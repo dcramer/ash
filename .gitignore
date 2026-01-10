@@ -63,6 +63,8 @@ secrets.toml
 .DS_Store
 Thumbs.db
 
-# Project specific
-workspace/
-!workspace/.gitkeep
+# Project specific - workspace contains user data, but templates are tracked
+workspace/*
+!workspace/SOUL.md
+!workspace/USER.md
+!workspace/TOOLS.md

@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # Main Ash application
+  ash:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../workspace:/app/workspace:ro
+      - ash-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY}
+    depends_on:
+      - sandbox
+    networks:
+      - ash-network
+
+  # Sandbox container for code execution
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    # Sandbox runs as needed, not continuously
+    profiles:
+      - sandbox
+    networks:
+      - ash-network
+
+volumes:
+  ash-data:
+
+networks:
+  ash-network:
+    driver: bridge
