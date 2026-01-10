@@ -10,6 +10,7 @@ from ash.config.models import (
     ServerConfig,
     TelegramConfig,
 )
+from ash.config.workspace import Workspace, WorkspaceLoader
 
 __all__ = [
     "AshConfig",
@@ -19,6 +20,8 @@ __all__ = [
     "SandboxConfig",
     "ServerConfig",
     "TelegramConfig",
+    "Workspace",
+    "WorkspaceLoader",
     "get_default_config",
     "load_config",
 ]
