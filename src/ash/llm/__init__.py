@@ -3,7 +3,12 @@
 from ash.llm.anthropic import AnthropicProvider
 from ash.llm.base import LLMProvider
 from ash.llm.openai import OpenAIProvider
-from ash.llm.registry import LLMRegistry, ProviderName, create_registry
+from ash.llm.registry import (
+    LLMRegistry,
+    ProviderName,
+    create_llm_provider,
+    create_registry,
+)
 from ash.llm.types import (
     CompletionResponse,
     ContentBlock,
@@ -27,6 +32,7 @@ __all__ = [
     # Registry
     "LLMRegistry",
     "ProviderName",
+    "create_llm_provider",
     "create_registry",
     # Types
     "CompletionResponse",

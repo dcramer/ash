@@ -10,6 +10,12 @@ from ash.config.models import (
     ServerConfig,
     TelegramConfig,
 )
+from ash.config.paths import (
+    get_ash_home,
+    get_config_path,
+    get_database_path,
+    get_workspace_path,
+)
 from ash.config.workspace import Workspace, WorkspaceLoader
 
 __all__ = [
@@ -22,6 +28,10 @@ __all__ = [
     "TelegramConfig",
     "Workspace",
     "WorkspaceLoader",
+    "get_ash_home",
+    "get_config_path",
+    "get_database_path",
     "get_default_config",
+    "get_workspace_path",
     "load_config",
 ]

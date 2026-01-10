@@ -41,16 +41,19 @@ class SandboxExecutor:
         self,
         config: SandboxConfig | None = None,
         dockerfile_path: Path | None = None,
+        environment: dict[str, str] | None = None,
     ):
         """Initialize executor.
 
         Args:
             config: Sandbox configuration.
             dockerfile_path: Path to Dockerfile for building image.
+            environment: Environment variables to set in container.
         """
         self._config = config or SandboxConfig()
         self._manager = SandboxManager(self._config)
         self._dockerfile_path = dockerfile_path
+        self._environment = environment or {}
         self._container_id: str | None = None
         self._initialized = False
 
@@ -196,8 +199,10 @@ class SandboxExecutor:
         if reuse and self._container_id:
             return self._container_id
 
-        # Create new container
-        container_id = await self._manager.create_container()
+        # Create new container with environment variables
+        container_id = await self._manager.create_container(
+            environment=self._environment if self._environment else None,
+        )
         await self._manager.start_container(container_id)
 
         if reuse:

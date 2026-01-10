@@ -9,3 +9,5 @@ __all__ = [
     "SandboxExecutor",
     "SandboxManager",
 ]
+
+# Verification module available via ash.sandbox.verify

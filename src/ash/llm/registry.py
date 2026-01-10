@@ -2,11 +2,40 @@
 
 from typing import Literal
 
+from pydantic import SecretStr
+
 from ash.llm.anthropic import AnthropicProvider
 from ash.llm.base import LLMProvider
 from ash.llm.openai import OpenAIProvider
 
 ProviderName = Literal["anthropic", "openai"]
+
+
+def create_llm_provider(
+    provider: ProviderName,
+    api_key: str | SecretStr | None = None,
+) -> LLMProvider:
+    """Create a single LLM provider instance.
+
+    Args:
+        provider: Provider name ("anthropic" or "openai").
+        api_key: API key (or uses env var if not provided).
+
+    Returns:
+        LLM provider instance.
+
+    Raises:
+        ValueError: If provider name is unknown.
+    """
+    # Extract string from SecretStr if needed
+    key = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
+
+    if provider == "anthropic":
+        return AnthropicProvider(api_key=key)
+    elif provider == "openai":
+        return OpenAIProvider(api_key=key)
+    else:
+        raise ValueError(f"Unknown LLM provider: {provider}")
 
 
 class LLMRegistry:

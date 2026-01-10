@@ -3,7 +3,9 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, Field, SecretStr
+
+from ash.config.paths import get_database_path, get_workspace_path
 
 
 class LLMConfig(BaseModel):
@@ -25,13 +27,31 @@ class TelegramConfig(BaseModel):
 
 
 class SandboxConfig(BaseModel):
-    """Configuration for Docker sandbox."""
+    """Configuration for Docker sandbox.
+
+    The sandbox is mandatory - all bash commands run in an isolated container
+    with security hardening including read-only root filesystem, dropped
+    capabilities, process limits, and more.
+    """
 
     image: str = "ash-sandbox:latest"
     timeout: int = 60
     memory_limit: str = "512m"
     cpu_limit: float = 1.0
-    network_disabled: bool = True
+
+    # Container runtime: "runc" (default) or "runsc" (gVisor for enhanced security)
+    runtime: Literal["runc", "runsc"] = "runc"
+
+    # Network: "none" = isolated, "bridge" = has network access
+    network_mode: Literal["none", "bridge"] = "bridge"
+    # Optional DNS servers for filtering (e.g., Pi-hole, NextDNS)
+    dns_servers: list[str] = []
+    # Optional HTTP proxy for monitoring/filtering traffic
+    http_proxy: str | None = None
+
+    # Workspace mounting into sandbox
+    # Access: "none" = not mounted, "ro" = read-only, "rw" = read-write
+    workspace_access: Literal["none", "ro", "rw"] = "rw"
 
 
 class ServerConfig(BaseModel):
@@ -45,7 +65,7 @@ class ServerConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Configuration for memory system."""
 
-    database_path: Path = Path("~/.ash/memory.db")
+    database_path: Path = Field(default_factory=get_database_path)
     embedding_model: str = "text-embedding-3-small"
     max_context_messages: int = 20
 
@@ -59,7 +79,7 @@ class BraveSearchConfig(BaseModel):
 class AshConfig(BaseModel):
     """Root configuration model."""
 
-    workspace: Path = Path("~/.ash/workspace")
+    workspace: Path = Field(default_factory=get_workspace_path)
     default_llm: LLMConfig
     fallback_llm: LLMConfig | None = None
     telegram: TelegramConfig | None = None

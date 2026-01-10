@@ -2,9 +2,9 @@
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from docker.errors import ImageNotFound, NotFound
 from docker.models.containers import Container
@@ -18,6 +18,13 @@ DEFAULT_TIMEOUT = 60
 DEFAULT_MEMORY_LIMIT = "512m"
 DEFAULT_CPU_LIMIT = 1.0
 
+# Network modes
+NetworkMode = Literal["none", "bridge"]
+# Workspace access levels
+WorkspaceAccess = Literal["none", "ro", "rw"]
+# Container runtime
+Runtime = Literal["runc", "runsc"]  # runsc = gVisor
+
 
 @dataclass
 class SandboxConfig:
@@ -27,12 +34,34 @@ class SandboxConfig:
     timeout: int = DEFAULT_TIMEOUT
     memory_limit: str = DEFAULT_MEMORY_LIMIT
     cpu_limit: float = DEFAULT_CPU_LIMIT
-    network_disabled: bool = True
     work_dir: str = "/workspace"
+
+    # Container runtime: "runc" (default) or "runsc" (gVisor for enhanced security)
+    runtime: Runtime = "runc"
+
+    # Network configuration
+    network_mode: NetworkMode = "none"  # "none" = isolated, "bridge" = has network
+    dns_servers: list[str] = field(default_factory=list)  # Custom DNS for filtering
+    http_proxy: str | None = None  # HTTP proxy URL for monitoring traffic
+
+    # Workspace mounting
+    workspace_path: Path | None = None  # Host path to mount
+    workspace_access: WorkspaceAccess = "rw"  # none, ro, or rw
 
 
 class SandboxManager:
-    """Manage Docker containers for sandboxed code execution."""
+    """Manage Docker containers for sandboxed code execution.
+
+    Security features:
+    - Read-only root filesystem (immutable container)
+    - All capabilities dropped
+    - No privilege escalation
+    - Process limits (fork bomb protection)
+    - Memory limits
+    - Non-root user execution
+    - Optional gVisor runtime for syscall isolation
+    - tmpfs for writable areas with size limits
+    """
 
     def __init__(self, config: SandboxConfig | None = None):
         """Initialize sandbox manager.
@@ -95,36 +124,85 @@ class SandboxManager:
         self,
         name: str | None = None,
         environment: dict[str, str] | None = None,
-        volumes: dict[str, dict[str, str]] | None = None,
+        extra_volumes: dict[str, dict[str, str]] | None = None,
     ) -> str:
-        """Create a new sandbox container.
+        """Create a new sandbox container with security hardening.
 
         Args:
             name: Optional container name.
             environment: Environment variables.
-            volumes: Volume mounts (host_path: {bind: container_path, mode: 'ro'/'rw'}).
+            extra_volumes: Additional volume mounts.
 
         Returns:
             Container ID.
         """
+        # Build environment with proxy settings if configured
+        env = dict(environment) if environment else {}
+        if self._config.http_proxy:
+            env.update({
+                "HTTP_PROXY": self._config.http_proxy,
+                "HTTPS_PROXY": self._config.http_proxy,
+                "http_proxy": self._config.http_proxy,
+                "https_proxy": self._config.http_proxy,
+            })
+
+        # Build volume mounts
+        volumes = dict(extra_volumes) if extra_volumes else {}
+        if (
+            self._config.workspace_path
+            and self._config.workspace_access != "none"
+            and self._config.workspace_path.exists()
+        ):
+            mode = "ro" if self._config.workspace_access == "ro" else "rw"
+            volumes[str(self._config.workspace_path)] = {
+                "bind": self._config.work_dir,
+                "mode": mode,
+            }
+
+        # Security-hardened container configuration
         container_config: dict[str, Any] = {
             "image": self._config.image,
             "detach": True,
             "tty": True,
             "stdin_open": True,
             "working_dir": self._config.work_dir,
+            # Resource limits
             "mem_limit": self._config.memory_limit,
             "nano_cpus": int(self._config.cpu_limit * 1e9),
-            "network_disabled": self._config.network_disabled,
-            "read_only": False,  # Allow writes to workspace
-            "security_opt": ["no-new-privileges"],
+            # Security hardening
+            "read_only": True,  # Immutable root filesystem
+            "security_opt": ["no-new-privileges:true"],
+            "cap_drop": ["ALL"],  # Drop all capabilities
+            "pids_limit": 100,  # Fork bomb protection
+            # Writable areas via tmpfs (with size limits and security options)
+            # uid=1000,gid=1000 matches the sandbox user created in Dockerfile
+            "tmpfs": {
+                "/tmp": "size=64m,noexec,nosuid,nodev,uid=1000,gid=1000",
+                "/home/sandbox": "size=64m,noexec,nosuid,nodev,uid=1000,gid=1000",
+                "/var/tmp": "size=32m,noexec,nosuid,nodev,uid=1000,gid=1000",
+                "/run": "size=16m,noexec,nosuid,nodev,uid=1000,gid=1000",
+            },
         }
+
+        # Use gVisor runtime if configured (enhanced syscall isolation)
+        if self._config.runtime == "runsc":
+            container_config["runtime"] = "runsc"
+
+        # Network configuration
+        if self._config.network_mode == "none":
+            container_config["network_disabled"] = True
+        else:
+            container_config["network_disabled"] = False
+            container_config["network_mode"] = self._config.network_mode
+            # Custom DNS for filtering/logging
+            if self._config.dns_servers:
+                container_config["dns"] = self._config.dns_servers
 
         if name:
             container_config["name"] = name
 
-        if environment:
-            container_config["environment"] = environment
+        if env:
+            container_config["environment"] = env
 
         if volumes:
             container_config["volumes"] = volumes

@@ -1,5 +1,6 @@
 # Sandbox container for executing untrusted code
-# This image provides a minimal, isolated environment for running bash commands
+# This image provides an isolated environment for running bash commands
+# with security hardening to contain execution
 
 FROM python:3.12-slim-bookworm
 
@@ -12,23 +13,83 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     vim-tiny \
     less \
     tree \
-    && rm -rf /var/lib/apt/lists/*
+    unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Create non-root user for sandbox execution
-RUN useradd -m -s /bin/bash sandbox
+RUN useradd -m -s /bin/bash -u 1000 sandbox
 
-# Create working directory
+# Create working directory with proper ownership
 WORKDIR /workspace
-
-# Set restrictive permissions
 RUN chown -R sandbox:sandbox /workspace
+
+# Create sandbox bashrc with security hardening
+RUN cat > /home/sandbox/.bashrc << 'BASHRC'
+# Ash Sandbox Environment
+# This is an isolated container - changes do not persist
+
+# Disable history to prevent leaking sensitive data
+unset HISTFILE
+HISTSIZE=0
+HISTFILESIZE=0
+
+# Clear any existing history
+history -c
+
+# Restricted PATH - only essential binaries
+export PATH="/usr/local/bin:/usr/bin:/bin"
+
+# Sandbox-aware prompt
+PS1='\[\033[1;33m\][sandbox]\[\033[0m\] \[\033[1;34m\]\w\[\033[0m\]\$ '
+
+# Prevent common escape techniques
+alias sudo='echo "sudo: permission denied"'
+alias su='echo "su: permission denied"'
+alias docker='echo "docker: permission denied"'
+alias mount='echo "mount: permission denied"'
+alias umount='echo "umount: permission denied"'
+
+# Safety aliases
+alias rm='rm -i'
+alias mv='mv -i'
+alias cp='cp -i'
+
+# Disable job control (prevents background process shenanigans)
+set +m
+
+# Read-only functions to prevent tampering
+readonly -f command_not_found_handle 2>/dev/null || true
+BASHRC
+
+# Create profile that sources bashrc
+RUN cat > /home/sandbox/.profile << 'PROFILE'
+if [ -f ~/.bashrc ]; then
+    . ~/.bashrc
+fi
+PROFILE
+
+# Set ownership of user files
+RUN chown sandbox:sandbox /home/sandbox/.bashrc /home/sandbox/.profile
+
+# Remove setuid/setgid binaries that could be used for privilege escalation
+RUN find / -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true
 
 # Switch to non-root user
 USER sandbox
 
 # Set environment
 ENV HOME=/home/sandbox
-ENV PATH=/home/sandbox/.local/bin:$PATH
+ENV USER=sandbox
+ENV SHELL=/bin/bash
+ENV TERM=xterm-256color
+# Minimal PATH
+ENV PATH=/usr/local/bin:/usr/bin:/bin
+
+# Labels for identification
+LABEL org.opencontainers.image.title="Ash Sandbox"
+LABEL org.opencontainers.image.description="Isolated execution environment for Ash assistant"
+LABEL ash.sandbox="true"
 
 # Default command
-CMD ["/bin/bash"]
+CMD ["/bin/bash", "--login"]

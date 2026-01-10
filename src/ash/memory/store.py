@@ -1,7 +1,7 @@
 """Memory store for conversation history and knowledge."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -187,7 +187,7 @@ class MemoryStore:
         stmt = select(Knowledge).order_by(Knowledge.created_at.desc()).limit(limit)
 
         if not include_expired:
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             stmt = stmt.where(
                 (Knowledge.expires_at.is_(None)) | (Knowledge.expires_at > now)
             )

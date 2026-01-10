@@ -8,12 +8,16 @@ from typing import Any
 from pydantic import SecretStr
 
 from ash.config.models import AshConfig
+from ash.config.paths import get_config_path
 
-DEFAULT_CONFIG_PATHS = [
-    Path("config.toml"),
-    Path.home() / ".ash" / "config.toml",
-    Path("/etc/ash/config.toml"),
-]
+
+def _get_default_config_paths() -> list[Path]:
+    """Get ordered list of default config file locations."""
+    return [
+        Path("config.toml"),  # Current directory
+        get_config_path(),  # ~/.ash/config.toml (or ASH_HOME)
+        Path("/etc/ash/config.toml"),  # System-wide
+    ]
 
 
 def _resolve_env_secrets(config: dict[str, Any]) -> dict[str, Any]:
@@ -71,12 +75,14 @@ def load_config(path: Path | None = None) -> AshConfig:
     """
     config_path: Path | None = None
 
+    default_paths = _get_default_config_paths()
+
     if path is not None:
         config_path = Path(path).expanduser()
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
     else:
-        for default_path in DEFAULT_CONFIG_PATHS:
+        for default_path in default_paths:
             expanded = default_path.expanduser()
             if expanded.exists():
                 config_path = expanded
@@ -84,7 +90,7 @@ def load_config(path: Path | None = None) -> AshConfig:
 
     if config_path is None:
         raise FileNotFoundError(
-            f"No config file found. Searched: {', '.join(str(p) for p in DEFAULT_CONFIG_PATHS)}"
+            f"No config file found. Searched: {', '.join(str(p) for p in default_paths)}"
         )
 
     with config_path.open("rb") as f:

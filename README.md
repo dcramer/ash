@@ -66,6 +66,55 @@ uv run ruff check --fix .
 uv run ruff format .
 ```
 
+## Claude Code Development
+
+This project is built with [Claude Code](https://claude.com/code). Agent instructions live in `CLAUDE.md`.
+
+### Skills
+
+Skills are slash commands that Claude Code executes. Use them in chat:
+
+**From [getsentry/sentry-skills](https://github.com/getsentry/sentry-skills)** (requires installation):
+
+| Skill | Purpose |
+|-------|---------|
+| `/commit` | Create commits with proper attribution |
+| `/create-pr` | Open pull requests |
+| `/find-bugs` | Audit local changes before merging |
+| `/deslop` | Remove AI-generated code slop |
+| `/code-review` | Review code following best practices |
+
+**Project-specific** (defined in `CLAUDE.md`):
+
+| Skill | Purpose |
+|-------|---------|
+| `/write-spec <feature>` | Create/update a feature spec |
+| `/verify-spec <feature>` | Verify implementation matches spec |
+
+### Adding Skills
+
+Add custom skills to the `## Skills` section in `CLAUDE.md`:
+
+```markdown
+### `/skill-name <args>`
+
+Description of what the skill does:
+1. Step one
+2. Step two
+3. Step three
+```
+
+Skills are numbered instruction lists. Claude Code follows them when you invoke `/skill-name`.
+
+### Workflow
+
+1. **Start work**: Describe what you want to build
+2. **Spec first**: Use `/write-spec feature` for new features
+3. **Implement**: Claude Code writes code, runs tests
+4. **Verify**: Use `/verify-spec feature` to check requirements
+5. **Commit**: Use `/commit` for proper attribution
+6. **PR**: Use `/create-pr` when ready
+
 ## License
 
 MIT
