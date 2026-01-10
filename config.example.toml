@@ -1,0 +1,49 @@
+# Ash Configuration Example
+# Copy this file to ~/.ash/config.toml and customize
+
+# Path to workspace containing SOUL.md, USER.md, etc.
+workspace = "~/.ash/workspace"
+
+# Default LLM provider
+[default_llm]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+# api_key loaded from ANTHROPIC_API_KEY env var
+temperature = 0.7
+max_tokens = 4096
+
+# Fallback LLM (optional)
+[fallback_llm]
+provider = "openai"
+model = "gpt-4o"
+# api_key loaded from OPENAI_API_KEY env var
+
+# Telegram provider (optional)
+[telegram]
+# bot_token loaded from TELEGRAM_BOT_TOKEN env var
+allowed_users = []  # Empty = allow all. Use "@username" or "123456789" (user ID)
+# webhook_url = "https://your-domain.com/webhook/telegram"  # Optional, uses polling if omitted
+
+# Docker sandbox settings
+[sandbox]
+image = "ash-sandbox:latest"
+timeout = 60
+memory_limit = "512m"
+cpu_limit = 1.0
+network_disabled = true
+
+# HTTP server settings
+[server]
+host = "127.0.0.1"
+port = 8080
+webhook_path = "/webhook"
+
+# Memory/database settings
+[memory]
+database_path = "~/.ash/memory.db"
+embedding_model = "text-embedding-3-small"
+max_context_messages = 20
+
+# Brave Search API (optional)
+[brave_search]
+# api_key loaded from BRAVE_SEARCH_API_KEY env var
