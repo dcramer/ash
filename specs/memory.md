@@ -1,152 +1,73 @@
 # Memory
 
-> Persistent memory with context retrieval for personalized conversations
+> Hybrid memory system with automatic context retrieval and explicit memory tools
 
-Files: src/ash/memory/store.py, src/ash/memory/retrieval.py, src/ash/memory/embeddings.py, src/ash/core/agent.py
-
-## Purpose
-
-A personal assistant must remember past conversations, learn about the user, and retrieve relevant context to inform responses. Memory is not just storage - it's active retrieval integrated into the agent loop.
+Files: `src/ash/memory/manager.py`, `src/ash/memory/store.py`, `src/ash/memory/retrieval.py`, `src/ash/memory/embeddings.py`, `src/ash/tools/builtin/memory.py`, `src/ash/core/agent.py`
 
 ## Requirements
 
 ### MUST
 
-**Persistence**
-- Store all conversation messages to database after each turn
-- Store sessions linked to provider/chat/user identifiers
-- Persist across restarts
-
-**Context Retrieval**
-- Before each LLM call, retrieve relevant past context via semantic search
-- Include retrieved context in the prompt (RAG pattern)
-- Retrieve from both conversation history and knowledge base
-
-**User Context**
-- Track user profile with preferences and learned facts
-- Include relevant user context in system prompt
-- Update user understanding based on conversations
-
-**Knowledge Base**
-- Store knowledge entries with optional expiration
-- Retrieve relevant knowledge based on query similarity
-- Support manual knowledge insertion (via tool or API)
+- Retrieve relevant context via semantic search before each LLM call
+- Include retrieved context (messages, knowledge, user notes) in system prompt
+- Store conversation messages to database after each turn
+- Index messages for semantic search via embeddings
+- Link sessions to provider/chat_id/user_id
+- Persist data across restarts
+- Provide `remember` tool to store facts in knowledge base
+- Index knowledge entries for semantic search
+- Support optional expiration on knowledge entries
+- Degrade gracefully if embedding service unavailable
 
 ### SHOULD
 
-- Limit context window by token count, not just message count
-- Prioritize recent messages over old ones at equal relevance
-- Chunk long documents for better retrieval
-- Cache embeddings to avoid recomputation
+- Limit retrieved context by token count
+- Prioritize recent messages at equal relevance
+- Include source attribution in retrieved context
 
 ### MAY
 
-- Auto-extract facts about user from conversations
-- Summarize old conversations to compress history
-- Support multiple embedding providers
-- Background indexing for large imports
-
-## Integration
-
-### Agent Loop with Memory
-
-```
-1. User sends message
-2. Agent retrieves relevant context:
-   - Semantic search over past messages
-   - Semantic search over knowledge base
-   - Load user profile
-3. Agent builds prompt with retrieved context
-4. LLM generates response (possibly with tools)
-5. Agent persists:
-   - User message + assistant response to database
-   - Index new messages for future retrieval
-6. Return response to user
-```
-
-### Context Injection
-
-```python
-# Before LLM call
-relevant_messages = await retriever.search_messages(user_message, limit=5)
-relevant_knowledge = await retriever.search_knowledge(user_message, limit=3)
-user_profile = await store.get_user_profile(user_id)
-
-# Build augmented system prompt
-system = f"""
-{base_system_prompt}
-
-## About the user
-{user_profile.notes}
-
-## Relevant context
-{format_retrieved_context(relevant_messages, relevant_knowledge)}
-"""
-```
+- Provide `recall` tool for explicit memory search
+- Auto-extract facts from conversations to user profile
+- Cache embeddings to avoid recomputation
 
 ## Interface
 
-### MemoryManager (new - orchestrates retrieval and persistence)
+### MemoryManager
 
 ```python
 class MemoryManager:
-    def __init__(
-        self,
-        store: MemoryStore,
-        retriever: SemanticRetriever,
-    ): ...
+    def __init__(self, store: MemoryStore, retriever: SemanticRetriever): ...
 
     async def get_context_for_message(
         self,
-        session: Session,
+        session_id: str,
+        user_id: str,
         user_message: str,
-        max_tokens: int = 2000,
+        max_messages: int = 5,
+        max_knowledge: int = 3,
     ) -> RetrievedContext: ...
 
     async def persist_turn(
         self,
-        session: Session,
+        session_id: str,
         user_message: str,
         assistant_response: str,
     ) -> None: ...
 
-    async def get_user_context(self, user_id: str) -> str | None: ...
+    async def add_knowledge(
+        self,
+        content: str,
+        source: str = "user",
+        expires_at: datetime | None = None,
+    ) -> Knowledge: ...
+
+    async def search(self, query: str, limit: int = 5) -> list[SearchResult]: ...
+
+    async def get_user_notes(self, user_id: str) -> str | None: ...
 ```
 
-### MemoryStore (data access)
-
-```python
-class MemoryStore:
-    # Sessions
-    async def get_or_create_session(provider, chat_id, user_id) -> Session
-    async def get_session(session_id) -> Session | None
-
-    # Messages
-    async def add_message(session_id, role, content, metadata) -> Message
-    async def get_messages(session_id, limit, before) -> list[Message]
-
-    # Knowledge
-    async def add_knowledge(content, source, expires_at) -> Knowledge
-    async def get_knowledge(limit, include_expired) -> list[Knowledge]
-
-    # User Profiles
-    async def get_or_create_user_profile(user_id, provider) -> UserProfile
-    async def update_user_notes(user_id, notes) -> UserProfile | None
-```
-
-### SemanticRetriever (vector search)
-
-```python
-class SemanticRetriever:
-    async def index_message(message_id, content) -> None
-    async def index_knowledge(knowledge_id, content) -> None
-
-    async def search_messages(query, session_id, limit) -> list[SearchResult]
-    async def search_knowledge(query, limit) -> list[SearchResult]
-    async def search_all(query, limit) -> list[SearchResult]
-```
-
-### Data Types
+### RetrievedContext
 
 ```python
 @dataclass
@@ -154,33 +75,51 @@ class RetrievedContext:
     messages: list[SearchResult]
     knowledge: list[SearchResult]
     user_notes: str | None
-    token_count: int
-
-@dataclass
-class SearchResult:
-    id: str
-    content: str
-    similarity: float
-    source_type: str  # "message" or "knowledge"
-    metadata: dict | None
 ```
 
-## Storage
+### Tools
 
-### SQLite Tables
+```python
+# remember tool
+{
+    "name": "remember",
+    "description": "Store a fact or preference in long-term memory",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string", "description": "The fact to remember"},
+            "expires_in_days": {"type": "integer", "description": "Days until expiration"}
+        },
+        "required": ["content"]
+    }
+}
 
-```sql
-sessions (id, provider, chat_id, user_id, created_at, updated_at)
-messages (id, session_id, role, content, created_at, token_count)
-knowledge (id, content, source, created_at, expires_at)
-user_profiles (user_id, provider, username, display_name, notes)
+# recall tool (MAY)
+{
+    "name": "recall",
+    "description": "Search memory for relevant information",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to search for"}
+        },
+        "required": ["query"]
+    }
+}
 ```
 
-### Vector Tables (sqlite-vec)
+### Agent Integration
 
-```sql
-message_embeddings (message_id, embedding FLOAT[1536])
-knowledge_embeddings (knowledge_id, embedding FLOAT[1536])
+```python
+class Agent:
+    def __init__(
+        self,
+        llm: LLMProvider,
+        tool_executor: ToolExecutor,
+        workspace: Workspace,
+        memory_manager: MemoryManager | None = None,
+        config: AgentConfig | None = None,
+    ): ...
 ```
 
 ## Behaviors
@@ -188,29 +127,35 @@ knowledge_embeddings (knowledge_id, embedding FLOAT[1536])
 | Scenario | Behavior |
 |----------|----------|
 | First message in session | Create session, no past context retrieved |
-| Subsequent messages | Retrieve relevant past messages from this + other sessions |
-| User mentions preference | Should be extractable to user profile (MAY) |
-| Knowledge query | Retrieve matching knowledge entries |
-| Old expired knowledge | Excluded from retrieval by default |
-| Context exceeds token limit | Truncate lowest-relevance items first |
+| Subsequent messages | Retrieve relevant messages + knowledge before LLM call |
+| User says "remember X" | Agent uses `remember` tool, stores to knowledge base |
+| User asks "what do you know" | Agent references context in system prompt or uses `recall` |
+| Embedding service down | Log warning, continue without semantic search |
+| No relevant context found | Proceed with empty context |
 
 ## Errors
 
 | Condition | Response |
 |-----------|----------|
-| Embedding service unavailable | Log warning, skip retrieval, continue without context |
-| Database unavailable | Fail request (memory is required) |
-| No relevant context found | Proceed with empty context (not an error) |
+| Embedding service unavailable | Log warning, skip retrieval, continue |
+| Database unavailable | Fail request |
+| No relevant context | Proceed with empty context |
+| Remember tool fails | Return error to LLM |
 
 ## Verification
 
 ```bash
 uv run pytest tests/test_memory.py -v
 uv run ash chat "Remember that I prefer concise responses"
-uv run ash chat "What do you know about my preferences?"  # Should recall
+uv run ash chat "What communication style do I prefer?"
 ```
 
-- Conversation persists across CLI restarts
-- Relevant past context appears in LLM prompts
-- User profile notes are included in system prompt
-- Knowledge retrieval returns semantically similar entries
+- [ ] MemoryManager class exists in `src/ash/memory/manager.py`
+- [ ] Agent accepts optional `memory_manager` parameter
+- [ ] Agent calls `get_context_for_message()` before LLM call
+- [ ] Agent calls `persist_turn()` after response
+- [ ] Retrieved context appears in system prompt
+- [ ] `remember` tool exists in `src/ash/tools/builtin/memory.py`
+- [ ] `remember` tool stores and indexes knowledge
+- [ ] Conversation persists across CLI restarts
+- [ ] Semantic search returns relevant results

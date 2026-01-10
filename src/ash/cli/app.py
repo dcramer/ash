@@ -57,12 +57,10 @@ def serve(
         import uvicorn
 
         from ash.config import WorkspaceLoader, load_config
-        from ash.core import Agent, AgentConfig
+        from ash.core import create_agent
         from ash.db import init_database
-        from ash.llm import create_llm_provider
         from ash.providers.telegram import TelegramProvider
         from ash.server.app import create_app
-        from ash.tools import BashTool, ToolExecutor, ToolRegistry, WebSearchTool
 
         # Load configuration
         console.print("[bold]Loading configuration...[/bold]")
@@ -79,42 +77,25 @@ def serve(
         workspace_loader.ensure_workspace()
         workspace = workspace_loader.load()
 
-        # Set up LLM using the default model
-        console.print("[bold]Setting up LLM providers...[/bold]")
-        model_config = ash_config.default_model
-        api_key = ash_config.resolve_api_key("default")
-        llm = create_llm_provider(model_config.provider, api_key=api_key)
-
-        # Set up tools (sandbox is mandatory for security)
-        console.print("[bold]Setting up tools...[/bold]")
-        tool_registry = ToolRegistry()
-        tool_registry.register(
-            BashTool(
-                sandbox_config=ash_config.sandbox,
-                workspace_path=ash_config.workspace,
-            )
-        )
-        if ash_config.brave_search and ash_config.brave_search.api_key:
-            tool_registry.register(
-                WebSearchTool(
-                    api_key=ash_config.brave_search.api_key.get_secret_value(),
-                    sandbox_config=ash_config.sandbox,
-                    workspace_path=ash_config.workspace,
-                )
-            )
-        tool_executor = ToolExecutor(tool_registry)
-
-        # Create agent
-        agent = Agent(
-            llm=llm,
-            tool_executor=tool_executor,
+        # Create agent with all dependencies
+        # Note: Server manages its own database sessions per-request,
+        # so we don't pass db_session here. Memory tools require CLI mode.
+        console.print("[bold]Setting up agent...[/bold]")
+        components = await create_agent(
+            config=ash_config,
             workspace=workspace,
-            config=AgentConfig(
-                model=model_config.model,
-                max_tokens=model_config.max_tokens,
-                temperature=model_config.temperature,
-            ),
+            db_session=None,  # Server handles sessions per-request
+            model_alias="default",
         )
+        agent = components.agent
+
+        console.print(
+            f"[dim]Tools: {', '.join(components.tool_registry.list_names())}[/dim]"
+        )
+        if components.skill_registry:
+            console.print(
+                f"[dim]Skills: {len(components.skill_registry)} discovered[/dim]"
+            )
 
         # Set up Telegram if configured
         telegram_provider = None
@@ -222,10 +203,8 @@ def chat(
     from rich.panel import Panel
 
     from ash.config import ConfigError, WorkspaceLoader, load_config
-    from ash.core import Agent, AgentConfig
+    from ash.core import create_agent
     from ash.core.session import SessionState
-    from ash.llm import create_llm_provider
-    from ash.tools import BashTool, ToolExecutor, ToolRegistry, WebSearchTool
 
     console = Console()
 
@@ -242,16 +221,17 @@ def chat(
         # Resolve model alias: CLI flag > ASH_MODEL env > "default"
         resolved_alias = model_alias or os.environ.get("ASH_MODEL") or "default"
 
-        # Get model configuration
+        # Validate model configuration early
         try:
-            model_config = ash_config.get_model(resolved_alias)
+            ash_config.get_model(resolved_alias)
         except ConfigError as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1) from None
 
-        # Resolve API key for the selected model
+        # Check API key early
         api_key = ash_config.resolve_api_key(resolved_alias)
         if api_key is None:
+            model_config = ash_config.get_model(resolved_alias)
             provider = model_config.provider
             env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
             console.print(
@@ -265,118 +245,107 @@ def chat(
         workspace_loader.ensure_workspace()
         workspace = workspace_loader.load()
 
-        # Set up LLM - only create the provider we need
-        llm = create_llm_provider(
-            model_config.provider,
-            api_key=api_key,
-        )
+        # Initialize database for memory
+        from ash.db import init_database
 
-        # Set up tools (sandbox is mandatory for security)
-        tool_registry = ToolRegistry()
-        tool_registry.register(
-            BashTool(
-                sandbox_config=ash_config.sandbox,
-                workspace_path=ash_config.workspace,
-            )
-        )
-        if ash_config.brave_search and ash_config.brave_search.api_key:
-            tool_registry.register(
-                WebSearchTool(
-                    api_key=ash_config.brave_search.api_key.get_secret_value(),
-                    sandbox_config=ash_config.sandbox,
-                    workspace_path=ash_config.workspace,
+        database = init_database(database_path=ash_config.memory.database_path)
+        await database.connect()
+
+        try:
+            async with database.session() as db_session:
+                # Create agent with all dependencies
+                components = await create_agent(
+                    config=ash_config,
+                    workspace=workspace,
+                    db_session=db_session,
+                    model_alias=resolved_alias,
                 )
-            )
-        tool_executor = ToolExecutor(tool_registry)
+                agent = components.agent
 
-        # Create agent
-        agent = Agent(
-            llm=llm,
-            tool_executor=tool_executor,
-            workspace=workspace,
-            config=AgentConfig(
-                model=model_config.model,
-                max_tokens=model_config.max_tokens,
-                temperature=model_config.temperature,
-            ),
-        )
+                # Create session
+                session = SessionState(
+                    session_id=str(uuid.uuid4()),
+                    provider="cli",
+                    chat_id="local",
+                    user_id="local-user",
+                )
 
-        # Create session
-        session = SessionState(
-            session_id=str(uuid.uuid4()),
-            provider="cli",
-            chat_id="local",
-            user_id="local-user",
-        )
+                async def process_single_message(user_input: str) -> None:
+                    """Process a single message and print the response."""
+                    if streaming:
+                        async for chunk in agent.process_message_streaming(
+                            user_input, session
+                        ):
+                            console.print(chunk, end="")
+                        console.print()
+                    else:
+                        with console.status("[dim]Thinking...[/dim]"):
+                            response = await agent.process_message(user_input, session)
+                        console.print(response.text)
 
-        async def process_single_message(user_input: str) -> None:
-            """Process a single message and print the response."""
-            if streaming:
-                async for chunk in agent.process_message_streaming(user_input, session):
-                    console.print(chunk, end="")
-                console.print()
-            else:
-                with console.status("[dim]Thinking...[/dim]"):
-                    response = await agent.process_message(user_input, session)
-                console.print(response.text)
+                # Non-interactive mode: single prompt
+                if prompt:
+                    await process_single_message(prompt)
+                    return
 
-        # Non-interactive mode: single prompt
-        if prompt:
-            await process_single_message(prompt)
-            return
-
-        # Interactive mode
-        console.print(
-            Panel(
-                "[bold]Ash Chat[/bold]\n\n"
-                "Type your message and press Enter. "
-                "Type 'exit' or 'quit' to end the session.\n"
-                "Press Ctrl+C to cancel a response.",
-                title="Welcome",
-                border_style="blue",
-            )
-        )
-        console.print()
-
-        while True:
-            try:
-                # Get user input
-                user_input = console.input("[bold cyan]You:[/bold cyan] ").strip()
-
-                if not user_input:
-                    continue
-
-                if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
-                    console.print("\n[dim]Goodbye![/dim]")
-                    break
-
+                # Interactive mode
+                console.print(
+                    Panel(
+                        "[bold]Ash Chat[/bold]\n\n"
+                        "Type your message and press Enter. "
+                        "Type 'exit' or 'quit' to end the session.\n"
+                        "Press Ctrl+C to cancel a response.",
+                        title="Welcome",
+                        border_style="blue",
+                    )
+                )
                 console.print()
 
-                # Process message
-                if streaming:
-                    console.print("[bold green]Ash:[/bold green] ", end="")
-                    async for chunk in agent.process_message_streaming(
-                        user_input, session
-                    ):
-                        console.print(chunk, end="")
-                    console.print("\n")
-                else:
-                    with console.status("[dim]Thinking...[/dim]"):
-                        response = await agent.process_message(user_input, session)
+                while True:
+                    try:
+                        # Get user input
+                        user_input = console.input(
+                            "[bold cyan]You:[/bold cyan] "
+                        ).strip()
 
-                    console.print("[bold green]Ash:[/bold green]")
-                    console.print(Markdown(response.text))
+                        if not user_input:
+                            continue
 
-                    if response.tool_calls:
-                        console.print(
-                            f"[dim]({len(response.tool_calls)} tool calls, "
-                            f"{response.iterations} iterations)[/dim]"
-                        )
-                    console.print()
+                        if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
+                            console.print("\n[dim]Goodbye![/dim]")
+                            break
 
-            except KeyboardInterrupt:
-                console.print("\n[dim]Cancelled[/dim]\n")
-                continue
+                        console.print()
+
+                        # Process message
+                        if streaming:
+                            console.print("[bold green]Ash:[/bold green] ", end="")
+                            async for chunk in agent.process_message_streaming(
+                                user_input, session
+                            ):
+                                console.print(chunk, end="")
+                            console.print("\n")
+                        else:
+                            with console.status("[dim]Thinking...[/dim]"):
+                                response = await agent.process_message(
+                                    user_input, session
+                                )
+
+                            console.print("[bold green]Ash:[/bold green]")
+                            console.print(Markdown(response.text))
+
+                            if response.tool_calls:
+                                console.print(
+                                    f"[dim]({len(response.tool_calls)} tool calls, "
+                                    f"{response.iterations} iterations)[/dim]"
+                                )
+                            console.print()
+
+                    except KeyboardInterrupt:
+                        console.print("\n[dim]Cancelled[/dim]\n")
+                        continue
+        finally:
+            await database.disconnect()
 
     try:
         asyncio.run(run_chat())

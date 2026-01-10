@@ -85,11 +85,21 @@ class ServerConfig(BaseModel):
     webhook_path: str = "/webhook"
 
 
+class EmbeddingsConfig(BaseModel):
+    """Configuration for embedding model.
+
+    Embeddings are used for semantic search in memory.
+    Currently only OpenAI embeddings are supported.
+    """
+
+    provider: Literal["openai"] = "openai"
+    model: str = "text-embedding-3-small"
+
+
 class MemoryConfig(BaseModel):
     """Configuration for memory system."""
 
     database_path: Path = Field(default_factory=get_database_path)
-    embedding_model: str = "text-embedding-3-small"
     max_context_messages: int = 20
 
 
@@ -121,6 +131,7 @@ class AshConfig(BaseModel):
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    embeddings: EmbeddingsConfig | None = None
     brave_search: BraveSearchConfig | None = None
 
     @model_validator(mode="after")
@@ -228,6 +239,33 @@ class AshConfig(BaseModel):
 
         # Check environment variable
         env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+        env_value = os.environ.get(env_var)
+        if env_value:
+            return SecretStr(env_value)
+
+        return None
+
+    def resolve_embeddings_api_key(self) -> SecretStr | None:
+        """Resolve API key for embeddings.
+
+        Resolution order:
+        1. Provider-level config api_key (based on embeddings.provider)
+        2. Environment variable (OPENAI_API_KEY for openai provider)
+
+        Returns:
+            The resolved API key, or None if not found.
+        """
+        if self.embeddings is None:
+            return None
+
+        provider = self.embeddings.provider
+
+        # Check provider-level config
+        if provider == "openai" and self.openai and self.openai.api_key:
+            return self.openai.api_key
+
+        # Check environment variable
+        env_var = "OPENAI_API_KEY"  # Currently only openai supported
         env_value = os.environ.get(env_var)
         if env_value:
             return SecretStr(env_value)

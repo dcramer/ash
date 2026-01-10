@@ -4,6 +4,8 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import sqlite_vec
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -57,6 +59,16 @@ class Database:
             echo=False,
             pool_pre_ping=True,
         )
+
+        # Load sqlite-vec extension for vector search
+        @event.listens_for(self._engine.sync_engine, "connect")
+        def _load_sqlite_vec(dbapi_conn, connection_record):
+            # aiosqlite wraps: AsyncAdapt -> aiosqlite.Connection -> sqlite3.Connection
+            conn = dbapi_conn._connection._conn
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+
         self._session_factory = async_sessionmaker(
             self._engine,
             class_=AsyncSession,

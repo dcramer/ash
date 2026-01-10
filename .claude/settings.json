@@ -11,7 +11,6 @@
       "Bash(tail:*)",
       "Bash(cat:*)",
       "Bash(tree:*)",
-
       "Bash(git status:*)",
       "Bash(git log:*)",
       "Bash(git diff:*)",
@@ -21,7 +20,6 @@
       "Bash(git tag:*)",
       "Bash(git stash list:*)",
       "Bash(git rev-parse:*)",
-
       "Bash(gh pr view:*)",
       "Bash(gh pr list:*)",
       "Bash(gh pr checks:*)",
@@ -33,7 +31,6 @@
       "Bash(gh run logs:*)",
       "Bash(gh repo view:*)",
       "Bash(gh api:*)",
-
       "Bash(python --version:*)",
       "Bash(python3 --version:*)",
       "Bash(uv pip list:*)",
@@ -44,11 +41,9 @@
       "Bash(uv run alembic:*)",
       "Bash(uv run ash:*)",
       "Bash(uv sync:*)",
-
       "Bash(docker --version:*)",
       "Bash(docker ps:*)",
       "Bash(docker images:*)",
-
       "Skill(sentry-skills:commit)",
       "Skill(sentry-skills:create-pr)",
       "Skill(sentry-skills:code-review)",
@@ -56,7 +51,6 @@
       "Skill(sentry-skills:deslop)",
       "Skill(sentry-skills:iterate-pr)",
       "Skill(sentry-skills:claude-settings-audit)",
-
       "WebFetch(domain:docs.github.com)",
       "WebFetch(domain:cli.github.com)",
       "WebFetch(domain:fastapi.tiangolo.com)",
@@ -71,5 +65,8 @@
       "WebFetch(domain:docs.aiogram.dev)"
     ],
     "deny": []
+  },
+  "enabledPlugins": {
+    "plugin-dev@claude-code-plugins": true
   }
 }

@@ -70,6 +70,16 @@ uv run ruff format .
 
 This project is built with [Claude Code](https://claude.com/code). Agent instructions live in `CLAUDE.md`.
 
+### Setup
+
+Install required plugins:
+
+```bash
+claude plugin marketplace add anthropics/claude-code
+```
+
+This provides the `plugin-dev` skill for developing custom skills.
+
 ### Skills
 
 Skills are slash commands that Claude Code executes. Use them in chat:

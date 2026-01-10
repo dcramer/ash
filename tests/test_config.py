@@ -7,6 +7,7 @@ from ash.config.loader import _resolve_env_secrets, get_default_config, load_con
 from ash.config.models import (
     AshConfig,
     ConfigError,
+    EmbeddingsConfig,
     LLMConfig,
     MemoryConfig,
     ModelConfig,
@@ -111,6 +112,19 @@ class TestServerConfig:
         assert config.webhook_path == "/webhook"
 
 
+class TestEmbeddingsConfig:
+    """Tests for EmbeddingsConfig model."""
+
+    def test_defaults(self):
+        config = EmbeddingsConfig()
+        assert config.provider == "openai"
+        assert config.model == "text-embedding-3-small"
+
+    def test_custom_model(self):
+        config = EmbeddingsConfig(model="text-embedding-3-large")
+        assert config.model == "text-embedding-3-large"
+
+
 class TestMemoryConfig:
     """Tests for MemoryConfig model."""
 
@@ -119,7 +133,6 @@ class TestMemoryConfig:
 
         config = MemoryConfig()
         assert config.database_path == get_database_path()
-        assert config.embedding_model == "text-embedding-3-small"
         assert config.max_context_messages == 20
 
 

@@ -8,7 +8,10 @@ Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/execut
 
 ### MUST
 
-- Load skills from YAML files in `workspace/skills/` directory
+- Load skills from `workspace/skills/` directory
+- Support directory format: `skills/<name>/SKILL.md` (preferred)
+- Support flat markdown: `skills/<name>.md` (convenience)
+- Support pure YAML: `skills/<name>.yaml` (backward compatibility)
 - Each skill defines: name, description, instructions, preferred_model, required_tools
 - SkillRegistry discovers and loads skills from workspace
 - SkillExecutor creates sub-agent loop with skill instructions as system prompt
@@ -22,8 +25,8 @@ Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/execut
 - Support skill parameters via input_schema (JSON Schema)
 - Allow skills to specify max_iterations independently
 - Log skill execution with duration and iteration count
-- Cache loaded YAML skills for performance
 - Provide clear error when referenced model alias not found
+- Default skill name to filename stem if not specified
 
 ### MAY
 
@@ -33,11 +36,19 @@ Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/execut
 
 ## Interface
 
-### YAML Skill Format
+### Directory Skill Format (Preferred)
 
-```yaml
-# workspace/skills/summarize.yaml
-name: summarize
+```
+workspace/skills/
+  summarize/
+    SKILL.md
+  explain/
+    SKILL.md
+```
+
+```markdown
+<!-- workspace/skills/summarize/SKILL.md -->
+---
 description: Summarize text or documents concisely
 preferred_model: fast
 required_tools:
@@ -55,10 +66,35 @@ input_schema:
       default: bullets
   required:
     - content
+---
+
+You are a summarization assistant. Create clear, concise summaries.
+
+Extract key points only. Maintain factual accuracy.
+Use the requested format for output.
+```
+
+Note: `name` defaults to the directory name (e.g., `skills/summarize/` → `summarize`).
+
+### YAML Skill Format (Backward Compatibility)
+
+```yaml
+# workspace/skills/summarize.yaml
+name: summarize
+description: Summarize text or documents concisely
+preferred_model: fast
+required_tools:
+  - bash
+max_iterations: 3
+input_schema:
+  type: object
+  properties:
+    content:
+      type: string
+  required:
+    - content
 instructions: |
-  You are a summarization assistant. Create clear, concise summaries.
-  Extract key points only. Maintain factual accuracy.
-  Use the requested format for output.
+  You are a summarization assistant.
 ```
 
 ### Python Classes
@@ -66,7 +102,7 @@ instructions: |
 ```python
 @dataclass
 class SkillDefinition:
-    """Skill loaded from YAML."""
+    """Skill loaded from workspace."""
     name: str
     description: str
     instructions: str
@@ -102,7 +138,7 @@ class SkillResult:
 ```python
 class SkillRegistry:
     def discover(self, workspace_path: Path) -> None:
-        """Load all YAML skills from workspace/skills/."""
+        """Load skills from workspace/skills/ (.md, .yaml, .yml)."""
         ...
 
     def get(self, name: str) -> SkillDefinition:
@@ -111,7 +147,7 @@ class SkillRegistry:
 
     def has(self, name: str) -> bool: ...
 
-    def list(self) -> list[str]:
+    def list_names(self) -> list[str]:
         """List available skill names."""
         ...
 
@@ -128,7 +164,7 @@ class SkillExecutor:
         self,
         registry: SkillRegistry,
         tool_executor: ToolExecutor,
-        model_registry: ModelRegistry,
+        config: AshConfig,
     ) -> None: ...
 
     async def execute(
@@ -173,6 +209,7 @@ class UseSkillTool(Tool):
 | Skill requires unavailable tool | Error before execution | Validation fails |
 | Skill exceeds max_iterations | Returns partial result | With limit message |
 | Empty workspace/skills/ | list_skills returns empty | No error |
+| Skill without `name` in frontmatter | Uses filename stem | e.g., `foo.md` → `foo` |
 
 ## Errors
 
@@ -181,26 +218,33 @@ class UseSkillTool(Tool):
 | Skill not found | SkillResult.error("Skill 'name' not found") |
 | Required tool unavailable | SkillResult.error("Skill requires tool 'bash' which is not available") |
 | Invalid input schema | SkillResult.error("Invalid input: <validation error>") |
-| YAML parse error | Logged warning, skill skipped during discovery |
+| Missing frontmatter | Logged warning, skill skipped during discovery |
+| Missing description | Logged warning, skill skipped |
+| Empty instructions | Logged warning, skill skipped |
 | Model alias not found | Uses default model, logs warning |
 
 ## Verification
 
 ```bash
 uv run pytest tests/test_skills.py -v
-mkdir -p workspace/skills
-cat > workspace/skills/test.yaml << 'EOF'
-name: test
+mkdir -p workspace/skills/test
+cat > workspace/skills/test/SKILL.md << 'EOF'
+---
 description: Test skill
-instructions: Say hello
+---
+
+Say hello to the user.
 EOF
 uv run ash chat "List available skills"
 uv run ash chat "Use the test skill"
 ```
 
 - Skills discovered from workspace/skills/
+- Directory format `<name>/SKILL.md` loads correctly
+- Flat markdown files still supported
+- YAML files still supported
 - list_skills returns available skills
 - use_skill executes skill with sub-agent
 - Model alias resolution works
 - Missing tools detected before execution
-- Invalid YAML files skipped with warning
+- Invalid files skipped with warning

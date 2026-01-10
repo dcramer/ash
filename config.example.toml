@@ -93,8 +93,13 @@ webhook_path = "/webhook"
 # Memory/database settings
 [memory]
 # database_path = "/path/to/custom/memory.db"  # Default: $ASH_HOME/data/memory.db
-embedding_model = "text-embedding-3-small"
 max_context_messages = 20
+
+# Embeddings for semantic search (requires OpenAI API key)
+# Memory features are disabled if this section is not configured
+[embeddings]
+provider = "openai"
+model = "text-embedding-3-small"
 
 # Brave Search API (optional)
 [brave_search]
