@@ -29,17 +29,138 @@ def serve(
             help="Use webhook mode instead of polling",
         ),
     ] = False,
+    host: Annotated[
+        str,
+        typer.Option(
+            "--host",
+            "-h",
+            help="Host to bind to",
+        ),
+    ] = "127.0.0.1",
+    port: Annotated[
+        int,
+        typer.Option(
+            "--port",
+            "-p",
+            help="Port to bind to",
+        ),
+    ] = 8080,
 ) -> None:
     """Start the Ash assistant server."""
+    import asyncio
+
     from rich.console import Console
 
     console = Console()
-    console.print("[bold green]Starting Ash server...[/bold green]")
 
-    # TODO: Implement server startup
-    console.print(f"Config: {config or 'default'}")
-    console.print(f"Webhook mode: {webhook}")
-    console.print("[yellow]Server not yet implemented[/yellow]")
+    async def run_server() -> None:
+        import uvicorn
+
+        from ash.config import WorkspaceLoader, load_config
+        from ash.core import Agent, AgentConfig
+        from ash.db import init_database
+        from ash.llm import create_registry
+        from ash.providers.telegram import TelegramProvider
+        from ash.server.app import create_app
+        from ash.tools import BashTool, ToolExecutor, ToolRegistry, WebSearchTool
+
+        # Load configuration
+        console.print("[bold]Loading configuration...[/bold]")
+        ash_config = load_config(config)
+
+        # Initialize database
+        console.print("[bold]Initializing database...[/bold]")
+        database = init_database(database_path=ash_config.memory.database_path)
+        await database.connect()
+
+        # Load workspace
+        console.print("[bold]Loading workspace...[/bold]")
+        workspace_loader = WorkspaceLoader(ash_config.workspace)
+        workspace_loader.ensure_workspace()
+        workspace = workspace_loader.load()
+
+        # Set up LLM
+        console.print("[bold]Setting up LLM providers...[/bold]")
+        llm_registry = create_registry()
+        llm = llm_registry.get(ash_config.default_llm.provider)
+
+        # Set up tools
+        console.print("[bold]Setting up tools...[/bold]")
+        tool_registry = ToolRegistry()
+        tool_registry.register(BashTool())
+        if ash_config.brave_search and ash_config.brave_search.api_key:
+            tool_registry.register(
+                WebSearchTool(api_key=ash_config.brave_search.api_key)
+            )
+        tool_executor = ToolExecutor(tool_registry)
+
+        # Create agent
+        agent = Agent(
+            llm=llm,
+            tool_executor=tool_executor,
+            workspace=workspace,
+            config=AgentConfig(
+                model=ash_config.default_llm.model,
+                max_tokens=ash_config.default_llm.max_tokens,
+                temperature=ash_config.default_llm.temperature,
+            ),
+        )
+
+        # Set up Telegram if configured
+        telegram_provider = None
+        if ash_config.telegram and ash_config.telegram.bot_token:
+            console.print("[bold]Setting up Telegram provider...[/bold]")
+            webhook_url = ash_config.telegram.webhook_url if webhook else None
+            telegram_provider = TelegramProvider(
+                bot_token=ash_config.telegram.bot_token,
+                allowed_users=ash_config.telegram.allowed_users,
+                webhook_url=webhook_url,
+            )
+
+        # Create FastAPI app
+        console.print("[bold]Creating server...[/bold]")
+        fastapi_app = create_app(
+            database=database,
+            agent=agent,
+            telegram_provider=telegram_provider,
+        )
+
+        # Start server
+        console.print(
+            f"[bold green]Server starting on http://{host}:{port}[/bold green]"
+        )
+
+        if telegram_provider and not webhook:
+            # Run both uvicorn and telegram polling
+            console.print("[bold]Starting Telegram polling...[/bold]")
+
+            async def start_telegram():
+                handler = await fastapi_app.state.server.get_telegram_handler()
+                if handler:
+                    await telegram_provider.start(handler.handle_message)
+
+            # Start both concurrently
+            uvicorn_config = uvicorn.Config(
+                fastapi_app, host=host, port=port, log_level="info"
+            )
+            server = uvicorn.Server(uvicorn_config)
+
+            await asyncio.gather(
+                server.serve(),
+                start_telegram(),
+            )
+        else:
+            # Just run uvicorn
+            uvicorn_config = uvicorn.Config(
+                fastapi_app, host=host, port=port, log_level="info"
+            )
+            server = uvicorn.Server(uvicorn_config)
+            await server.serve()
+
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]Server stopped[/bold yellow]")
 
 
 @app.command()
