@@ -79,18 +79,60 @@ def db(
         str,
         typer.Argument(help="Action: migrate, rollback, status"),
     ],
+    revision: Annotated[
+        str,
+        typer.Option(
+            "--revision",
+            "-r",
+            help="Target revision (for migrate/rollback)",
+        ),
+    ] = "head",
 ) -> None:
     """Manage database migrations."""
+    import subprocess
+    import sys
+
     from rich.console import Console
 
     console = Console()
 
     if action == "migrate":
-        console.print("[yellow]DB migrate not yet implemented[/yellow]")
+        console.print(f"[bold]Running migrations to {revision}...[/bold]")
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", revision],
+            capture_output=False,
+        )
+        if result.returncode == 0:
+            console.print("[green]Migrations completed successfully[/green]")
+        else:
+            console.print("[red]Migration failed[/red]")
+            raise typer.Exit(1)
+
     elif action == "rollback":
-        console.print("[yellow]DB rollback not yet implemented[/yellow]")
+        target = revision if revision != "head" else "-1"
+        console.print(f"[bold]Rolling back to {target}...[/bold]")
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "downgrade", target],
+            capture_output=False,
+        )
+        if result.returncode == 0:
+            console.print("[green]Rollback completed successfully[/green]")
+        else:
+            console.print("[red]Rollback failed[/red]")
+            raise typer.Exit(1)
+
     elif action == "status":
-        console.print("[yellow]DB status not yet implemented[/yellow]")
+        console.print("[bold]Migration status:[/bold]")
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "current"],
+            capture_output=False,
+        )
+        console.print("\n[bold]Pending migrations:[/bold]")
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "history", "--indicate-current"],
+            capture_output=False,
+        )
+
     else:
         console.print(f"[red]Unknown action: {action}[/red]")
         raise typer.Exit(1)
