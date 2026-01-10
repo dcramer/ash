@@ -9,7 +9,8 @@ Files: src/ash/config/models.py, src/ash/config/loader.py, src/ash/llm/registry.
 ### MUST
 
 - Support named model configurations via `[models.<alias>]` TOML sections
-- Each named config contains: provider, model, temperature, max_tokens
+- Each named config contains: provider, model, and optionally temperature, max_tokens
+- Temperature is optional (None = use provider default; omit for reasoning models that don't support it)
 - Require `default` alias as the agent's primary model
 - Provide `get_model(alias: str) -> ModelConfig` lookup
 - API keys inherit from provider-level config if not specified per-model
@@ -37,7 +38,7 @@ Files: src/ash/config/models.py, src/ash/config/loader.py, src/ash/llm/registry.
 [models.default]
 provider = "anthropic"
 model = "claude-sonnet-4-5-20250929"
-temperature = 0.7
+temperature = 0.7  # Optional - omit to use API default
 max_tokens = 4096
 
 [models.fast]
@@ -46,10 +47,15 @@ model = "claude-3-5-haiku-20241022"
 temperature = 0.5
 max_tokens = 2048
 
+[models.reasoning]
+provider = "anthropic"
+model = "claude-3-5-opus-20241219"
+# temperature omitted for reasoning models that don't support it
+max_tokens = 8192
+
 [models.capable]
 provider = "openai"
 model = "gpt-4o"
-temperature = 0.7
 max_tokens = 4096
 
 # Provider-level API keys (shared by models using that provider)
@@ -72,7 +78,7 @@ class ModelConfig(BaseModel):
     """Configuration for a named model."""
     provider: Literal["anthropic", "openai"]
     model: str
-    temperature: float = 0.7
+    temperature: float | None = None  # None = use provider default; omit for reasoning models
     max_tokens: int = 4096
 
 class ProviderConfig(BaseModel):

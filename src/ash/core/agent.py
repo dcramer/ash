@@ -22,11 +22,15 @@ MAX_TOOL_ITERATIONS = 10
 
 @dataclass
 class AgentConfig:
-    """Configuration for the agent."""
+    """Configuration for the agent.
+
+    Temperature is optional - if None, the provider's default is used.
+    Omit temperature for reasoning models that don't support it.
+    """
 
     model: str | None = None
     max_tokens: int = 4096
-    temperature: float = 0.7
+    temperature: float | None = None  # None = use provider default
     max_tool_iterations: int = MAX_TOOL_ITERATIONS
 
 

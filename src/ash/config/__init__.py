@@ -4,8 +4,11 @@ from ash.config.loader import get_default_config, load_config
 from ash.config.models import (
     AshConfig,
     BraveSearchConfig,
+    ConfigError,
     LLMConfig,
     MemoryConfig,
+    ModelConfig,
+    ProviderConfig,
     SandboxConfig,
     ServerConfig,
     TelegramConfig,
@@ -21,8 +24,11 @@ from ash.config.workspace import Workspace, WorkspaceLoader
 __all__ = [
     "AshConfig",
     "BraveSearchConfig",
+    "ConfigError",
     "LLMConfig",
     "MemoryConfig",
+    "ModelConfig",
+    "ProviderConfig",
     "SandboxConfig",
     "ServerConfig",
     "TelegramConfig",

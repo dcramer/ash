@@ -185,15 +185,27 @@ class OpenAIProvider(LLMProvider):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
+        temperature: float | None = None,
     ) -> CompletionResponse:
-        """Generate a completion."""
+        """Generate a completion.
+
+        Args:
+            messages: List of messages.
+            model: Model to use.
+            tools: Tool definitions.
+            system: System prompt.
+            max_tokens: Maximum tokens.
+            temperature: Sampling temperature. None = use API default (omit for reasoning models).
+        """
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": self._convert_messages(messages, system),
             "max_tokens": max_tokens,
-            "temperature": temperature,
         }
+
+        # Only include temperature if explicitly set (reasoning models don't support it)
+        if temperature is not None:
+            kwargs["temperature"] = temperature
 
         converted_tools = self._convert_tools(tools)
         if converted_tools:
@@ -210,16 +222,28 @@ class OpenAIProvider(LLMProvider):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
+        temperature: float | None = None,
     ) -> AsyncIterator[StreamChunk]:
-        """Generate a streaming completion."""
+        """Generate a streaming completion.
+
+        Args:
+            messages: List of messages.
+            model: Model to use.
+            tools: Tool definitions.
+            system: System prompt.
+            max_tokens: Maximum tokens.
+            temperature: Sampling temperature. None = use API default (omit for reasoning models).
+        """
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": self._convert_messages(messages, system),
             "max_tokens": max_tokens,
-            "temperature": temperature,
             "stream": True,
         }
+
+        # Only include temperature if explicitly set (reasoning models don't support it)
+        if temperature is not None:
+            kwargs["temperature"] = temperature
 
         converted_tools = self._convert_tools(tools)
         if converted_tools:

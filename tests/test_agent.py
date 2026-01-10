@@ -162,7 +162,7 @@ class TestAgentConfig:
         config = AgentConfig()
         assert config.model is None
         assert config.max_tokens == 4096
-        assert config.temperature == 0.7
+        assert config.temperature is None  # None = use provider default
         assert config.max_tool_iterations == 10
 
     def test_custom_values(self):

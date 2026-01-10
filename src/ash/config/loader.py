@@ -22,7 +22,20 @@ def _get_default_config_paths() -> list[Path]:
 
 def _resolve_env_secrets(config: dict[str, Any]) -> dict[str, Any]:
     """Resolve API keys from environment variables where not set in config."""
-    env_mappings = {
+    # Provider-level API keys
+    provider_env_mappings = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }
+    for provider, env_var in provider_env_mappings.items():
+        if provider in config:
+            if config[provider].get("api_key") is None:
+                value = os.environ.get(env_var)
+                if value:
+                    config[provider]["api_key"] = SecretStr(value)
+
+    # Legacy LLM config API keys (backward compatibility)
+    llm_env_mappings = {
         ("default_llm", "api_key"): {
             "anthropic": "ANTHROPIC_API_KEY",
             "openai": "OPENAI_API_KEY",
@@ -31,11 +44,9 @@ def _resolve_env_secrets(config: dict[str, Any]) -> dict[str, Any]:
             "anthropic": "ANTHROPIC_API_KEY",
             "openai": "OPENAI_API_KEY",
         },
-        ("telegram", "bot_token"): "TELEGRAM_BOT_TOKEN",
-        ("brave_search", "api_key"): "BRAVE_SEARCH_API_KEY",
     }
 
-    for path, env_var in env_mappings.items():
+    for path, env_var_map in llm_env_mappings.items():
         section = config
         for key in path[:-1]:
             if key not in section or section[key] is None:
@@ -44,18 +55,30 @@ def _resolve_env_secrets(config: dict[str, Any]) -> dict[str, Any]:
         else:
             final_key = path[-1]
             if section.get(final_key) is None:
-                if isinstance(env_var, dict):
-                    # Provider-specific env var
-                    provider = section.get("provider")
-                    if provider and provider in env_var:
-                        value = os.environ.get(env_var[provider])
-                        if value:
-                            section[final_key] = SecretStr(value)
-                else:
-                    # Simple env var
-                    value = os.environ.get(env_var)
+                provider = section.get("provider")
+                if provider and provider in env_var_map:
+                    value = os.environ.get(env_var_map[provider])
                     if value:
                         section[final_key] = SecretStr(value)
+
+    # Other secrets (telegram, brave_search)
+    simple_mappings = {
+        ("telegram", "bot_token"): "TELEGRAM_BOT_TOKEN",
+        ("brave_search", "api_key"): "BRAVE_SEARCH_API_KEY",
+    }
+
+    for path, env_var in simple_mappings.items():
+        section = config
+        for key in path[:-1]:
+            if key not in section or section[key] is None:
+                break
+            section = section[key]
+        else:
+            final_key = path[-1]
+            if section.get(final_key) is None:
+                value = os.environ.get(env_var)
+                if value:
+                    section[final_key] = SecretStr(value)
 
     return config
 
@@ -104,9 +127,13 @@ def load_config(path: Path | None = None) -> AshConfig:
 
 def get_default_config() -> AshConfig:
     """Get a default configuration for development/testing."""
+    from ash.config.models import ModelConfig
+
     return AshConfig(
-        default_llm={
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-5-20250929",
+        models={
+            "default": ModelConfig(
+                provider="anthropic",
+                model="claude-sonnet-4-5-20250929",
+            )
         }
     )

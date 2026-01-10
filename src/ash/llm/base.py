@@ -35,7 +35,7 @@ class LLMProvider(ABC):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
+        temperature: float | None = None,
     ) -> CompletionResponse:
         """Generate a completion (non-streaming).
 
@@ -45,7 +45,7 @@ class LLMProvider(ABC):
             tools: Available tools for the model.
             system: System prompt.
             max_tokens: Maximum tokens to generate.
-            temperature: Sampling temperature.
+            temperature: Sampling temperature. None = use API default (omit for reasoning models).
 
         Returns:
             Complete response with message and metadata.
@@ -61,7 +61,7 @@ class LLMProvider(ABC):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
+        temperature: float | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Generate a streaming completion.
 
@@ -71,7 +71,7 @@ class LLMProvider(ABC):
             tools: Available tools for the model.
             system: System prompt.
             max_tokens: Maximum tokens to generate.
-            temperature: Sampling temperature.
+            temperature: Sampling temperature. None = use API default (omit for reasoning models).
 
         Yields:
             Stream chunks as they arrive.

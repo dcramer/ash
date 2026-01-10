@@ -59,7 +59,7 @@ def serve(
         from ash.config import WorkspaceLoader, load_config
         from ash.core import Agent, AgentConfig
         from ash.db import init_database
-        from ash.llm import create_registry
+        from ash.llm import create_llm_provider
         from ash.providers.telegram import TelegramProvider
         from ash.server.app import create_app
         from ash.tools import BashTool, ToolExecutor, ToolRegistry, WebSearchTool
@@ -79,10 +79,11 @@ def serve(
         workspace_loader.ensure_workspace()
         workspace = workspace_loader.load()
 
-        # Set up LLM
+        # Set up LLM using the default model
         console.print("[bold]Setting up LLM providers...[/bold]")
-        llm_registry = create_registry()
-        llm = llm_registry.get(ash_config.default_llm.provider)
+        model_config = ash_config.default_model
+        api_key = ash_config.resolve_api_key("default")
+        llm = create_llm_provider(model_config.provider, api_key=api_key)
 
         # Set up tools (sandbox is mandatory for security)
         console.print("[bold]Setting up tools...[/bold]")
@@ -109,9 +110,9 @@ def serve(
             tool_executor=tool_executor,
             workspace=workspace,
             config=AgentConfig(
-                model=ash_config.default_llm.model,
-                max_tokens=ash_config.default_llm.max_tokens,
-                temperature=ash_config.default_llm.temperature,
+                model=model_config.model,
+                max_tokens=model_config.max_tokens,
+                temperature=model_config.temperature,
             ),
         )
 
@@ -188,6 +189,14 @@ def chat(
             help="Path to configuration file",
         ),
     ] = None,
+    model_alias: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            "-m",
+            help="Model alias to use (default: 'default' or ASH_MODEL env)",
+        ),
+    ] = None,
     streaming: Annotated[
         bool,
         typer.Option(
@@ -202,15 +211,17 @@ def chat(
         ash chat                     # Interactive mode
         ash chat "Hello, how are you?"  # Single prompt
         ash chat "List files" --no-streaming
+        ash chat --model fast "Quick question"  # Use model alias
     """
     import asyncio
+    import os
     import uuid
 
     from rich.console import Console
     from rich.markdown import Markdown
     from rich.panel import Panel
 
-    from ash.config import WorkspaceLoader, load_config
+    from ash.config import ConfigError, WorkspaceLoader, load_config
     from ash.core import Agent, AgentConfig
     from ash.core.session import SessionState
     from ash.llm import create_llm_provider
@@ -228,6 +239,27 @@ def chat(
             )
             raise typer.Exit(1) from None
 
+        # Resolve model alias: CLI flag > ASH_MODEL env > "default"
+        resolved_alias = model_alias or os.environ.get("ASH_MODEL") or "default"
+
+        # Get model configuration
+        try:
+            model_config = ash_config.get_model(resolved_alias)
+        except ConfigError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from None
+
+        # Resolve API key for the selected model
+        api_key = ash_config.resolve_api_key(resolved_alias)
+        if api_key is None:
+            provider = model_config.provider
+            env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+            console.print(
+                f"[red]No API key for provider '{provider}'. "
+                f"Set {env_var} or api_key in config[/red]"
+            )
+            raise typer.Exit(1) from None
+
         # Load workspace
         workspace_loader = WorkspaceLoader(ash_config.workspace)
         workspace_loader.ensure_workspace()
@@ -235,8 +267,8 @@ def chat(
 
         # Set up LLM - only create the provider we need
         llm = create_llm_provider(
-            ash_config.default_llm.provider,
-            api_key=ash_config.default_llm.api_key,
+            model_config.provider,
+            api_key=api_key,
         )
 
         # Set up tools (sandbox is mandatory for security)
@@ -263,9 +295,9 @@ def chat(
             tool_executor=tool_executor,
             workspace=workspace,
             config=AgentConfig(
-                model=ash_config.default_llm.model,
-                max_tokens=ash_config.default_llm.max_tokens,
-                temperature=ash_config.default_llm.temperature,
+                model=model_config.model,
+                max_tokens=model_config.max_tokens,
+                temperature=model_config.temperature,
             ),
         )
 
@@ -441,16 +473,18 @@ def config(
             table.add_column("Value", style="green")
 
             table.add_row("Workspace", str(config_obj.workspace))
-            table.add_row(
-                "Default LLM",
-                f"{config_obj.default_llm.provider}/{config_obj.default_llm.model}",
-            )
-            table.add_row(
-                "Fallback LLM",
-                f"{config_obj.fallback_llm.provider}/{config_obj.fallback_llm.model}"
-                if config_obj.fallback_llm
-                else "[dim]not configured[/dim]",
-            )
+
+            # Show models
+            model_aliases = config_obj.list_models()
+            for alias in model_aliases:
+                model = config_obj.get_model(alias)
+                has_key = config_obj.resolve_api_key(alias) is not None
+                key_status = "[green]✓[/green]" if has_key else "[yellow]?[/yellow]"
+                table.add_row(
+                    f"Model '{alias}'",
+                    f"{model.provider}/{model.model} {key_status}",
+                )
+
             table.add_row(
                 "Telegram",
                 "configured"

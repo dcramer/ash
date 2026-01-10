@@ -8,19 +8,56 @@
 # Default: $ASH_HOME/workspace
 # workspace = "/path/to/custom/workspace"
 
-# Default LLM provider
-[default_llm]
+# =============================================================================
+# Model Configuration (Named Aliases)
+# =============================================================================
+# Define named model configurations with [models.<alias>] sections.
+# Use --model <alias> or ASH_MODEL=<alias> to select a model.
+# The "default" alias is required and used when no model is specified.
+
+[models.default]
 provider = "anthropic"
 model = "claude-sonnet-4-5-20250929"
-# api_key loaded from ANTHROPIC_API_KEY env var
 temperature = 0.7
 max_tokens = 4096
 
-# Fallback LLM (optional)
-[fallback_llm]
-provider = "openai"
-model = "gpt-4o"
-# api_key loaded from OPENAI_API_KEY env var
+[models.fast]
+provider = "anthropic"
+model = "claude-3-5-haiku-20241022"
+temperature = 0.5
+max_tokens = 2048
+
+# Example OpenAI model (uncomment to use)
+# [models.gpt4]
+# provider = "openai"
+# model = "gpt-4o"
+# temperature = 0.7
+# max_tokens = 4096
+
+# =============================================================================
+# Provider API Keys
+# =============================================================================
+# API keys can be set here or via environment variables:
+# - ANTHROPIC_API_KEY for Anthropic
+# - OPENAI_API_KEY for OpenAI
+
+[anthropic]
+# api_key = "sk-ant-..."  # Or set ANTHROPIC_API_KEY env var
+
+[openai]
+# api_key = "sk-..."  # Or set OPENAI_API_KEY env var
+
+# =============================================================================
+# Backward Compatibility (Deprecated)
+# =============================================================================
+# The [default_llm] and [fallback_llm] sections still work for backward
+# compatibility but are deprecated. Use [models.<alias>] instead.
+#
+# [default_llm]
+# provider = "anthropic"
+# model = "claude-sonnet-4-5-20250929"
+# temperature = 0.7
+# max_tokens = 4096
 
 # Telegram provider (optional)
 [telegram]
