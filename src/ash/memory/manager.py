@@ -101,7 +101,8 @@ class MemoryManager:
 
         Args:
             session_id: Current session ID.
-            user_id: User ID (for future use).
+            user_id: User ID for filtering memories. In group chats, this ensures
+                User A's memories aren't returned when User B asks a question.
             user_message: The user's message to find relevant context for.
             max_messages: Maximum number of past messages to retrieve.
             max_memories: Maximum number of memory entries to retrieve.
@@ -138,11 +139,12 @@ class MemoryManager:
 
         try:
             # Search memory store - include top N without filtering
-            # For a personal assistant, stored facts are always relevant
+            # Filter by owner_user_id to ensure user A's memories aren't shown to user B
             # The retriever already ranks by similarity, so top N are best matches
             memories = await self._retriever.search_memories(
                 query=user_message,
                 limit=max_memories,
+                owner_user_id=user_id,
             )
         except Exception:
             logger.warning("Failed to search memories, continuing without", exc_info=True)
@@ -237,6 +239,7 @@ class MemoryManager:
         query: str,
         limit: int = 5,
         subject_person_id: str | None = None,
+        owner_user_id: str | None = None,
     ) -> list[SearchResult]:
         """Search all memory (used by recall tool).
 
@@ -244,12 +247,14 @@ class MemoryManager:
             query: Search query.
             limit: Maximum results.
             subject_person_id: Optional filter to memories about a specific person.
+            owner_user_id: Optional filter to memories owned by a specific user.
 
         Returns:
             List of search results sorted by relevance.
         """
         return await self._retriever.search_all(
-            query, limit=limit, subject_person_id=subject_person_id
+            query, limit=limit, subject_person_id=subject_person_id,
+            owner_user_id=owner_user_id
         )
 
     # Person operations

@@ -430,7 +430,7 @@ class TestMemoryManager:
         assert len(results) == 1
         assert results[0].content == "Result 1"
         mock_retriever.search_all.assert_called_once_with(
-            "test query", limit=5, subject_person_id=None
+            "test query", limit=5, subject_person_id=None, owner_user_id=None
         )
 
 

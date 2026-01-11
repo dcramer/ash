@@ -139,6 +139,7 @@ class Agent:
         self,
         user_message: str,
         session: SessionState,
+        user_id: str | None = None,
     ) -> AgentResponse:
         """Process a user message and return response.
 
@@ -148,10 +149,16 @@ class Agent:
         Args:
             user_message: User's message.
             session: Session state.
+            user_id: Optional user ID for the current message sender.
+                In group chats, this should be the actual sender, not session.user_id.
+                When provided, this is used for memory retrieval and known_people lookup.
 
         Returns:
             Agent response.
         """
+        # Use provided user_id or fall back to session user_id
+        effective_user_id = user_id or session.user_id
+
         # Get message IDs in recency window for deduplication
         recent_message_ids = session.get_recent_message_ids(self._config.recency_window)
 
@@ -162,7 +169,7 @@ class Agent:
             try:
                 memory_context = await self._memory.get_context_for_message(
                     session_id=session.session_id,
-                    user_id=session.user_id,
+                    user_id=effective_user_id,
                     user_message=user_message,
                     exclude_message_ids=recent_message_ids,
                 )
@@ -170,9 +177,9 @@ class Agent:
                 logger.warning("Failed to retrieve memory context", exc_info=True)
 
             # Get known people for context
-            if session.user_id:
+            if effective_user_id:
                 try:
-                    known_people = await self._memory.get_known_people(session.user_id)
+                    known_people = await self._memory.get_known_people(effective_user_id)
                 except Exception:
                     logger.warning("Failed to get known people", exc_info=True)
 
@@ -236,10 +243,10 @@ class Agent:
                     iterations=iterations,
                 )
 
-            # Execute tools
+            # Execute tools with effective user_id (supports group chats)
             tool_context = ToolContext(
                 session_id=session.session_id,
-                user_id=session.user_id,
+                user_id=effective_user_id,
                 chat_id=session.chat_id,
                 provider=session.provider,
             )
@@ -297,6 +304,7 @@ class Agent:
         self,
         user_message: str,
         session: SessionState,
+        user_id: str | None = None,
     ) -> AsyncIterator[str]:
         """Process a user message with streaming response.
 
@@ -306,10 +314,16 @@ class Agent:
         Args:
             user_message: User's message.
             session: Session state.
+            user_id: Optional user ID for the current message sender.
+                In group chats, this should be the actual sender, not session.user_id.
+                When provided, this is used for memory retrieval and known_people lookup.
 
         Yields:
             Text chunks.
         """
+        # Use provided user_id or fall back to session user_id
+        effective_user_id = user_id or session.user_id
+
         # Get message IDs in recency window for deduplication
         recent_message_ids = session.get_recent_message_ids(self._config.recency_window)
 
@@ -320,7 +334,7 @@ class Agent:
             try:
                 memory_context = await self._memory.get_context_for_message(
                     session_id=session.session_id,
-                    user_id=session.user_id,
+                    user_id=effective_user_id,
                     user_message=user_message,
                     exclude_message_ids=recent_message_ids,
                 )
@@ -328,9 +342,9 @@ class Agent:
                 logger.warning("Failed to retrieve memory context", exc_info=True)
 
             # Get known people for context
-            if session.user_id:
+            if effective_user_id:
                 try:
-                    known_people = await self._memory.get_known_people(session.user_id)
+                    known_people = await self._memory.get_known_people(effective_user_id)
                 except Exception:
                     logger.warning("Failed to get known people", exc_info=True)
 
@@ -444,10 +458,10 @@ class Agent:
                         logger.warning("Failed to persist turn to memory", exc_info=True)
                 return
 
-            # Execute tools (non-streaming)
+            # Execute tools (non-streaming) with effective user_id (supports group chats)
             tool_context = ToolContext(
                 session_id=session.session_id,
-                user_id=session.user_id,
+                user_id=effective_user_id,
                 chat_id=session.chat_id,
                 provider=session.provider,
             )

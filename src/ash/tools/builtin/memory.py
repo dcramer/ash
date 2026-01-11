@@ -217,6 +217,7 @@ class RecallTool(Tool):
                 query,
                 limit=5,
                 subject_person_id=person_id,
+                owner_user_id=context.user_id,
             )
 
             if not results:

@@ -187,6 +187,7 @@ class SemanticRetriever:
         limit: int = 10,
         include_expired: bool = False,
         subject_person_id: str | None = None,
+        owner_user_id: str | None = None,
     ) -> list[SearchResult]:
         """Search memories by semantic similarity.
 
@@ -195,6 +196,8 @@ class SemanticRetriever:
             limit: Maximum results.
             include_expired: Include expired entries.
             subject_person_id: Optional filter to memories about a specific person.
+            owner_user_id: Optional filter to memories owned by a specific user.
+                For group chats, this ensures User A's memories aren't returned for User B.
 
         Returns:
             List of search results with similarity scores.
@@ -217,6 +220,10 @@ class SemanticRetriever:
         if subject_person_id:
             where_clauses.append("m.subject_person_id = :subject_person_id")
             params["subject_person_id"] = subject_person_id
+
+        if owner_user_id:
+            where_clauses.append("m.owner_user_id = :owner_user_id")
+            params["owner_user_id"] = owner_user_id
 
         where_clause = ""
         if where_clauses:
@@ -261,6 +268,7 @@ class SemanticRetriever:
         query: str,
         limit: int = 10,
         subject_person_id: str | None = None,
+        owner_user_id: str | None = None,
     ) -> list[SearchResult]:
         """Search both messages and memories.
 
@@ -268,6 +276,7 @@ class SemanticRetriever:
             query: Search query.
             limit: Maximum results (combined).
             subject_person_id: Optional filter for memories about a specific person.
+            owner_user_id: Optional filter to memories owned by a specific user.
 
         Returns:
             List of search results sorted by similarity.
@@ -275,7 +284,8 @@ class SemanticRetriever:
         # Search both sources with limit
         messages = await self.search_messages(query, limit=limit)
         memories = await self.search_memories(
-            query, limit=limit, subject_person_id=subject_person_id
+            query, limit=limit, subject_person_id=subject_person_id,
+            owner_user_id=owner_user_id
         )
 
         # Combine and sort by similarity

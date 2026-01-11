@@ -1,6 +1,7 @@
 """High-level command execution in sandbox containers."""
 
 import logging
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -169,9 +170,11 @@ class SandboxExecutor:
         Returns:
             Execution result.
         """
+        # Quote path to prevent shell injection
+        safe_path = shlex.quote(path)
         # Escape content for cat heredoc
         escaped = content.replace("'", "'\\''")
-        command = f"cat > {path} << 'ASHEOF'\n{escaped}\nASHEOF"
+        command = f"cat > {safe_path} << 'ASHEOF'\n{escaped}\nASHEOF"
         return await self.execute(command)
 
     async def read_file(self, path: str) -> ExecutionResult:
@@ -183,7 +186,9 @@ class SandboxExecutor:
         Returns:
             Execution result with file content in stdout.
         """
-        return await self.execute(f"cat {path}")
+        # Quote path to prevent shell injection
+        safe_path = shlex.quote(path)
+        return await self.execute(f"cat {safe_path}")
 
     async def cleanup(self) -> None:
         """Clean up the sandbox container."""

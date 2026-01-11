@@ -214,9 +214,14 @@ class SkillExecutor:
         iterations = 0
         result_text = ""
 
+        logger.info(f"Starting skill '{skill_name}' (model={model})")
+
         # Sub-agent loop
         while iterations < skill.max_iterations:
             iterations += 1
+            logger.debug(
+                f"Skill '{skill_name}' iteration {iterations}/{skill.max_iterations}"
+            )
 
             try:
                 response = await provider.complete(

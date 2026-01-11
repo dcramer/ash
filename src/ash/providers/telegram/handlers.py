@@ -1,6 +1,8 @@
 """Telegram message handling utilities."""
 
+import asyncio
 import logging
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from ash.core import Agent, SessionState
@@ -13,6 +15,9 @@ if TYPE_CHECKING:
     from ash.providers.telegram.provider import TelegramProvider
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of sessions to cache in memory
+MAX_CACHED_SESSIONS = 100
 
 
 class TelegramMessageHandler:
@@ -40,7 +45,23 @@ class TelegramMessageHandler:
         self._agent = agent
         self._database = database
         self._streaming = streaming
-        self._sessions: dict[str, SessionState] = {}
+        # Use OrderedDict for LRU-style eviction of cached sessions
+        self._sessions: OrderedDict[str, SessionState] = OrderedDict()
+        # Per-chat locks to serialize message handling
+        self._chat_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_chat_lock(self, chat_id: str) -> asyncio.Lock:
+        """Get or create a lock for a chat.
+
+        Args:
+            chat_id: Chat ID.
+
+        Returns:
+            Lock for the chat.
+        """
+        if chat_id not in self._chat_locks:
+            self._chat_locks[chat_id] = asyncio.Lock()
+        return self._chat_locks[chat_id]
 
     async def handle_message(self, message: IncomingMessage) -> None:
         """Handle an incoming Telegram message.
@@ -67,29 +88,35 @@ class TelegramMessageHandler:
                 logger.info(f"Skipping duplicate message {message.id}")
                 return
 
-            # Set processing indicator (eyes reaction - "looking at it")
-            await self._provider.set_reaction(message.chat_id, message.id, "👀")
+            # Acquire per-chat lock to serialize message handling
+            chat_lock = self._get_chat_lock(message.chat_id)
+            logger.debug(f"Waiting for chat lock (chat={message.chat_id})")
+            async with chat_lock:
+                logger.debug(f"Acquired chat lock (chat={message.chat_id})")
 
-            # Get or create session
-            session = await self._get_or_create_session(message)
+                # Set processing indicator (eyes reaction - "looking at it")
+                await self._provider.set_reaction(message.chat_id, message.id, "👀")
 
-            # Repair session if it has incomplete tool use (e.g., from interruption)
-            if session.has_incomplete_tool_use():
-                logger.warning(
-                    f"Session {session.session_id} has incomplete tool use, repairing..."
-                )
-                session.repair_incomplete_tool_use()
+                # Get or create session
+                session = await self._get_or_create_session(message)
 
-            try:
-                if self._streaming:
-                    # Stream response
-                    await self._handle_streaming(message, session)
-                else:
-                    # Non-streaming response
-                    await self._handle_sync(message, session)
-            finally:
-                # Clear processing indicator
-                await self._provider.clear_reaction(message.chat_id, message.id)
+                # Repair session if it has incomplete tool use (e.g., from interruption)
+                if session.has_incomplete_tool_use():
+                    logger.warning(
+                        f"Session {session.session_id} has incomplete tool use, repairing..."
+                    )
+                    session.repair_incomplete_tool_use()
+
+                try:
+                    if self._streaming:
+                        # Stream response
+                        await self._handle_streaming(message, session)
+                    else:
+                        # Non-streaming response
+                        await self._handle_sync(message, session)
+                finally:
+                    # Clear processing indicator
+                    await self._provider.clear_reaction(message.chat_id, message.id)
 
         except Exception:
             logger.exception("Error handling message")
@@ -123,6 +150,7 @@ class TelegramMessageHandler:
                 response_stream = self._agent.process_message_streaming(
                     image_context,
                     session,
+                    user_id=message.user_id,
                 )
                 await self._provider.send_streaming(
                     chat_id=message.chat_id,
@@ -130,7 +158,9 @@ class TelegramMessageHandler:
                     reply_to=message.id,
                 )
             else:
-                response = await self._agent.process_message(image_context, session)
+                response = await self._agent.process_message(
+                    image_context, session, user_id=message.user_id
+                )
                 await self._provider.send(
                     OutgoingMessage(
                         chat_id=message.chat_id,
@@ -191,6 +221,8 @@ class TelegramMessageHandler:
         session_key = f"{self._provider.name}:{message.chat_id}"
 
         if session_key in self._sessions:
+            # Move to end (most recently used)
+            self._sessions.move_to_end(session_key)
             return self._sessions[session_key]
 
         # Create new session from database
@@ -241,6 +273,11 @@ class TelegramMessageHandler:
                     f"Restored {len(db_messages)} messages for session {session_key}"
                 )
 
+            # Evict oldest sessions if cache is full
+            while len(self._sessions) >= MAX_CACHED_SESSIONS:
+                evicted_key, _ = self._sessions.popitem(last=False)
+                logger.debug(f"Evicted session from cache: {evicted_key}")
+
             self._sessions[session_key] = session
 
             # Update user profile
@@ -275,6 +312,7 @@ class TelegramMessageHandler:
             async for chunk in self._agent.process_message_streaming(
                 message.text,
                 session,
+                user_id=message.user_id,
             ):
                 response_content += chunk
                 yield chunk
@@ -301,16 +339,14 @@ class TelegramMessageHandler:
             message: Incoming message.
             session: Session state.
         """
-        import asyncio
-
         # Start typing indicator loop (Telegram typing only lasts 5 seconds)
-        typing_task = asyncio.create_task(
-            self._typing_loop(message.chat_id)
-        )
+        typing_task = asyncio.create_task(self._typing_loop(message.chat_id))
 
         try:
-            # Process message
-            response = await self._agent.process_message(message.text, session)
+            # Process message with per-message user_id for group chat support
+            response = await self._agent.process_message(
+                message.text, session, user_id=message.user_id
+            )
         finally:
             # Stop typing indicator
             typing_task.cancel()
@@ -342,8 +378,6 @@ class TelegramMessageHandler:
         Args:
             chat_id: Chat to show typing in.
         """
-        import asyncio
-
         while True:
             try:
                 await self._provider.send_typing(chat_id)

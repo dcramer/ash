@@ -1,11 +1,15 @@
 """Anthropic Claude LLM provider."""
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 import anthropic
 
 from ash.llm.base import LLMProvider
+
+logger = logging.getLogger(__name__)
 from ash.llm.types import (
     CompletionResponse,
     ContentBlock,
@@ -26,13 +30,24 @@ DEFAULT_MODEL = "claude-sonnet-4-20250514"
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude provider."""
 
-    def __init__(self, api_key: str | None = None):
+    # Shared semaphore for rate limiting across all instances
+    _semaphore: asyncio.Semaphore | None = None
+    _max_concurrent: int = 2  # Max concurrent API requests
+
+    def __init__(self, api_key: str | None = None, max_concurrent: int | None = None):
         """Initialize provider.
 
         Args:
             api_key: Anthropic API key. If None, uses ANTHROPIC_API_KEY env var.
+            max_concurrent: Max concurrent API requests (default: 2).
         """
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        if max_concurrent is not None:
+            AnthropicProvider._max_concurrent = max_concurrent
+        if AnthropicProvider._semaphore is None:
+            AnthropicProvider._semaphore = asyncio.Semaphore(
+                AnthropicProvider._max_concurrent
+            )
 
     @property
     def name(self) -> str:
@@ -146,8 +161,9 @@ class AnthropicProvider(LLMProvider):
             max_tokens: Maximum tokens.
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
         """
+        model_name = model or self.default_model
         kwargs: dict[str, Any] = {
-            "model": model or self.default_model,
+            "model": model_name,
             "messages": self._convert_messages(messages),
             "max_tokens": max_tokens,
         }
@@ -163,7 +179,15 @@ class AnthropicProvider(LLMProvider):
         if converted_tools:
             kwargs["tools"] = converted_tools
 
-        response = await self._client.messages.create(**kwargs)
+        assert self._semaphore is not None
+        logger.debug(f"Waiting for API slot (model={model_name})")
+        async with self._semaphore:
+            logger.debug(f"Acquired API slot, calling {model_name}")
+            response = await self._client.messages.create(**kwargs)
+            logger.debug(
+                f"API call complete: {response.usage.input_tokens}in/"
+                f"{response.usage.output_tokens}out tokens"
+            )
         return self._parse_response(response)
 
     async def stream(
@@ -186,8 +210,9 @@ class AnthropicProvider(LLMProvider):
             max_tokens: Maximum tokens.
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
         """
+        model_name = model or self.default_model
         kwargs: dict[str, Any] = {
-            "model": model or self.default_model,
+            "model": model_name,
             "messages": self._convert_messages(messages),
             "max_tokens": max_tokens,
         }
@@ -206,45 +231,50 @@ class AnthropicProvider(LLMProvider):
         current_tool_id: str | None = None
         current_tool_name: str | None = None
 
-        async with self._client.messages.stream(**kwargs) as stream:
-            async for event in stream:
-                if event.type == "message_start":
-                    yield StreamChunk(type=StreamEventType.MESSAGE_START)
+        assert self._semaphore is not None
+        logger.debug(f"Waiting for API slot (stream, model={model_name})")
+        async with self._semaphore:
+            logger.debug(f"Acquired API slot, streaming {model_name}")
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for event in stream:
+                    if event.type == "message_start":
+                        yield StreamChunk(type=StreamEventType.MESSAGE_START)
 
-                elif event.type == "content_block_start":
-                    if event.content_block.type == "tool_use":
-                        current_tool_id = event.content_block.id
-                        current_tool_name = event.content_block.name
-                        yield StreamChunk(
-                            type=StreamEventType.TOOL_USE_START,
-                            tool_use_id=current_tool_id,
-                            tool_name=current_tool_name,
-                        )
+                    elif event.type == "content_block_start":
+                        if event.content_block.type == "tool_use":
+                            current_tool_id = event.content_block.id
+                            current_tool_name = event.content_block.name
+                            yield StreamChunk(
+                                type=StreamEventType.TOOL_USE_START,
+                                tool_use_id=current_tool_id,
+                                tool_name=current_tool_name,
+                            )
 
-                elif event.type == "content_block_delta":
-                    if event.delta.type == "text_delta":
-                        yield StreamChunk(
-                            type=StreamEventType.TEXT_DELTA,
-                            content=event.delta.text,
-                        )
-                    elif event.delta.type == "input_json_delta":
-                        yield StreamChunk(
-                            type=StreamEventType.TOOL_USE_DELTA,
-                            content=event.delta.partial_json,
-                            tool_use_id=current_tool_id,
-                        )
+                    elif event.type == "content_block_delta":
+                        if event.delta.type == "text_delta":
+                            yield StreamChunk(
+                                type=StreamEventType.TEXT_DELTA,
+                                content=event.delta.text,
+                            )
+                        elif event.delta.type == "input_json_delta":
+                            yield StreamChunk(
+                                type=StreamEventType.TOOL_USE_DELTA,
+                                content=event.delta.partial_json,
+                                tool_use_id=current_tool_id,
+                            )
 
-                elif event.type == "content_block_stop":
-                    if current_tool_id:
-                        yield StreamChunk(
-                            type=StreamEventType.TOOL_USE_END,
-                            tool_use_id=current_tool_id,
-                        )
-                        current_tool_id = None
-                        current_tool_name = None
+                    elif event.type == "content_block_stop":
+                        if current_tool_id:
+                            yield StreamChunk(
+                                type=StreamEventType.TOOL_USE_END,
+                                tool_use_id=current_tool_id,
+                            )
+                            current_tool_id = None
+                            current_tool_name = None
 
-                elif event.type == "message_stop":
-                    yield StreamChunk(type=StreamEventType.MESSAGE_END)
+                    elif event.type == "message_stop":
+                        yield StreamChunk(type=StreamEventType.MESSAGE_END)
+            logger.debug("Stream complete")
 
     async def embed(
         self,
