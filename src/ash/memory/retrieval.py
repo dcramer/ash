@@ -222,7 +222,10 @@ class SemanticRetriever:
             params["subject_person_id"] = subject_person_id
 
         if owner_user_id:
-            where_clauses.append("m.owner_user_id = :owner_user_id")
+            # Include shared memories (NULL owner) AND user's personal memories
+            where_clauses.append(
+                "(m.owner_user_id IS NULL OR m.owner_user_id = :owner_user_id)"
+            )
             params["owner_user_id"] = owner_user_id
 
         where_clause = ""

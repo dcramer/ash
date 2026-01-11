@@ -71,6 +71,13 @@ class RememberTool(Tool):
                     "type": "integer",
                     "description": "Optional: number of days until this memory expires.",
                 },
+                "shared": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, this memory is shared with everyone in the chat "
+                        "(e.g., team facts, group reminders). Default is false (personal memory)."
+                    ),
+                },
             },
             "required": ["content"],
         }
@@ -95,6 +102,7 @@ class RememberTool(Tool):
 
         subject_ref = input_data.get("subject")
         expires_in_days = input_data.get("expires_in_days")
+        is_shared = input_data.get("shared", False)
 
         try:
             # Resolve subject to person ID
@@ -112,15 +120,21 @@ class RememberTool(Tool):
                 person_created = result.created
                 subject_name = result.person_name
 
+            # Shared memories have no owner (visible to everyone)
+            # Personal memories are owned by the current user
+            owner_user_id = None if is_shared else context.user_id
+
             await self._memory.add_memory(
                 content=content,
                 source="remember_tool",
                 expires_in_days=expires_in_days,
-                owner_user_id=context.user_id,
+                owner_user_id=owner_user_id,
                 subject_person_id=subject_person_id,
             )
 
             response = f"Remembered: {content}"
+            if is_shared:
+                response += " (shared with everyone)"
             if subject_person_id and person_created:
                 response += f" (created new person record for '{subject_name}')"
             elif subject_person_id:

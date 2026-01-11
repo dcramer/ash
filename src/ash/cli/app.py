@@ -59,11 +59,23 @@ def serve(
 
         import uvicorn
 
-        # Configure logging for ash modules
+        # Configure logging for all modules with consistent format
+        log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         logging.basicConfig(
             level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            format=log_format,
+            force=True,  # Override any existing configuration
         )
+
+        # Configure uvicorn/aiogram loggers to use same format
+        for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "aiogram"):
+            lib_logger = logging.getLogger(logger_name)
+            lib_logger.handlers = []  # Remove default handlers
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter(log_format))
+            lib_logger.addHandler(handler)
+            lib_logger.propagate = False
+
         logger = logging.getLogger(__name__)
 
         from ash.config import WorkspaceLoader, load_config
@@ -148,7 +160,11 @@ def serve(
 
         try:
             uvicorn_config = uvicorn.Config(
-                fastapi_app, host=host, port=port, log_level="info"
+                fastapi_app,
+                host=host,
+                port=port,
+                log_level="info",
+                log_config=None,  # Use our logging config, not uvicorn's
             )
             server = uvicorn.Server(uvicorn_config)
 
