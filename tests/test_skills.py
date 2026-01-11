@@ -1,6 +1,6 @@
 """Tests for skills system."""
 
-import json
+import platform
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -15,10 +15,88 @@ from ash.skills import (
     SkillRegistry,
     SkillResult,
 )
+from ash.skills.base import SkillRequirements
 from ash.tools.base import ToolContext
-from ash.tools.builtin.skills import ListSkillsTool, UseSkillTool
+from ash.tools.builtin.skills import UseSkillTool
 from ash.tools.executor import ToolExecutor
 from ash.tools.registry import ToolRegistry
+
+# =============================================================================
+# SkillRequirements Tests
+# =============================================================================
+
+
+class TestSkillRequirements:
+    """Tests for SkillRequirements dataclass."""
+
+    def test_empty_requirements_pass(self):
+        req = SkillRequirements()
+        is_met, reason = req.check()
+        assert is_met is True
+        assert reason is None
+
+    def test_os_requirement_current_os_passes(self):
+        current_os = platform.system().lower()
+        req = SkillRequirements(os=[current_os])
+        is_met, reason = req.check()
+        assert is_met is True
+        assert reason is None
+
+    def test_os_requirement_other_os_fails(self):
+        # Pick an OS that's definitely not the current one
+        other_os = "windows" if platform.system().lower() != "windows" else "darwin"
+        req = SkillRequirements(os=[other_os])
+        is_met, reason = req.check()
+        assert is_met is False
+        assert "Requires OS" in reason
+
+    def test_bin_requirement_existing_binary_passes(self):
+        # python should always be available
+        req = SkillRequirements(bins=["python"])
+        is_met, reason = req.check()
+        assert is_met is True
+        assert reason is None
+
+    def test_bin_requirement_missing_binary_fails(self):
+        req = SkillRequirements(bins=["nonexistent-binary-xyz123"])
+        is_met, reason = req.check()
+        assert is_met is False
+        assert "Requires binary" in reason
+
+    def test_env_requirement_existing_var_passes(self):
+        with patch.dict("os.environ", {"TEST_VAR_123": "value"}):
+            req = SkillRequirements(env=["TEST_VAR_123"])
+            is_met, reason = req.check()
+            assert is_met is True
+            assert reason is None
+
+    def test_env_requirement_missing_var_fails(self):
+        req = SkillRequirements(env=["NONEXISTENT_VAR_XYZ123"])
+        is_met, reason = req.check()
+        assert is_met is False
+        assert "Requires environment variable" in reason
+
+    def test_multiple_requirements_all_pass(self):
+        with patch.dict("os.environ", {"TEST_VAR": "value"}):
+            current_os = platform.system().lower()
+            req = SkillRequirements(
+                bins=["python"],
+                env=["TEST_VAR"],
+                os=[current_os],
+            )
+            is_met, reason = req.check()
+            assert is_met is True
+
+    def test_multiple_requirements_one_fails(self):
+        current_os = platform.system().lower()
+        req = SkillRequirements(
+            bins=["python", "nonexistent-xyz"],
+            os=[current_os],
+        )
+        is_met, reason = req.check()
+        assert is_met is False
+        assert "nonexistent-xyz" in reason
+
 
 # =============================================================================
 # SkillDefinition Tests
@@ -55,6 +133,39 @@ class TestSkillDefinition:
         assert skill.preferred_model == "fast"
         assert skill.required_tools == ["bash"]
         assert skill.max_iterations == 3
+
+    def test_is_available_no_requirements(self):
+        skill = SkillDefinition(
+            name="test",
+            description="Test",
+            instructions="Do something",
+        )
+        is_available, reason = skill.is_available()
+        assert is_available is True
+        assert reason is None
+
+    def test_is_available_with_met_requirements(self):
+        current_os = platform.system().lower()
+        skill = SkillDefinition(
+            name="test",
+            description="Test",
+            instructions="Do something",
+            requires=SkillRequirements(os=[current_os]),
+        )
+        is_available, reason = skill.is_available()
+        assert is_available is True
+
+    def test_is_available_with_unmet_requirements(self):
+        other_os = "windows" if platform.system().lower() != "windows" else "darwin"
+        skill = SkillDefinition(
+            name="test",
+            description="Test",
+            instructions="Do something",
+            requires=SkillRequirements(os=[other_os]),
+        )
+        is_available, reason = skill.is_available()
+        assert is_available is False
+        assert reason is not None
 
 
 # =============================================================================
@@ -192,12 +303,12 @@ class TestSkillRegistryDiscovery:
         registry = SkillRegistry()
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
         assert len(registry) == 0
 
     def test_discover_no_skills_directory(self, tmp_path: Path):
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
         assert len(registry) == 0
 
     def test_discover_skill_directory(self, tmp_path: Path):
@@ -216,7 +327,7 @@ Do something useful.
         )
 
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
         assert len(registry) == 1
         assert registry.has("test")  # Name from directory
 
@@ -250,7 +361,7 @@ Create summaries. Be concise.
         )
 
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
 
         skill = registry.get("summarize")
         assert skill.preferred_model == "fast"
@@ -274,7 +385,7 @@ Help the user.
         )
 
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
         assert len(registry) == 1
         assert registry.has("helper")
 
@@ -292,7 +403,7 @@ instructions: Do something
         )
 
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
         assert len(registry) == 1
         assert registry.has("test")
 
@@ -308,7 +419,7 @@ instructions: Do something
         )
 
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
         assert len(registry) == 1
         assert registry.has("test")  # Name from filename
 
@@ -333,7 +444,7 @@ Do something.
         )
 
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
 
         assert len(registry) == 1
         assert registry.has("valid")
@@ -353,7 +464,7 @@ Instructions without description.
         )
 
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
 
         assert len(registry) == 0
 
@@ -370,7 +481,7 @@ description: Has description but no body
         )
 
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
 
         assert len(registry) == 0
 
@@ -383,7 +494,7 @@ description: Has description but no body
         (skill_dir / "README.md").write_text("Not a skill")
 
         registry = SkillRegistry()
-        registry.discover(tmp_path)
+        registry.discover(tmp_path, include_bundled=False)
 
         assert len(registry) == 0
 
@@ -660,42 +771,6 @@ class TestSkillExecutor:
 # =============================================================================
 
 
-class TestListSkillsTool:
-    """Tests for ListSkillsTool."""
-
-    def test_properties(self):
-        registry = SkillRegistry()
-        tool = ListSkillsTool(registry)
-        assert tool.name == "list_skills"
-        assert "skills" in tool.description.lower()
-
-    async def test_list_empty(self):
-        registry = SkillRegistry()
-        tool = ListSkillsTool(registry)
-        result = await tool.execute({}, ToolContext())
-        assert not result.is_error
-        assert "No skills" in result.content
-
-    async def test_list_skills(self):
-        registry = SkillRegistry()
-        registry.register(
-            SkillDefinition(name="skill1", description="First skill", instructions="Do 1")
-        )
-        registry.register(
-            SkillDefinition(name="skill2", description="Second skill", instructions="Do 2")
-        )
-
-        tool = ListSkillsTool(registry)
-        result = await tool.execute({}, ToolContext())
-
-        assert not result.is_error
-        data = json.loads(result.content)
-        assert len(data) == 2
-        names = [s["name"] for s in data]
-        assert "skill1" in names
-        assert "skill2" in names
-
-
 class TestUseSkillTool:
     """Tests for UseSkillTool."""
 
@@ -870,7 +945,7 @@ Explain clearly for beginners.
 
     def test_discover_workspace_skills(self, workspace_with_skills: Path):
         registry = SkillRegistry()
-        registry.discover(workspace_with_skills)
+        registry.discover(workspace_with_skills, include_bundled=False)
 
         assert len(registry) == 2
         assert registry.has("summarize")
@@ -885,15 +960,12 @@ Explain clearly for beginners.
         assert explain.preferred_model is None
         assert explain.max_iterations == 5  # default
 
-    async def test_list_skills_from_workspace(self, workspace_with_skills: Path):
+    def test_list_skills_from_workspace(self, workspace_with_skills: Path):
         registry = SkillRegistry()
-        registry.discover(workspace_with_skills)
+        registry.discover(workspace_with_skills, include_bundled=False)
 
-        tool = ListSkillsTool(registry)
-        result = await tool.execute({}, ToolContext())
-
-        assert not result.is_error
-        data = json.loads(result.content)
-        names = [s["name"] for s in data]
+        # Verify skills are available via registry
+        definitions = registry.get_definitions()
+        names = [s["name"] for s in definitions]
         assert "summarize" in names
         assert "explain" in names

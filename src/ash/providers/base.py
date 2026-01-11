@@ -7,6 +7,18 @@ from typing import Any
 
 
 @dataclass
+class ImageAttachment:
+    """Image attached to a message."""
+
+    file_id: str  # Provider-specific file identifier
+    width: int | None = None
+    height: int | None = None
+    file_size: int | None = None
+    mime_type: str | None = None
+    data: bytes | None = None  # Populated after download
+
+
+@dataclass
 class IncomingMessage:
     """Message received from a provider."""
 
@@ -17,7 +29,13 @@ class IncomingMessage:
     username: str | None = None
     display_name: str | None = None
     reply_to_message_id: str | None = None
+    images: list[ImageAttachment] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def has_images(self) -> bool:
+        """Check if message has attached images."""
+        return len(self.images) > 0
 
 
 @dataclass

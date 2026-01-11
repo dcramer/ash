@@ -1,62 +1,9 @@
-"""Tools for listing and invoking skills."""
+"""Tools for invoking skills."""
 
-import json
 from typing import Any
 
 from ash.skills import SkillContext, SkillExecutor, SkillRegistry
 from ash.tools.base import Tool, ToolContext, ToolResult
-
-
-class ListSkillsTool(Tool):
-    """List available skills from workspace."""
-
-    def __init__(self, registry: SkillRegistry) -> None:
-        """Initialize tool.
-
-        Args:
-            registry: Skill registry.
-        """
-        self._registry = registry
-
-    @property
-    def name(self) -> str:
-        return "list_skills"
-
-    @property
-    def description(self) -> str:
-        return (
-            "List available skills from workspace. "
-            "Skills are workspace-defined behaviors that can be invoked with use_skill."
-        )
-
-    @property
-    def input_schema(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {},
-        }
-
-    async def execute(
-        self,
-        input_data: dict[str, Any],
-        context: ToolContext,
-    ) -> ToolResult:
-        """List available skills.
-
-        Args:
-            input_data: Not used.
-            context: Execution context.
-
-        Returns:
-            JSON list of skills with names and descriptions.
-        """
-        skills = self._registry.get_definitions()
-
-        if not skills:
-            return ToolResult.success("No skills available in workspace.")
-
-        result = json.dumps(skills, indent=2)
-        return ToolResult.success(result)
 
 
 class UseSkillTool(Tool):
@@ -83,9 +30,9 @@ class UseSkillTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Invoke a skill by name. Skills are workspace-defined behaviors "
+            "Invoke a skill by name. Skills are reusable behaviors "
             "that orchestrate tools with specific instructions. "
-            "Use list_skills to see available skills."
+            "Available skills are listed in the system prompt."
         )
 
     @property

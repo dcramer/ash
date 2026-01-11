@@ -3,7 +3,7 @@
 from ash.tools.base import Tool, ToolContext, ToolResult
 from ash.tools.builtin import BashTool, WebSearchTool
 from ash.tools.builtin.memory import RecallTool, RememberTool
-from ash.tools.builtin.skills import ListSkillsTool, UseSkillTool
+from ash.tools.builtin.skills import UseSkillTool
 from ash.tools.executor import ToolExecutor
 from ash.tools.registry import ToolRegistry
 
@@ -22,6 +22,5 @@ __all__ = [
     "RecallTool",
     "RememberTool",
     # Skill tools
-    "ListSkillsTool",
     "UseSkillTool",
 ]

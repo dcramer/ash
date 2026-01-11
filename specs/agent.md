@@ -2,7 +2,7 @@
 
 > Orchestrates LLM interactions with agentic tool-use loop
 
-Files: src/ash/core/agent.py, src/ash/core/session.py
+Files: src/ash/core/agent.py, src/ash/core/session.py, src/ash/core/prompt.py
 
 ## Requirements
 
@@ -14,7 +14,7 @@ Files: src/ash/core/agent.py, src/ash/core/session.py
 - Pass tool results back to LLM for next iteration
 - Track session state across conversation turns
 - Support streaming responses with mid-stream tool execution
-- Get system prompt from workspace configuration
+- Build system prompt via SystemPromptBuilder with full context
 - Return response with text, tool call history, and iteration count
 
 ### SHOULD
@@ -36,7 +36,7 @@ Files: src/ash/core/agent.py, src/ash/core/session.py
 class AgentConfig:
     model: str | None = None
     max_tokens: int = 4096
-    temperature: float = 0.7
+    temperature: float | None = None
     max_tool_iterations: int = 10
 
 @dataclass
@@ -45,12 +45,55 @@ class AgentResponse:
     tool_calls: list[dict[str, Any]]  # id, name, input, result, is_error
     iterations: int
 
+@dataclass
+class RuntimeInfo:
+    """Runtime information for system prompt."""
+    os: str | None = None
+    arch: str | None = None
+    python: str | None = None
+    model: str | None = None
+    provider: str | None = None
+    timezone: str | None = None
+    time: str | None = None
+
+    @classmethod
+    def from_environment(
+        cls,
+        model: str | None = None,
+        provider: str | None = None,
+        timezone: str | None = None,
+    ) -> "RuntimeInfo": ...
+
+@dataclass
+class PromptContext:
+    """Context for building system prompts."""
+    runtime: RuntimeInfo | None = None
+    memory: RetrievedContext | None = None
+    extra_context: dict[str, Any] = field(default_factory=dict)
+
+class SystemPromptBuilder:
+    """Build system prompts with full context."""
+
+    def __init__(
+        self,
+        workspace: Workspace,
+        tool_registry: ToolRegistry,
+        skill_registry: SkillRegistry,
+        config: AshConfig,
+    ) -> None: ...
+
+    def build(self, context: PromptContext | None = None) -> str:
+        """Build complete system prompt with all sections."""
+        ...
+
 class Agent:
     def __init__(
         self,
         llm: LLMProvider,
         tool_executor: ToolExecutor,
-        workspace: Workspace,
+        prompt_builder: SystemPromptBuilder,
+        runtime: RuntimeInfo | None = None,
+        memory_manager: MemoryManager | None = None,
         config: AgentConfig | None = None,
     ): ...
 
@@ -84,6 +127,19 @@ class SessionState:
     def get_pending_tool_uses() -> list[ToolUse]
     def to_json() / from_json() -> serialization
 ```
+
+## System Prompt Sections
+
+SystemPromptBuilder constructs prompts with these sections (in order):
+
+1. **Base Identity** - from SOUL.md (with personality inheritance)
+2. **Available Tools** - all registered tools with descriptions
+3. **Skills** - all available skills from registry
+4. **Model Aliases** - configured model names (if > 1)
+5. **Workspace** - working directory path
+6. **Sandbox** - Docker restrictions and access level
+7. **Runtime** - OS, Python version, model, provider, timezone, time
+8. **Memory Context** - user notes and retrieved knowledge (if memory enabled)
 
 ## Behaviors
 
@@ -119,3 +175,4 @@ uv run ash chat "Run: echo hello"   # Tool use
 - Streaming yields text chunks
 - Tool indicators appear in streaming
 - Max iteration limit enforced
+- System prompt includes all sections

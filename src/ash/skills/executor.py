@@ -181,6 +181,11 @@ class SkillExecutor:
         except KeyError:
             return SkillResult.error(f"Skill '{skill_name}' not found")
 
+        # Check availability
+        is_available, reason = skill.is_available()
+        if not is_available:
+            return SkillResult.error(f"Skill '{skill_name}' not available: {reason}")
+
         # Validate tools
         error = self._validate_tools(skill)
         if error:

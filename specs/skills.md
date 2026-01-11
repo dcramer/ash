@@ -1,21 +1,26 @@
 # Skills
 
-> Workspace-defined behaviors that orchestrate tools with model preferences
+> Reusable behaviors that orchestrate tools with model preferences
 
-Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/executor.py, src/ash/tools/builtin/skills.py
+Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/executor.py, src/ash/skills/bundled/, src/ash/tools/builtin/skills.py
 
 ## Requirements
 
 ### MUST
 
-- Load skills from `workspace/skills/` directory
+- Load bundled skills from `src/ash/skills/bundled/`
+- Load workspace skills from `workspace/skills/` (can override bundled)
 - Support directory format: `skills/<name>/SKILL.md` (preferred)
 - Support flat markdown: `skills/<name>.md` (convenience)
 - Support pure YAML: `skills/<name>.yaml` (backward compatibility)
 - Each skill defines: name, description, instructions, preferred_model, required_tools
-- SkillRegistry discovers and loads skills from workspace
+- Support skill requirements: bins, env, os filtering
+- Filter unavailable skills from system prompt and iteration
+- SkillRegistry discovers and loads skills from bundled + workspace
 - SkillExecutor creates sub-agent loop with skill instructions as system prompt
-- Expose skills to LLM via `list_skills` and `use_skill` tools
+- Validate skill availability before execution
+- List skills in system prompt (via SystemPromptBuilder)
+- Expose `use_skill` tool for invoking skills
 - Skills can reference model aliases (e.g., "fast", "default")
 - Validate required_tools exist before skill execution
 - Pass skill results back to parent agent
@@ -27,6 +32,7 @@ Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/execut
 - Log skill execution with duration and iteration count
 - Provide clear error when referenced model alias not found
 - Default skill name to filename stem if not specified
+- Bundle useful starter skills (manage-skill, research, code-review, debug)
 
 ### MAY
 
@@ -54,6 +60,13 @@ preferred_model: fast
 required_tools:
   - bash
 max_iterations: 3
+requires:
+  bins:
+    - pandoc
+  env: []
+  os:
+    - linux
+    - darwin
 input_schema:
   type: object
   properties:
@@ -101,6 +114,17 @@ instructions: |
 
 ```python
 @dataclass
+class SkillRequirements:
+    """Requirements for a skill to be available."""
+    bins: list[str] = field(default_factory=list)  # Required binaries in PATH
+    env: list[str] = field(default_factory=list)   # Required environment variables
+    os: list[str] = field(default_factory=list)    # Supported OS (darwin, linux, windows)
+
+    def check(self) -> tuple[bool, str | None]:
+        """Check if requirements are met. Returns (is_met, error_message)."""
+        ...
+
+@dataclass
 class SkillDefinition:
     """Skill loaded from workspace."""
     name: str
@@ -110,6 +134,11 @@ class SkillDefinition:
     required_tools: list[str] = field(default_factory=list)
     input_schema: dict[str, Any] = field(default_factory=dict)
     max_iterations: int = 5
+    requires: SkillRequirements = field(default_factory=SkillRequirements)
+
+    def is_available(self) -> tuple[bool, str | None]:
+        """Check if skill is available on current system."""
+        return self.requires.check()
 
 @dataclass
 class SkillContext:
@@ -137,8 +166,12 @@ class SkillResult:
 
 ```python
 class SkillRegistry:
-    def discover(self, workspace_path: Path) -> None:
-        """Load skills from workspace/skills/ (.md, .yaml, .yml)."""
+    def load_bundled(self) -> None:
+        """Load bundled skills from src/ash/skills/bundled/."""
+        ...
+
+    def discover(self, workspace_path: Path, *, include_bundled: bool = True) -> None:
+        """Load skills from bundled (optional) and workspace directories."""
         ...
 
     def get(self, name: str) -> SkillDefinition:
@@ -148,12 +181,22 @@ class SkillRegistry:
     def has(self, name: str) -> bool: ...
 
     def list_names(self) -> list[str]:
-        """List available skill names."""
+        """List all registered skill names (including unavailable)."""
         ...
 
-    def get_definitions(self) -> list[dict[str, Any]]:
-        """Get skill definitions for LLM."""
+    def list_available(self) -> list[SkillDefinition]:
+        """List skills available on current system."""
         ...
+
+    def get_definitions(self, include_unavailable: bool = False) -> list[dict[str, Any]]:
+        """Get skill definitions for LLM. By default only returns available skills."""
+        ...
+
+    def __iter__(self) -> Iterator[SkillDefinition]:
+        """Iterate over available skills only."""
+        ...
+
+    def __len__(self) -> int: ...
 ```
 
 ### Executor
@@ -177,14 +220,9 @@ class SkillExecutor:
         ...
 ```
 
-### LLM Tools
+### LLM Tool
 
 ```python
-class ListSkillsTool(Tool):
-    """List available skills from workspace."""
-    name = "list_skills"
-    input_schema = {"type": "object", "properties": {}}
-
 class UseSkillTool(Tool):
     """Invoke a skill by name."""
     name = "use_skill"
@@ -198,24 +236,41 @@ class UseSkillTool(Tool):
     }
 ```
 
+### Bundled Skills
+
+Skills shipped with Ash in `src/ash/skills/bundled/`:
+
+| Skill | Description |
+|-------|-------------|
+| manage-skill | Create, edit, or view skills in the workspace |
+| research | Research a topic using web search and memory |
+| code-review | Review code for bugs, security issues, and improvements |
+| debug | Systematically debug issues in code or systems |
+
 ## Behaviors
 
 | Input | Output | Notes |
 |-------|--------|-------|
-| `list_skills` tool call | JSON list of skill names and descriptions | |
+| Registry.discover() called | Bundled + workspace skills loaded | Bundled first, workspace can override |
+| Skills discovered | Listed in system prompt | Via SystemPromptBuilder |
 | `use_skill(summarize, {content: "..."})` | SkillResult with summary | Sub-agent executes |
 | Skill with `preferred_model: fast` | Uses `models.fast` config | Model alias resolved |
 | Skill with unknown model alias | Falls back to default model | Warning logged |
 | Skill requires unavailable tool | Error before execution | Validation fails |
 | Skill exceeds max_iterations | Returns partial result | With limit message |
-| Empty workspace/skills/ | list_skills returns empty | No error |
+| Empty workspace/skills/ | Bundled skills only | No error |
 | Skill without `name` in frontmatter | Uses filename stem | e.g., `foo.md` → `foo` |
+| Skill with `requires.bins` not in PATH | Filtered from prompt/iteration | Still registered |
+| Skill with `requires.env` not set | Filtered from prompt/iteration | Still registered |
+| Skill with `requires.os` not matching | Filtered from prompt/iteration | Still registered |
+| Workspace skill same name as bundled | Workspace overrides bundled | Customization |
 
 ## Errors
 
 | Condition | Response |
 |-----------|----------|
 | Skill not found | SkillResult.error("Skill 'name' not found") |
+| Skill not available | SkillResult.error("Skill 'name' not available: <reason>") |
 | Required tool unavailable | SkillResult.error("Skill requires tool 'bash' which is not available") |
 | Invalid input schema | SkillResult.error("Invalid input: <validation error>") |
 | Missing frontmatter | Logged warning, skill skipped during discovery |
@@ -227,24 +282,41 @@ class UseSkillTool(Tool):
 
 ```bash
 uv run pytest tests/test_skills.py -v
-mkdir -p workspace/skills/test
-cat > workspace/skills/test/SKILL.md << 'EOF'
+
+# Test bundled skills loaded
+uv run ash chat "What skills are available?"
+# Should show: manage-skill, research, code-review, debug
+
+# Test skill creation via manage-skill
+uv run ash chat "Use the manage-skill skill to create a greeting skill"
+
+# Test skill with requirements
+mkdir -p workspace/skills/darwin-only
+cat > workspace/skills/darwin-only/SKILL.md << 'EOF'
 ---
-description: Test skill
+description: macOS-only skill
+requires:
+  os:
+    - darwin
 ---
 
-Say hello to the user.
+This skill only works on macOS.
 EOF
-uv run ash chat "List available skills"
-uv run ash chat "Use the test skill"
+
+# Verify filtering (skill should not appear on Linux)
+uv run ash chat "What skills are available?"
 ```
 
-- Skills discovered from workspace/skills/
+- Bundled skills loaded from src/ash/skills/bundled/
+- Workspace skills loaded from workspace/skills/
+- Workspace skills can override bundled skills
+- Skills listed in system prompt
 - Directory format `<name>/SKILL.md` loads correctly
 - Flat markdown files still supported
 - YAML files still supported
-- list_skills returns available skills
 - use_skill executes skill with sub-agent
 - Model alias resolution works
 - Missing tools detected before execution
 - Invalid files skipped with warning
+- Skills with unmet requirements filtered from prompt
+- Skills with unmet requirements return error on execution

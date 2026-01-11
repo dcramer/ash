@@ -1,53 +1,85 @@
 """Workspace and personality file loading."""
 
+from __future__ import annotations
+
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 logger = logging.getLogger(__name__)
+
+# Regex to match YAML frontmatter: starts with ---, ends with ---
+FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
+
+# Built-in personalities that can be extended
+PERSONALITIES: dict[str, str] = {
+    "ash": """# Ash
+
+You are Ash, a personal assistant inspired by Ash Ketchum from Pokemon.
+
+## Personality
+
+- Enthusiastic and determined - you never give up on helping
+- Friendly and encouraging - you believe in the user's potential
+- Action-oriented - you prefer doing over just talking
+- Loyal and supportive - you're always on the user's side
+- Curious and eager to learn - you love discovering new things
+
+## Communication Style
+
+- Energetic and positive tone
+- Use encouraging phrases like "Let's do this!" or "We've got this!"
+- Be direct and action-focused
+- Ask clarifying questions when the path forward isn't clear
+- Celebrate successes, no matter how small
+
+## Catchphrases (use sparingly)
+
+- "I choose you!" (when selecting a tool or approach)
+- "Gotta catch 'em all!" (when gathering information)
+- "Time to battle!" (when tackling a challenge)
+
+## Principles
+
+- Never give up - there's always a way
+- Trust your instincts but verify with data
+- Learn from every experience, success or failure
+- Teamwork makes the dream work
+- Respect boundaries and privacy
+""",
+}
+
+
+@dataclass
+class SoulConfig:
+    """Configuration parsed from SOUL.md frontmatter."""
+
+    extends: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class Workspace:
     """Loaded workspace configuration.
 
-    Contains the SOUL (personality) and USER (user profile) documents
-    that define how the assistant behaves and interacts.
+    Contains the SOUL (personality) that defines how the assistant
+    behaves and interacts.
     """
 
     path: Path
     soul: str = ""
-    user: str = ""
-    tools: str = ""
+    soul_config: SoulConfig = field(default_factory=SoulConfig)
     custom_files: dict[str, str] = field(default_factory=dict)
-
-    @property
-    def system_prompt(self) -> str:
-        """Generate system prompt from workspace files.
-
-        Returns:
-            Combined system prompt.
-        """
-        parts = []
-
-        if self.soul:
-            parts.append(self.soul)
-
-        if self.user:
-            parts.append(f"\n\n## User Profile\n\n{self.user}")
-
-        if self.tools:
-            parts.append(f"\n\n## Available Tools\n\n{self.tools}")
-
-        return "\n".join(parts)
 
 
 class WorkspaceLoader:
     """Load workspace configuration from directory."""
 
     SOUL_FILENAME = "SOUL.md"
-    USER_FILENAME = "USER.md"
-    TOOLS_FILENAME = "TOOLS.md"
 
     def __init__(self, workspace_path: Path):
         """Initialize loader.
@@ -79,24 +111,68 @@ class WorkspaceLoader:
         # Load SOUL.md (personality)
         soul_path = self._path / self.SOUL_FILENAME
         if soul_path.exists():
-            workspace.soul = self._read_file(soul_path)
+            raw_content = self._read_file(soul_path)
+            workspace.soul, workspace.soul_config = self._parse_soul(raw_content)
             logger.debug(f"Loaded SOUL.md ({len(workspace.soul)} chars)")
         else:
-            logger.warning(f"No SOUL.md found in {self._path}")
-
-        # Load USER.md (user profile)
-        user_path = self._path / self.USER_FILENAME
-        if user_path.exists():
-            workspace.user = self._read_file(user_path)
-            logger.debug(f"Loaded USER.md ({len(workspace.user)} chars)")
-
-        # Load TOOLS.md (tool documentation)
-        tools_path = self._path / self.TOOLS_FILENAME
-        if tools_path.exists():
-            workspace.tools = self._read_file(tools_path)
-            logger.debug(f"Loaded TOOLS.md ({len(workspace.tools)} chars)")
+            # Use default personality
+            workspace.soul = PERSONALITIES["ash"]
+            workspace.soul_config = SoulConfig(extends="ash")
+            logger.info("No SOUL.md found, using default Ash personality")
 
         return workspace
+
+    def _parse_soul(self, content: str) -> tuple[str, SoulConfig]:
+        """Parse SOUL.md with optional frontmatter and inheritance.
+
+        Frontmatter format:
+            ---
+            extends: ash  # Inherit from built-in personality
+            ---
+
+            # Custom additions here...
+
+        Args:
+            content: Raw file content.
+
+        Returns:
+            Tuple of (final soul content, parsed config).
+        """
+        config = SoulConfig()
+        body = content
+
+        # Check for frontmatter
+        match = FRONTMATTER_PATTERN.match(content)
+        if match:
+            frontmatter_yaml = match.group(1)
+            body = content[match.end() :].strip()
+
+            try:
+                data = yaml.safe_load(frontmatter_yaml)
+                if isinstance(data, dict):
+                    config.extends = data.get("extends")
+                    # Store any extra frontmatter fields
+                    config.extra = {k: v for k, v in data.items() if k != "extends"}
+            except yaml.YAMLError as e:
+                logger.warning(f"Failed to parse SOUL.md frontmatter: {e}")
+
+        # Build final soul content
+        if config.extends:
+            base_name = config.extends.lower().replace("-", "_").replace(" ", "_")
+            if base_name in PERSONALITIES:
+                base = PERSONALITIES[base_name]
+                if body:
+                    # Append custom content after base personality
+                    return f"{base}\n\n{body}", config
+                return base, config
+            else:
+                logger.warning(
+                    f"Unknown personality '{config.extends}', "
+                    f"available: {', '.join(PERSONALITIES.keys())}"
+                )
+
+        # No inheritance or unknown base - use content as-is
+        return body or PERSONALITIES["ash"], config
 
     def load_custom_file(self, filename: str, workspace: Workspace) -> str | None:
         """Load a custom file from workspace.
@@ -136,52 +212,15 @@ class WorkspaceLoader:
             soul_path.write_text(self._default_soul(), encoding="utf-8")
             logger.info(f"Created default {self.SOUL_FILENAME}")
 
-        # Create default USER.md if not exists
-        user_path = self._path / self.USER_FILENAME
-        if not user_path.exists():
-            user_path.write_text(self._default_user(), encoding="utf-8")
-            logger.info(f"Created default {self.USER_FILENAME}")
-
     @staticmethod
     def _default_soul() -> str:
         """Generate default SOUL.md content."""
-        return """# Ash
+        return """---
+extends: ash
+---
 
-You are Ash, a helpful personal assistant.
+# Customizations
 
-## Personality
-
-- Friendly and approachable
-- Clear and concise in communication
-- Proactive in offering helpful suggestions
-- Honest about limitations
-
-## Communication Style
-
-- Use natural, conversational language
-- Be direct but polite
-- Ask clarifying questions when needed
-- Provide explanations when helpful
-
-## Principles
-
-- Respect user privacy
-- Be transparent about capabilities
-- Prioritize accuracy over speed
-- Learn from interactions
-"""
-
-    @staticmethod
-    def _default_user() -> str:
-        """Generate default USER.md content."""
-        return """# User Profile
-
-## Preferences
-
-- Language: English
-- Communication style: Balanced (not too formal, not too casual)
-
-## Notes
-
-Add notes about the user here as you learn their preferences.
+Add your personality customizations here. They will be appended
+to the base Ash personality.
 """

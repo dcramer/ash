@@ -9,12 +9,15 @@ Files: `src/ash/memory/manager.py`, `src/ash/memory/store.py`, `src/ash/memory/r
 ### MUST
 
 - Retrieve relevant context via semantic search before each LLM call
+- Apply similarity threshold (default 0.3) to filter irrelevant messages
+- Include top N knowledge entries regardless of similarity (personal assistant has small KB)
 - Include retrieved context (messages, knowledge, user notes) in system prompt
 - Store conversation messages to database after each turn
 - Index messages for semantic search via embeddings
 - Link sessions to provider/chat_id/user_id
 - Persist data across restarts
 - Provide `remember` tool to store facts in knowledge base
+- Provide `recall` tool for explicit memory search
 - Index knowledge entries for semantic search
 - Support optional expiration on knowledge entries
 - Degrade gracefully if embedding service unavailable
@@ -27,7 +30,6 @@ Files: `src/ash/memory/manager.py`, `src/ash/memory/store.py`, `src/ash/memory/r
 
 ### MAY
 
-- Provide `recall` tool for explicit memory search
 - Auto-extract facts from conversations to user profile
 - Cache embeddings to avoid recomputation
 
@@ -45,7 +47,8 @@ class MemoryManager:
         user_id: str,
         user_message: str,
         max_messages: int = 5,
-        max_knowledge: int = 3,
+        max_knowledge: int = 10,
+        min_message_similarity: float = 0.3,
     ) -> RetrievedContext: ...
 
     async def persist_turn(
@@ -63,8 +66,6 @@ class MemoryManager:
     ) -> Knowledge: ...
 
     async def search(self, query: str, limit: int = 5) -> list[SearchResult]: ...
-
-    async def get_user_notes(self, user_id: str) -> str | None: ...
 ```
 
 ### RetrievedContext
@@ -74,7 +75,6 @@ class MemoryManager:
 class RetrievedContext:
     messages: list[SearchResult]
     knowledge: list[SearchResult]
-    user_notes: str | None
 ```
 
 ### Tools
@@ -126,12 +126,24 @@ class Agent:
 
 | Scenario | Behavior |
 |----------|----------|
-| First message in session | Create session, no past context retrieved |
-| Subsequent messages | Retrieve relevant messages + knowledge before LLM call |
+| Every message | Auto-retrieve relevant context (semantic search on user's message) |
+| Auto-retrieval (messages) | Returns up to 5 messages above 0.3 similarity |
+| Auto-retrieval (knowledge) | Returns up to 10 knowledge entries ranked by relevance (no threshold) |
 | User says "remember X" | Agent uses `remember` tool, stores to knowledge base |
-| User asks "what do you know" | Agent references context in system prompt or uses `recall` |
+| User asks about past topic | Context auto-retrieved if semantically similar to current message |
+| User asks "what did we discuss about X" | Agent may use `recall` for targeted search |
+| Low similarity messages | Filtered out (below 0.3 threshold) |
 | Embedding service down | Log warning, continue without semantic search |
 | No relevant context found | Proceed with empty context |
+
+### When to Use `recall` vs Auto-Retrieval
+
+| Situation | Approach |
+|-----------|----------|
+| Current message relates to past context | Auto-retrieval handles it |
+| User explicitly asks to search memory | Use `recall` tool |
+| Looking for something not related to current topic | Use `recall` tool |
+| Want to search with custom query | Use `recall` tool |
 
 ## Errors
 

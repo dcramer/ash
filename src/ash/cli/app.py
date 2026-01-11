@@ -54,17 +54,39 @@ def serve(
     console = Console()
 
     async def run_server() -> None:
+        import logging
+        import signal as signal_module
+
         import uvicorn
 
+        # Configure logging for ash modules
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+
         from ash.config import WorkspaceLoader, load_config
+        from ash.config.paths import get_pid_path
         from ash.core import create_agent
         from ash.db import init_database
         from ash.providers.telegram import TelegramProvider
         from ash.server.app import create_app
+        from ash.service.pid import remove_pid_file, write_pid_file
+
+        # Write PID file for service management
+        pid_path = get_pid_path()
+        write_pid_file(pid_path)
 
         # Load configuration
         console.print("[bold]Loading configuration...[/bold]")
         ash_config = load_config(config)
+
+        # Initialize Sentry for server mode
+        if ash_config.sentry:
+            from ash.observability import init_sentry
+
+            if init_sentry(ash_config.sentry, server_mode=True):
+                console.print("[dim]Sentry initialized[/dim]")
 
         # Initialize database
         console.print("[bold]Initializing database...[/bold]")
@@ -90,7 +112,7 @@ def serve(
         agent = components.agent
 
         console.print(
-            f"[dim]Tools: {', '.join(components.tool_registry.list_names())}[/dim]"
+            f"[dim]Tools: {', '.join(components.tool_registry.names)}[/dim]"
         )
         if components.skill_registry:
             console.print(
@@ -103,9 +125,11 @@ def serve(
             console.print("[bold]Setting up Telegram provider...[/bold]")
             webhook_url = ash_config.telegram.webhook_url if webhook else None
             telegram_provider = TelegramProvider(
-                bot_token=ash_config.telegram.bot_token,
+                bot_token=ash_config.telegram.bot_token.get_secret_value(),
                 allowed_users=ash_config.telegram.allowed_users,
                 webhook_url=webhook_url,
+                allowed_groups=ash_config.telegram.allowed_groups,
+                group_mode=ash_config.telegram.group_mode,
             )
 
         # Create FastAPI app
@@ -121,32 +145,47 @@ def serve(
             f"[bold green]Server starting on http://{host}:{port}[/bold green]"
         )
 
-        if telegram_provider and not webhook:
-            # Run both uvicorn and telegram polling
-            console.print("[bold]Starting Telegram polling...[/bold]")
-
-            async def start_telegram():
-                handler = await fastapi_app.state.server.get_telegram_handler()
-                if handler:
-                    await telegram_provider.start(handler.handle_message)
-
-            # Start both concurrently
+        try:
             uvicorn_config = uvicorn.Config(
                 fastapi_app, host=host, port=port, log_level="info"
             )
             server = uvicorn.Server(uvicorn_config)
 
-            await asyncio.gather(
-                server.serve(),
-                start_telegram(),
-            )
-        else:
-            # Just run uvicorn
-            uvicorn_config = uvicorn.Config(
-                fastapi_app, host=host, port=port, log_level="info"
-            )
-            server = uvicorn.Server(uvicorn_config)
-            await server.serve()
+            # Set up signal handlers for graceful shutdown
+            loop = asyncio.get_running_loop()
+
+            def handle_signal():
+                server.should_exit = True
+
+            for sig in (signal_module.SIGTERM, signal_module.SIGINT):
+                loop.add_signal_handler(sig, handle_signal)
+
+            if telegram_provider and not webhook:
+                # Run both uvicorn and telegram polling
+                console.print("[bold]Starting Telegram polling...[/bold]")
+
+                async def start_telegram():
+                    # Wait for server to be ready and handler to be created
+                    handler = None
+                    for _ in range(50):  # Wait up to 5 seconds
+                        handler = await fastapi_app.state.server.get_telegram_handler()
+                        if handler:
+                            break
+                        await asyncio.sleep(0.1)
+
+                    if handler:
+                        await telegram_provider.start(handler.handle_message)
+                    else:
+                        console.print(
+                            "[red]Failed to get Telegram handler after timeout[/red]"
+                        )
+
+                await asyncio.gather(server.serve(), start_telegram())
+            else:
+                await server.serve()
+        finally:
+            # Clean up PID file on exit
+            remove_pid_file(pid_path)
 
     try:
         asyncio.run(run_server())
@@ -218,6 +257,12 @@ def chat(
             )
             raise typer.Exit(1) from None
 
+        # Initialize Sentry for CLI mode
+        if ash_config.sentry:
+            from ash.observability import init_sentry
+
+            init_sentry(ash_config.sentry, server_mode=False)
+
         # Resolve model alias: CLI flag > ASH_MODEL env > "default"
         resolved_alias = model_alias or os.environ.get("ASH_MODEL") or "default"
 
@@ -283,6 +328,9 @@ def chat(
                             response = await agent.process_message(user_input, session)
                         console.print(response.text)
 
+                    # Commit after each message to persist memory changes
+                    await db_session.commit()
+
                 # Non-interactive mode: single prompt
                 if prompt:
                     await process_single_message(prompt)
@@ -325,6 +373,8 @@ def chat(
                             ):
                                 console.print(chunk, end="")
                             console.print("\n")
+                            # Commit after each message to persist memory changes
+                            await db_session.commit()
                         else:
                             with console.status("[dim]Thinking...[/dim]"):
                                 response = await agent.process_message(
@@ -340,6 +390,8 @@ def chat(
                                     f"{response.iterations} iterations)[/dim]"
                                 )
                             console.print()
+                            # Commit after each message to persist memory changes
+                            await db_session.commit()
 
                     except KeyboardInterrupt:
                         console.print("\n[dim]Cancelled[/dim]\n")
@@ -351,6 +403,63 @@ def chat(
         asyncio.run(run_chat())
     except KeyboardInterrupt:
         console.print("\n[dim]Goodbye![/dim]")
+
+
+@app.command()
+def setup(
+    section: Annotated[
+        str | None,
+        typer.Option(
+            "--section",
+            "-s",
+            help="Configure specific section only (models, telegram, search, advanced)",
+        ),
+    ] = None,
+    reconfigure: Annotated[
+        bool,
+        typer.Option(
+            "--reconfigure",
+            "-r",
+            help="Reconfigure existing config file",
+        ),
+    ] = False,
+) -> None:
+    """Interactive setup wizard for Ash configuration.
+
+    Guides you through configuring:
+    - LLM provider and model selection
+    - Telegram bot integration (optional)
+    - Web search with Brave API (optional)
+    - Advanced settings like sandbox and server (optional)
+
+    Examples:
+        ash setup                    # Full interactive setup
+        ash setup --section models   # Configure only models
+        ash setup --reconfigure      # Reconfigure existing config
+    """
+    from rich.console import Console
+    from rich.prompt import Confirm
+
+    from ash.cli.setup import SetupWizard
+    from ash.config.paths import get_config_path
+
+    console = Console()
+    config_path = get_config_path()
+
+    # Check if config already exists
+    if config_path.exists() and not reconfigure:
+        console.print(f"[yellow]Config file already exists:[/yellow] {config_path}")
+        if not Confirm.ask("Reconfigure?", default=False):
+            console.print("[dim]Use --reconfigure to force reconfiguration.[/dim]")
+            raise typer.Exit(0)
+
+    wizard = SetupWizard(config_path=config_path)
+    sections = [section] if section else None
+
+    if wizard.run(sections=sections):
+        raise typer.Exit(0)
+    else:
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -841,9 +950,9 @@ def upgrade() -> None:
                 console.print("[yellow]No migrations to run (database is up to date)[/yellow]")
             elif "unable to open database file" in stderr:
                 console.print("[red]Failed to open database file[/red]")
-                console.print(f"[dim]Check that data directory exists and is writable[/dim]")
+                console.print("[dim]Check that data directory exists and is writable[/dim]")
             else:
-                console.print(f"[red]Migration failed[/red]")
+                console.print("[red]Migration failed[/red]")
                 if stderr:
                     # Show just the last meaningful line
                     lines = [l for l in stderr.split('\n') if l.strip() and not l.startswith('  ')]
@@ -1057,10 +1166,10 @@ def sandbox(
         from rich.progress import Progress, SpinnerColumn, TextColumn
 
         from ash.sandbox.verify import (
+            VERIFICATION_TESTS,
             SandboxVerifier,
             TestCategory,
             TestResult,
-            VERIFICATION_TESTS,
         )
 
         # Check if sandbox image exists
@@ -1173,6 +1282,252 @@ def sandbox(
     else:
         console.print(f"[red]Unknown action: {action}[/red]")
         console.print("Valid actions: build, status, clean, verify, prompts")
+        raise typer.Exit(1)
+
+
+# Service management subcommand
+service_app = typer.Typer(help="Manage the Ash background service")
+app.add_typer(service_app, name="service")
+
+
+@service_app.command("start")
+def service_start(
+    foreground: Annotated[
+        bool,
+        typer.Option(
+            "--foreground",
+            "-f",
+            help="Run in foreground (don't daemonize)",
+        ),
+    ] = False,
+) -> None:
+    """Start the Ash service."""
+    import asyncio
+
+    from rich.console import Console
+
+    console = Console()
+
+    if foreground:
+        # Just run serve directly
+        serve()
+        return
+
+    from ash.service import ServiceManager
+
+    manager = ServiceManager()
+
+    async def do_start():
+        return await manager.start()
+
+    success, message = asyncio.run(do_start())
+
+    if success:
+        console.print(f"[green]{message}[/green]")
+    else:
+        console.print(f"[red]{message}[/red]")
+        raise typer.Exit(1)
+
+
+@service_app.command("stop")
+def service_stop() -> None:
+    """Stop the Ash service."""
+    import asyncio
+
+    from rich.console import Console
+
+    from ash.service import ServiceManager
+
+    console = Console()
+    manager = ServiceManager()
+
+    async def do_stop():
+        return await manager.stop()
+
+    success, message = asyncio.run(do_stop())
+
+    if success:
+        console.print(f"[green]{message}[/green]")
+    else:
+        console.print(f"[red]{message}[/red]")
+        raise typer.Exit(1)
+
+
+@service_app.command("restart")
+def service_restart() -> None:
+    """Restart the Ash service."""
+    import asyncio
+
+    from rich.console import Console
+
+    from ash.service import ServiceManager
+
+    console = Console()
+    manager = ServiceManager()
+
+    async def do_restart():
+        return await manager.restart()
+
+    success, message = asyncio.run(do_restart())
+
+    if success:
+        console.print(f"[green]{message}[/green]")
+    else:
+        console.print(f"[red]{message}[/red]")
+        raise typer.Exit(1)
+
+
+@service_app.command("status")
+def service_status() -> None:
+    """Show Ash service status."""
+    import asyncio
+
+    from rich.console import Console
+    from rich.table import Table
+
+    from ash.service import ServiceManager, ServiceState
+
+    console = Console()
+    manager = ServiceManager()
+
+    async def do_status():
+        return await manager.status()
+
+    status = asyncio.run(do_status())
+
+    # Build status display
+    table = Table(title="Ash Service Status")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value")
+
+    # State with color
+    state_colors = {
+        ServiceState.RUNNING: "green",
+        ServiceState.STOPPED: "yellow",
+        ServiceState.FAILED: "red",
+        ServiceState.STARTING: "cyan",
+        ServiceState.STOPPING: "cyan",
+        ServiceState.UNKNOWN: "dim",
+    }
+    state_color = state_colors.get(status.state, "white")
+    table.add_row("State", f"[{state_color}]{status.state.value}[/{state_color}]")
+    table.add_row("Backend", manager.backend_name)
+
+    if status.pid:
+        table.add_row("PID", str(status.pid))
+
+    if status.uptime_seconds is not None:
+        # Format uptime
+        uptime = status.uptime_seconds
+        if uptime < 60:
+            uptime_str = f"{uptime:.0f}s"
+        elif uptime < 3600:
+            uptime_str = f"{uptime / 60:.0f}m"
+        elif uptime < 86400:
+            uptime_str = f"{uptime / 3600:.1f}h"
+        else:
+            uptime_str = f"{uptime / 86400:.1f}d"
+        table.add_row("Uptime", uptime_str)
+
+    if status.memory_mb is not None:
+        table.add_row("Memory", f"{status.memory_mb:.1f} MB")
+
+    if status.cpu_percent is not None:
+        table.add_row("CPU", f"{status.cpu_percent:.1f}%")
+
+    if status.message:
+        table.add_row("Message", status.message)
+
+    console.print(table)
+
+
+@service_app.command("logs")
+def service_logs(
+    follow: Annotated[
+        bool,
+        typer.Option(
+            "--follow",
+            "-f",
+            help="Follow log output",
+        ),
+    ] = False,
+    lines: Annotated[
+        int,
+        typer.Option(
+            "--lines",
+            "-n",
+            help="Number of lines to show",
+        ),
+    ] = 50,
+) -> None:
+    """View service logs."""
+    import asyncio
+
+    from rich.console import Console
+
+    from ash.service import ServiceManager
+
+    console = Console()
+    manager = ServiceManager()
+
+    async def do_logs():
+        try:
+            async for line in manager.logs(follow=follow, lines=lines):
+                console.print(line)
+        except KeyboardInterrupt:
+            pass
+
+    try:
+        asyncio.run(do_logs())
+    except KeyboardInterrupt:
+        pass
+
+
+@service_app.command("install")
+def service_install() -> None:
+    """Install Ash as an auto-starting service."""
+    import asyncio
+
+    from rich.console import Console
+
+    from ash.service import ServiceManager
+
+    console = Console()
+    manager = ServiceManager()
+
+    async def do_install():
+        return await manager.install()
+
+    success, message = asyncio.run(do_install())
+
+    if success:
+        console.print(f"[green]{message}[/green]")
+    else:
+        console.print(f"[red]{message}[/red]")
+        raise typer.Exit(1)
+
+
+@service_app.command("uninstall")
+def service_uninstall() -> None:
+    """Remove Ash from auto-starting services."""
+    import asyncio
+
+    from rich.console import Console
+
+    from ash.service import ServiceManager
+
+    console = Console()
+    manager = ServiceManager()
+
+    async def do_uninstall():
+        return await manager.uninstall()
+
+    success, message = asyncio.run(do_uninstall())
+
+    if success:
+        console.print(f"[green]{message}[/green]")
+    else:
+        console.print(f"[red]{message}[/red]")
         raise typer.Exit(1)
 
 

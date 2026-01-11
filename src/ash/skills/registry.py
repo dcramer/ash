@@ -7,18 +7,24 @@ from typing import Any
 
 import yaml
 
-from ash.skills.base import SkillDefinition
+from ash.skills.base import SkillDefinition, SkillRequirements
 
 logger = logging.getLogger(__name__)
 
 # Regex to match YAML frontmatter: starts with ---, ends with ---
 FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
+# Path to bundled skills (relative to this file)
+BUNDLED_SKILLS_DIR = Path(__file__).parent / "bundled"
+
 
 class SkillRegistry:
     """Registry for skill definitions.
 
-    Discovers and loads skills from workspace/skills/.
+    Loads skills from:
+    1. Bundled skills (shipped with Ash)
+    2. Workspace skills (can override bundled)
+
     Supports markdown files with YAML frontmatter (preferred) or pure YAML.
     """
 
@@ -26,8 +32,21 @@ class SkillRegistry:
         """Initialize empty registry."""
         self._skills: dict[str, SkillDefinition] = {}
 
-    def discover(self, workspace_path: Path) -> None:
-        """Load skills from workspace/skills/.
+    def load_bundled(self) -> None:
+        """Load bundled skills shipped with Ash.
+
+        Bundled skills are loaded first, workspace skills can override them.
+        """
+        if not BUNDLED_SKILLS_DIR.exists():
+            logger.debug("No bundled skills directory found")
+            return
+
+        self._load_from_directory(BUNDLED_SKILLS_DIR, source="bundled")
+
+    def discover(self, workspace_path: Path, *, include_bundled: bool = True) -> None:
+        """Load skills from bundled and workspace directories.
+
+        Loads bundled skills first, then workspace skills (which can override).
 
         Supports:
         - Directory format: skills/<name>/SKILL.md (preferred)
@@ -36,11 +55,31 @@ class SkillRegistry:
 
         Args:
             workspace_path: Path to workspace directory.
+            include_bundled: Whether to load bundled skills (default True).
         """
+        # Load bundled skills first
+        if include_bundled:
+            self.load_bundled()
+
+        # Then load workspace skills (can override bundled)
         skills_dir = workspace_path / "skills"
         if not skills_dir.exists():
-            logger.debug(f"Skills directory not found: {skills_dir}")
+            logger.debug(f"Workspace skills directory not found: {skills_dir}")
             return
+
+        self._load_from_directory(skills_dir, source="workspace")
+
+    def _load_from_directory(self, skills_dir: Path, source: str = "unknown") -> None:
+        """Load skills from a directory.
+
+        Args:
+            skills_dir: Path to skills directory.
+            source: Source label for logging (bundled, workspace).
+        """
+        if not skills_dir.exists():
+            return
+
+        count_before = len(self._skills)
 
         # Preferred: skills/<name>/SKILL.md
         for skill_dir in skills_dir.iterdir():
@@ -72,7 +111,28 @@ class SkillRegistry:
             except Exception as e:
                 logger.warning(f"Failed to load skill from {yml_file}: {e}")
 
-        logger.info(f"Discovered {len(self._skills)} skills from {skills_dir}")
+        count_loaded = len(self._skills) - count_before
+        if count_loaded > 0:
+            logger.info(f"Loaded {count_loaded} skills from {source} ({skills_dir})")
+
+    def _parse_requirements(self, data: dict[str, Any]) -> SkillRequirements:
+        """Parse requirements from skill data.
+
+        Args:
+            data: Skill data dict (from YAML).
+
+        Returns:
+            SkillRequirements instance.
+        """
+        requires = data.get("requires", {})
+        if not isinstance(requires, dict):
+            return SkillRequirements()
+
+        return SkillRequirements(
+            bins=requires.get("bins", []),
+            env=requires.get("env", []),
+            os=requires.get("os", []),
+        )
 
     def _load_markdown_skill(
         self, path: Path, default_name: str | None = None
@@ -114,6 +174,7 @@ class SkillRegistry:
         if not instructions:
             raise ValueError("Skill missing instructions (markdown body)")
 
+        requirements = self._parse_requirements(data)
         skill = SkillDefinition(
             name=name,
             description=data["description"],
@@ -122,7 +183,13 @@ class SkillRegistry:
             required_tools=data.get("required_tools", []),
             input_schema=data.get("input_schema", {}),
             max_iterations=data.get("max_iterations", 5),
+            requires=requirements,
         )
+
+        # Check availability and log if not available
+        is_available, reason = skill.is_available()
+        if not is_available:
+            logger.debug(f"Skill '{skill.name}' not available: {reason}")
 
         self._skills[skill.name] = skill
         logger.debug(f"Loaded skill: {skill.name} from {path}")
@@ -147,6 +214,7 @@ class SkillRegistry:
         if "instructions" not in data:
             raise ValueError("Skill missing required field: instructions")
 
+        requirements = self._parse_requirements(data)
         skill = SkillDefinition(
             name=name,
             description=data["description"],
@@ -155,7 +223,13 @@ class SkillRegistry:
             required_tools=data.get("required_tools", []),
             input_schema=data.get("input_schema", {}),
             max_iterations=data.get("max_iterations", 5),
+            requires=requirements,
         )
+
+        # Check availability and log if not available
+        is_available, reason = skill.is_available()
+        if not is_available:
+            logger.debug(f"Skill '{skill.name}' not available: {reason}")
 
         self._skills[skill.name] = skill
         logger.debug(f"Loaded skill: {skill.name} from {path}")
@@ -197,26 +271,42 @@ class SkillRegistry:
         return name in self._skills
 
     def list_names(self) -> list[str]:
-        """List available skill names.
+        """List all registered skill names (including unavailable).
 
         Returns:
             List of skill names.
         """
         return list(self._skills.keys())
 
-    def get_definitions(self) -> list[dict[str, Any]]:
+    def list_available(self) -> list[SkillDefinition]:
+        """List skills available on the current system.
+
+        Returns:
+            List of available skill definitions.
+        """
+        return [skill for skill in self._skills.values() if skill.is_available()[0]]
+
+    def get_definitions(self, include_unavailable: bool = False) -> list[dict[str, Any]]:
         """Get skill definitions for LLM.
+
+        Args:
+            include_unavailable: If True, include skills that don't meet requirements.
 
         Returns:
             List of skill definitions with name, description, and input_schema.
         """
+        skills = (
+            self._skills.values()
+            if include_unavailable
+            else self.list_available()
+        )
         return [
             {
                 "name": skill.name,
                 "description": skill.description,
                 "input_schema": skill.input_schema,
             }
-            for skill in self._skills.values()
+            for skill in skills
         ]
 
     def __len__(self) -> int:
@@ -228,5 +318,5 @@ class SkillRegistry:
         return name in self._skills
 
     def __iter__(self):
-        """Iterate over skill definitions."""
-        return iter(self._skills.values())
+        """Iterate over available skill definitions."""
+        return iter(self.list_available())

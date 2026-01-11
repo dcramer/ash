@@ -1,6 +1,5 @@
 """Bash command execution tool with mandatory Docker sandbox."""
 
-import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 

@@ -4,10 +4,9 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ash.db.models import Knowledge, UserProfile
+from ash.db.models import Knowledge
 from ash.memory.retrieval import SearchResult, SemanticRetriever
 from ash.memory.store import MemoryStore
 
@@ -20,7 +19,6 @@ class RetrievedContext:
 
     messages: list[SearchResult]
     knowledge: list[SearchResult]
-    user_notes: str | None
 
 
 class MemoryManager:
@@ -54,35 +52,43 @@ class MemoryManager:
         user_id: str,
         user_message: str,
         max_messages: int = 5,
-        max_knowledge: int = 3,
+        max_knowledge: int = 10,
+        min_message_similarity: float = 0.3,
     ) -> RetrievedContext:
         """Retrieve relevant context before LLM call.
 
         Args:
             session_id: Current session ID.
-            user_id: User ID for profile lookup.
+            user_id: User ID (for future use).
             user_message: The user's message to find relevant context for.
             max_messages: Maximum number of past messages to retrieve.
             max_knowledge: Maximum number of knowledge entries to retrieve.
+            min_message_similarity: Minimum similarity threshold for messages.
+                Knowledge entries are always included (ranked by relevance)
+                since a personal assistant typically has a small knowledge base
+                where all stored facts are potentially useful.
 
         Returns:
-            Retrieved context with messages, knowledge, and user notes.
+            Retrieved context with messages and knowledge.
         """
         messages: list[SearchResult] = []
         knowledge: list[SearchResult] = []
-        user_notes: str | None = None
 
         try:
             # Search past messages (across all sessions for this retrieval)
-            messages = await self._retriever.search_messages(
+            all_messages = await self._retriever.search_messages(
                 query=user_message,
                 limit=max_messages,
             )
+            # Filter messages by similarity threshold (they can be noisy)
+            messages = [m for m in all_messages if m.similarity >= min_message_similarity]
         except Exception:
             logger.warning("Failed to search messages, continuing without", exc_info=True)
 
         try:
-            # Search knowledge base
+            # Search knowledge base - include top N without filtering
+            # For a personal assistant, stored facts are always relevant
+            # The retriever already ranks by similarity, so top N are best matches
             knowledge = await self._retriever.search_knowledge(
                 query=user_message,
                 limit=max_knowledge,
@@ -90,16 +96,9 @@ class MemoryManager:
         except Exception:
             logger.warning("Failed to search knowledge, continuing without", exc_info=True)
 
-        try:
-            # Get user notes
-            user_notes = await self.get_user_notes(user_id)
-        except Exception:
-            logger.warning("Failed to get user notes, continuing without", exc_info=True)
-
         return RetrievedContext(
             messages=messages,
             knowledge=knowledge,
-            user_notes=user_notes,
         )
 
     async def persist_turn(
@@ -187,42 +186,3 @@ class MemoryManager:
             List of search results sorted by relevance.
         """
         return await self._retriever.search_all(query, limit=limit)
-
-    async def get_user_notes(self, user_id: str) -> str | None:
-        """Get user profile notes.
-
-        Args:
-            user_id: User ID.
-
-        Returns:
-            User notes or None if not found.
-        """
-        stmt = select(UserProfile.notes).where(UserProfile.user_id == user_id)
-        result = await self._session.execute(stmt)
-        row = result.scalar_one_or_none()
-        return row if row else None
-
-    def format_context_for_prompt(self, context: RetrievedContext) -> str | None:
-        """Format retrieved context for inclusion in system prompt.
-
-        Args:
-            context: Retrieved context.
-
-        Returns:
-            Formatted string or None if no context.
-        """
-        parts: list[str] = []
-
-        if context.user_notes:
-            parts.append(f"## About this user\n{context.user_notes}")
-
-        context_items: list[str] = []
-        for item in context.knowledge:
-            context_items.append(f"- [Knowledge] {item.content}")
-        for item in context.messages:
-            context_items.append(f"- [Past conversation] {item.content}")
-
-        if context_items:
-            parts.append("## Relevant context from memory\n" + "\n".join(context_items))
-
-        return "\n\n".join(parts) if parts else None

@@ -61,10 +61,11 @@ def _resolve_env_secrets(config: dict[str, Any]) -> dict[str, Any]:
                     if value:
                         section[final_key] = SecretStr(value)
 
-    # Other secrets (telegram, brave_search)
+    # Other secrets (telegram, brave_search, sentry)
     simple_mappings = {
         ("telegram", "bot_token"): "TELEGRAM_BOT_TOKEN",
         ("brave_search", "api_key"): "BRAVE_SEARCH_API_KEY",
+        ("sentry", "dsn"): "SENTRY_DSN",
     }
 
     for path, env_var in simple_mappings.items():

@@ -97,7 +97,6 @@ class UserProfile(Base):
     username: Mapped[str | None] = mapped_column(String, nullable=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     profile_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, onupdate=utc_now, nullable=False
     )

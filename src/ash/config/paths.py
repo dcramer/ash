@@ -54,6 +54,21 @@ def get_logs_path() -> Path:
     return get_ash_home() / "logs"
 
 
+def get_run_path() -> Path:
+    """Get the runtime directory path (PID files, sockets)."""
+    return get_ash_home() / "run"
+
+
+def get_pid_path() -> Path:
+    """Get the service PID file path."""
+    return get_run_path() / "ash.pid"
+
+
+def get_service_log_path() -> Path:
+    """Get the service log file path."""
+    return get_logs_path() / "service.log"
+
+
 def ensure_ash_home() -> Path:
     """Ensure the Ash home directory exists.
 
@@ -77,4 +92,7 @@ def get_all_paths() -> dict[str, Path]:
         "database": get_database_path(),
         "workspace": get_workspace_path(),
         "logs": get_logs_path(),
+        "run": get_run_path(),
+        "pid": get_pid_path(),
+        "service_log": get_service_log_path(),
     }

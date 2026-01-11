@@ -47,9 +47,20 @@ class TelegramMessageHandler:
         Args:
             message: Incoming message.
         """
-        logger.debug(f"Handling message from {message.user_id} in {message.chat_id}")
+        logger.info(
+            f"Received message from {message.username or message.user_id} "
+            f"in chat {message.chat_id}: {message.text[:50]}..."
+            if len(message.text) > 50
+            else f"Received message from {message.username or message.user_id} "
+            f"in chat {message.chat_id}: {message.text}"
+        )
 
         try:
+            # Handle image messages
+            if message.has_images:
+                await self._handle_image_message(message)
+                return
+
             # Get or create session
             session = await self._get_or_create_session(message)
 
@@ -63,6 +74,60 @@ class TelegramMessageHandler:
         except Exception:
             logger.exception("Error handling message")
             await self._send_error(message.chat_id)
+
+    async def _handle_image_message(self, message: IncomingMessage) -> None:
+        """Handle a message containing images.
+
+        Args:
+            message: Incoming message with images.
+        """
+        # For now, acknowledge the image but note that vision isn't fully wired up
+        # TODO: Wire up vision model support (Claude 3, GPT-4V)
+
+        if message.text:
+            # If there's a caption, process it with context about the image
+            session = await self._get_or_create_session(message)
+
+            # Add context about the image to the message
+            image_context = "[User sent an image"
+            if message.images[0].width and message.images[0].height:
+                image_context += f" ({message.images[0].width}x{message.images[0].height})"
+            image_context += f"]\n\n{message.text}"
+
+            # Send typing indicator
+            await self._provider.send_typing(message.chat_id)
+
+            if self._streaming:
+                response_stream = self._agent.process_message_streaming(
+                    image_context,
+                    session,
+                )
+                await self._provider.send_streaming(
+                    chat_id=message.chat_id,
+                    stream=response_stream,
+                    reply_to=message.id,
+                )
+            else:
+                response = await self._agent.process_message(image_context, session)
+                await self._provider.send(
+                    OutgoingMessage(
+                        chat_id=message.chat_id,
+                        text=response.text,
+                        reply_to_message_id=message.id,
+                    )
+                )
+
+            await self._persist_messages(session, image_context)
+        else:
+            # No caption - just acknowledge the image
+            await self._provider.send(
+                OutgoingMessage(
+                    chat_id=message.chat_id,
+                    text="I received your image! Image analysis isn't fully supported yet, "
+                    "but you can add a caption to tell me what you'd like to know about it.",
+                    reply_to_message_id=message.id,
+                )
+            )
 
     async def _get_or_create_session(
         self,
@@ -90,8 +155,11 @@ class TelegramMessageHandler:
                 user_id=message.user_id,
             )
 
-            # TODO: Load and restore messages from database for session continuity
-            # For now, start fresh each session
+            # Load and restore messages from database for session continuity
+            db_messages = await store.get_messages(
+                session_id=db_session_record.id,
+                limit=50,  # Limit history to prevent token overflow
+            )
 
             # Create session state
             session = SessionState(
@@ -101,8 +169,20 @@ class TelegramMessageHandler:
                 user_id=message.user_id,
             )
 
-            # Restore messages (simplified - would need full deserialization)
-            # For now, start fresh each session
+            # Restore messages from database
+            for db_msg in db_messages:
+                if db_msg.role == "user":
+                    session.add_user_message(db_msg.content)
+                elif db_msg.role == "assistant":
+                    session.add_assistant_message(db_msg.content)
+                # Note: tool_use and tool_result are not restored since they
+                # are intermediate states that shouldn't persist across restarts
+
+            if db_messages:
+                logger.debug(
+                    f"Restored {len(db_messages)} messages for session {session_key}"
+                )
+
             self._sessions[session_key] = session
 
             # Update user profile
@@ -126,7 +206,8 @@ class TelegramMessageHandler:
             message: Incoming message.
             session: Session state.
         """
-        # Send typing indicator could be added here
+        # Send typing indicator
+        await self._provider.send_typing(message.chat_id)
 
         # Stream response
         response_stream = self._agent.process_message_streaming(
@@ -154,6 +235,9 @@ class TelegramMessageHandler:
             message: Incoming message.
             session: Session state.
         """
+        # Send typing indicator
+        await self._provider.send_typing(message.chat_id)
+
         # Process message
         response = await self._agent.process_message(message.text, session)
 

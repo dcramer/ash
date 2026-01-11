@@ -353,5 +353,4 @@ def workspace_dir(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "SOUL.md").write_text("# Test Soul\n\nYou are a test assistant.")
-    (workspace / "USER.md").write_text("# Test User\n\nThis is a test user.")
     return workspace

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ash.core.prompt import PromptContext, SystemPromptBuilder
 from ash.llm import LLMProvider, ToolDefinition
 from ash.llm.types import (
     StreamEventType,
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ash.config import AshConfig, Workspace
+    from ash.core.prompt import RuntimeInfo
     from ash.memory.manager import MemoryManager, RetrievedContext
     from ash.skills import SkillExecutor, SkillRegistry
 
@@ -61,7 +63,8 @@ class Agent:
         self,
         llm: LLMProvider,
         tool_executor: ToolExecutor,
-        workspace: Workspace,
+        prompt_builder: SystemPromptBuilder,
+        runtime: RuntimeInfo | None = None,
         memory_manager: MemoryManager | None = None,
         config: AgentConfig | None = None,
     ):
@@ -70,20 +73,22 @@ class Agent:
         Args:
             llm: LLM provider for completions.
             tool_executor: Tool executor for running tools.
-            workspace: Workspace with personality config.
+            prompt_builder: System prompt builder with full context.
+            runtime: Runtime information for prompt.
             memory_manager: Optional memory manager for context retrieval.
             config: Agent configuration.
         """
         self._llm = llm
         self._tools = tool_executor
-        self._workspace = workspace
+        self._prompt_builder = prompt_builder
+        self._runtime = runtime
         self._memory = memory_manager
         self._config = config or AgentConfig()
 
     @property
     def system_prompt(self) -> str:
-        """Get the base system prompt from workspace."""
-        return self._workspace.system_prompt
+        """Get the base system prompt (without memory context)."""
+        return self._prompt_builder.build(PromptContext(runtime=self._runtime))
 
     def _build_system_prompt(self, context: RetrievedContext | None = None) -> str:
         """Build system prompt with optional memory context.
@@ -94,28 +99,11 @@ class Agent:
         Returns:
             Complete system prompt.
         """
-        base_prompt = self._workspace.system_prompt
-
-        if not context:
-            return base_prompt
-
-        parts = [base_prompt]
-
-        if context.user_notes:
-            parts.append(f"\n## About this user\n{context.user_notes}")
-
-        context_items: list[str] = []
-        for item in context.knowledge:
-            context_items.append(f"- [Knowledge] {item.content}")
-        for item in context.messages:
-            context_items.append(f"- [Past conversation] {item.content}")
-
-        if context_items:
-            parts.append(
-                "\n## Relevant context from memory\n" + "\n".join(context_items)
-            )
-
-        return "\n".join(parts)
+        prompt_context = PromptContext(
+            runtime=self._runtime,
+            memory=context,
+        )
+        return self._prompt_builder.build(prompt_context)
 
     def _get_tool_definitions(self) -> list[ToolDefinition]:
         """Get tool definitions for LLM.
@@ -452,15 +440,16 @@ class AgentComponents:
     llm: LLMProvider
     tool_registry: ToolRegistry
     tool_executor: ToolExecutor
-    skill_registry: "SkillRegistry"
-    skill_executor: "SkillExecutor | None"
-    memory_manager: "MemoryManager | None"
+    prompt_builder: SystemPromptBuilder
+    skill_registry: SkillRegistry
+    skill_executor: SkillExecutor | None
+    memory_manager: MemoryManager | None
 
 
 async def create_agent(
-    config: "AshConfig",
-    workspace: "Workspace",
-    db_session: "AsyncSession | None" = None,
+    config: AshConfig,
+    workspace: Workspace,
+    db_session: AsyncSession | None = None,
     model_alias: str = "default",
 ) -> AgentComponents:
     """Create a fully-configured agent with all dependencies.
@@ -482,6 +471,7 @@ async def create_agent(
         AgentComponents with the agent and all its dependencies.
     """
     # Import here to avoid circular imports
+    from ash.core.prompt import RuntimeInfo
     from ash.llm import create_llm_provider
     from ash.memory import (
         EmbeddingGenerator,
@@ -492,7 +482,7 @@ async def create_agent(
     from ash.skills import SkillExecutor, SkillRegistry
     from ash.tools.builtin import BashTool, WebSearchTool
     from ash.tools.builtin.memory import RecallTool, RememberTool
-    from ash.tools.builtin.skills import ListSkillsTool, UseSkillTool
+    from ash.tools.builtin.skills import UseSkillTool
 
     # Resolve model configuration
     model_config = config.get_model(model_alias)
@@ -579,21 +569,35 @@ async def create_agent(
     skill_registry.discover(config.workspace)
     logger.info(f"Discovered {len(skill_registry)} skills from workspace")
 
-    # Create skill executor and register skill tools
+    # Create skill executor and register skill tool
     skill_executor: SkillExecutor | None = None
     skill_executor = SkillExecutor(skill_registry, tool_executor, config)
-    tool_registry.register(ListSkillsTool(skill_registry))
     tool_registry.register(UseSkillTool(skill_registry, skill_executor))
-    logger.debug("Skill tools registered")
+    logger.debug("Skill tool registered")
 
     # Recreate tool executor with all tools registered
     tool_executor = ToolExecutor(tool_registry)
+
+    # Create runtime info
+    runtime = RuntimeInfo.from_environment(
+        model=model_config.model,
+        provider=model_config.provider,
+    )
+
+    # Create prompt builder
+    prompt_builder = SystemPromptBuilder(
+        workspace=workspace,
+        tool_registry=tool_registry,
+        skill_registry=skill_registry,
+        config=config,
+    )
 
     # Create agent
     agent = Agent(
         llm=llm,
         tool_executor=tool_executor,
-        workspace=workspace,
+        prompt_builder=prompt_builder,
+        runtime=runtime,
         memory_manager=memory_manager,
         config=AgentConfig(
             model=model_config.model,
@@ -607,6 +611,7 @@ async def create_agent(
         llm=llm,
         tool_registry=tool_registry,
         tool_executor=tool_executor,
+        prompt_builder=prompt_builder,
         skill_registry=skill_registry,
         skill_executor=skill_executor,
         memory_manager=memory_manager,

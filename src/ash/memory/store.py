@@ -238,26 +238,6 @@ class MemoryStore:
 
         return profile
 
-    async def update_user_notes(self, user_id: str, notes: str) -> UserProfile | None:
-        """Update user profile notes.
-
-        Args:
-            user_id: User ID.
-            notes: Notes about the user.
-
-        Returns:
-            Updated profile or None if not found.
-        """
-        stmt = select(UserProfile).where(UserProfile.user_id == user_id)
-        result = await self._session.execute(stmt)
-        profile = result.scalar_one_or_none()
-
-        if profile:
-            profile.notes = notes
-            await self._session.flush()
-
-        return profile
-
     # Tool execution operations
 
     async def log_tool_execution(

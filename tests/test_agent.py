@@ -5,8 +5,11 @@ from typing import Any
 
 import pytest
 
+from ash.config import AshConfig
+from ash.config.models import ModelConfig
 from ash.config.workspace import Workspace
 from ash.core.agent import Agent, AgentConfig, AgentResponse
+from ash.core.prompt import SystemPromptBuilder
 from ash.core.session import SessionState
 from ash.llm.types import (
     CompletionResponse,
@@ -19,6 +22,7 @@ from ash.llm.types import (
     ToolUse,
     Usage,
 )
+from ash.skills.registry import SkillRegistry
 from ash.tools.base import Tool, ToolContext, ToolResult
 from ash.tools.executor import ToolExecutor
 from ash.tools.registry import ToolRegistry
@@ -140,7 +144,43 @@ def workspace(tmp_path: Path) -> Workspace:
     return Workspace(
         path=tmp_path,
         soul="You are a test assistant.",
-        user="Test user profile.",
+    )
+
+
+@pytest.fixture
+def skill_registry() -> SkillRegistry:
+    """Create empty skill registry for testing."""
+    return SkillRegistry()
+
+
+@pytest.fixture
+def config(tmp_path: Path) -> AshConfig:
+    """Create test config."""
+    return AshConfig(
+        workspace=tmp_path,
+        models={"default": ModelConfig(provider="anthropic", model="claude-test")},
+    )
+
+
+def create_test_prompt_builder(
+    workspace: Workspace,
+    tool_registry: ToolRegistry,
+    skill_registry: SkillRegistry | None = None,
+    config: AshConfig | None = None,
+) -> SystemPromptBuilder:
+    """Helper to create prompt builder for tests."""
+    if skill_registry is None:
+        skill_registry = SkillRegistry()
+    if config is None:
+        config = AshConfig(
+            workspace=workspace.path,
+            models={"default": ModelConfig(provider="anthropic", model="claude-test")},
+        )
+    return SystemPromptBuilder(
+        workspace=workspace,
+        tool_registry=tool_registry,
+        skill_registry=skill_registry,
+        config=config,
     )
 
 
@@ -201,20 +241,21 @@ class TestAgent:
         )
 
     @pytest.fixture
-    def tool_registry(self):
+    def test_tool_registry(self):
         """Create tool registry with mock tool."""
         registry = ToolRegistry()
         registry.register(MockTool(name="test_tool"))
         return registry
 
     @pytest.fixture
-    def agent(self, mock_llm, tool_registry, workspace):
+    def agent(self, mock_llm, test_tool_registry, workspace):
         """Create agent for testing."""
-        executor = ToolExecutor(tool_registry)
+        executor = ToolExecutor(test_tool_registry)
+        prompt_builder = create_test_prompt_builder(workspace, test_tool_registry)
         return Agent(
             llm=mock_llm,
             tool_executor=executor,
-            workspace=workspace,
+            prompt_builder=prompt_builder,
         )
 
     async def test_process_simple_message(self, agent, session):
@@ -252,11 +293,12 @@ class TestAgent:
         registry = ToolRegistry()
         registry.register(MockTool(name="test_tool"))
         executor = ToolExecutor(registry)
+        prompt_builder = create_test_prompt_builder(workspace, registry)
 
         agent = Agent(
             llm=mock_llm,
             tool_executor=executor,
-            workspace=workspace,
+            prompt_builder=prompt_builder,
         )
 
         session = SessionState(
@@ -288,12 +330,13 @@ class TestAgent:
         registry = ToolRegistry()
         registry.register(MockTool(name="test_tool"))
         executor = ToolExecutor(registry)
+        prompt_builder = create_test_prompt_builder(workspace, registry)
 
         config = AgentConfig(max_tool_iterations=3)
         agent = Agent(
             llm=mock_llm,
             tool_executor=executor,
-            workspace=workspace,
+            prompt_builder=prompt_builder,
             config=config,
         )
 
@@ -309,8 +352,8 @@ class TestAgent:
         assert response.iterations == 3
         assert "maximum" in response.text.lower()
 
-    async def test_system_prompt_from_workspace(self, agent, workspace):
-        assert agent.system_prompt == workspace.system_prompt
+    async def test_system_prompt_from_workspace(self, agent):
+        """Test that system prompt includes workspace content."""
         assert "test assistant" in agent.system_prompt.lower()
 
     async def test_tool_definitions_conversion(self, agent):
@@ -333,11 +376,12 @@ class TestAgent:
 
         registry = ToolRegistry()
         executor = ToolExecutor(registry)
+        prompt_builder = create_test_prompt_builder(workspace, registry)
 
         agent = Agent(
             llm=mock_llm,
             tool_executor=executor,
-            workspace=workspace,
+            prompt_builder=prompt_builder,
         )
 
         session = SessionState(
@@ -470,30 +514,79 @@ class TestSessionState:
 class TestWorkspace:
     """Tests for Workspace."""
 
-    def test_system_prompt_with_soul(self, tmp_path):
+    def test_soul_content(self, tmp_path):
         workspace = Workspace(
             path=tmp_path,
             soul="You are Ash.",
         )
-        assert "You are Ash." in workspace.system_prompt
+        assert workspace.soul == "You are Ash."
 
-    def test_system_prompt_with_user(self, tmp_path):
+    def test_custom_files(self, tmp_path):
         workspace = Workspace(
             path=tmp_path,
             soul="You are Ash.",
-            user="User prefers formal language.",
+            custom_files={"extra.md": "Extra content"},
         )
-        prompt = workspace.system_prompt
-        assert "You are Ash." in prompt
-        assert "User Profile" in prompt
-        assert "User prefers formal language." in prompt
+        assert workspace.custom_files["extra.md"] == "Extra content"
 
-    def test_system_prompt_with_tools(self, tmp_path):
-        workspace = Workspace(
-            path=tmp_path,
-            soul="You are Ash.",
-            tools="bash: run shell commands",
+
+class TestSystemPromptBuilder:
+    """Tests for SystemPromptBuilder."""
+
+    @pytest.fixture
+    def prompt_builder(self, workspace, config) -> SystemPromptBuilder:
+        """Create a prompt builder for testing."""
+        registry = ToolRegistry()
+        registry.register(MockTool(name="test_tool", description="A test tool"))
+        skill_registry = SkillRegistry()
+        return SystemPromptBuilder(
+            workspace=workspace,
+            tool_registry=registry,
+            skill_registry=skill_registry,
+            config=config,
         )
-        prompt = workspace.system_prompt
+
+    def test_build_includes_soul(self, prompt_builder):
+        """Test that build includes SOUL content."""
+        prompt = prompt_builder.build()
+        assert "test assistant" in prompt.lower()
+
+    def test_build_includes_tools_section(self, prompt_builder):
+        """Test that build includes tools section."""
+        prompt = prompt_builder.build()
         assert "Available Tools" in prompt
-        assert "bash" in prompt
+        assert "test_tool" in prompt
+        assert "A test tool" in prompt
+
+    def test_build_includes_workspace_section(self, prompt_builder):
+        """Test that build includes workspace info."""
+        prompt = prompt_builder.build()
+        assert "Workspace" in prompt
+        assert "Working directory" in prompt
+
+    def test_build_includes_sandbox_section(self, prompt_builder):
+        """Test that build includes sandbox info."""
+        prompt = prompt_builder.build()
+        assert "Sandbox" in prompt
+        assert "Docker sandbox" in prompt
+
+    def test_build_with_runtime_info(self, prompt_builder):
+        """Test that runtime info is included when provided."""
+        from ash.core.prompt import PromptContext, RuntimeInfo
+
+        runtime = RuntimeInfo(
+            os="Linux",
+            python="3.12.0",
+            model="claude-test",
+            provider="anthropic",
+            timezone="America/New_York",
+            time="2024-01-15 10:30:00",
+        )
+        context = PromptContext(runtime=runtime)
+        prompt = prompt_builder.build(context)
+
+        assert "Runtime" in prompt
+        assert "os=Linux" in prompt
+        assert "python=3.12.0" in prompt
+        assert "model=claude-test" in prompt
+        assert "America/New_York" in prompt

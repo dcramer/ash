@@ -11,6 +11,7 @@ from ash.config.models import (
     ModelConfig,
     ProviderConfig,
     SandboxConfig,
+    SentryConfig,
     ServerConfig,
     TelegramConfig,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "ModelConfig",
     "ProviderConfig",
     "SandboxConfig",
+    "SentryConfig",
     "ServerConfig",
     "TelegramConfig",
     "Workspace",

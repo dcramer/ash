@@ -15,6 +15,9 @@ class RememberTool(Tool):
     - User explicitly asks to remember something
     - User shares important preferences or facts about themselves
     - Information will be relevant to future conversations
+
+    Facts should be stored as complete, standalone statements that will
+    make sense when retrieved later without context.
     """
 
     def __init__(self, memory_manager: "MemoryManager"):
@@ -32,9 +35,11 @@ class RememberTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Store a fact, preference, or piece of information in long-term memory. "
-            "Use when the user explicitly asks you to remember something, or when "
-            "they share important preferences or facts about themselves."
+            "Store a fact or preference in long-term memory. "
+            "IMPORTANT: Always store as a complete, standalone statement. "
+            "Good: 'User's name is David', 'User prefers dark mode', 'User works at Acme Corp'. "
+            "Bad: 'David', 'dark mode', 'likes it'. "
+            "The stored fact must make sense without any conversation context."
         )
 
     @property
@@ -44,7 +49,11 @@ class RememberTool(Tool):
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The fact or information to remember.",
+                    "description": (
+                        "A complete, standalone statement about the user. "
+                        "Examples: 'User's name is David', 'User prefers Python over JavaScript', "
+                        "'User is allergic to peanuts', 'User's birthday is March 15th'."
+                    ),
                 },
                 "expires_in_days": {
                     "type": "integer",
@@ -89,8 +98,13 @@ class RecallTool(Tool):
     """Search memory for relevant information.
 
     Use when:
-    - User asks what you remember or know about something
-    - You need to explicitly search past context
+    - You need to search for something NOT in the auto-retrieved context
+    - User asks about a specific past conversation topic
+    - Looking for information with a different query than the user's message
+
+    DO NOT use when:
+    - Relevant knowledge is already shown in "Relevant Context from Memory"
+    - Answering simple questions about the user (name, preferences, etc.)
     """
 
     def __init__(self, memory_manager: "MemoryManager"):
@@ -108,8 +122,9 @@ class RecallTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Search your memory for relevant information. "
-            "Use when the user asks what you remember or know about something."
+            "Search memory with a custom query. "
+            "Only use if you need information NOT already in your context. "
+            "Check 'Relevant Context from Memory' first - if the answer is there, just respond directly."
         )
 
     @property

@@ -95,7 +95,9 @@ Specs MUST be updated when:
 | [memory](specs/memory.md) | Persistent memory with context retrieval |
 | [models](specs/models.md) | Named model configurations with aliases |
 | [sandbox](specs/sandbox.md) | Docker sandbox for command execution |
+| [sentry](specs/sentry.md) | Optional error tracking and observability |
 | [server](specs/server.md) | FastAPI server and webhooks |
 | [skills](specs/skills.md) | Workspace-defined behaviors with model preferences |
 | [telegram](specs/telegram.md) | Telegram bot integration |
 | [web_search](specs/web_search.md) | Web search via Brave API in sandbox |
+| [workspace](specs/workspace.md) | Agent personality via SOUL.md with inheritance |

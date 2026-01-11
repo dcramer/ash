@@ -47,6 +47,9 @@ class TelegramConfig(BaseModel):
     bot_token: SecretStr | None = None
     allowed_users: list[str] = []
     webhook_url: str | None = None
+    # Group chat settings
+    allowed_groups: list[str] = []  # Group IDs (empty = allow all with authorized users)
+    group_mode: Literal["mention", "always"] = "mention"  # How to respond in groups
 
 
 class SandboxConfig(BaseModel):
@@ -109,6 +112,22 @@ class BraveSearchConfig(BaseModel):
     api_key: SecretStr | None = None
 
 
+class SentryConfig(BaseModel):
+    """Configuration for Sentry error tracking and observability.
+
+    Sentry is optional - if this section is not configured or DSN is not set,
+    error tracking is disabled.
+    """
+
+    dsn: SecretStr | None = None
+    environment: str | None = None
+    release: str | None = None
+    traces_sample_rate: float = Field(default=0.1, ge=0.0, le=1.0)
+    profiles_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    send_default_pii: bool = False
+    debug: bool = False
+
+
 class ConfigError(Exception):
     """Configuration error."""
 
@@ -133,6 +152,7 @@ class AshConfig(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     embeddings: EmbeddingsConfig | None = None
     brave_search: BraveSearchConfig | None = None
+    sentry: SentryConfig | None = None
 
     @model_validator(mode="after")
     def _migrate_default_llm(self) -> "AshConfig":

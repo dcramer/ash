@@ -218,26 +218,6 @@ class TestUserProfileOperations:
         )
         assert profile.username == "newname"
 
-    async def test_update_user_notes(self, memory_store):
-        await memory_store.get_or_create_user_profile(
-            user_id="user-123",
-            provider="telegram",
-        )
-        profile = await memory_store.update_user_notes(
-            user_id="user-123",
-            notes="Prefers formal language",
-        )
-        assert profile is not None
-        assert profile.notes == "Prefers formal language"
-
-    async def test_update_user_notes_nonexistent(self, memory_store):
-        result = await memory_store.update_user_notes(
-            user_id="nonexistent",
-            notes="Some notes",
-        )
-        assert result is None
-
-
 class TestToolExecutionOperations:
     """Tests for tool execution logging."""
 
@@ -352,7 +332,6 @@ class TestMemoryManager:
         assert isinstance(context, RetrievedContext)
         assert context.messages == []
         assert context.knowledge == []
-        assert context.user_notes is None
 
     async def test_get_context_for_message_with_results(
         self, memory_manager, mock_retriever
@@ -385,26 +364,6 @@ class TestMemoryManager:
         assert context.messages[0].content == "Previous conversation"
         assert len(context.knowledge) == 1
         assert context.knowledge[0].content == "User preference"
-
-    async def test_get_context_with_user_notes(self, memory_manager, memory_store):
-        """Test getting context includes user notes."""
-        # Create user profile with notes
-        await memory_store.get_or_create_user_profile(
-            user_id="user-1",
-            provider="test",
-        )
-        await memory_store.update_user_notes(
-            user_id="user-1",
-            notes="Prefers formal language",
-        )
-
-        context = await memory_manager.get_context_for_message(
-            session_id="session-1",
-            user_id="user-1",
-            user_message="Hello",
-        )
-
-        assert context.user_notes == "Prefers formal language"
 
     async def test_persist_turn(self, memory_manager, memory_store, mock_retriever):
         """Test persisting a conversation turn."""
@@ -471,35 +430,6 @@ class TestMemoryManager:
         assert len(results) == 1
         assert results[0].content == "Result 1"
         mock_retriever.search_all.assert_called_once_with("test query", limit=5)
-
-    async def test_format_context_for_prompt_empty(self, memory_manager):
-        """Test formatting empty context returns None."""
-        context = RetrievedContext(messages=[], knowledge=[], user_notes=None)
-        formatted = memory_manager.format_context_for_prompt(context)
-        assert formatted is None
-
-    async def test_format_context_for_prompt_with_content(self, memory_manager):
-        """Test formatting context with content."""
-        context = RetrievedContext(
-            messages=[
-                SearchResult(
-                    id="1", content="Past message", similarity=0.9, source_type="message"
-                )
-            ],
-            knowledge=[
-                SearchResult(
-                    id="2", content="Known fact", similarity=0.8, source_type="knowledge"
-                )
-            ],
-            user_notes="User prefers brevity",
-        )
-        formatted = memory_manager.format_context_for_prompt(context)
-
-        assert "## About this user" in formatted
-        assert "User prefers brevity" in formatted
-        assert "## Relevant context from memory" in formatted
-        assert "[Knowledge] Known fact" in formatted
-        assert "[Past conversation] Past message" in formatted
 
 
 class TestRememberTool:
