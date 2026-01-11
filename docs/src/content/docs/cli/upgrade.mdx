@@ -1,0 +1,66 @@
+---
+title: ash upgrade
+description: Run migrations and verify sandbox
+sidebar:
+  order: 9
+---
+
+Run all necessary setup and upgrade tasks.
+
+## Usage
+
+```bash
+ash upgrade
+```
+
+## What It Does
+
+1. **Runs database migrations** - Applies any pending schema changes
+2. **Verifies sandbox** - Checks sandbox image is built and working
+
+## When to Run
+
+Run after:
+- Installing Ash
+- Updating to a new version
+- Changing configuration
+
+## Examples
+
+After installation:
+
+```bash
+ash upgrade
+```
+
+After updating:
+
+```bash
+git pull
+uv sync
+ash upgrade
+```
+
+## Output
+
+```
+Running database migrations...
+✓ Database up to date
+Verifying sandbox...
+✓ Sandbox ready
+```
+
+## Troubleshooting
+
+If migrations fail, check:
+
+```bash
+ash db status
+```
+
+If sandbox verification fails, rebuild:
+
+```bash
+ash sandbox build
+ash sandbox verify
+```

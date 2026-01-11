@@ -1,0 +1,118 @@
+---
+title: ash service
+description: Manage Ash as a background service
+sidebar:
+  order: 10
+---
+
+Run Ash as a background service for persistent operation.
+
+## Usage
+
+```bash
+ash service COMMAND [OPTIONS]
+```
+
+## Commands
+
+### start
+
+Start Ash as a background service:
+
+```bash
+ash service start
+```
+
+Options:
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--config`, `-c` | auto | Config file path |
+| `--webhook` | false | Use webhook mode |
+
+### stop
+
+Stop the running service:
+
+```bash
+ash service stop
+```
+
+### restart
+
+Restart the service:
+
+```bash
+ash service restart
+```
+
+### status
+
+Check service status:
+
+```bash
+ash service status
+```
+
+Shows:
+- Running state
+- PID
+- Uptime
+
+### logs
+
+View service logs:
+
+```bash
+ash service logs
+```
+
+Options:
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--follow`, `-f` | false | Follow log output |
+| `--lines`, `-n` | 50 | Number of lines |
+
+### install
+
+Install as a system service:
+
+```bash
+ash service install
+```
+
+Creates a systemd unit file (Linux) or launchd plist (macOS).
+
+### uninstall
+
+Remove system service:
+
+```bash
+ash service uninstall
+```
+
+## Examples
+
+Start in background:
+
+```bash
+ash service start
+```
+
+Check if running:
+
+```bash
+ash service status
+```
+
+Follow logs:
+
+```bash
+ash service logs -f
+```
+
+Install for auto-start:
+
+```bash
+ash service install
+sudo systemctl enable ash
+```

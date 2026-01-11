@@ -1,0 +1,87 @@
+---
+title: ash chat
+description: Interactive chat with your assistant
+sidebar:
+  order: 2
+---
+
+Start an interactive conversation or send a single prompt.
+
+## Usage
+
+```bash
+ash chat [OPTIONS] [PROMPT]
+```
+
+## Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `PROMPT` | Optional single prompt to send |
+
+## Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--model`, `-m` | `default` | Model alias to use |
+| `--config`, `-c` | auto | Path to config file |
+| `--streaming/--no-streaming` | `--streaming` | Enable/disable streaming |
+
+## Interactive Mode
+
+Start an interactive session:
+
+```bash
+ash chat
+```
+
+Type messages and press Enter. Type `exit` or `quit` to end.
+
+## Single Prompt
+
+Send a single prompt and exit:
+
+```bash
+ash chat "What's the weather like?"
+```
+
+## Model Selection
+
+Use a different model:
+
+```bash
+ash chat --model fast "Quick question"
+```
+
+Models are defined in your config under `[models.*]`.
+
+## Streaming
+
+Disable streaming for CI/CD or scripting:
+
+```bash
+ash chat --no-streaming "Generate a report"
+```
+
+## Examples
+
+Interactive session:
+
+```bash
+ash chat
+> Hello!
+Hi! How can I help you today?
+> exit
+```
+
+Quick question:
+
+```bash
+ash chat "How do I list files in bash?"
+```
+
+Using a specific model:
+
+```bash
+ash chat -m reasoning "Explain quantum computing"
+```

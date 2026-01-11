@@ -1,0 +1,165 @@
+---
+title: Tools
+description: Tool system and execution
+sidebar:
+  order: 4
+---
+
+Tools extend the agent's capabilities with actions like running commands or searching the web.
+
+## Tool Interface
+
+Location: `src/ash/tools/base.py`
+
+```python
+from abc import ABC, abstractmethod
+from pydantic import BaseModel
+
+class Tool(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Tool name used in LLM calls."""
+
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        """Description for the LLM."""
+
+    @property
+    @abstractmethod
+    def input_schema(self) -> type[BaseModel]:
+        """Pydantic model for input validation."""
+
+    @abstractmethod
+    async def execute(
+        self,
+        input: BaseModel,
+        context: ToolContext,
+    ) -> ToolResult:
+        """Execute the tool and return result."""
+```
+
+## ToolContext
+
+Context provided to tool execution:
+
+```python
+class ToolContext:
+    session_id: str
+    user_id: str
+    config: AshConfig
+    workspace: Workspace
+```
+
+## ToolResult
+
+Tool execution result:
+
+```python
+class ToolResult:
+    success: bool
+    output: str
+    error: str | None
+```
+
+## Built-in Tools
+
+### Bash Tool
+
+Location: `src/ash/tools/builtin/bash.py`
+
+Executes commands in the Docker sandbox:
+
+```python
+class BashInput(BaseModel):
+    command: str
+
+class BashTool(Tool):
+    name = "bash"
+    description = "Execute bash commands in a sandboxed environment"
+    input_schema = BashInput
+```
+
+### Web Search Tool
+
+Location: `src/ash/tools/builtin/web_search.py`
+
+Searches the web using Brave Search:
+
+```python
+class WebSearchInput(BaseModel):
+    query: str
+
+class WebSearchTool(Tool):
+    name = "web_search"
+    description = "Search the web for information"
+    input_schema = WebSearchInput
+```
+
+### Memory Tool
+
+Location: `src/ash/tools/builtin/memory.py`
+
+Manages persistent memories:
+
+```python
+class MemoryTool(Tool):
+    name = "memory"
+    description = "Store and recall information"
+```
+
+## Tool Registry
+
+Location: `src/ash/tools/registry.py`
+
+Tools are discovered and registered:
+
+```python
+registry = ToolRegistry()
+registry.register(BashTool())
+registry.register(WebSearchTool())
+
+tools = registry.all()
+```
+
+## Tool Execution
+
+Location: `src/ash/tools/executor.py`
+
+The executor handles tool calls from the LLM:
+
+```python
+class ToolExecutor:
+    async def execute(
+        self,
+        tool_call: ToolCall,
+        context: ToolContext,
+    ) -> ToolResult:
+        tool = self.registry.get(tool_call.name)
+        input = tool.input_schema.model_validate(tool_call.input)
+        return await tool.execute(input, context)
+```
+
+## Creating Custom Tools
+
+1. Create a class implementing `Tool`
+2. Define input schema as Pydantic model
+3. Implement `execute()` method
+4. Register with the tool registry
+
+Example:
+
+```python
+class WeatherInput(BaseModel):
+    location: str
+
+class WeatherTool(Tool):
+    name = "weather"
+    description = "Get current weather for a location"
+    input_schema = WeatherInput
+
+    async def execute(self, input: WeatherInput, context: ToolContext) -> ToolResult:
+        # Implementation
+        return ToolResult(success=True, output="...")
+```

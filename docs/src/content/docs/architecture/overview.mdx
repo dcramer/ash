@@ -1,0 +1,114 @@
+---
+title: Architecture Overview
+description: High-level system architecture
+sidebar:
+  order: 1
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+Ash is a Python-based personal assistant agent with modular architecture.
+
+## System Components
+
+<CardGrid>
+  <Card title="Agent Core" icon="puzzle">
+    Orchestrates conversations, manages context, and coordinates tool execution.
+  </Card>
+  <Card title="LLM Providers" icon="rocket">
+    Abstraction layer for Anthropic Claude and OpenAI models.
+  </Card>
+  <Card title="Tool System" icon="setting">
+    Extensible tools including sandboxed bash and web search.
+  </Card>
+  <Card title="Memory" icon="document">
+    SQLite-based storage with semantic search via embeddings.
+  </Card>
+  <Card title="Sandbox" icon="shield">
+    Docker containers for secure command execution.
+  </Card>
+  <Card title="Providers" icon="telegram">
+    Communication channels (Telegram, CLI).
+  </Card>
+</CardGrid>
+
+## Data Flow
+
+```
+User Message
+     │
+     ▼
+┌─────────────┐
+│  Provider   │  (Telegram, CLI)
+└─────┬───────┘
+      │
+      ▼
+┌─────────────┐
+│   Agent     │  Orchestrator
+└─────┬───────┘
+      │
+      ├──────────────┐
+      │              │
+      ▼              ▼
+┌─────────────┐ ┌─────────────┐
+│    LLM      │ │   Memory    │
+│  Provider   │ │   Store     │
+└─────────────┘ └─────────────┘
+      │
+      ▼
+┌─────────────┐
+│   Tools     │ ──► Sandbox
+└─────────────┘
+```
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Language | Python 3.12+ |
+| CLI | Typer |
+| HTTP Server | FastAPI + Uvicorn |
+| Telegram | aiogram 3.x |
+| Database | SQLite + sqlite-vec |
+| ORM | SQLAlchemy 2.0 (async) |
+| LLM SDKs | anthropic, openai |
+| Container | docker-py |
+| Validation | Pydantic |
+
+## Directory Structure
+
+```
+src/ash/
+├── cli/           # Typer CLI
+├── config/        # Configuration loading
+├── core/          # Agent orchestrator
+├── llm/           # LLM abstraction
+├── providers/     # Communication providers
+├── tools/         # Tool system
+├── sandbox/       # Docker sandboxing
+├── db/            # Database layer
+├── memory/        # Memory + retrieval
+├── skills/        # Skill system
+├── server/        # FastAPI server
+└── service/       # Background service
+```
+
+## Key Design Principles
+
+1. **Async everywhere** - All I/O is async using asyncio
+2. **Type hints required** - Full type coverage with Pydantic validation
+3. **ABC for interfaces** - Abstract base classes define contracts
+4. **Registry pattern** - Dynamic discovery for tools, skills, providers
+5. **Security first** - All command execution is sandboxed
+
+## Architecture Sections
+
+| Section | Description |
+|---------|-------------|
+| [Agent](/architecture/agent/) | Agentic loop and orchestration |
+| [LLM Providers](/architecture/llm-providers/) | LLM abstraction layer |
+| [Tools](/architecture/tools/) | Tool system and execution |
+| [Skills](/architecture/skills/) | Configurable skill system |
+| [Memory](/architecture/memory/) | Storage and semantic search |
+| [Sandbox](/architecture/sandbox/) | Docker container isolation |
+| [Providers](/architecture/providers/) | Communication channels |

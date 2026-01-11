@@ -1,0 +1,71 @@
+---
+title: Sentry
+description: Configure error tracking and observability
+sidebar:
+  order: 9
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Integrate Sentry for error tracking and performance monitoring.
+
+## Configuration
+
+```toml
+[sentry]
+dsn = "https://abc123@o123.ingest.sentry.io/456"
+environment = "production"
+release = "1.0.0"
+traces_sample_rate = 0.1
+profiles_sample_rate = 0.0
+send_default_pii = false
+debug = false
+```
+
+## Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `dsn` | string | `null` | Sentry DSN |
+| `environment` | string | `null` | Environment name |
+| `release` | string | `null` | Release version |
+| `traces_sample_rate` | float | `0.1` | Transaction sampling (0.0-1.0) |
+| `profiles_sample_rate` | float | `0.0` | Profiling sampling (0.0-1.0) |
+| `send_default_pii` | bool | `false` | Include PII in reports |
+| `debug` | bool | `false` | Enable debug logging |
+
+<Aside type="caution">
+  Set `send_default_pii = false` to avoid sending personal information to Sentry.
+</Aside>
+
+## Enabling Sentry
+
+1. Create a project at [sentry.io](https://sentry.io)
+2. Copy the DSN from Project Settings > Client Keys
+3. Add to config or environment:
+
+```bash
+export SENTRY_DSN=https://...
+```
+
+## Sampling Rates
+
+Control how much data is sent:
+
+```toml
+[sentry]
+traces_sample_rate = 0.1   # 10% of transactions
+profiles_sample_rate = 0.0  # Disable profiling
+```
+
+<Aside type="tip">
+  Start with low sample rates and increase as needed to control costs.
+</Aside>
+
+## Disabling Sentry
+
+Omit the `[sentry]` section or leave `dsn` unset:
+
+```toml
+# No [sentry] section = disabled
+```

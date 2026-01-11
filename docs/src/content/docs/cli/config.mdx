@@ -1,0 +1,94 @@
+---
+title: ash config
+description: Configuration management commands
+sidebar:
+  order: 7
+---
+
+Manage Ash configuration.
+
+## Usage
+
+```bash
+ash config COMMAND [OPTIONS]
+```
+
+## Commands
+
+### init
+
+Create a new configuration file:
+
+```bash
+ash config init
+```
+
+Creates `~/.ash/config.toml` with default values.
+
+### show
+
+Display current configuration:
+
+```bash
+ash config show
+```
+
+Options:
+| Option | Description |
+|--------|-------------|
+| `--config`, `-c` | Path to config file |
+
+### validate
+
+Validate configuration file:
+
+```bash
+ash config validate
+```
+
+Checks:
+- TOML syntax
+- Required fields
+- Type correctness
+- API key availability
+
+## Setup Wizard
+
+For interactive configuration, use the setup wizard:
+
+```bash
+ash setup
+```
+
+Options:
+| Option | Description |
+|--------|-------------|
+| `--section` | Configure specific section |
+| `--reconfigure` | Reset and reconfigure |
+
+Configure a specific section:
+
+```bash
+ash setup --section models
+ash setup --section telegram
+```
+
+## Examples
+
+Create initial config:
+
+```bash
+ash config init
+```
+
+Check configuration:
+
+```bash
+ash config validate
+```
+
+View current settings (redacts secrets):
+
+```bash
+ash config show
+```

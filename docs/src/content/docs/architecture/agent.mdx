@@ -1,0 +1,107 @@
+---
+title: Agent
+description: Agentic loop and orchestration
+sidebar:
+  order: 2
+---
+
+The agent orchestrator manages conversations and coordinates between LLM, tools, and memory.
+
+## Agentic Loop
+
+The agent implements an iterative loop:
+
+```
+1. Receive message
+2. Build context (system prompt, history, memories)
+3. Call LLM
+4. If tool calls requested:
+   a. Execute tools
+   b. Add results to context
+   c. Go to step 3
+5. Return final response
+```
+
+## Key Components
+
+### Agent Class
+
+Location: `src/ash/core/agent.py`
+
+```python
+class Agent:
+    async def process(
+        self,
+        message: str,
+        *,
+        session_id: str,
+        user_id: str,
+        stream: bool = True,
+    ) -> AsyncIterator[str]:
+        """Process a user message and yield response chunks."""
+```
+
+### Iteration Limits
+
+The agent limits tool iterations to prevent infinite loops:
+
+- **Default**: 25 iterations
+- **Configurable**: Via agent initialization
+
+### Context Building
+
+For each LLM call, the agent builds context:
+
+1. **System prompt** - From SOUL.md + capabilities
+2. **Memory retrieval** - Relevant memories via semantic search
+3. **Conversation history** - Recent messages within token budget
+4. **Tool definitions** - Available tools schema
+
+## Session Management
+
+Sessions track conversations per provider/chat:
+
+```python
+class Session:
+    id: str
+    provider: str
+    chat_id: str
+    user_id: str
+    messages: list[Message]
+```
+
+Sessions are persisted to the database.
+
+## Message Types
+
+```python
+class Message:
+    role: Literal["user", "assistant"]
+    content: str
+    tool_calls: list[ToolCall] | None
+    tool_results: list[ToolResult] | None
+```
+
+## Streaming
+
+The agent supports streaming responses:
+
+```python
+async for chunk in agent.process(message, stream=True):
+    print(chunk, end="")
+```
+
+Non-streaming returns the complete response:
+
+```python
+async for response in agent.process(message, stream=False):
+    print(response)  # Single complete response
+```
+
+## Error Handling
+
+The agent handles:
+
+- **LLM errors** - Retries with exponential backoff
+- **Tool failures** - Reports error to LLM for recovery
+- **Context overflow** - Prunes history to fit token budget

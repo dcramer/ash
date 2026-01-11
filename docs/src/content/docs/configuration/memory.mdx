@@ -1,0 +1,118 @@
+---
+title: Memory
+description: Configure conversation memory and context management
+sidebar:
+  order: 6
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Ash stores conversation history and memories in SQLite with semantic search.
+
+## Configuration
+
+```toml
+[memory]
+database_path = "~/.ash/memory.db"
+max_context_messages = 20
+context_token_budget = 100000
+recency_window = 10
+system_prompt_buffer = 8000
+```
+
+## Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `database_path` | path | `"~/.ash/memory.db"` | SQLite database path |
+| `max_context_messages` | int | `20` | Maximum messages in context |
+| `context_token_budget` | int | `100000` | Target context window size |
+| `recency_window` | int | `10` | Always keep last N messages |
+| `system_prompt_buffer` | int | `8000` | Reserved tokens for system prompt |
+
+## Context Management
+
+Ash uses smart pruning to fit conversations within token limits:
+
+1. **Recency window** - Last N messages are always included
+2. **Token budget** - Older messages pruned to fit budget
+3. **System prompt buffer** - Space reserved for instructions
+
+<Aside type="tip">
+  Increase `context_token_budget` for longer conversations, but watch API costs.
+</Aside>
+
+## Database Location
+
+The default database is at `~/.ash/memory.db`. Override:
+
+```toml
+[memory]
+database_path = "/var/lib/ash/memory.db"
+```
+
+## Managing Memory
+
+List stored memories:
+
+```bash
+ash memory list
+```
+
+Search memories:
+
+```bash
+ash memory search -q "project ideas"
+```
+
+Add a memory:
+
+```bash
+ash memory add -q "Remember to check logs daily"
+```
+
+Clear all memories:
+
+```bash
+ash memory clear
+```
+
+View statistics:
+
+```bash
+ash memory stats
+```
+
+## Sessions
+
+Conversations are organized into sessions. View sessions:
+
+```bash
+ash sessions list
+```
+
+Search message history:
+
+```bash
+ash sessions search -q "keyword"
+```
+
+Export a session:
+
+```bash
+ash sessions export --id <session-id>
+```
+
+## Database Migrations
+
+Run migrations after updates:
+
+```bash
+ash db migrate
+```
+
+Check migration status:
+
+```bash
+ash db status
+```

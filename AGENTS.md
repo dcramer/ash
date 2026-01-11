@@ -55,6 +55,7 @@ Every feature MUST have a spec in `specs/<feature>.md`. See `SPECS.md` for forma
 |-------|---------|
 | `/write-spec <feature>` | Create or update a spec. See `.claude/skills/write-spec.md` |
 | `/verify-spec <feature>` | Verify implementation matches spec. See `.claude/skills/verify-spec.md` |
+| `/write-docs <page>` | Create or update documentation. See `.claude/skills/write-docs.md` |
 | `/commit` | Create commits following project conventions |
 | `/create-pr` | Create pull requests |
 | `/find-bugs` | Find bugs before merging |
@@ -63,4 +64,4 @@ Every feature MUST have a spec in `specs/<feature>.md`. See `SPECS.md` for forma
 
 - `SPECS.md` - Spec format and index
 - `ARCHITECTURE.md` - Tech stack and roadmap
-- `config.example.toml` - All config options
+- `docs/` - Documentation site (Astro Starlight)

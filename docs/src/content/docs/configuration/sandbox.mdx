@@ -1,0 +1,176 @@
+---
+title: Sandbox
+description: Configure the Docker sandbox for secure command execution
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+All bash commands run in an isolated Docker container with security hardening.
+
+## Configuration
+
+```toml
+[sandbox]
+image = "ash-sandbox:latest"
+timeout = 60
+memory_limit = "512m"
+cpu_limit = 1.0
+runtime = "runc"
+network_mode = "bridge"
+dns_servers = []
+http_proxy = ""
+workspace_access = "rw"
+```
+
+## Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `image` | string | `"ash-sandbox:latest"` | Docker image name |
+| `timeout` | int | `60` | Command timeout in seconds |
+| `memory_limit` | string | `"512m"` | Container memory limit |
+| `cpu_limit` | float | `1.0` | CPU cores allowed |
+| `runtime` | string | `"runc"` | Container runtime |
+| `network_mode` | string | `"bridge"` | Network isolation mode |
+| `dns_servers` | list | `[]` | Custom DNS servers |
+| `http_proxy` | string | `""` | HTTP proxy URL |
+| `workspace_access` | string | `"rw"` | Workspace mount mode |
+
+## Security Features
+
+The sandbox applies multiple security layers:
+
+- **Read-only root filesystem** - Container filesystem is immutable
+- **Dropped capabilities** - Minimal Linux capabilities
+- **No new privileges** - Prevents privilege escalation
+- **Process limits** - PIDs limited to prevent fork bombs
+- **Resource limits** - Memory and CPU constraints
+- **Seccomp profile** - System call filtering
+
+## Network Isolation
+
+Control network access:
+
+| Mode | Description |
+|------|-------------|
+| `none` | No network access (most secure) |
+| `bridge` | Standard Docker networking |
+
+```toml
+[sandbox]
+network_mode = "none"  # Fully isolated
+```
+
+### DNS Filtering
+
+Use filtered DNS servers:
+
+```toml
+[sandbox]
+network_mode = "bridge"
+dns_servers = ["9.9.9.9", "149.112.112.112"]  # Quad9 filtered DNS
+```
+
+### HTTP Proxy
+
+Route traffic through a proxy for monitoring:
+
+```toml
+[sandbox]
+http_proxy = "http://localhost:8888"
+```
+
+## Workspace Access
+
+Control how the workspace is mounted:
+
+| Mode | Description |
+|------|-------------|
+| `none` | Workspace not mounted |
+| `ro` | Read-only access |
+| `rw` | Read-write access |
+
+```toml
+[sandbox]
+workspace_access = "ro"  # Read-only for safety
+```
+
+<Aside type="caution">
+  With `workspace_access = "rw"`, commands can modify files in your workspace.
+</Aside>
+
+## Container Runtime
+
+### runc (Default)
+
+Standard OCI runtime:
+
+```toml
+[sandbox]
+runtime = "runc"
+```
+
+### gVisor (runsc)
+
+Enhanced isolation with gVisor:
+
+```toml
+[sandbox]
+runtime = "runsc"
+```
+
+<Aside type="tip">
+  gVisor provides stronger isolation but may have compatibility issues with some commands.
+</Aside>
+
+## Building the Sandbox
+
+Build the sandbox image:
+
+```bash
+ash sandbox build
+```
+
+## Verifying Security
+
+Run security tests:
+
+```bash
+ash sandbox verify
+```
+
+This checks:
+- Container isolation
+- Resource limits
+- Network restrictions
+- Filesystem restrictions
+
+## Troubleshooting
+
+### Container fails to start
+
+Check Docker is running:
+
+```bash
+docker info
+```
+
+### Command timeout
+
+Increase the timeout:
+
+```toml
+[sandbox]
+timeout = 120
+```
+
+### Out of memory
+
+Increase memory limit:
+
+```toml
+[sandbox]
+memory_limit = "1g"
+```

@@ -1,0 +1,78 @@
+---
+title: ash serve
+description: Start the Ash server
+sidebar:
+  order: 3
+---
+
+Start the HTTP server for Telegram integration and webhooks.
+
+## Usage
+
+```bash
+ash serve [OPTIONS]
+```
+
+## Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--config`, `-c` | auto | Path to config file |
+| `--host`, `-h` | `127.0.0.1` | Host to bind to |
+| `--port`, `-p` | `8080` | Port to bind to |
+| `--webhook` | false | Use webhook mode |
+
+## Basic Usage
+
+Start with defaults (polling mode):
+
+```bash
+ash serve
+```
+
+## Custom Host/Port
+
+Bind to all interfaces:
+
+```bash
+ash serve --host 0.0.0.0 --port 3000
+```
+
+## Webhook Mode
+
+Use webhooks instead of polling:
+
+```bash
+ash serve --webhook
+```
+
+Requires `[telegram].webhook_url` to be configured.
+
+## What the Server Does
+
+1. Loads configuration
+2. Initializes database
+3. Sets up the agent
+4. Starts Telegram provider (if configured)
+5. Runs FastAPI server
+
+## Endpoints
+
+| Path | Method | Description |
+|------|--------|-------------|
+| `/health` | GET | Health check |
+| `/webhook` | POST | Telegram webhook |
+
+## Stopping
+
+Press `Ctrl+C` to gracefully stop the server.
+
+## Production
+
+For production deployments:
+
+```bash
+ash serve --host 0.0.0.0 --port 8080 --webhook
+```
+
+Use a reverse proxy (nginx, Caddy) for TLS.

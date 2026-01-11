@@ -1,0 +1,145 @@
+---
+title: Testing
+description: Running and writing tests
+sidebar:
+  order: 2
+---
+
+Ash uses pytest with async support for testing.
+
+## Running Tests
+
+Run all tests:
+
+```bash
+uv run pytest
+```
+
+Run with verbose output:
+
+```bash
+uv run pytest -v
+```
+
+Run specific test file:
+
+```bash
+uv run pytest tests/unit/test_config.py
+```
+
+Run specific test:
+
+```bash
+uv run pytest tests/unit/test_config.py::test_load_config
+```
+
+## Test Organization
+
+```
+tests/
+├── conftest.py       # Shared fixtures
+├── unit/             # Unit tests
+│   ├── test_config.py
+│   ├── test_llm.py
+│   ├── test_memory.py
+│   └── test_tools.py
+└── integration/      # Integration tests
+    └── test_agent.py
+```
+
+## Writing Tests
+
+### Async Tests
+
+Use `pytest-asyncio`:
+
+```python
+import pytest
+
+@pytest.mark.asyncio
+async def test_async_function():
+    result = await some_async_function()
+    assert result == expected
+```
+
+### Fixtures
+
+Common fixtures in `conftest.py`:
+
+```python
+import pytest
+from ash.config import AshConfig
+
+@pytest.fixture
+def config():
+    return AshConfig(
+        models={"default": {...}},
+    )
+
+@pytest.fixture
+async def memory_store(config):
+    store = MemoryStore(config)
+    await store.connect()
+    yield store
+    await store.close()
+```
+
+### Mocking
+
+Mock external services:
+
+```python
+from unittest.mock import AsyncMock, patch
+
+@pytest.mark.asyncio
+async def test_with_mock():
+    with patch("ash.llm.anthropic.AsyncAnthropic") as mock:
+        mock.return_value.messages.create = AsyncMock(
+            return_value=mock_response
+        )
+        result = await provider.complete(messages)
+        assert result.content == expected
+```
+
+## Coverage
+
+Run with coverage:
+
+```bash
+uv run pytest --cov=ash --cov-report=html
+```
+
+View report at `htmlcov/index.html`.
+
+## Test Categories
+
+### Unit Tests
+
+Test individual components in isolation:
+
+```python
+def test_config_validation():
+    config = AshConfig(models={...})
+    assert config.default_model.provider == "anthropic"
+```
+
+### Integration Tests
+
+Test component interactions:
+
+```python
+@pytest.mark.asyncio
+async def test_agent_tool_execution():
+    agent = Agent(config, tools)
+    response = await agent.process("run ls")
+    assert "file.txt" in response
+```
+
+## CI Integration
+
+Tests run on every PR via GitHub Actions:
+
+```yaml
+- run: uv run pytest --cov-report=xml
+- uses: codecov/codecov-action@v4
+```

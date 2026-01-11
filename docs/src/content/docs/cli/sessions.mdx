@@ -1,0 +1,85 @@
+---
+title: ash sessions
+description: Manage conversation sessions
+sidebar:
+  order: 5
+---
+
+Manage conversation history and sessions.
+
+## Usage
+
+```bash
+ash sessions COMMAND [OPTIONS]
+```
+
+## Commands
+
+### list
+
+List all sessions:
+
+```bash
+ash sessions list
+```
+
+Options:
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--limit`, `-l` | 50 | Maximum sessions to show |
+
+### search
+
+Search message history:
+
+```bash
+ash sessions search -q "docker commands"
+```
+
+Options:
+| Option | Description |
+|--------|-------------|
+| `--query`, `-q` | Search query (required) |
+| `--limit`, `-l` | Maximum results |
+
+### export
+
+Export a session to JSON:
+
+```bash
+ash sessions export --id <session-id>
+```
+
+Options:
+| Option | Description |
+|--------|-------------|
+| `--id` | Session ID (required) |
+| `--output`, `-o` | Output file path |
+
+### clear
+
+Clear all session history:
+
+```bash
+ash sessions clear
+```
+
+## Examples
+
+View recent sessions:
+
+```bash
+ash sessions list --limit 5
+```
+
+Find conversations about Python:
+
+```bash
+ash sessions search -q "python"
+```
+
+Export a session:
+
+```bash
+ash sessions export --id abc123 -o session.json
+```

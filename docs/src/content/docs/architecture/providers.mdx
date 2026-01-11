@@ -1,0 +1,157 @@
+---
+title: Providers
+description: Communication channels
+sidebar:
+  order: 8
+---
+
+Providers handle communication between users and the agent.
+
+## Provider Interface
+
+Location: `src/ash/providers/base.py`
+
+```python
+from abc import ABC, abstractmethod
+from typing import AsyncIterator, Callable, Awaitable
+
+MessageHandler = Callable[[IncomingMessage], Awaitable[None]]
+
+class Provider(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Provider name (e.g., 'telegram')."""
+
+    @abstractmethod
+    async def start(self, handler: MessageHandler) -> None:
+        """Start receiving messages."""
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Stop the provider."""
+
+    @abstractmethod
+    async def send(self, message: OutgoingMessage) -> str:
+        """Send a message, return message ID."""
+
+    @abstractmethod
+    async def send_streaming(
+        self,
+        chat_id: str,
+        stream: AsyncIterator[str],
+        *,
+        reply_to: str | None = None,
+    ) -> str:
+        """Send streaming response, updating message."""
+
+    @abstractmethod
+    async def edit(self, message_id: str, content: str) -> None:
+        """Edit an existing message."""
+
+    @abstractmethod
+    async def delete(self, message_id: str) -> None:
+        """Delete a message."""
+```
+
+## Message Types
+
+```python
+class IncomingMessage:
+    id: str
+    chat_id: str
+    user_id: str
+    username: str | None
+    content: str
+    reply_to: str | None
+    metadata: dict
+
+class OutgoingMessage:
+    chat_id: str
+    content: str
+    reply_to: str | None
+    metadata: dict
+```
+
+## Telegram Provider
+
+Location: `src/ash/providers/telegram/`
+
+Uses aiogram 3.x for Telegram Bot API:
+
+```python
+from aiogram import Bot, Dispatcher
+
+class TelegramProvider(Provider):
+    def __init__(
+        self,
+        bot_token: str,
+        allowed_users: list[str],
+        webhook_url: str | None = None,
+    ):
+        self.bot = Bot(token=bot_token)
+        self.dp = Dispatcher()
+```
+
+### Features
+
+- **Polling mode** - Long polling for development
+- **Webhook mode** - HTTP webhooks for production
+- **User authorization** - Restrict to allowed users
+- **Group support** - Mention-based or always respond
+- **Streaming** - Edit message as response generates
+
+### Streaming Implementation
+
+```python
+async def send_streaming(self, chat_id: str, stream: AsyncIterator[str]) -> str:
+    content = ""
+    message = None
+
+    async for chunk in stream:
+        content += chunk
+        if message is None:
+            message = await self.bot.send_message(chat_id, content)
+        else:
+            await self.bot.edit_message_text(
+                content,
+                chat_id=chat_id,
+                message_id=message.message_id,
+            )
+
+    return str(message.message_id)
+```
+
+## CLI Provider
+
+The CLI uses direct I/O rather than the provider interface:
+
+```python
+async def chat_loop():
+    while True:
+        user_input = input("> ")
+        async for chunk in agent.process(user_input):
+            print(chunk, end="", flush=True)
+        print()
+```
+
+## Provider Registry
+
+Location: `src/ash/providers/registry.py`
+
+```python
+registry = ProviderRegistry()
+registry.register("telegram", TelegramProvider)
+
+provider = registry.create("telegram", **config)
+await provider.start(handler)
+```
+
+## Creating Providers
+
+To add a new provider (e.g., Discord, Slack):
+
+1. Implement the `Provider` interface
+2. Handle message reception and delivery
+3. Support streaming if platform allows
+4. Register in the provider registry

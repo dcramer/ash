@@ -1,0 +1,164 @@
+---
+title: Installation
+description: Detailed installation methods for Ash
+sidebar:
+  order: 2
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+## Requirements
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Python | 3.12+ | Required |
+| Docker | 20.10+ | For sandbox execution |
+| uv | Latest | Recommended package manager |
+
+## Install from Source
+
+<Steps>
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/dcramer/ash.git
+   cd ash
+   ```
+
+2. **Install with uv**
+
+   ```bash
+   uv sync --all-groups
+   ```
+
+   This installs all dependencies including development tools.
+
+3. **Verify installation**
+
+   ```bash
+   uv run ash --help
+   ```
+
+</Steps>
+
+## Environment Variables
+
+Set API keys via environment variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | Yes* | Anthropic Claude API key |
+| `OPENAI_API_KEY` | Yes* | OpenAI API key |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
+| `BRAVE_SEARCH_API_KEY` | No | Brave Search API key |
+| `SENTRY_DSN` | No | Sentry error tracking DSN |
+
+*At least one LLM provider key is required.
+
+<Aside type="tip">
+  API keys can also be set in the configuration file. Environment variables take precedence.
+</Aside>
+
+## Configuration
+
+Run the setup wizard to create your configuration:
+
+```bash
+uv run ash setup
+```
+
+Or create `~/.ash/config.toml` manually:
+
+```toml
+[models.default]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+```
+
+See [Configuration Overview](/configuration/overview/) for all options.
+
+## Docker Sandbox
+
+The sandbox isolates command execution for security. Build the image:
+
+```bash
+uv run ash sandbox build
+```
+
+Verify the sandbox:
+
+```bash
+uv run ash sandbox verify
+```
+
+This runs security tests to ensure proper isolation.
+
+## Database Setup
+
+Initialize the SQLite database:
+
+```bash
+uv run ash upgrade
+```
+
+This runs migrations and verifies the sandbox is ready.
+
+## Workspace Setup
+
+Ash uses a workspace directory for personality and user data:
+
+```
+~/.ash/workspace/
+├── SOUL.md    # Assistant personality
+└── USER.md    # User profile (optional)
+```
+
+The setup wizard creates these files. Edit `SOUL.md` to customize your assistant's personality.
+
+## Upgrading
+
+Update your installation:
+
+```bash
+cd ash
+git pull
+uv sync --all-groups
+uv run ash upgrade
+```
+
+The `upgrade` command handles database migrations and sandbox verification.
+
+## Troubleshooting
+
+### Docker not found
+
+Ensure Docker is installed and running:
+
+```bash
+docker info
+```
+
+### Permission denied
+
+Add your user to the docker group:
+
+```bash
+sudo usermod -aG docker $USER
+```
+
+Log out and back in for changes to take effect.
+
+### API key errors
+
+Verify your API key is set:
+
+```bash
+echo $ANTHROPIC_API_KEY
+```
+
+Or check your config file:
+
+```bash
+uv run ash config show
+```

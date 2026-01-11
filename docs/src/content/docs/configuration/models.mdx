@@ -1,0 +1,115 @@
+---
+title: Models
+description: Configure LLM models and providers
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Define named model configurations that can be referenced throughout Ash.
+
+## Model Configuration
+
+```toml
+[models.default]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+temperature = 0.7
+max_tokens = 4096
+```
+
+## Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | string | required | `"anthropic"` or `"openai"` |
+| `model` | string | required | Model identifier |
+| `temperature` | float | `null` | Sampling temperature (0.0-1.0) |
+| `max_tokens` | int | `4096` | Maximum response tokens |
+
+<Aside type="tip">
+  Set `temperature` to `null` (or omit it) for reasoning models that don't support temperature control.
+</Aside>
+
+## Multiple Models
+
+Define multiple named models:
+
+```toml
+[models.default]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+temperature = 0.7
+
+[models.fast]
+provider = "openai"
+model = "gpt-4o-mini"
+temperature = 0.5
+
+[models.reasoning]
+provider = "anthropic"
+model = "claude-3-opus-20240229"
+# No temperature for reasoning models
+```
+
+Use models by alias:
+
+```bash
+ash chat --model fast "Quick question"
+ash chat --model reasoning "Complex problem"
+```
+
+## Provider API Keys
+
+Set API keys at the provider level:
+
+```toml
+[anthropic]
+api_key = "sk-ant-..."
+
+[openai]
+api_key = "sk-..."
+```
+
+Or use environment variables:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+```
+
+## API Key Resolution
+
+Keys are resolved in this order:
+
+1. Provider config (`[anthropic].api_key`)
+2. Environment variable (`ANTHROPIC_API_KEY`)
+
+## Supported Models
+
+### Anthropic
+
+- `claude-sonnet-4-5-20250929` (recommended)
+- `claude-3-opus-20240229`
+- `claude-3-sonnet-20240229`
+- `claude-3-haiku-20240307`
+
+### OpenAI
+
+- `gpt-4o`
+- `gpt-4o-mini`
+- `gpt-4-turbo`
+- `gpt-3.5-turbo`
+
+## Default Model Requirement
+
+A model named `default` is required:
+
+```toml
+[models.default]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+```
+
+This model is used when no `--model` flag is specified.

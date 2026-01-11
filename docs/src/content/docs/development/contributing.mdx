@@ -1,0 +1,120 @@
+---
+title: Contributing
+description: Guidelines for contributing
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Guidelines for contributing to Ash.
+
+## Getting Started
+
+1. Fork the repository
+2. Clone your fork
+3. Follow [Development Setup](/development/setup/)
+4. Create a feature branch
+
+## Code Style
+
+### Python Style
+
+- Follow PEP 8
+- Use type hints for all functions
+- Async everywhere for I/O operations
+- Use Pydantic for data validation
+
+Ruff handles formatting and linting:
+
+```bash
+uv run ruff check --fix .
+uv run ruff format .
+```
+
+### Commit Messages
+
+Follow conventional commits:
+
+```
+type(scope): description
+
+feat(tools): add weather tool
+fix(sandbox): handle timeout errors
+docs(readme): update installation steps
+```
+
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+
+<Aside type="tip">
+  AI-generated commits must include the `Co-Authored-By` trailer.
+</Aside>
+
+## Pull Requests
+
+### Before Submitting
+
+1. Run tests: `uv run pytest`
+2. Run linter: `uv run ruff check .`
+3. Update documentation if needed
+4. Update specs if adding features
+
+### PR Template
+
+```markdown
+## Summary
+
+Brief description of changes.
+
+## Changes
+
+- Change 1
+- Change 2
+
+## Testing
+
+How was this tested?
+
+## Checklist
+
+- [ ] Tests pass
+- [ ] Linting passes
+- [ ] Documentation updated
+- [ ] Spec updated (if new feature)
+```
+
+## Specifications
+
+Every feature needs a spec in `specs/`:
+
+```bash
+# Create or update spec
+/write-spec <feature>
+
+# Verify implementation
+/verify-spec <feature>
+```
+
+See [SPECS.md](/specs.md) for format.
+
+## Architecture
+
+Follow existing patterns:
+
+- **ABC for interfaces** in `*/base.py`
+- **Registry pattern** for discovery
+- **Async/await** for all I/O
+- **Pydantic models** for validation
+
+## Testing Requirements
+
+- Unit tests for new functionality
+- Integration tests for complex features
+- Maintain or improve coverage
+
+## Review Process
+
+1. Create PR against `main`
+2. CI must pass
+3. At least one approval required
+4. Squash merge preferred

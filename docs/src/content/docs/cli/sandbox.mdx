@@ -1,0 +1,108 @@
+---
+title: ash sandbox
+description: Manage the Docker sandbox
+sidebar:
+  order: 6
+---
+
+Manage the Docker sandbox for secure command execution.
+
+## Usage
+
+```bash
+ash sandbox COMMAND [OPTIONS]
+```
+
+## Commands
+
+### build
+
+Build the sandbox Docker image:
+
+```bash
+ash sandbox build
+```
+
+### status
+
+Check sandbox status:
+
+```bash
+ash sandbox status
+```
+
+Shows:
+- Image availability
+- Container runtime
+- Configuration
+
+### verify
+
+Run security verification tests:
+
+```bash
+ash sandbox verify
+```
+
+Tests:
+- Container isolation
+- Resource limits
+- Network restrictions
+- Filesystem access
+
+### clean
+
+Remove stopped containers:
+
+```bash
+ash sandbox clean
+```
+
+### prompts
+
+Show test prompts for manual testing:
+
+```bash
+ash sandbox prompts
+```
+
+## Examples
+
+Initial setup:
+
+```bash
+ash sandbox build
+ash sandbox verify
+```
+
+Check if sandbox is ready:
+
+```bash
+ash sandbox status
+```
+
+Clean up after testing:
+
+```bash
+ash sandbox clean
+```
+
+## Troubleshooting
+
+### Build fails
+
+Ensure Docker is running:
+
+```bash
+docker info
+```
+
+### Verification fails
+
+Check sandbox configuration:
+
+```bash
+ash config show
+```
+
+Review the `[sandbox]` section for issues.

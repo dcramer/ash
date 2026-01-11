@@ -1,0 +1,82 @@
+---
+title: ash db
+description: Database management commands
+sidebar:
+  order: 8
+---
+
+Manage the SQLite database and migrations.
+
+## Usage
+
+```bash
+ash db COMMAND [OPTIONS]
+```
+
+## Commands
+
+### migrate
+
+Apply pending migrations:
+
+```bash
+ash db migrate
+```
+
+### rollback
+
+Rollback the last migration:
+
+```bash
+ash db rollback
+```
+
+Options:
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--steps`, `-n` | 1 | Number of migrations to rollback |
+
+### status
+
+Show migration status:
+
+```bash
+ash db status
+```
+
+Shows:
+- Current revision
+- Pending migrations
+- Database path
+
+## Examples
+
+Apply all pending migrations:
+
+```bash
+ash db migrate
+```
+
+Check current state:
+
+```bash
+ash db status
+```
+
+Rollback last migration:
+
+```bash
+ash db rollback
+```
+
+Rollback multiple migrations:
+
+```bash
+ash db rollback --steps 3
+```
+
+## Database Location
+
+Default: `~/.ash/memory.db`
+
+Configure in `[memory].database_path`.

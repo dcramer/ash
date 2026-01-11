@@ -1,0 +1,135 @@
+---
+title: Development Setup
+description: Set up your development environment
+sidebar:
+  order: 1
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Set up a development environment for contributing to Ash.
+
+## Prerequisites
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) package manager
+- Docker
+- Git
+
+## Setup
+
+<Steps>
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/dcramer/ash.git
+   cd ash
+   ```
+
+2. **Install dependencies**
+
+   ```bash
+   uv sync --all-groups
+   ```
+
+   This installs all dependencies including dev tools.
+
+3. **Install pre-commit hooks**
+
+   ```bash
+   uv run pre-commit install
+   ```
+
+4. **Set up environment**
+
+   ```bash
+   export ANTHROPIC_API_KEY=your-key
+   ```
+
+5. **Run database migrations**
+
+   ```bash
+   uv run ash upgrade
+   ```
+
+6. **Build the sandbox**
+
+   ```bash
+   uv run ash sandbox build
+   ```
+
+</Steps>
+
+## Development Tools
+
+| Tool | Purpose | Command |
+|------|---------|---------|
+| ruff | Linting + formatting | `uv run ruff check --fix .` |
+| pytest | Testing | `uv run pytest` |
+| pre-commit | Git hooks | `uv run pre-commit run --all-files` |
+
+## Running Locally
+
+Interactive chat:
+
+```bash
+uv run ash chat
+```
+
+Start server:
+
+```bash
+uv run ash serve
+```
+
+## Code Quality
+
+Run linter:
+
+```bash
+uv run ruff check --fix .
+```
+
+Format code:
+
+```bash
+uv run ruff format .
+```
+
+Both run automatically via pre-commit hooks.
+
+## Adding Dependencies
+
+Add runtime dependency:
+
+```bash
+uv add <package>
+```
+
+Add dev dependency:
+
+```bash
+uv add --dev <package>
+```
+
+## IDE Setup
+
+### VS Code
+
+Recommended extensions:
+- Python
+- Ruff
+- Even Better TOML
+
+Settings:
+
+```json
+{
+  "python.defaultInterpreterPath": ".venv/bin/python",
+  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  }
+}
+```

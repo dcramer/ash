@@ -1,0 +1,184 @@
+---
+title: Sandbox
+description: Docker container isolation
+sidebar:
+  order: 7
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+All command execution runs in isolated Docker containers with security hardening.
+
+## Architecture
+
+```
+┌──────────────────────────────────────┐
+│            Host System               │
+│  ┌────────────────────────────────┐  │
+│  │        Docker Daemon           │  │
+│  │  ┌──────────────────────────┐  │  │
+│  │  │    Sandbox Container     │  │  │
+│  │  │  - Read-only rootfs      │  │  │
+│  │  │  - Dropped capabilities  │  │  │
+│  │  │  - Process limits        │  │  │
+│  │  │  - Network isolation     │  │  │
+│  │  │  - /workspace mount      │  │  │
+│  │  └──────────────────────────┘  │  │
+│  └────────────────────────────────┘  │
+└──────────────────────────────────────┘
+```
+
+## Components
+
+### Sandbox Manager
+
+Location: `src/ash/sandbox/manager.py`
+
+Manages container lifecycle:
+
+```python
+class SandboxManager:
+    async def create(self) -> Container:
+        """Create a new sandbox container."""
+
+    async def execute(
+        self,
+        command: str,
+        timeout: int = 60,
+    ) -> ExecutionResult:
+        """Execute command in sandbox."""
+
+    async def cleanup(self) -> None:
+        """Remove stopped containers."""
+```
+
+### Sandbox Executor
+
+Location: `src/ash/sandbox/executor.py`
+
+Handles command execution:
+
+```python
+class SandboxExecutor:
+    async def run(
+        self,
+        command: str,
+        *,
+        timeout: int,
+        working_dir: str = "/workspace",
+    ) -> ExecutionResult:
+        """Run command with resource limits."""
+```
+
+## Security Features
+
+### Container Configuration
+
+```python
+container_config = {
+    "read_only": True,              # Immutable rootfs
+    "security_opt": ["no-new-privileges"],
+    "cap_drop": ["ALL"],            # Drop all capabilities
+    "pids_limit": 100,              # Prevent fork bombs
+    "mem_limit": "512m",            # Memory limit
+    "cpu_quota": 100000,            # CPU limit
+    "network_mode": "none",         # Network isolation
+}
+```
+
+### Security Layers
+
+| Layer | Protection |
+|-------|------------|
+| Read-only rootfs | Prevents filesystem modification |
+| Dropped capabilities | Minimal Linux capabilities |
+| No new privileges | Prevents privilege escalation |
+| PID limit | Prevents fork bombs |
+| Memory limit | Prevents memory exhaustion |
+| CPU limit | Prevents CPU exhaustion |
+| Network isolation | Prevents network access |
+| Seccomp profile | System call filtering |
+
+<Aside type="tip">
+  For enhanced security, use gVisor (`runtime = "runsc"`) which adds kernel-level isolation.
+</Aside>
+
+## Container Image
+
+Built from `docker/Dockerfile.sandbox`:
+
+```dockerfile
+FROM python:3.12-slim
+
+# Install common tools
+RUN apt-get update && apt-get install -y \
+    curl wget git jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Run as non-root user
+USER nobody
+```
+
+Build with:
+
+```bash
+ash sandbox build
+```
+
+## Execution Flow
+
+1. **Create container** with security configuration
+2. **Mount workspace** (optional, based on config)
+3. **Execute command** with timeout
+4. **Capture output** (stdout, stderr, exit code)
+5. **Cleanup** container
+
+## Workspace Mounting
+
+Controlled by `workspace_access` config:
+
+| Mode | Behavior |
+|------|----------|
+| `none` | Workspace not accessible |
+| `ro` | Read-only access |
+| `rw` | Read-write access |
+
+```toml
+[sandbox]
+workspace_access = "ro"  # Recommended for safety
+```
+
+## Network Options
+
+### Isolated (Default for Security)
+
+```toml
+[sandbox]
+network_mode = "none"
+```
+
+### Bridge (When Network Needed)
+
+```toml
+[sandbox]
+network_mode = "bridge"
+dns_servers = ["9.9.9.9"]  # Filtered DNS
+http_proxy = "http://proxy:8080"  # Optional monitoring
+```
+
+## Verification
+
+Run security tests:
+
+```bash
+ash sandbox verify
+```
+
+Tests include:
+- Filesystem restrictions
+- Network isolation
+- Resource limits
+- Privilege escalation attempts

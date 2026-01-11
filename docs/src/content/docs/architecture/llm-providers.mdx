@@ -1,0 +1,136 @@
+---
+title: LLM Providers
+description: LLM abstraction layer
+sidebar:
+  order: 3
+---
+
+The LLM module provides a unified interface for multiple LLM backends.
+
+## Provider Interface
+
+Location: `src/ash/llm/base.py`
+
+```python
+from abc import ABC, abstractmethod
+from typing import AsyncIterator
+
+class LLMProvider(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Provider name (e.g., 'anthropic', 'openai')."""
+
+    @abstractmethod
+    async def complete(
+        self,
+        messages: list[Message],
+        *,
+        model: str | None = None,
+        tools: list[ToolDefinition] | None = None,
+        system: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float | None = None,
+    ) -> Message:
+        """Generate a complete response."""
+
+    @abstractmethod
+    async def stream(
+        self,
+        messages: list[Message],
+        *,
+        model: str | None = None,
+        tools: list[ToolDefinition] | None = None,
+        system: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float | None = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """Generate a streaming response."""
+
+    @abstractmethod
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+    ) -> list[list[float]]:
+        """Generate embeddings for texts."""
+```
+
+## Implementations
+
+### Anthropic Provider
+
+Location: `src/ash/llm/anthropic.py`
+
+Uses the official `anthropic` SDK:
+
+```python
+from anthropic import AsyncAnthropic
+
+class AnthropicProvider(LLMProvider):
+    def __init__(self, api_key: str):
+        self.client = AsyncAnthropic(api_key=api_key)
+```
+
+### OpenAI Provider
+
+Location: `src/ash/llm/openai.py`
+
+Uses the official `openai` SDK:
+
+```python
+from openai import AsyncOpenAI
+
+class OpenAIProvider(LLMProvider):
+    def __init__(self, api_key: str):
+        self.client = AsyncOpenAI(api_key=api_key)
+```
+
+## Message Types
+
+Location: `src/ash/llm/types.py`
+
+```python
+class Message:
+    role: Literal["user", "assistant"]
+    content: str | list[ContentBlock]
+    tool_calls: list[ToolCall] | None
+
+class ToolCall:
+    id: str
+    name: str
+    input: dict
+
+class StreamChunk:
+    type: Literal["text", "tool_use"]
+    content: str | None
+    tool_call: ToolCall | None
+```
+
+## Provider Registry
+
+Location: `src/ash/llm/registry.py`
+
+Providers are registered and resolved by name:
+
+```python
+registry = LLMRegistry()
+registry.register("anthropic", AnthropicProvider)
+registry.register("openai", OpenAIProvider)
+
+provider = registry.get("anthropic", api_key="...")
+```
+
+## Tool Definitions
+
+Tools are defined for the LLM:
+
+```python
+class ToolDefinition:
+    name: str
+    description: str
+    input_schema: dict  # JSON Schema
+```
+
+The LLM receives tool definitions and can request tool calls in its response.

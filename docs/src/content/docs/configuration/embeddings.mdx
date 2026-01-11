@@ -1,0 +1,74 @@
+---
+title: Embeddings
+description: Configure semantic search embeddings
+sidebar:
+  order: 7
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Embeddings enable semantic search for memories and messages.
+
+## Configuration
+
+```toml
+[embeddings]
+provider = "openai"
+model = "text-embedding-3-small"
+```
+
+## Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | string | `"openai"` | Embedding provider |
+| `model` | string | `"text-embedding-3-small"` | Model name |
+
+## Supported Models
+
+### OpenAI
+
+| Model | Dimensions | Notes |
+|-------|------------|-------|
+| `text-embedding-3-small` | 1536 | Recommended, cost-effective |
+| `text-embedding-3-large` | 3072 | Higher quality |
+| `text-embedding-ada-002` | 1536 | Legacy model |
+
+<Aside type="tip">
+  `text-embedding-3-small` provides good quality at low cost for most use cases.
+</Aside>
+
+## API Key
+
+Embeddings use the OpenAI API key:
+
+```toml
+[openai]
+api_key = "sk-..."
+```
+
+Or via environment:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+## Semantic Search
+
+With embeddings configured, memory search uses semantic similarity:
+
+```bash
+ash memory search -q "things to remember about the project"
+```
+
+This finds relevant memories even if the exact words don't match.
+
+## Disabling Embeddings
+
+Omit the `[embeddings]` section to disable semantic search:
+
+```toml
+# No [embeddings] section = disabled
+```
+
+Memory search will fall back to text matching.

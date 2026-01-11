@@ -1,0 +1,142 @@
+---
+title: Telegram
+description: Configure Telegram bot integration
+sidebar:
+  order: 3
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+Connect Ash to Telegram for mobile access to your assistant.
+
+## Configuration
+
+```toml
+[telegram]
+bot_token = "123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"
+allowed_users = ["@yourusername", "123456789"]
+allowed_groups = ["-100123456789"]
+group_mode = "mention"
+webhook_url = "https://your-domain.com/webhook"
+```
+
+## Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `bot_token` | string | required | Bot token from BotFather |
+| `allowed_users` | list | `[]` | Authorized usernames or IDs |
+| `allowed_groups` | list | `[]` | Authorized group chat IDs |
+| `group_mode` | string | `"mention"` | `"mention"` or `"always"` |
+| `webhook_url` | string | `null` | Webhook URL (polling if not set) |
+
+## Create a Telegram Bot
+
+<Steps>
+
+1. **Open BotFather**
+
+   Search for `@BotFather` in Telegram and start a chat.
+
+2. **Create a new bot**
+
+   Send `/newbot` and follow the prompts to name your bot.
+
+3. **Copy the token**
+
+   BotFather will give you a token like `123456789:ABCdef...`
+
+4. **Configure Ash**
+
+   Add the token to your config or environment:
+
+   ```bash
+   export TELEGRAM_BOT_TOKEN=123456789:ABCdef...
+   ```
+
+</Steps>
+
+## User Authorization
+
+Specify who can use the bot:
+
+```toml
+[telegram]
+allowed_users = [
+    "@yourusername",     # By username
+    "123456789",         # By user ID
+]
+```
+
+<Aside type="caution">
+  If `allowed_users` is empty, anyone can message your bot. Always set authorized users in production.
+</Aside>
+
+### Finding Your User ID
+
+Send `/start` to `@userinfobot` to get your Telegram user ID.
+
+## Group Chats
+
+Allow the bot in specific groups:
+
+```toml
+[telegram]
+allowed_groups = ["-100123456789"]
+group_mode = "mention"
+```
+
+### Group Modes
+
+| Mode | Behavior |
+|------|----------|
+| `mention` | Bot responds only when mentioned (`@botname`) |
+| `always` | Bot responds to all messages in the group |
+
+### Finding Group IDs
+
+1. Add your bot to the group
+2. Send a message in the group
+3. Check server logs for the group ID
+
+## Polling vs Webhook
+
+### Polling (Default)
+
+The bot polls Telegram for updates. Good for local development:
+
+```bash
+ash serve
+```
+
+### Webhook
+
+For production, use webhooks. Set the URL:
+
+```toml
+[telegram]
+webhook_url = "https://your-domain.com/webhook"
+```
+
+Start with webhook mode:
+
+```bash
+ash serve --webhook
+```
+
+<Aside type="tip">
+  Webhooks require HTTPS. Use a reverse proxy like nginx or Caddy with TLS.
+</Aside>
+
+## Running the Server
+
+Start the Telegram bot:
+
+```bash
+ash serve
+```
+
+The server handles:
+- Incoming messages from authorized users
+- Streaming responses back to Telegram
+- Message editing for response updates

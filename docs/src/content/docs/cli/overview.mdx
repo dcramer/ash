@@ -1,0 +1,56 @@
+---
+title: CLI Overview
+description: Command line interface reference
+sidebar:
+  order: 1
+---
+
+Ash provides a comprehensive CLI for interacting with your assistant.
+
+## Usage
+
+```bash
+ash [OPTIONS] COMMAND [ARGS]
+```
+
+## Global Options
+
+| Option | Description |
+|--------|-------------|
+| `--help` | Show help message |
+| `--version` | Show version |
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| [`chat`](/cli/chat/) | Interactive chat or single prompt |
+| [`serve`](/cli/serve/) | Start the server |
+| [`config`](/cli/config/) | Configuration management |
+| [`memory`](/cli/memory/) | Memory management |
+| [`sessions`](/cli/sessions/) | Session management |
+| [`sandbox`](/cli/sandbox/) | Sandbox management |
+| [`db`](/cli/db/) | Database operations |
+| [`upgrade`](/cli/upgrade/) | Run migrations and checks |
+| [`service`](/cli/service/) | Service management |
+
+## Getting Help
+
+Get help for any command:
+
+```bash
+ash --help
+ash chat --help
+ash memory --help
+```
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ASH_CONFIG` | Config file path |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API key |
+| `SENTRY_DSN` | Sentry DSN |

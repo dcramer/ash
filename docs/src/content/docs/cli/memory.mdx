@@ -1,0 +1,105 @@
+---
+title: ash memory
+description: Manage stored memories
+sidebar:
+  order: 4
+---
+
+Manage persistent memories that Ash uses across conversations.
+
+## Usage
+
+```bash
+ash memory COMMAND [OPTIONS]
+```
+
+## Commands
+
+### list
+
+List all memories:
+
+```bash
+ash memory list
+```
+
+Options:
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--limit`, `-l` | 50 | Maximum entries to show |
+
+### search
+
+Search memories semantically:
+
+```bash
+ash memory search -q "project ideas"
+```
+
+Options:
+| Option | Description |
+|--------|-------------|
+| `--query`, `-q` | Search query (required) |
+| `--limit`, `-l` | Maximum results |
+
+### add
+
+Add a new memory:
+
+```bash
+ash memory add -q "Remember to check logs every morning"
+```
+
+Options:
+| Option | Description |
+|--------|-------------|
+| `--query`, `-q` | Memory content (required) |
+
+### remove
+
+Remove a memory by ID:
+
+```bash
+ash memory remove --id abc123
+```
+
+Options:
+| Option | Description |
+|--------|-------------|
+| `--id` | Memory ID (required) |
+
+### clear
+
+Remove all memories:
+
+```bash
+ash memory clear
+```
+
+### stats
+
+Show memory statistics:
+
+```bash
+ash memory stats
+```
+
+## Examples
+
+Add a reminder:
+
+```bash
+ash memory add -q "Prefer concise code examples"
+```
+
+Find project-related memories:
+
+```bash
+ash memory search -q "project"
+```
+
+List recent memories:
+
+```bash
+ash memory list --limit 10
+```

@@ -1,0 +1,57 @@
+---
+title: Skills Configuration
+description: Configure per-skill settings
+sidebar:
+  order: 10
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Skills can have their own configuration sections for API keys and settings.
+
+## Configuration
+
+```toml
+[skills.weather]
+api_key = "abc123"
+units = "metric"
+
+[skills.calendar]
+default_timezone = "America/New_York"
+```
+
+## Format
+
+Each skill gets its own `[skills.<name>]` section:
+
+```toml
+[skills.<skill-name>]
+key = "value"
+another_key = "another value"
+```
+
+## Example: Weather Skill
+
+```toml
+[skills.weather]
+api_key = "your-openweather-api-key"
+units = "metric"
+default_location = "New York, NY"
+```
+
+The skill accesses these values when invoked.
+
+## Skill Discovery
+
+Skills are loaded from:
+
+1. `~/.ash/workspace/skills/` - User skills
+2. Built-in skills bundled with Ash
+
+<Aside type="tip">
+  Check individual skill documentation for required configuration options.
+</Aside>
+
+## Accessing Config in Skills
+
+Skills receive their config section when executed. A skill named `weather` receives values from `[skills.weather]`.

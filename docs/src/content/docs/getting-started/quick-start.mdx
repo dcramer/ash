@@ -1,0 +1,104 @@
+---
+title: Quick Start
+description: Get Ash running in 5 minutes
+sidebar:
+  order: 1
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+Get Ash up and running with these steps.
+
+## Prerequisites
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) package manager
+- Docker (for sandboxed command execution)
+- An Anthropic or OpenAI API key
+
+## Installation
+
+<Steps>
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/dcramer/ash.git
+   cd ash
+   ```
+
+2. **Install dependencies**
+
+   ```bash
+   uv sync --all-groups
+   ```
+
+3. **Set your API key**
+
+   ```bash
+   export ANTHROPIC_API_KEY=your-api-key
+   ```
+
+   Or for OpenAI:
+
+   ```bash
+   export OPENAI_API_KEY=your-api-key
+   ```
+
+4. **Run the setup wizard**
+
+   ```bash
+   uv run ash setup
+   ```
+
+   This creates your configuration at `~/.ash/config.toml`.
+
+5. **Build the sandbox**
+
+   ```bash
+   uv run ash sandbox build
+   ```
+
+   This builds the Docker image for secure command execution.
+
+6. **Run database migrations**
+
+   ```bash
+   uv run ash upgrade
+   ```
+
+</Steps>
+
+## Start Chatting
+
+Interactive mode:
+
+```bash
+uv run ash chat
+```
+
+Single prompt:
+
+```bash
+uv run ash chat "What's the weather like?"
+```
+
+<Aside type="tip">
+  Use `--no-streaming` if you prefer to see complete responses rather than streaming output.
+</Aside>
+
+## Run as a Server
+
+Start the server for Telegram integration:
+
+```bash
+uv run ash serve
+```
+
+The server runs on `http://127.0.0.1:8080` by default.
+
+## Next Steps
+
+- [Installation](/getting-started/installation/) - Detailed installation options
+- [Configuration Overview](/configuration/overview/) - Configure models, providers, and features
+- [CLI Reference](/cli/overview/) - Full command reference

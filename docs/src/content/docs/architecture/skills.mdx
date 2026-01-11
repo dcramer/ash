@@ -1,0 +1,145 @@
+---
+title: Skills
+description: Configurable skill system
+sidebar:
+  order: 5
+---
+
+Skills provide configurable, workspace-defined capabilities that extend the agent.
+
+## Skill Definition
+
+Skills are defined in YAML files in the workspace:
+
+```yaml
+# ~/.ash/workspace/skills/weather.yaml
+name: weather
+description: Get weather information for locations
+requirements:
+  bins:
+    - curl
+  env:
+    - WEATHER_API_KEY
+inputs:
+  location:
+    type: string
+    description: Location to get weather for
+    required: true
+  units:
+    type: string
+    description: Temperature units
+    default: metric
+script: |
+  curl -s "https://api.weather.com/v1?q=$location&units=$units" \
+    -H "Authorization: $WEATHER_API_KEY"
+```
+
+## Skill Structure
+
+Location: `src/ash/skills/base.py`
+
+```python
+class SkillDefinition:
+    name: str
+    description: str
+    requirements: SkillRequirements
+    inputs: dict[str, SkillInput]
+    script: str
+    config: dict[str, str]  # From [skills.name] config section
+```
+
+### Requirements
+
+Skills can specify requirements:
+
+```yaml
+requirements:
+  bins:           # Required binaries
+    - curl
+    - jq
+  env:            # Required environment variables
+    - API_KEY
+  os:             # OS constraints
+    - linux
+    - darwin
+```
+
+### Inputs
+
+Input parameters are validated:
+
+```yaml
+inputs:
+  query:
+    type: string
+    description: Search query
+    required: true
+  limit:
+    type: integer
+    description: Maximum results
+    default: 10
+```
+
+## Skill Registry
+
+Location: `src/ash/skills/registry.py`
+
+Skills are discovered from the workspace:
+
+```python
+registry = SkillRegistry(workspace_path)
+await registry.discover()
+
+skill = registry.get("weather")
+```
+
+## Skill Execution
+
+Location: `src/ash/skills/executor.py`
+
+Skills are executed in the sandbox:
+
+```python
+class SkillExecutor:
+    async def execute(
+        self,
+        skill: SkillDefinition,
+        inputs: dict,
+        context: ToolContext,
+    ) -> ToolResult:
+        # Validate inputs
+        # Inject config values
+        # Execute script in sandbox
+```
+
+## Configuration
+
+Skills receive config from `[skills.<name>]`:
+
+```toml
+[skills.weather]
+api_key = "abc123"
+units = "metric"
+```
+
+Access in script via environment:
+
+```yaml
+script: |
+  curl "https://api.weather.com?key=$api_key&units=$units"
+```
+
+## Bundled Skills
+
+Location: `src/ash/skills/bundled/`
+
+Pre-defined skills included with Ash.
+
+## Creating Skills
+
+1. Create YAML file in `~/.ash/workspace/skills/`
+2. Define name, description, and inputs
+3. Write script using bash
+4. Add config section if needed
+
+Skills appear as tools to the LLM.

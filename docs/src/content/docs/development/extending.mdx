@@ -1,0 +1,210 @@
+---
+title: Extending Ash
+description: Adding tools, skills, and providers
+sidebar:
+  order: 4
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Extend Ash with custom tools, skills, and providers.
+
+## Adding Tools
+
+Tools are Python classes that implement the `Tool` interface.
+
+### Tool Interface
+
+```python
+from abc import ABC, abstractmethod
+from pydantic import BaseModel
+from ash.tools.base import Tool, ToolContext, ToolResult
+
+class MyToolInput(BaseModel):
+    """Input schema for validation."""
+    query: str
+    limit: int = 10
+
+class MyTool(Tool):
+    @property
+    def name(self) -> str:
+        return "my_tool"
+
+    @property
+    def description(self) -> str:
+        return "Description shown to the LLM"
+
+    @property
+    def input_schema(self) -> type[BaseModel]:
+        return MyToolInput
+
+    async def execute(
+        self,
+        input: MyToolInput,
+        context: ToolContext,
+    ) -> ToolResult:
+        # Implementation
+        result = await do_something(input.query)
+        return ToolResult(success=True, output=result)
+```
+
+### Registering Tools
+
+Add to the tool registry in your application:
+
+```python
+from ash.tools.registry import ToolRegistry
+
+registry = ToolRegistry()
+registry.register(MyTool())
+```
+
+## Adding Skills
+
+Skills are YAML-defined capabilities executed in the sandbox.
+
+### Skill Format
+
+Create `~/.ash/workspace/skills/my_skill.yaml`:
+
+```yaml
+name: my_skill
+description: What this skill does
+
+requirements:
+  bins:
+    - curl
+  env:
+    - API_KEY
+
+inputs:
+  query:
+    type: string
+    description: The search query
+    required: true
+  format:
+    type: string
+    description: Output format
+    default: json
+
+script: |
+  curl -s "https://api.example.com/search?q=$query&format=$format" \
+    -H "Authorization: Bearer $API_KEY"
+```
+
+### Skill Configuration
+
+Add config in `config.toml`:
+
+```toml
+[skills.my_skill]
+api_key = "secret"
+```
+
+Config values become environment variables in the script.
+
+## Adding Providers
+
+Providers handle communication channels.
+
+### Provider Interface
+
+```python
+from ash.providers.base import Provider, IncomingMessage, OutgoingMessage
+
+class MyProvider(Provider):
+    @property
+    def name(self) -> str:
+        return "my_provider"
+
+    async def start(self, handler) -> None:
+        """Start receiving messages."""
+        # Set up message reception
+        # Call handler(message) for each incoming message
+
+    async def stop(self) -> None:
+        """Clean up resources."""
+
+    async def send(self, message: OutgoingMessage) -> str:
+        """Send message, return message ID."""
+
+    async def send_streaming(
+        self,
+        chat_id: str,
+        stream,
+        reply_to=None,
+    ) -> str:
+        """Stream response with live updates."""
+
+    async def edit(self, message_id: str, content: str) -> None:
+        """Edit existing message."""
+
+    async def delete(self, message_id: str) -> None:
+        """Delete message."""
+```
+
+### Example: Discord Provider
+
+```python
+import discord
+from ash.providers.base import Provider
+
+class DiscordProvider(Provider):
+    def __init__(self, token: str, allowed_channels: list[str]):
+        self.client = discord.Client()
+        self.token = token
+        self.allowed_channels = allowed_channels
+        self.handler = None
+
+    async def start(self, handler) -> None:
+        self.handler = handler
+
+        @self.client.event
+        async def on_message(message):
+            if message.author.bot:
+                return
+            if str(message.channel.id) not in self.allowed_channels:
+                return
+
+            incoming = IncomingMessage(
+                id=str(message.id),
+                chat_id=str(message.channel.id),
+                user_id=str(message.author.id),
+                content=message.content,
+            )
+            await handler(incoming)
+
+        await self.client.start(self.token)
+
+    async def send(self, message: OutgoingMessage) -> str:
+        channel = self.client.get_channel(int(message.chat_id))
+        sent = await channel.send(message.content)
+        return str(sent.id)
+```
+
+## Adding LLM Providers
+
+For new LLM backends:
+
+```python
+from ash.llm.base import LLMProvider
+
+class MyLLMProvider(LLMProvider):
+    @property
+    def name(self) -> str:
+        return "my_llm"
+
+    async def complete(self, messages, **kwargs):
+        # Call your LLM API
+        pass
+
+    async def stream(self, messages, **kwargs):
+        # Yield streaming chunks
+        pass
+
+    async def embed(self, texts, **kwargs):
+        # Generate embeddings
+        pass
+```
+
+Register in `src/ash/llm/registry.py`.
