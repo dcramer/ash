@@ -14,6 +14,9 @@ importers:
       astro:
         specifier: ^5.0.0
         version: 5.16.8(rollup@4.55.1)(typescript@5.9.3)
+      unist-util-visit:
+        specifier: ^5.0.0
+        version: 5.0.0
 
 packages:
 

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@astrojs/starlight": "^0.30.0",
-    "astro": "^5.0.0"
+    "astro": "^5.0.0",
+    "unist-util-visit": "^5.0.0"
   }
 }

@@ -1,9 +1,26 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import { visit } from "unist-util-visit";
+
+const base = "/ash";
+
+/** Rehype plugin to prefix internal links with base path */
+function rehypeBaseLinks() {
+  return (tree) => {
+    visit(tree, "element", (node) => {
+      if (node.tagName === "a" && node.properties?.href?.startsWith("/")) {
+        node.properties.href = base + node.properties.href;
+      }
+    });
+  };
+}
 
 export default defineConfig({
   site: "https://dcramer.github.io",
-  base: "/ash",
+  base,
+  markdown: {
+    rehypePlugins: [rehypeBaseLinks],
+  },
   integrations: [
     starlight({
       title: "Ash",

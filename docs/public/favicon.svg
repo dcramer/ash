@@ -1,10 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <defs>
-    <linearGradient id="ember" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ff8c5a"/>
-      <stop offset="100%" stop-color="#ff6b35"/>
-    </linearGradient>
-  </defs>
-  <rect width="128" height="128" rx="16" fill="#0d0d0d"/>
-  <text x="64" y="88" font-family="system-ui, sans-serif" font-size="64" font-weight="bold" fill="url(#ember)" text-anchor="middle">A</text>
+  <rect width="128" height="128" rx="24" fill="#09090b"/>
+  <!-- Abstract ember/flame mark - monochrome white -->
+  <g transform="translate(32, 20) scale(2)" fill="#fafafa">
+    <path d="M16 2C16 2 12 8 12 14c0 4 2 6 4 6s4-2 4-6c0-6-4-12-4-12z"/>
+    <path d="M10 10c0 0-3 4-3 8 0 3 1.5 4.5 3 4.5s3-1.5 3-4.5c0-4-3-8-3-8z" opacity="0.7"/>
+    <path d="M22 10c0 0 3 4 3 8 0 3-1.5 4.5-3 4.5s-3-1.5-3-4.5c0-4 3-8 3-8z" opacity="0.7"/>
+  </g>
 </svg>

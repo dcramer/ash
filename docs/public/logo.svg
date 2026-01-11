@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="#ffffff">
+  <!-- Abstract ember/flame mark - three rising shapes, monochrome white -->
+  <path d="M16 2C16 2 12 8 12 14c0 4 2 6 4 6s4-2 4-6c0-6-4-12-4-12z"/>
+  <path d="M10 10c0 0-3 4-3 8 0 3 1.5 4.5 3 4.5s3-1.5 3-4.5c0-4-3-8-3-8z" opacity="0.7"/>
+  <path d="M22 10c0 0 3 4 3 8 0 3-1.5 4.5-3 4.5s-3-1.5-3-4.5c0-4 3-8 3-8z" opacity="0.7"/>
+</svg>

@@ -14,56 +14,42 @@ Get Ash up and running with these steps.
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
 - Docker (for sandboxed command execution)
-- An Anthropic or OpenAI API key
+
+**API Keys Required:**
+- **Anthropic** — Powers the LLM (Claude)
+- **OpenAI** — Powers memory embeddings
+
+<Aside type="note">
+  You'll need both API keys for the full experience. Anthropic handles chat, OpenAI handles semantic memory search.
+</Aside>
 
 ## Installation
 
 <Steps>
 
-1. **Clone the repository**
+1. **Clone and install**
 
    ```bash
    git clone https://github.com/dcramer/ash.git
    cd ash
-   ```
-
-2. **Install dependencies**
-
-   ```bash
    uv sync --all-groups
    ```
 
-3. **Set your API key**
-
-   ```bash
-   export ANTHROPIC_API_KEY=your-api-key
-   ```
-
-   Or for OpenAI:
-
-   ```bash
-   export OPENAI_API_KEY=your-api-key
-   ```
-
-4. **Run the setup wizard**
+2. **Run setup**
 
    ```bash
    uv run ash setup
    ```
 
-   The wizard creates `~/.ash/config.toml` with your API key and model preferences.
+   The wizard walks you through configuration—API keys, model preferences, everything. It creates `~/.ash/config.toml` for you.
 
-   **Tip:** Choose Haiku as your default model (fast, cost-effective), then add a "sonnet" alias when prompted for complex tasks requiring more reasoning power.
-
-5. **Build the sandbox**
+3. **Build the sandbox**
 
    ```bash
    uv run ash sandbox build
    ```
 
-   This builds the Docker image for secure command execution.
-
-6. **Run database migrations**
+4. **Initialize the database**
 
    ```bash
    uv run ash upgrade
@@ -73,34 +59,28 @@ Get Ash up and running with these steps.
 
 ## Start Chatting
 
-Interactive mode:
-
 ```bash
 uv run ash chat
 ```
 
-Single prompt:
+Or run a single prompt:
 
 ```bash
-uv run ash chat "What's the weather like?"
+uv run ash chat "Find all TODO comments in my codebase"
 ```
-
-<Aside type="tip">
-  Use `--no-streaming` if you prefer to see complete responses rather than streaming output.
-</Aside>
 
 ## Run as a Server
 
-Start the server for Telegram integration:
+For Telegram integration or API access:
 
 ```bash
 uv run ash serve
 ```
 
-The server runs on `http://127.0.0.1:8080` by default.
+Runs on `http://127.0.0.1:8080` by default.
 
 ## Next Steps
 
-- [Installation](../installation/) - Detailed installation options
-- [Configuration Overview](../../configuration/overview/) - Configure models, providers, and features
-- [CLI Reference](../../cli/overview/) - Full command reference
+- [Installation](/getting-started/installation/) — Detailed setup options
+- [Configuration](/configuration/overview/) — All the knobs you can turn
+- [CLI Reference](/cli/overview/) — Full command reference
