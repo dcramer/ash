@@ -54,6 +54,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.8.0",
     "pre-commit>=4.0.0",
+    "ty>=0.0.1a11",
 ]
 sentry = [
     "sentry-sdk[fastapi]>=2.0.0",
@@ -74,6 +75,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.8.0",
     "pre-commit>=4.0.0",
+    "ty>=0.0.1a11",
 ]
 sentry = [
     "sentry-sdk[fastapi]>=2.0.0",

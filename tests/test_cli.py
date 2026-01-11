@@ -14,7 +14,7 @@ class TestConfigCommand:
         if result.exit_code == 0:
             assert config_path.exists()
             content = config_path.read_text()
-            assert "[default_llm]" in content
+            assert "[models.default]" in content
 
     def test_config_init_existing_file_fails(self, cli_runner, tmp_path):
         config_path = tmp_path / "config.toml"
@@ -100,9 +100,7 @@ class TestMemoryCommand:
         assert "--query" in result.stdout or "required" in result.stdout.lower()
 
     def test_memory_add_requires_query(self, cli_runner, config_file):
-        result = cli_runner.invoke(
-            app, ["memory", "add", "--config", str(config_file)]
-        )
+        result = cli_runner.invoke(app, ["memory", "add", "--config", str(config_file)])
         assert result.exit_code == 1
         assert "--query" in result.stdout or "required" in result.stdout.lower()
 
@@ -182,7 +180,9 @@ class TestUpgradeCommand:
     def test_upgrade_help(self, cli_runner):
         result = cli_runner.invoke(app, ["upgrade", "--help"])
         assert result.exit_code == 0
-        assert "migration" in result.stdout.lower() or "upgrade" in result.stdout.lower()
+        assert (
+            "migration" in result.stdout.lower() or "upgrade" in result.stdout.lower()
+        )
 
 
 class TestSandboxCommand:

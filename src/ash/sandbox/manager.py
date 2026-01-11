@@ -139,12 +139,14 @@ class SandboxManager:
         # Build environment with proxy settings if configured
         env = dict(environment) if environment else {}
         if self._config.http_proxy:
-            env.update({
-                "HTTP_PROXY": self._config.http_proxy,
-                "HTTPS_PROXY": self._config.http_proxy,
-                "http_proxy": self._config.http_proxy,
-                "https_proxy": self._config.http_proxy,
-            })
+            env.update(
+                {
+                    "HTTP_PROXY": self._config.http_proxy,
+                    "HTTPS_PROXY": self._config.http_proxy,
+                    "http_proxy": self._config.http_proxy,
+                    "https_proxy": self._config.http_proxy,
+                }
+            )
 
         # Build volume mounts
         volumes = dict(extra_volumes) if extra_volumes else {}
@@ -177,9 +179,9 @@ class SandboxManager:
             # Writable areas via tmpfs (with size limits and security options)
             # uid=1000,gid=1000 matches the sandbox user created in Dockerfile
             "tmpfs": {
-                "/tmp": "size=64m,noexec,nosuid,nodev,uid=1000,gid=1000",
+                "/tmp": "size=64m,noexec,nosuid,nodev,uid=1000,gid=1000",  # noqa: S108
                 "/home/sandbox": "size=64m,noexec,nosuid,nodev,uid=1000,gid=1000",
-                "/var/tmp": "size=32m,noexec,nosuid,nodev,uid=1000,gid=1000",
+                "/var/tmp": "size=32m,noexec,nosuid,nodev,uid=1000,gid=1000",  # noqa: S108
                 "/run": "size=16m,noexec,nosuid,nodev,uid=1000,gid=1000",
             },
         }
@@ -292,9 +294,7 @@ class SandboxManager:
             exec_config["workdir"] = work_dir
 
         if environment:
-            exec_config["environment"] = [
-                f"{k}={v}" for k, v in environment.items()
-            ]
+            exec_config["environment"] = [f"{k}={v}" for k, v in environment.items()]
 
         loop = asyncio.get_event_loop()
 

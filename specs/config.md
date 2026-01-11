@@ -2,7 +2,7 @@
 
 > TOML configuration loading and validation
 
-Files: src/ash/config/loader.py, src/ash/config/models.py, src/ash/config/paths.py
+Files: src/ash/config/loader.py, src/ash/config/models.py, src/ash/config/paths.py, src/ash/cli/app.py
 
 ## Requirements
 
@@ -13,13 +13,18 @@ Files: src/ash/config/loader.py, src/ash/config/models.py, src/ash/config/paths.
 - Validate configuration against Pydantic models
 - Provide sensible defaults for all optional fields
 - Support multiple LLM providers (anthropic, openai)
-- Support multiple messaging providers (telegram)
+- Support named model configurations (`[models.<alias>]`)
+- Require a `default` model alias
+- Support per-skill model overrides (`[skills.<name>] model = "<alias>"`)
+- Generate config template programmatically (no static file)
 
 ### SHOULD
 
 - Auto-discover config file locations (~/.ash/config.toml, ./config.toml)
 - Merge configs from multiple sources
 - Validate provider-specific settings
+- Use Haiku as default model (fast, cost-effective)
+- Suggest Sonnet alias for complex tasks
 
 ### MAY
 
@@ -30,20 +35,25 @@ Files: src/ash/config/loader.py, src/ash/config/models.py, src/ash/config/paths.
 
 ```python
 class AshConfig(BaseModel):
-    llm: LLMConfig
+    models: dict[str, ModelConfig]  # Named model configurations
+    skills: dict[str, dict[str, str]]  # Per-skill config (model overrides)
     sandbox: SandboxConfig
     memory: MemoryConfig
     server: ServerConfig
     telegram: TelegramConfig | None
     brave_search: BraveSearchConfig | None
+    embeddings: EmbeddingsConfig | None
+    anthropic: ProviderConfig | None
+    openai: ProviderConfig | None
 
 def load_config(path: Path | None = None) -> AshConfig
 def get_default_config() -> AshConfig
-def resolve_env_secrets(config: AshConfig) -> AshConfig
 ```
 
 ```bash
-ash config init [--path PATH]      # Create config from template
+ash init [--path PATH]             # Generate config template
+ash setup [--section SECTION]      # Interactive wizard (creates template first)
+ash config init [--path PATH]      # Alias for ash init
 ash config show [--path PATH]      # Display current config
 ash config validate [--path PATH]  # Validate config file
 ```
@@ -51,61 +61,96 @@ ash config validate [--path PATH]  # Validate config file
 ## Configuration
 
 ```toml
-[llm]
-provider = "anthropic"  # or "openai"
-model = "claude-sonnet-4-20250514"
-
+# Provider API keys
 [anthropic]
 api_key = "..."  # or ANTHROPIC_API_KEY env
 
 [openai]
 api_key = "..."  # or OPENAI_API_KEY env
 
+# Named model configurations
+[models.default]
+provider = "anthropic"
+model = "claude-haiku-4-5-20251001"
+temperature = 0.7
+max_tokens = 4096
+
+[models.sonnet]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+max_tokens = 8192
+
+# Per-skill model overrides
+[skills.debug]
+model = "sonnet"
+
+[skills.code-review]
+model = "sonnet"
+
 [sandbox]
 timeout = 60
 memory_limit = "512m"
-network_mode = "none"
+network_mode = "bridge"
 workspace_access = "rw"
 
 [telegram]
 bot_token = "..."  # or TELEGRAM_BOT_TOKEN env
-allowed_users = ["@username"]
+allowed_users = ["123456789"]
 
 [brave_search]
-api_key = "..."  # or BRAVE_API_KEY env
+api_key = "..."  # or BRAVE_SEARCH_API_KEY env
+
+[embeddings]
+provider = "openai"
+model = "text-embedding-3-small"
 
 [server]
-host = "0.0.0.0"
-port = 8000
+host = "127.0.0.1"
+port = 8080
 ```
+
+## Model Resolution
+
+For skills:
+1. `[skills.<name>] model` in config (per-skill override)
+2. `model` in SKILL.md frontmatter
+3. `"default"` fallback
+
+For API keys:
+1. Provider config (`[anthropic].api_key`)
+2. Environment variable (`ANTHROPIC_API_KEY`)
 
 ## Behaviors
 
 | Input | Output | Notes |
 |-------|--------|-------|
 | Valid TOML | AshConfig instance | Parsed and validated |
-| Missing file | Error or default | Depends on context |
+| Missing file | FileNotFoundError | No implicit default |
 | Invalid TOML | TOMLDecodeError | Parse error |
 | Invalid values | ValidationError | Pydantic validation |
-| ENV override | Merged config | Environment takes precedence |
+| ENV override | Merged config | Environment fills missing |
+| Missing default model | ValidationError | Required |
 
 ## Errors
 
 | Condition | Response |
 |-----------|----------|
-| File not found | ConfigError: "Config file not found" |
-| Invalid TOML syntax | ConfigError with parse error details |
+| File not found | FileNotFoundError with search paths |
+| Invalid TOML syntax | TOMLDecodeError with parse details |
 | Invalid provider | ValidationError: "Invalid provider" |
 | Missing required field | ValidationError with field name |
+| Missing default model | ValidationError: "models.default required" |
 
 ## Verification
 
 ```bash
 uv run pytest tests/test_config.py -v
-ash config validate --path config.example.toml
+ash init --path /tmp/test.toml && ash config validate --path /tmp/test.toml
 ```
 
-- Example config parses successfully
+- Generated config validates successfully
 - Invalid TOML rejected
 - Invalid provider rejected
+- Missing default model rejected
 - Environment overrides work
+- Per-skill model override resolves correctly

@@ -265,7 +265,9 @@ class TestWebSearchTool:
         )
         assert tool.name == "web_search"
 
-    async def test_missing_query_returns_error(self, mock_sandbox_config, mock_executor):
+    async def test_missing_query_returns_error(
+        self, mock_sandbox_config, mock_executor
+    ):
         """Test that missing query returns error."""
         tool = WebSearchTool(
             api_key="test-key",
@@ -415,7 +417,9 @@ class TestWebSearchTool:
         call_args = mock_executor.execute.call_args
         assert "5" in call_args[0][0]  # Command string contains capped count
 
-    async def test_special_characters_in_query(self, mock_sandbox_config, mock_executor):
+    async def test_special_characters_in_query(
+        self, mock_sandbox_config, mock_executor
+    ):
         """Test that special characters in query are handled safely."""
         mock_executor.execute.return_value = ExecutionResult(
             exit_code=0,

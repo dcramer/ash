@@ -218,6 +218,7 @@ class TestUserProfileOperations:
         )
         assert profile.username == "newname"
 
+
 class TestToolExecutionOperations:
     """Tests for tool execution logging."""
 
@@ -430,7 +431,11 @@ class TestMemoryManager:
         assert len(results) == 1
         assert results[0].content == "Result 1"
         mock_retriever.search_all.assert_called_once_with(
-            "test query", limit=5, subject_person_id=None, owner_user_id=None
+            "test query",
+            limit=5,
+            subject_person_id=None,
+            owner_user_id=None,
+            chat_id=None,
         )
 
 
@@ -464,7 +469,8 @@ class TestRememberTool:
             source="remember_tool",
             expires_in_days=None,
             owner_user_id="u1",
-            subject_person_id=None,
+            chat_id=None,
+            subject_person_ids=None,
         )
 
     async def test_remember_with_expiration(self, remember_tool, mock_memory_manager):
@@ -480,7 +486,8 @@ class TestRememberTool:
             source="remember_tool",
             expires_in_days=30,
             owner_user_id=None,
-            subject_person_id=None,
+            chat_id=None,
+            subject_person_ids=None,
         )
 
     async def test_remember_missing_content(self, remember_tool):
@@ -502,7 +509,236 @@ class TestRememberTool:
         )
 
         assert result.is_error
-        assert "Failed to store memory" in result.content
+        assert "Failed to store" in result.content
+        assert "DB error" in result.content
+
+
+class TestMemorySupersession:
+    """Tests for memory supersession functionality."""
+
+    async def test_mark_memory_superseded(self, memory_store):
+        """Test marking a memory as superseded."""
+        # Create old memory
+        old_memory = await memory_store.add_memory(
+            content="User's favorite color is red",
+            owner_user_id="user-1",
+        )
+        # Create new memory
+        new_memory = await memory_store.add_memory(
+            content="User's favorite color is blue",
+            owner_user_id="user-1",
+        )
+
+        # Mark old as superseded
+        result = await memory_store.mark_memory_superseded(
+            memory_id=old_memory.id,
+            superseded_by_id=new_memory.id,
+        )
+
+        assert result is True
+
+        # Verify the old memory is updated
+        old_refreshed = await memory_store.get_memory(old_memory.id)
+        assert old_refreshed.superseded_at is not None
+        assert old_refreshed.superseded_by_id == new_memory.id
+
+    async def test_mark_memory_superseded_not_found(self, memory_store):
+        """Test marking nonexistent memory as superseded."""
+        result = await memory_store.mark_memory_superseded(
+            memory_id="nonexistent-id",
+            superseded_by_id="some-id",
+        )
+        assert result is False
+
+    async def test_get_memories_excludes_superseded(self, memory_store):
+        """Test that get_memories excludes superseded memories by default."""
+        # Create old memory
+        old_memory = await memory_store.add_memory(
+            content="Old fact",
+            owner_user_id="user-1",
+        )
+        # Create new memory
+        new_memory = await memory_store.add_memory(
+            content="New fact",
+            owner_user_id="user-1",
+        )
+        # Supersede old memory
+        await memory_store.mark_memory_superseded(
+            memory_id=old_memory.id,
+            superseded_by_id=new_memory.id,
+        )
+
+        # Default: should only get the new memory
+        memories = await memory_store.get_memories(include_superseded=False)
+        assert len(memories) == 1
+        assert memories[0].content == "New fact"
+
+    async def test_get_memories_includes_superseded(self, memory_store):
+        """Test that get_memories can include superseded memories."""
+        old_memory = await memory_store.add_memory(content="Old fact")
+        new_memory = await memory_store.add_memory(content="New fact")
+        await memory_store.mark_memory_superseded(
+            memory_id=old_memory.id,
+            superseded_by_id=new_memory.id,
+        )
+
+        # With include_superseded=True: should get both
+        memories = await memory_store.get_memories(include_superseded=True)
+        assert len(memories) == 2
+
+
+class TestMemoryManagerSupersession:
+    """Tests for MemoryManager supersession logic."""
+
+    @pytest.fixture
+    def mock_retriever(self):
+        """Create a mock semantic retriever."""
+        retriever = MagicMock()
+        retriever.search_messages = AsyncMock(return_value=[])
+        retriever.search_memories = AsyncMock(return_value=[])
+        retriever.search_all = AsyncMock(return_value=[])
+        retriever.index_message = AsyncMock()
+        retriever.index_memory = AsyncMock()
+        return retriever
+
+    @pytest.fixture
+    async def memory_manager(self, memory_store, mock_retriever, db_session):
+        """Create a memory manager with mocked retriever."""
+        return MemoryManager(
+            store=memory_store,
+            retriever=mock_retriever,
+            db_session=db_session,
+        )
+
+    async def test_add_memory_supersedes_conflicting(
+        self, memory_manager, memory_store, mock_retriever
+    ):
+        """Test that adding a memory supersedes conflicting ones."""
+        # Create first memory
+        old_memory = await memory_store.add_memory(
+            content="User's favorite color is red",
+            owner_user_id="user-1",
+        )
+
+        # Mock the retriever to return the old memory as a conflict
+        mock_retriever.search_memories.return_value = [
+            SearchResult(
+                id=old_memory.id,
+                content=old_memory.content,
+                similarity=0.85,  # Above 0.75 threshold
+                source_type="memory",
+                metadata={"subject_person_id": None},
+            )
+        ]
+
+        # Add new conflicting memory via manager (which triggers supersession)
+        new_memory = await memory_manager.add_memory(
+            content="User's favorite color is blue",
+            owner_user_id="user-1",
+        )
+
+        # Verify old memory was superseded
+        old_refreshed = await memory_store.get_memory(old_memory.id)
+        assert old_refreshed.superseded_at is not None
+        assert old_refreshed.superseded_by_id == new_memory.id
+
+    async def test_add_memory_no_conflict_below_threshold(
+        self, memory_manager, memory_store, mock_retriever
+    ):
+        """Test that memories below threshold are not superseded."""
+        old_memory = await memory_store.add_memory(
+            content="User likes pizza",
+            owner_user_id="user-1",
+        )
+
+        # Mock retriever to return the old memory with low similarity
+        mock_retriever.search_memories.return_value = [
+            SearchResult(
+                id=old_memory.id,
+                content=old_memory.content,
+                similarity=0.5,  # Below 0.75 threshold
+                source_type="memory",
+                metadata={},
+            )
+        ]
+
+        # Add unrelated memory
+        await memory_manager.add_memory(
+            content="User likes coffee",
+            owner_user_id="user-1",
+        )
+
+        # Old memory should NOT be superseded
+        old_refreshed = await memory_store.get_memory(old_memory.id)
+        assert old_refreshed.superseded_at is None
+
+    async def test_find_conflicting_memories_filters_by_subject(
+        self, memory_manager, mock_retriever
+    ):
+        """Test that conflict detection respects subject filtering."""
+        # Mock retriever to return memories about different subjects
+        mock_retriever.search_memories.return_value = [
+            SearchResult(
+                id="mem-1",
+                content="Sarah likes pizza",
+                similarity=0.9,
+                source_type="memory",
+                metadata={"subject_person_ids": ["person-1"]},  # About Sarah
+            ),
+            SearchResult(
+                id="mem-2",
+                content="Michael likes sushi",
+                similarity=0.85,
+                source_type="memory",
+                metadata={"subject_person_ids": ["person-2"]},  # About Michael
+            ),
+        ]
+
+        # Find conflicts for memories about Sarah (person-1)
+        conflicts = await memory_manager.find_conflicting_memories(
+            new_content="Sarah likes pasta",
+            owner_user_id="user-1",
+            subject_person_ids=["person-1"],
+        )
+
+        # Only memory about Sarah should be a conflict
+        assert len(conflicts) == 1
+        assert conflicts[0][0] == "mem-1"
+
+    async def test_subjectless_memory_does_not_supersede_subject_memory(
+        self,
+        memory_manager,
+        mock_retriever,
+    ):
+        """Test that memories without subjects don't supersede person-specific memories."""
+        # Mock retriever to return memories WITH subjects
+        mock_retriever.search_memories.return_value = [
+            SearchResult(
+                id="mem-1",
+                content="Sarah likes pizza",
+                similarity=0.9,
+                source_type="memory",
+                metadata={"subject_person_ids": ["person-1"]},  # About Sarah
+            ),
+            SearchResult(
+                id="mem-2",
+                content="General food preferences",
+                similarity=0.85,
+                source_type="memory",
+                metadata={"subject_person_ids": None},  # No subject
+            ),
+        ]
+
+        # Find conflicts for a memory with NO subjects
+        conflicts = await memory_manager.find_conflicting_memories(
+            new_content="Family likes pizza",
+            owner_user_id="user-1",
+            subject_person_ids=None,  # No subjects
+        )
+
+        # Only the subjectless memory should be a conflict
+        assert len(conflicts) == 1
+        assert conflicts[0][0] == "mem-2"
 
 
 class TestRecallTool:

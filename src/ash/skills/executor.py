@@ -8,7 +8,8 @@ from typing import Any
 from ash.config.models import AshConfig, ConfigError
 from ash.llm import LLMProvider, ToolDefinition
 from ash.llm.registry import create_llm_provider
-from ash.llm.types import Message, Role, TextContent, ToolUse
+from ash.llm.types import ContentBlock, Message, Role
+from ash.llm.types import ToolResult as LLMToolResult
 from ash.skills.base import SkillContext, SkillDefinition, SkillResult
 from ash.skills.registry import SkillRegistry
 from ash.tools.base import ToolContext
@@ -42,23 +43,30 @@ class SkillExecutor:
     ) -> tuple[LLMProvider, str, float | None, int]:
         """Resolve model alias to provider and model config.
 
+        Resolution order:
+        1. Per-skill config override: [skills.<name>] model = "<alias>"
+        2. Skill's preferred_model from SKILL.md
+        3. "default" fallback
+
         Args:
             skill: Skill definition with preferred_model.
 
         Returns:
             Tuple of (provider, model, temperature, max_tokens).
         """
-        alias = skill.preferred_model or "default"
+        # Check per-skill config override first
+        skill_config = self._config.skills.get(skill.name, {})
+        alias = skill_config.get("model") or skill.model or "default"
 
         try:
             model_config = self._config.get_model(alias)
         except ConfigError:
-            logger.warning(
-                f"Model alias '{alias}' not found, using default model"
-            )
+            logger.warning(f"Model alias '{alias}' not found, using default model")
             model_config = self._config.default_model
 
-        api_key = self._config.resolve_api_key(alias if alias in self._config.models else "default")
+        api_key = self._config.resolve_api_key(
+            alias if alias in self._config.models else "default"
+        )
         provider = create_llm_provider(
             model_config.provider,
             api_key=api_key.get_secret_value() if api_key else None,
@@ -109,9 +117,7 @@ class SkillExecutor:
 
         return None
 
-    def _get_tool_definitions(
-        self, skill: SkillDefinition
-    ) -> list[ToolDefinition]:
+    def _get_tool_definitions(self, skill: SkillDefinition) -> list[ToolDefinition]:
         """Get tool definitions for the skill.
 
         If skill has required_tools, only include those.
@@ -260,7 +266,7 @@ class SkillExecutor:
                 env=skill_env,
             )
 
-            tool_results: list[TextContent | ToolUse | Any] = []
+            tool_results: list[ContentBlock] = []
             for tool_use in tool_uses:
                 logger.debug(f"Skill '{skill_name}' executing tool: {tool_use.name}")
 
@@ -269,8 +275,6 @@ class SkillExecutor:
                     tool_use.input,
                     tool_context,
                 )
-
-                from ash.llm.types import ToolResult as LLMToolResult
 
                 tool_results.append(
                     LLMToolResult(

@@ -15,7 +15,7 @@ BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 
 # Python script to execute inside sandbox
 # This is more robust than curl+jq for URL encoding and JSON parsing
-SEARCH_SCRIPT = '''
+SEARCH_SCRIPT = """
 import json, os, sys, urllib.request, urllib.parse
 
 query = sys.argv[1]
@@ -73,7 +73,7 @@ for i, r in enumerate(results, 1):
     print(f"   URL: {url}")
     print(f"   {desc}")
     print()
-'''
+"""
 
 
 class WebSearchTool(Tool):
@@ -224,7 +224,9 @@ class WebSearchTool(Tool):
 
             # Count results (each result starts with a number followed by dot)
             result_count = sum(
-                1 for line in output.split("\n") if line and line[0].isdigit() and ". " in line
+                1
+                for line in output.split("\n")
+                if line and line[0].isdigit() and ". " in line
             )
 
             return ToolResult.success(

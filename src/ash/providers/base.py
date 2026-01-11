@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 
@@ -31,6 +32,7 @@ class IncomingMessage:
     reply_to_message_id: str | None = None
     images: list[ImageAttachment] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime | None = None  # When the message was sent
 
     @property
     def has_images(self) -> bool:

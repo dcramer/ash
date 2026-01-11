@@ -115,7 +115,9 @@ class SessionState:
         older_tokens = token_counts[:recency_start]
 
         included_older: list[Message] = []
-        for msg, tokens in zip(reversed(older_messages), reversed(older_tokens)):
+        for msg, tokens in zip(
+            reversed(older_messages), reversed(older_tokens), strict=False
+        ):
             if tokens <= remaining_budget:
                 included_older.insert(0, msg)
                 remaining_budget -= tokens
@@ -157,7 +159,9 @@ class SessionState:
         result: list[Message] = []
         remaining = budget
 
-        for msg, tokens in zip(reversed(messages), reversed(token_counts)):
+        for msg, tokens in zip(
+            reversed(messages), reversed(token_counts), strict=False
+        ):
             if tokens <= remaining:
                 result.insert(0, msg)
                 remaining -= tokens

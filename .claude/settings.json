@@ -38,6 +38,7 @@
       "Bash(uv run python:*)",
       "Bash(uv run pytest:*)",
       "Bash(uv run ruff:*)",
+      "Bash(uv run ty:*)",
       "Bash(uv run alembic:*)",
       "Bash(uv run ash:*)",
       "Bash(uv sync:*)",

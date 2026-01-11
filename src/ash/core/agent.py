@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     from ash.skills import SkillExecutor, SkillRegistry
 
 logger = logging.getLogger(__name__)
+
+# Callback type for tool start notifications
+OnToolStartCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 MAX_TOOL_ITERATIONS = 25
 
@@ -100,13 +103,17 @@ class Agent:
     def _build_system_prompt(
         self,
         context: RetrievedContext | None = None,
-        known_people: list["Person"] | None = None,
+        known_people: list[Person] | None = None,
+        conversation_gap_minutes: float | None = None,
+        has_reply_context: bool = False,
     ) -> str:
         """Build system prompt with optional memory context.
 
         Args:
             context: Retrieved memory context.
             known_people: List of known people for the user.
+            conversation_gap_minutes: Time since last message in conversation.
+            has_reply_context: Whether this message is a reply with context.
 
         Returns:
             Complete system prompt.
@@ -115,6 +122,8 @@ class Agent:
             runtime=self._runtime,
             memory=context,
             known_people=known_people,
+            conversation_gap_minutes=conversation_gap_minutes,
+            has_reply_context=has_reply_context,
         )
         return self._prompt_builder.build(prompt_context)
 
@@ -140,6 +149,7 @@ class Agent:
         user_message: str,
         session: SessionState,
         user_id: str | None = None,
+        on_tool_start: OnToolStartCallback | None = None,
     ) -> AgentResponse:
         """Process a user message and return response.
 
@@ -152,6 +162,8 @@ class Agent:
             user_id: Optional user ID for the current message sender.
                 In group chats, this should be the actual sender, not session.user_id.
                 When provided, this is used for memory retrieval and known_people lookup.
+            on_tool_start: Optional callback invoked before each tool execution.
+                Receives tool name and input dict.
 
         Returns:
             Agent response.
@@ -180,12 +192,19 @@ class Agent:
             # Get known people for context
             if effective_user_id:
                 try:
-                    known_people = await self._memory.get_known_people(effective_user_id)
+                    known_people = await self._memory.get_known_people(
+                        effective_user_id
+                    )
                 except Exception:
                     logger.warning("Failed to get known people", exc_info=True)
 
-        # Build system prompt with memory context and known people
-        system_prompt = self._build_system_prompt(memory_context, known_people)
+        # Build system prompt with memory context, known people, and conversation gap
+        system_prompt = self._build_system_prompt(
+            context=memory_context,
+            known_people=known_people,
+            conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
+            has_reply_context=session.metadata.get("has_reply_context", False),
+        )
 
         # Calculate message token budget (context budget - system prompt - buffer)
         system_tokens = estimate_tokens(system_prompt)
@@ -236,7 +255,9 @@ class Agent:
                             assistant_response=final_text,
                         )
                     except Exception:
-                        logger.warning("Failed to persist turn to memory", exc_info=True)
+                        logger.warning(
+                            "Failed to persist turn to memory", exc_info=True
+                        )
 
                 return AgentResponse(
                     text=final_text,
@@ -258,6 +279,10 @@ class Agent:
                 if len(input_str) > 200:
                     input_str = input_str[:200] + "..."
                 logger.info(f"Tool call: {tool_use.name} | input: {input_str}")
+
+                # Notify callback before execution
+                if on_tool_start:
+                    await on_tool_start(tool_use.name, tool_use.input)
 
                 result = await self._tools.execute(
                     tool_use.name,
@@ -317,6 +342,7 @@ class Agent:
         user_message: str,
         session: SessionState,
         user_id: str | None = None,
+        on_tool_start: OnToolStartCallback | None = None,
     ) -> AsyncIterator[str]:
         """Process a user message with streaming response.
 
@@ -329,6 +355,8 @@ class Agent:
             user_id: Optional user ID for the current message sender.
                 In group chats, this should be the actual sender, not session.user_id.
                 When provided, this is used for memory retrieval and known_people lookup.
+            on_tool_start: Optional callback invoked before each tool execution.
+                Receives tool name and input dict.
 
         Yields:
             Text chunks.
@@ -357,12 +385,19 @@ class Agent:
             # Get known people for context
             if effective_user_id:
                 try:
-                    known_people = await self._memory.get_known_people(effective_user_id)
+                    known_people = await self._memory.get_known_people(
+                        effective_user_id
+                    )
                 except Exception:
                     logger.warning("Failed to get known people", exc_info=True)
 
-        # Build system prompt with memory context and known people
-        system_prompt = self._build_system_prompt(memory_context, known_people)
+        # Build system prompt with memory context, known people, and conversation gap
+        system_prompt = self._build_system_prompt(
+            context=memory_context,
+            known_people=known_people,
+            conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
+            has_reply_context=session.metadata.get("has_reply_context", False),
+        )
 
         # Calculate message token budget (context budget - system prompt - buffer)
         system_tokens = estimate_tokens(system_prompt)
@@ -453,7 +488,9 @@ class Agent:
                             assistant_response=accumulated_response,
                         )
                     except Exception:
-                        logger.warning("Failed to persist turn to memory", exc_info=True)
+                        logger.warning(
+                            "Failed to persist turn to memory", exc_info=True
+                        )
                 return
 
             # Get tool uses from what we just added
@@ -468,7 +505,9 @@ class Agent:
                             assistant_response=accumulated_response,
                         )
                     except Exception:
-                        logger.warning("Failed to persist turn to memory", exc_info=True)
+                        logger.warning(
+                            "Failed to persist turn to memory", exc_info=True
+                        )
                 return
 
             # Execute tools (non-streaming) with effective user_id (supports group chats)
@@ -479,15 +518,16 @@ class Agent:
                 provider=session.provider,
             )
 
-            yield "\n\n"  # Separator before tool results
-
             for tool_use in pending_tools:
                 # Log tool call with input (truncated)
                 input_str = str(tool_use.input)
                 if len(input_str) > 200:
                     input_str = input_str[:200] + "..."
                 logger.info(f"Tool call: {tool_use.name} | input: {input_str}")
-                yield f"[Running {tool_use.name}...]\n"
+
+                # Notify callback before execution
+                if on_tool_start:
+                    await on_tool_start(tool_use.name, tool_use.input)
 
                 result = await self._tools.execute(
                     tool_use.name,
@@ -508,8 +548,6 @@ class Agent:
                     content=result.content,
                     is_error=result.is_error,
                 )
-
-            yield "\n"  # Separator after tool execution
 
         # Max iterations - persist turn
         if self._memory and accumulated_response:

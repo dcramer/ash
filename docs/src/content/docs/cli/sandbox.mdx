@@ -23,6 +23,9 @@ Build the sandbox Docker image:
 ash sandbox build
 ```
 
+Options:
+- `--force`, `-f`: Rebuild even if image exists
+
 ### status
 
 Check sandbox status:
@@ -32,23 +35,9 @@ ash sandbox status
 ```
 
 Shows:
-- Image availability
-- Container runtime
-- Configuration
-
-### verify
-
-Run security verification tests:
-
-```bash
-ash sandbox verify
-```
-
-Tests:
-- Container isolation
-- Resource limits
-- Network restrictions
-- Filesystem access
+- Docker availability
+- Image status
+- Running containers
 
 ### clean
 
@@ -58,13 +47,8 @@ Remove stopped containers:
 ash sandbox clean
 ```
 
-### prompts
-
-Show test prompts for manual testing:
-
-```bash
-ash sandbox prompts
-```
+Options:
+- `--force`, `-f`: Also remove the sandbox image
 
 ## Examples
 
@@ -72,20 +56,30 @@ Initial setup:
 
 ```bash
 ash sandbox build
-ash sandbox verify
-```
-
-Check if sandbox is ready:
-
-```bash
 ash sandbox status
 ```
 
-Clean up after testing:
+Clean up containers:
 
 ```bash
 ash sandbox clean
 ```
+
+Full cleanup including image:
+
+```bash
+ash sandbox clean --force
+```
+
+## Verification
+
+For security verification, use pytest:
+
+```bash
+uv run pytest tests/test_sandbox_verify.py -v
+```
+
+For manual testing prompts, use the `/test-sandbox` skill.
 
 ## Troubleshooting
 
@@ -97,9 +91,9 @@ Ensure Docker is running:
 docker info
 ```
 
-### Verification fails
+### Container issues
 
-Check sandbox configuration:
+Check configuration:
 
 ```bash
 ash config show

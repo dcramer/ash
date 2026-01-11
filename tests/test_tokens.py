@@ -1,7 +1,5 @@
 """Tests for token estimation utilities."""
 
-import pytest
-
 from ash.core.tokens import estimate_message_tokens, estimate_tokens
 
 
@@ -82,7 +80,7 @@ class TestEstimateMessageTokens:
         assert result > estimate_tokens("Let me run that command.")
 
     def test_dataclass_content_blocks(self):
-        from ash.llm.types import TextContent, ToolResult, ToolUse
+        from ash.llm.types import TextContent, ToolUse
 
         blocks = [
             TextContent(text="Here's the result:"),

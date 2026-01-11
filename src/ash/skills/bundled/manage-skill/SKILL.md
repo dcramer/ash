@@ -82,7 +82,7 @@ Interpret the results and summarize for the user.
 ```markdown
 ---
 description: Short description of what the skill does
-preferred_model: default  # optional: model alias (default, fast, etc.)
+model: default  # optional: model alias (default, sonnet, etc.)
 max_iterations: 5         # optional: max tool iterations
 required_tools:           # optional: tools the skill needs
   - bash

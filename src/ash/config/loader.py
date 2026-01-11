@@ -134,7 +134,7 @@ def get_default_config() -> AshConfig:
         models={
             "default": ModelConfig(
                 provider="anthropic",
-                model="claude-sonnet-4-5-20250929",
+                model="claude-haiku-4-5-20251001",
             )
         }
     )

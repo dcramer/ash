@@ -48,7 +48,9 @@ async def main():
         print('       model = "text-embedding-3-small"')
         return False
 
-    print(f"[OK] Embeddings configured: {config.embeddings.provider}/{config.embeddings.model}")
+    print(
+        f"[OK] Embeddings configured: {config.embeddings.provider}/{config.embeddings.model}"
+    )
 
     # Check API key
     embeddings_key = config.resolve_embeddings_api_key()
@@ -111,7 +113,9 @@ async def main():
 
         found = False
         for r in results:
-            print(f"  - [{r.source_type}] {r.content[:50]}... (sim: {r.similarity:.3f})")
+            print(
+                f"  - [{r.source_type}] {r.content[:50]}... (sim: {r.similarity:.3f})"
+            )
             if "purple" in r.content.lower():
                 found = True
 
@@ -139,7 +143,9 @@ async def main():
         if context.knowledge:
             print("[OK] Context retrieval working!")
         else:
-            print("[WARNING] No knowledge in context (may be below 0.3 similarity threshold)")
+            print(
+                "[WARNING] No knowledge in context (may be below 0.3 similarity threshold)"
+            )
 
         print("-" * 60)
         print("Test 4: Check database directly")
@@ -147,11 +153,14 @@ async def main():
 
         # Check knowledge table
         from sqlalchemy import text
+
         result = await session.execute(text("SELECT COUNT(*) FROM knowledge"))
         count = result.scalar()
         print(f"Knowledge entries: {count}")
 
-        result = await session.execute(text("SELECT COUNT(*) FROM knowledge_embeddings"))
+        result = await session.execute(
+            text("SELECT COUNT(*) FROM knowledge_embeddings")
+        )
         count = result.scalar()
         print(f"Knowledge embeddings: {count}")
 

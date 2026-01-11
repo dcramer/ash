@@ -72,16 +72,12 @@ class LaunchdBackend(ServiceBackend):
 
         # Use bootstrap for modern launchctl (macOS 10.10+)
         # Fall back to load for older systems
-        returncode, _, _ = await self._run_launchctl(
-            "load", "-w", str(self.plist_path)
-        )
+        returncode, _, _ = await self._run_launchctl("load", "-w", str(self.plist_path))
         return returncode == 0
 
     async def stop(self) -> bool:
         """Stop the service via launchctl."""
-        returncode, _, _ = await self._run_launchctl(
-            "unload", str(self.plist_path)
-        )
+        returncode, _, _ = await self._run_launchctl("unload", str(self.plist_path))
         return returncode == 0
 
     async def restart(self) -> bool:
@@ -183,7 +179,7 @@ class LaunchdBackend(ServiceBackend):
         }
 
         self.plist_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.plist_path, "wb") as f:
+        with self.plist_path.open("wb") as f:
             plistlib.dump(plist, f)
 
     def get_log_source(self) -> Path:

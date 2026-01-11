@@ -66,7 +66,7 @@ class GenericBackend(ServiceBackend):
         cmd = _get_ash_command() + ["serve"]
 
         # Start the process detached
-        with open(log_path, "a") as log_file:
+        with log_path.open("a") as log_file:  # noqa: ASYNC230
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=log_file,

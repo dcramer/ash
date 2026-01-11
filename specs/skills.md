@@ -13,7 +13,7 @@ Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/execut
 - Support directory format: `skills/<name>/SKILL.md` (preferred)
 - Support flat markdown: `skills/<name>.md` (convenience)
 - Support pure YAML: `skills/<name>.yaml` (backward compatibility)
-- Each skill defines: name, description, instructions, preferred_model, required_tools
+- Each skill defines: name, description, instructions, model, required_tools
 - Support skill requirements: bins, env, os filtering
 - Support skill config: list of env var names with optional defaults
 - Load config values from layered sources (skill config.toml → central config → env vars → defaults)
@@ -63,7 +63,7 @@ workspace/skills/
 <!-- workspace/skills/summarize/SKILL.md -->
 ---
 description: Summarize text or documents concisely
-preferred_model: fast
+model: fast
 required_tools:
   - bash
 max_iterations: 3
@@ -122,13 +122,19 @@ DEFAULT_VALUE = "custom"       # Literal value
 # ~/.ash/config.toml
 [skills.summarize]
 API_KEY = "abc123"
+model = "sonnet"  # Override model for this skill (see specs/models.md)
 ```
 
-**Resolution order (first match wins):**
+**Resolution order for config values (first match wins):**
 1. Skill's `config.toml`
 2. Central `[skills.<name>]` section
 3. Environment variable by name
 4. Default from SKILL.md (after `=`)
+
+**Resolution order for model (first match wins):**
+1. `[skills.<name>] model` in central config
+2. `model` in SKILL.md
+3. `"default"` fallback
 
 **Passed to sandbox as:**
 - `SKILL_API_KEY`
@@ -140,7 +146,7 @@ API_KEY = "abc123"
 # workspace/skills/summarize.yaml
 name: summarize
 description: Summarize text or documents concisely
-preferred_model: fast
+model: fast
 required_tools:
   - bash
 max_iterations: 3
@@ -175,7 +181,7 @@ class SkillDefinition:
     name: str
     description: str
     instructions: str
-    preferred_model: str | None = None
+    model: str | None = None
     required_tools: list[str] = field(default_factory=list)
     input_schema: dict[str, Any] = field(default_factory=dict)
     max_iterations: int = 5
@@ -315,7 +321,7 @@ Skills shipped with Ash in `src/ash/skills/bundled/`:
 | Registry.discover() called | Bundled + workspace skills loaded | Bundled first, workspace can override |
 | Skills discovered | Listed in system prompt | Via SystemPromptBuilder |
 | `use_skill(summarize, {content: "..."})` | SkillResult with summary | Sub-agent executes |
-| Skill with `preferred_model: fast` | Uses `models.fast` config | Model alias resolved |
+| Skill with `model: fast` | Uses `models.fast` config | Model alias resolved |
 | Skill with unknown model alias | Falls back to default model | Warning logged |
 | Skill requires unavailable tool | Error before execution | Validation fails |
 | Skill exceeds max_iterations | Returns partial result | With limit message |

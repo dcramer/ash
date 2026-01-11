@@ -94,13 +94,21 @@ class Person(Base):
         DateTime, default=utc_now, onupdate=utc_now, nullable=False
     )
 
-    memories: Mapped[list["Memory"]] = relationship(
-        "Memory", back_populates="subject_person"
-    )
+    # Note: memories relationship removed - subject_person_ids is now a JSON array
 
 
 class Memory(Base):
-    """Memory entry - a stored fact or piece of information."""
+    """Memory entry - a stored fact or piece of information.
+
+    Memory scoping:
+    - Personal: owner_user_id set, chat_id NULL - only visible to that user
+    - Group: owner_user_id NULL, chat_id set - visible to everyone in that chat
+    - Global: both NULL - visible everywhere (rare)
+
+    Supersession:
+    - When a new memory conflicts with an old one, the old one is marked superseded
+    - Superseded memories are preserved for history but excluded from retrieval
+    """
 
     __tablename__ = "memories"
 
@@ -115,16 +123,25 @@ class Memory(Base):
         "metadata", JSON, nullable=True
     )
 
-    # Owner tracking - who added this fact
+    # Owner tracking - who added this fact (NULL for group/shared memories)
     owner_user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
-    # Subject tracking - who/what is this fact about
-    subject_person_id: Mapped[str | None] = mapped_column(
-        String, ForeignKey("people.id", ondelete="SET NULL"), nullable=True, index=True
+    # Chat/group scoping - which chat this memory belongs to (NULL for personal memories)
+    chat_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # Subject tracking - who/what is this fact about (list of person IDs)
+    subject_person_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+
+    # Supersession tracking - soft delete with history
+    superseded_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
+    superseded_by_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("memories.id", ondelete="SET NULL"), nullable=True
     )
 
-    subject_person: Mapped["Person | None"] = relationship(
-        "Person", back_populates="memories"
+    superseded_by: Mapped["Memory | None"] = relationship(
+        "Memory", remote_side="Memory.id", foreign_keys=[superseded_by_id]
     )
 
 

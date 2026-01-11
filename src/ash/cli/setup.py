@@ -9,16 +9,19 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-# Model options by provider
+# Model options by provider (ordered by recommendation for cost/speed)
 ANTHROPIC_MODELS = [
-    ("claude-sonnet-4-5-20250929", "Claude Sonnet 4.5 (Recommended - balanced)"),
-    ("claude-3-5-haiku-20241022", "Claude 3.5 Haiku (Fast, lower cost)"),
-    ("claude-opus-4-5-20251101", "Claude Opus 4.5 (Most capable)"),
+    (
+        "claude-haiku-4-5-20251001",
+        "Claude Haiku 4.5 (Recommended - fast, cost-effective)",
+    ),
+    ("claude-sonnet-4-5-20250929", "Claude Sonnet 4.5 (More capable, higher cost)"),
+    ("claude-opus-4-5-20251101", "Claude Opus 4.5 (Most capable, highest cost)"),
 ]
 
 OPENAI_MODELS = [
-    ("gpt-4o", "GPT-4o (Recommended - balanced)"),
-    ("gpt-4o-mini", "GPT-4o Mini (Fast, lower cost)"),
+    ("gpt-5-mini", "GPT-5 Mini (Recommended - fast, cost-effective)"),
+    ("gpt-5", "GPT-5 (More capable, higher cost)"),
     ("o1", "o1 (Reasoning model)"),
 ]
 
@@ -122,7 +125,9 @@ class SetupWizard:
                         self.console.print()
                         method()
                     else:
-                        self.console.print(f"[yellow]Unknown section: {section}[/yellow]")
+                        self.console.print(
+                            f"[yellow]Unknown section: {section}[/yellow]"
+                        )
 
             # Check if any configuration was added
             if not self.config:
@@ -166,11 +171,15 @@ class SetupWizard:
             has_config = config_checks.get(var, lambda: False)()
 
             if has_env and has_config:
-                self.console.print(f"  [green]✓[/green] {name}: set [dim](env + config)[/dim]")
+                self.console.print(
+                    f"  [green]✓[/green] {name}: set [dim](env + config)[/dim]"
+                )
             elif has_env:
                 self.console.print(f"  [green]✓[/green] {name}: set [dim](env)[/dim]")
             elif has_config:
-                self.console.print(f"  [green]✓[/green] {name}: set [dim](config)[/dim]")
+                self.console.print(
+                    f"  [green]✓[/green] {name}: set [dim](config)[/dim]"
+                )
             else:
                 self.console.print(f"  [dim]✗[/dim] {name}: [dim]not set[/dim]")
 
@@ -184,14 +193,18 @@ class SetupWizard:
 
         for key, name, description, required in SECTIONS:
             if required:
-                self.console.print(f"  [green]✓[/green] {name} - {description} [dim](required)[/dim]")
+                self.console.print(
+                    f"  [green]✓[/green] {name} - {description} [dim](required)[/dim]"
+                )
                 # Configure required sections immediately
                 method = getattr(self, f"_configure_{key}", None)
                 if method:
                     self.console.print()
                     method()
             else:
-                if Confirm.ask(f"  Configure [cyan]{name}[/cyan]? ({description})", default=False):
+                if Confirm.ask(
+                    f"  Configure [cyan]{name}[/cyan]? ({description})", default=False
+                ):
                     # Configure immediately after user says yes
                     method = getattr(self, f"_configure_{key}", None)
                     if method:
@@ -239,8 +252,12 @@ class SetupWizard:
         has_config_key = self._has_config_api_key(provider)
 
         if has_env_key and has_config_key:
-            self.console.print(f"\n[green]✓[/green] {env_var} found in environment and config file")
-            self.console.print("[dim]Environment variable will be used if present.[/dim]")
+            self.console.print(
+                f"\n[green]✓[/green] {env_var} found in environment and config file"
+            )
+            self.console.print(
+                "[dim]Environment variable will be used if present.[/dim]"
+            )
         elif has_env_key:
             self.console.print(f"\n[green]✓[/green] {env_var} found in environment")
         elif has_config_key:
@@ -251,7 +268,9 @@ class SetupWizard:
                 self.config.setdefault(provider, {})["api_key"] = existing_key
         else:
             self.console.print(f"\n[yellow]![/yellow] {env_var} not set")
-            self.console.print("[dim]You can set it in your shell or enter it here.[/dim]")
+            self.console.print(
+                "[dim]You can set it in your shell or enter it here.[/dim]"
+            )
 
             if Confirm.ask("Enter API key now?", default=False):
                 api_key = Prompt.ask("Enter API key", password=True)
@@ -270,9 +289,43 @@ class SetupWizard:
             "max_tokens": 4096,
         }
 
-        # Ask about additional model aliases
-        if Confirm.ask("\nAdd another model alias (e.g., 'fast' for quick queries)?", default=False):
-            self._add_model_alias(provider)
+        # If user chose a fast model, suggest adding a more capable model for complex tasks
+        is_fast_model = model in ("claude-haiku-4-5-20251001", "gpt-5-mini")
+        if is_fast_model:
+            self.console.print(
+                "\n[dim]Tip: You can add a more capable model for complex tasks like debugging or code review.[/dim]"
+            )
+            if Confirm.ask("Add a 'sonnet' alias for complex tasks?", default=True):
+                if provider == "anthropic":
+                    self.config["models"]["sonnet"] = {
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-5-20250929",
+                        "max_tokens": 8192,
+                    }
+                    self.console.print(
+                        "[green]✓[/green] Added 'sonnet' alias for complex tasks"
+                    )
+                    self.console.print(
+                        "[dim]Tip: Configure skills to use sonnet in config.toml:[/dim]"
+                    )
+                    self.console.print("[dim]  [skills.debug][/dim]")
+                    self.console.print('[dim]  model = "sonnet"[/dim]')
+                else:
+                    self.config["models"]["gpt5"] = {
+                        "provider": "openai",
+                        "model": "gpt-5",
+                        "max_tokens": 8192,
+                    }
+                    self.console.print(
+                        "[green]✓[/green] Added 'gpt5' alias for complex tasks"
+                    )
+        else:
+            # Ask about additional model aliases
+            if Confirm.ask(
+                "\nAdd another model alias (e.g., 'fast' for quick queries)?",
+                default=False,
+            ):
+                self._add_model_alias(provider)
 
     def _add_model_alias(self, default_provider: str) -> None:
         """Add an additional model alias."""
@@ -284,9 +337,9 @@ class SetupWizard:
         # Quick selection for common aliases
         if alias == "fast":
             if default_provider == "anthropic":
-                model = "claude-3-5-haiku-20241022"
+                model = "claude-haiku-4-5-20251001"
             else:
-                model = "gpt-4o-mini"
+                model = "gpt-5-mini"
             self.config["models"][alias] = {
                 "provider": default_provider,
                 "model": model,
@@ -296,14 +349,18 @@ class SetupWizard:
             self.console.print(f"[green]✓[/green] Added '{alias}' alias using {model}")
         else:
             # Manual configuration
-            provider = Prompt.ask("Provider", choices=["anthropic", "openai"], default=default_provider)
+            provider = Prompt.ask(
+                "Provider", choices=["anthropic", "openai"], default=default_provider
+            )
             models = ANTHROPIC_MODELS if provider == "anthropic" else OPENAI_MODELS
 
             self.console.print("Select model:")
             for i, (model_id, _description) in enumerate(models, 1):
                 self.console.print(f"  [cyan]{i}[/cyan]. {model_id}")
 
-            model_choice = Prompt.ask("Model", choices=[str(i) for i in range(1, len(models) + 1)])
+            model_choice = Prompt.ask(
+                "Model", choices=[str(i) for i in range(1, len(models) + 1)]
+            )
             model = models[int(model_choice) - 1][0]
 
             self.config["models"][alias] = {
@@ -324,18 +381,28 @@ class SetupWizard:
         )
 
         self.console.print("\nTo use Telegram, you need a bot token from @BotFather.")
-        self.console.print("[dim]See: https://core.telegram.org/bots#creating-a-new-bot[/dim]")
+        self.console.print(
+            "[dim]See: https://core.telegram.org/bots#creating-a-new-bot[/dim]"
+        )
 
         has_env_token = bool(os.environ.get("TELEGRAM_BOT_TOKEN"))
         has_config_token = self._has_config_telegram_token()
 
         if has_env_token and has_config_token:
-            self.console.print("\n[green]✓[/green] TELEGRAM_BOT_TOKEN found in environment and config file")
-            self.console.print("[dim]Environment variable will be used if present.[/dim]")
+            self.console.print(
+                "\n[green]✓[/green] TELEGRAM_BOT_TOKEN found in environment and config file"
+            )
+            self.console.print(
+                "[dim]Environment variable will be used if present.[/dim]"
+            )
         elif has_env_token:
-            self.console.print("\n[green]✓[/green] TELEGRAM_BOT_TOKEN found in environment")
+            self.console.print(
+                "\n[green]✓[/green] TELEGRAM_BOT_TOKEN found in environment"
+            )
         elif has_config_token:
-            self.console.print("\n[green]✓[/green] TELEGRAM_BOT_TOKEN found in config file")
+            self.console.print(
+                "\n[green]✓[/green] TELEGRAM_BOT_TOKEN found in config file"
+            )
             # Preserve the existing config token
             existing_token = self.existing_config.get("telegram", {}).get("bot_token")
             if existing_token:
@@ -353,8 +420,12 @@ class SetupWizard:
 
         # Allowed users - required, numerical IDs only
         self.console.print("\n[bold]Allowed Users[/bold]")
-        self.console.print("You must specify which Telegram user IDs can interact with this bot.")
-        self.console.print("[dim]Find your user ID by messaging @userinfobot on Telegram.[/dim]")
+        self.console.print(
+            "You must specify which Telegram user IDs can interact with this bot."
+        )
+        self.console.print(
+            "[dim]Find your user ID by messaging @userinfobot on Telegram.[/dim]"
+        )
 
         allowed_users: list[str] = []
         while not allowed_users:
@@ -373,7 +444,9 @@ class SetupWizard:
                     continue
                 # Remove @ prefix if accidentally included
                 if part.startswith("@"):
-                    self.console.print(f"[yellow]'{part}' looks like a username. Use numerical IDs only.[/yellow]")
+                    self.console.print(
+                        f"[yellow]'{part}' looks like a username. Use numerical IDs only.[/yellow]"
+                    )
                     valid = False
                     break
                 # Validate it's a number
@@ -381,7 +454,9 @@ class SetupWizard:
                     int(part)
                     parsed_ids.append(part)
                 except ValueError:
-                    self.console.print(f"[yellow]'{part}' is not a valid user ID. Use numerical IDs only.[/yellow]")
+                    self.console.print(
+                        f"[yellow]'{part}' is not a valid user ID. Use numerical IDs only.[/yellow]"
+                    )
                     valid = False
                     break
 
@@ -394,7 +469,9 @@ class SetupWizard:
 
         # Group mode
         self.console.print("\n[bold]Group Chat Mode[/bold]")
-        self.console.print("  [cyan]1[/cyan]. mention - Only respond when @mentioned (recommended)")
+        self.console.print(
+            "  [cyan]1[/cyan]. mention - Only respond when @mentioned (recommended)"
+        )
         self.console.print("  [cyan]2[/cyan]. always - Respond to all messages")
 
         mode_choice = Prompt.ask("Mode", choices=["1", "2"], default="1")
@@ -403,7 +480,9 @@ class SetupWizard:
         self.config.setdefault("telegram", {})["group_mode"] = group_mode
 
         # Preserve existing allowed_groups if any
-        existing_groups = self.existing_config.get("telegram", {}).get("allowed_groups", [])
+        existing_groups = self.existing_config.get("telegram", {}).get(
+            "allowed_groups", []
+        )
         self.config["telegram"]["allowed_groups"] = existing_groups
 
     def _configure_search(self) -> None:
@@ -415,13 +494,19 @@ class SetupWizard:
             )
         )
 
-        self.console.print("\nBrave Search enables web queries for current information.")
-        self.console.print("[dim]Get an API key at: https://brave.com/search/api/[/dim]")
+        self.console.print(
+            "\nBrave Search enables web queries for current information."
+        )
+        self.console.print(
+            "[dim]Get an API key at: https://brave.com/search/api/[/dim]"
+        )
 
         has_env_key = bool(os.environ.get("BRAVE_SEARCH_API_KEY"))
 
         if has_env_key:
-            self.console.print("\n[green]✓[/green] BRAVE_SEARCH_API_KEY found in environment")
+            self.console.print(
+                "\n[green]✓[/green] BRAVE_SEARCH_API_KEY found in environment"
+            )
             self.console.print("[dim]Web search will be enabled automatically.[/dim]")
         else:
             self.console.print("\n[yellow]![/yellow] BRAVE_SEARCH_API_KEY not set")
@@ -464,11 +549,15 @@ class SetupWizard:
 
         # Sandbox settings
         self.console.print("\n[bold]Sandbox Settings[/bold]")
-        self.console.print("[dim]The sandbox runs bash commands in isolated Docker containers.[/dim]")
+        self.console.print(
+            "[dim]The sandbox runs bash commands in isolated Docker containers.[/dim]"
+        )
 
         if Confirm.ask("Configure sandbox settings?", default=False):
             self.console.print("\nNetwork mode:")
-            self.console.print("  [cyan]1[/cyan]. bridge - Has network access (default)")
+            self.console.print(
+                "  [cyan]1[/cyan]. bridge - Has network access (default)"
+            )
             self.console.print("  [cyan]2[/cyan]. none - Fully isolated (more secure)")
 
             network_choice = Prompt.ask("Network", choices=["1", "2"], default="1")
@@ -485,11 +574,15 @@ class SetupWizard:
 
         # Embeddings for semantic search
         self.console.print("\n[bold]Semantic Search (Embeddings)[/bold]")
-        self.console.print("[dim]Enables semantic memory search using OpenAI embeddings.[/dim]")
+        self.console.print(
+            "[dim]Enables semantic memory search using OpenAI embeddings.[/dim]"
+        )
 
         has_openai_key = bool(os.environ.get("OPENAI_API_KEY"))
         if has_openai_key:
-            if Confirm.ask("Enable semantic search? (requires OpenAI API)", default=True):
+            if Confirm.ask(
+                "Enable semantic search? (requires OpenAI API)", default=True
+            ):
                 self.config["embeddings"] = {
                     "provider": "openai",
                     "model": "text-embedding-3-small",
@@ -507,7 +600,11 @@ class SetupWizard:
         # Merge new config with existing config (new values override)
         merged = dict(self.existing_config)
         for key, value in self.config.items():
-            if isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
+            if (
+                isinstance(value, dict)
+                and key in merged
+                and isinstance(merged[key], dict)
+            ):
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value
@@ -530,8 +627,8 @@ class SetupWizard:
                 lines.append(f'provider = "{model_config["provider"]}"')
                 lines.append(f'model = "{model_config["model"]}"')
                 if model_config.get("temperature") is not None:
-                    lines.append(f'temperature = {model_config["temperature"]}')
-                lines.append(f'max_tokens = {model_config["max_tokens"]}')
+                    lines.append(f"temperature = {model_config['temperature']}")
+                lines.append(f"max_tokens = {model_config['max_tokens']}")
                 lines.append("")
 
         # Provider API keys (if configured in file)
@@ -543,8 +640,14 @@ class SetupWizard:
 
         # Add comment about env vars for API keys
         if "anthropic" not in config_to_write and "openai" not in config_to_write:
-            provider = config_to_write.get("models", {}).get("default", {}).get("provider", "anthropic")
-            env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+            provider = (
+                config_to_write.get("models", {})
+                .get("default", {})
+                .get("provider", "anthropic")
+            )
+            env_var = (
+                "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+            )
             lines.append(f"# API key loaded from {env_var} environment variable")
             lines.append("")
 
@@ -552,7 +655,9 @@ class SetupWizard:
         if "telegram" in config_to_write:
             lines.append("[telegram]")
             if "bot_token" in config_to_write["telegram"]:
-                lines.append(f'bot_token = "{config_to_write["telegram"]["bot_token"]}"')
+                lines.append(
+                    f'bot_token = "{config_to_write["telegram"]["bot_token"]}"'
+                )
             else:
                 lines.append("# bot_token loaded from TELEGRAM_BOT_TOKEN env var")
 
@@ -564,7 +669,9 @@ class SetupWizard:
             groups_str = ", ".join(f'"{g}"' for g in groups)
             lines.append(f"allowed_groups = [{groups_str}]")
 
-            lines.append(f'group_mode = "{config_to_write["telegram"].get("group_mode", "mention")}"')
+            lines.append(
+                f'group_mode = "{config_to_write["telegram"].get("group_mode", "mention")}"'
+            )
             lines.append("")
 
         # Sandbox
@@ -581,7 +688,7 @@ class SetupWizard:
         if "server" in config_to_write:
             lines.append("[server]")
             lines.append(f'host = "{config_to_write["server"]["host"]}"')
-            lines.append(f'port = {config_to_write["server"]["port"]}')
+            lines.append(f"port = {config_to_write['server']['port']}")
             lines.append("")
 
         # Embeddings
@@ -627,7 +734,9 @@ class SetupWizard:
             for alias in self.config["models"]:
                 if alias != "default":
                     model = self.config["models"][alias]
-                    table.add_row(f"  {alias}", f"{model.get('provider')}/{model.get('model')}")
+                    table.add_row(
+                        f"  {alias}", f"{model.get('provider')}/{model.get('model')}"
+                    )
 
         if "telegram" in self.config:
             users = self.config["telegram"].get("allowed_users", [])

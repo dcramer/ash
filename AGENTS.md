@@ -4,7 +4,17 @@ Personal assistant agent with sandboxed tool execution.
 
 ## Package Manager
 
-Use **uv**: `uv sync --all-groups`, `uv run pytest`, `uv run ruff check --fix .`
+Use **uv**: `uv sync --all-groups`
+
+## Quality
+
+| Tool | Command | Purpose |
+|------|---------|---------|
+| ruff | `uv run ruff check --fix .` | Lint and auto-fix |
+| ruff | `uv run ruff format .` | Format code |
+| ty | `uv run ty check` | Type check |
+| pytest | `uv run pytest` | Run tests |
+| pre-commit | `pre-commit run --all-files` | Run all hooks |
 
 ## Commands
 
@@ -14,7 +24,6 @@ Use **uv**: `uv sync --all-groups`, `uv run pytest`, `uv run ruff check --fix .`
 | `uv run ash serve` | Start server |
 | `uv run ash upgrade` | Run migrations, check sandbox |
 | `uv run ash sandbox build` | Build sandbox image |
-| `uv run ash sandbox verify` | Run security tests |
 | `uv run ash memory <action>` | Manage memories (list, search, add, remove, gc, stats) |
 | `uv run ash sessions <action>` | Manage sessions (list, search, export, clear) |
 

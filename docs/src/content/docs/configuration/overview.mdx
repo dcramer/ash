@@ -32,18 +32,24 @@ api_key = "sk-ant-..."  # Or use ANTHROPIC_API_KEY env var
 [openai]
 api_key = "sk-..."  # Or use OPENAI_API_KEY env var
 
-# Named model configurations
+# Named model configurations (Haiku for fast/cheap, Sonnet for complex tasks)
 [models.default]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-haiku-4-5-20251001"
 temperature = 0.7
 max_tokens = 4096
 
-[models.fast]
-provider = "openai"
-model = "gpt-4o-mini"
-temperature = 0.5
-max_tokens = 2048
+[models.sonnet]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+max_tokens = 8192
+
+# Override model for specific skills that need more reasoning power
+[skills.debug]
+model = "sonnet"
+
+[skills.code-review]
+model = "sonnet"
 
 # Telegram bot integration
 [telegram]
@@ -118,10 +124,22 @@ The minimum required configuration:
 ```toml
 [models.default]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-haiku-4-5-20251001"
 ```
 
 With `ANTHROPIC_API_KEY` set in your environment.
+
+For a better experience, add a "sonnet" alias for complex tasks:
+
+```toml
+[models.default]
+provider = "anthropic"
+model = "claude-haiku-4-5-20251001"
+
+[models.sonnet]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+```
 
 ## Configuration Commands
 

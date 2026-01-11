@@ -37,26 +37,20 @@ Files: src/ash/config/models.py, src/ash/config/loader.py, src/ash/llm/registry.
 # Named model configurations
 [models.default]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-3-5-haiku-20241022"  # Fast, cheap for simple tasks
 temperature = 0.7  # Optional - omit to use API default
 max_tokens = 4096
 
-[models.fast]
+[models.sonnet]
 provider = "anthropic"
-model = "claude-3-5-haiku-20241022"
-temperature = 0.5
-max_tokens = 2048
+model = "claude-sonnet-4-5-20250929"  # More capable for complex tasks
+max_tokens = 8192
 
 [models.reasoning]
 provider = "anthropic"
 model = "claude-3-5-opus-20241219"
 # temperature omitted for reasoning models that don't support it
 max_tokens = 8192
-
-[models.capable]
-provider = "openai"
-model = "gpt-4o"
-max_tokens = 4096
 
 # Provider-level API keys (shared by models using that provider)
 [anthropic]
@@ -65,10 +59,17 @@ api_key = "..."  # or ANTHROPIC_API_KEY env
 [openai]
 api_key = "..."  # or OPENAI_API_KEY env
 
+# Per-skill model overrides
+[skills.debug]
+model = "sonnet"  # Use more capable model for debugging
+
+[skills.code-review]
+model = "sonnet"  # Use more capable model for code review
+
 # Backward compatibility (maps to models.default if no [models] section)
 [default_llm]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-3-5-haiku-20241022"
 ```
 
 ### Python Classes
@@ -125,6 +126,7 @@ ASH_MODEL=fast ash chat "prompt"    # Environment override
 | `--model fast` | Agent uses `models.fast` config | CLI override |
 | `ASH_MODEL=fast` | Default model changes to "fast" | Env override |
 | No API key in model, provider has key | Use provider key | Inheritance |
+| `[skills.debug] model = "sonnet"` | Skill uses `models.sonnet` | Per-skill override |
 
 ## Errors
 

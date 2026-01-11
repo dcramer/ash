@@ -15,6 +15,28 @@ if TYPE_CHECKING:
     from ash.tools import ToolRegistry
 
 
+def format_gap_duration(minutes: float) -> str:
+    """Format a time gap in human-readable form.
+
+    Args:
+        minutes: Gap duration in minutes.
+
+    Returns:
+        Human-readable duration string.
+    """
+    if minutes < 60:
+        return f"{int(minutes)} minutes"
+    hours = minutes / 60
+    if hours < 24:
+        if hours < 2:
+            return "about an hour"
+        return f"{int(hours)} hours"
+    days = hours / 24
+    if days < 2:
+        return "about a day"
+    return f"{int(days)} days"
+
+
 @dataclass
 class RuntimeInfo:
     """Runtime information for system prompt."""
@@ -61,8 +83,11 @@ class PromptContext:
 
     runtime: RuntimeInfo | None = None
     memory: RetrievedContext | None = None
-    known_people: list["Person"] | None = None
+    known_people: list[Person] | None = None
     extra_context: dict[str, Any] = field(default_factory=dict)
+    # Conversation context
+    conversation_gap_minutes: float | None = None
+    has_reply_context: bool = False
 
 
 class SystemPromptBuilder:
@@ -157,6 +182,11 @@ class SystemPromptBuilder:
             memory_section = self._build_memory_section(context.memory)
             if memory_section:
                 parts.append(f"\n\n{memory_section}")
+
+        # 10. Conversation context (gap signal)
+        conversation_section = self._build_conversation_context_section(context)
+        if conversation_section:
+            parts.append(f"\n\n{conversation_section}")
 
         return "".join(parts)
 
@@ -305,7 +335,7 @@ class SystemPromptBuilder:
 
         return "\n".join(lines)
 
-    def _build_people_section(self, people: list["Person"]) -> str:
+    def _build_people_section(self, people: list[Person]) -> str:
         """Build known people section.
 
         Args:
@@ -366,3 +396,33 @@ class SystemPromptBuilder:
             return header + "\n".join(context_items)
 
         return ""
+
+    def _build_conversation_context_section(self, context: PromptContext) -> str:
+        """Build conversation context section with gap signaling.
+
+        Signals to the LLM when there has been a significant gap since the
+        last message, helping it understand conversation boundaries.
+
+        Args:
+            context: Prompt context with conversation gap info.
+
+        Returns:
+            Conversation context section string or empty if no signal needed.
+        """
+        gap_threshold = self._config.conversation.gap_threshold_minutes
+        gap_minutes = context.conversation_gap_minutes
+
+        # Only signal if gap exceeds threshold
+        if gap_minutes is None or gap_minutes <= gap_threshold:
+            return ""
+
+        lines = ["## Conversation Context", ""]
+
+        # Format the gap duration
+        gap_str = format_gap_duration(gap_minutes)
+        lines.append(f"Note: The last message in this conversation was {gap_str} ago.")
+        lines.append(
+            "The user may be starting a new topic or continuing a previous discussion."
+        )
+
+        return "\n".join(lines)

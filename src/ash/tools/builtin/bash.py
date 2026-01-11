@@ -121,7 +121,7 @@ class BashTool(Tool):
     async def _execute_sandboxed(
         self,
         command: str,
-        timeout: int,
+        timeout: int,  # noqa: ASYNC109
         environment: dict[str, str] | None = None,
     ) -> ToolResult:
         """Execute command in Docker sandbox."""

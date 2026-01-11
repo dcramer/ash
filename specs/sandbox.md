@@ -67,8 +67,6 @@ class ExecutionResult:
 ash sandbox build [--force]  # Build sandbox image
 ash sandbox status           # Show sandbox status
 ash sandbox clean            # Remove containers
-ash sandbox verify           # Run security tests
-ash sandbox prompts          # Show manual test cases
 ```
 
 ## Behaviors
@@ -93,7 +91,7 @@ ash sandbox prompts          # Show manual test cases
 ## Verification
 
 ```bash
-ash sandbox verify  # Runs automated security tests
+uv run pytest tests/test_sandbox_verify.py -v
 ```
 
 Security tests verify:

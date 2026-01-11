@@ -4,11 +4,21 @@ default_language_version:
 repos:
   # Ruff linting and formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.0
+    rev: v0.9.2
     hooks:
       - id: ruff
         args: ["--fix"]
       - id: ruff-format
+
+  # Type checking with ty
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty type checker
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false
 
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks

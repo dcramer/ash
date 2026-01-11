@@ -41,8 +41,8 @@ class SystemdBackend(ServiceBackend):
     def is_available(self) -> bool:
         """Check if systemd user services are available."""
         try:
-            result = subprocess.run(
-                ["systemctl", "--user", "status"],
+            subprocess.run(
+                ["systemctl", "--user", "status"],  # noqa: S607
                 capture_output=True,
                 timeout=5,
             )
@@ -134,7 +134,7 @@ class SystemdBackend(ServiceBackend):
                             mem_bytes = line.split("=")[1]
                             if mem_bytes.isdigit():
                                 memory_mb = int(mem_bytes) / (1024 * 1024)
-            except Exception:
+            except Exception:  # noqa: S110
                 pass
 
         return ServiceStatus(

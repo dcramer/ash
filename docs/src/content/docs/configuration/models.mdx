@@ -9,15 +9,36 @@ import { Aside } from '@astrojs/starlight/components';
 
 Define named model configurations that can be referenced throughout Ash.
 
-## Model Configuration
+## Recommended Setup
+
+Use Haiku for simple tasks (fast, cheap) and Sonnet for complex tasks:
 
 ```toml
 [models.default]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-haiku-4-5-20251001"
 temperature = 0.7
 max_tokens = 4096
+
+[models.sonnet]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+max_tokens = 8192
+
+# Override model for specific skills
+[skills.debug]
+model = "sonnet"
+
+[skills.code-review]
+model = "sonnet"
+
+[skills.research]
+model = "sonnet"
 ```
+
+<Aside type="tip">
+  This setup saves money by using Haiku for conversation while using Sonnet for complex skills that need more reasoning power.
+</Aside>
 
 ## Options
 
@@ -32,6 +53,23 @@ max_tokens = 4096
   Set `temperature` to `null` (or omit it) for reasoning models that don't support temperature control.
 </Aside>
 
+## Per-Skill Model Override
+
+Override the model used by specific skills:
+
+```toml
+[skills.debug]
+model = "sonnet"  # Use sonnet for debugging
+
+[skills.code-review]
+model = "sonnet"  # Use sonnet for code review
+```
+
+Model resolution order:
+1. `[skills.<name>] model` in config
+2. `model` in skill definition (SKILL.md)
+3. `"default"` fallback
+
 ## Multiple Models
 
 Define multiple named models:
@@ -39,25 +77,23 @@ Define multiple named models:
 ```toml
 [models.default]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
-temperature = 0.7
+model = "claude-haiku-4-5-20251001"
 
-[models.fast]
-provider = "openai"
-model = "gpt-4o-mini"
-temperature = 0.5
+[models.sonnet]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
 
 [models.reasoning]
 provider = "anthropic"
-model = "claude-3-opus-20240229"
+model = "claude-opus-4-5-20251101"
 # No temperature for reasoning models
 ```
 
 Use models by alias:
 
 ```bash
-ash chat --model fast "Quick question"
-ash chat --model reasoning "Complex problem"
+ash chat --model sonnet "Complex question"
+ash chat --model reasoning "Very complex problem"
 ```
 
 ## Provider API Keys
@@ -90,17 +126,14 @@ Keys are resolved in this order:
 
 ### Anthropic
 
-- `claude-sonnet-4-5-20250929` (recommended)
-- `claude-3-opus-20240229`
-- `claude-3-sonnet-20240229`
-- `claude-3-haiku-20240307`
+- `claude-haiku-4-5-20251001` (recommended for default - fast, cheap)
+- `claude-sonnet-4-5-20250929` (recommended for complex tasks)
+- `claude-opus-4-5-20251101` (reasoning tasks)
 
 ### OpenAI
 
-- `gpt-4o`
-- `gpt-4o-mini`
-- `gpt-4-turbo`
-- `gpt-3.5-turbo`
+- `gpt-5-mini` (recommended for default - fast, cheap)
+- `gpt-5` (more capable)
 
 ## Default Model Requirement
 
@@ -109,7 +142,7 @@ A model named `default` is required:
 ```toml
 [models.default]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-haiku-4-5-20251001"
 ```
 
 This model is used when no `--model` flag is specified.

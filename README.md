@@ -51,20 +51,41 @@ See `config.example.toml` for all available options.
 
 ## Development
 
+### Quick Setup
+
+```bash
+make setup
+```
+
+This installs dependencies and configures pre-commit hooks.
+
+### Make Targets
+
+| Command | Purpose |
+|---------|---------|
+| `make setup` | Install deps + pre-commit hooks |
+| `make lint` | Run ruff linting and formatting |
+| `make typecheck` | Run ty type checker |
+| `make test` | Run pytest |
+| `make check` | Run all pre-commit hooks |
+
+### Manual Setup
+
 ```bash
 # Install dev dependencies
 uv sync --all-groups
 
 # Install pre-commit hooks
 uv run pre-commit install
-
-# Run tests
-uv run pytest
-
-# Lint and format
-uv run ruff check --fix .
-uv run ruff format .
 ```
+
+### Pre-commit Hooks
+
+Pre-commit runs automatically on `git commit`:
+- **ruff**: Linting with auto-fix
+- **ruff-format**: Code formatting
+- **ty**: Type checking
+- File checks (trailing whitespace, YAML/JSON/TOML validation)
 
 ## Claude Code Development
 

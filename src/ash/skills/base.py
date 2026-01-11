@@ -36,7 +36,10 @@ class SkillRequirements:
         if self.os:
             current_os = platform.system().lower()
             if current_os not in self.os:
-                return False, f"Requires OS: {', '.join(self.os)} (current: {current_os})"
+                return (
+                    False,
+                    f"Requires OS: {', '.join(self.os)} (current: {current_os})",
+                )
 
         # Check binaries
         for bin_name in self.bins:
@@ -58,7 +61,7 @@ class SkillDefinition:
     name: str
     description: str
     instructions: str
-    preferred_model: str | None = None
+    model: str | None = None  # Model alias (e.g., "default", "sonnet")
     required_tools: list[str] = field(default_factory=list)
     input_schema: dict[str, Any] = field(default_factory=dict)
     max_iterations: int = 5
@@ -73,6 +76,21 @@ class SkillDefinition:
 
     # Path to skill directory (for loading config.toml)
     skill_path: Path | None = None
+
+    @staticmethod
+    def parse_config_spec(spec: str) -> tuple[str, str | None]:
+        """Parse config spec into (name, default_or_none).
+
+        Args:
+            spec: Config spec string, e.g. "API_KEY" or "TIMEOUT=30".
+
+        Returns:
+            Tuple of (name, default) where default is None if not specified.
+        """
+        if "=" in spec:
+            name, default = spec.split("=", 1)
+            return name.strip(), default.strip()
+        return spec.strip(), None
 
     def is_available(self) -> tuple[bool, str | None]:
         """Check if this skill is available on the current system.
@@ -95,11 +113,10 @@ class SkillDefinition:
             Tuple of (is_valid, error_message).
         """
         for item in self.config:
-            # Split on first = to get name and optional default
-            if "=" in item:
+            name, default = self.parse_config_spec(item)
+            if default is not None:
                 # Has default, so not required
                 continue
-            name = item.strip()
             if name not in self.config_values:
                 return False, f"Missing required config: {name}"
         return True, None
@@ -112,9 +129,9 @@ class SkillDefinition:
         """
         defaults = {}
         for item in self.config:
-            if "=" in item:
-                name, default = item.split("=", 1)
-                defaults[name.strip()] = default.strip()
+            name, default = self.parse_config_spec(item)
+            if default is not None:
+                defaults[name] = default
         return defaults
 
     def get_config_names(self) -> list[str]:
@@ -123,11 +140,7 @@ class SkillDefinition:
         Returns:
             List of config names without defaults.
         """
-        names = []
-        for item in self.config:
-            name = item.split("=")[0].strip()
-            names.append(name)
-        return names
+        return [self.parse_config_spec(item)[0] for item in self.config]
 
 
 @dataclass

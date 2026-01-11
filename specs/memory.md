@@ -21,10 +21,14 @@ Files: `src/ash/memory/manager.py`, `src/ash/memory/store.py`, `src/ash/memory/r
 - Index memory entries for semantic search
 - Support optional expiration on memory entries
 - Track memory ownership (which user added it)
-- Track memory subject (which person the fact is about)
+- Track memory subjects (which people the fact is about via JSON array)
 - Support Person entities with name, relationship, and aliases
+- Support batch storage of multiple facts in single remember tool call
 - Include known people in system prompt for context
 - Degrade gracefully if embedding service unavailable
+- Mark conflicting memories as superseded when new memory is added (similarity >= 0.75)
+- Filter out superseded memories from default retrieval
+- Preserve superseded memories for history/audit
 
 ### SHOULD
 
@@ -38,6 +42,7 @@ Files: `src/ash/memory/manager.py`, `src/ash/memory/store.py`, `src/ash/memory/r
 
 - Auto-extract facts from conversations to user profile
 - Cache embeddings to avoid recomputation
+- Add identity anchoring via external_id/external_provider on Person (for stable IDs across username changes)
 
 ## Data Models
 
@@ -65,8 +70,11 @@ class Memory(Base):
     created_at: datetime
     expires_at: datetime | None
     metadata_: dict | None
-    owner_user_id: str | None       # Who added this fact
-    subject_person_id: str | None   # FK to Person (who it's about)
+    owner_user_id: str | None          # Who added this fact
+    chat_id: str | None                # Which chat (NULL for personal)
+    subject_person_ids: list[str] | None  # JSON array of Person IDs (who it's about)
+    superseded_at: datetime | None     # When this memory was superseded
+    superseded_by_id: str | None       # FK to Memory (newer version)
 ```
 
 ## Interface
@@ -99,8 +107,10 @@ class MemoryManager:
         content: str,
         source: str = "user",
         expires_at: datetime | None = None,
+        expires_in_days: int | None = None,
         owner_user_id: str | None = None,
-        subject_person_id: str | None = None,
+        chat_id: str | None = None,
+        subject_person_ids: list[str] | None = None,
     ) -> Memory: ...
 
     async def search(
@@ -108,6 +118,8 @@ class MemoryManager:
         query: str,
         limit: int = 5,
         subject_person_id: str | None = None,
+        owner_user_id: str | None = None,
+        chat_id: str | None = None,
     ) -> list[SearchResult]: ...
 
     async def get_known_people(self, owner_user_id: str) -> list[Person]: ...
@@ -151,11 +163,29 @@ class PersonResolutionResult:
     "input_schema": {
         "type": "object",
         "properties": {
-            "content": {"type": "string", "description": "The fact to remember"},
-            "subject": {"type": "string", "description": "Who this fact is about (e.g., 'my wife', 'boss')"},
-            "expires_in_days": {"type": "integer", "description": "Days until expiration"}
-        },
-        "required": ["content"]
+            "content": {"type": "string", "description": "A single fact to remember"},
+            "facts": {
+                "type": "array",
+                "description": "Batch multiple facts in one call (preferred)",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string"},
+                        "subjects": {"type": "array", "items": {"type": "string"}},
+                        "expires_in_days": {"type": "integer"},
+                        "shared": {"type": "boolean"}
+                    },
+                    "required": ["content"]
+                }
+            },
+            "subjects": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Who this fact is about (e.g., ['Sarah'], ['my wife', 'John'])"
+            },
+            "expires_in_days": {"type": "integer", "description": "Days until expiration"},
+            "shared": {"type": "boolean", "description": "True for group/team facts"}
+        }
     }
 }
 
@@ -181,8 +211,10 @@ class PersonResolutionResult:
 | Every message | Auto-retrieve relevant context (semantic search on user's message) |
 | Auto-retrieval (messages) | Returns up to 5 messages above 0.3 similarity |
 | Auto-retrieval (memories) | Returns up to 10 memory entries ranked by relevance with subject attribution |
-| User says "remember my wife's name is Sarah" | Agent uses `remember` with subject="my wife", creates Person entity |
-| Subsequent "she likes Italian food" | Agent uses `remember` with subject="my wife", links to existing Person |
+| User says "remember my wife's name is Sarah" | Agent uses `remember` with subjects=["my wife"], creates Person entity |
+| Subsequent "she likes Italian food" | Agent uses `remember` with subjects=["my wife"], links to existing Person |
+| User says "remember Sarah and John are getting married" | Agent uses `remember` with subjects=["Sarah", "John"], links to both |
+| Multiple facts at once | Agent uses `remember` with facts=[...] array for batch storage |
 | User asks "what does my wife like?" | Agent may use `recall` with about="my wife" for targeted search |
 | Low similarity messages | Filtered out (below 0.3 threshold) |
 | Embedding service down | Log warning, continue without semantic search |
@@ -222,6 +254,24 @@ Memory context includes subject attribution:
 - [Memory] User prefers concise responses
 ```
 
+### Memory Supersession
+
+When a new memory conflicts with an existing memory (high semantic similarity in the same scope), the old memory is marked as superseded.
+
+| Scenario | Behavior |
+|----------|----------|
+| New memory added | Check for conflicting memories (similarity >= 0.75) |
+| Conflict detected | Mark old memory with `superseded_at` and `superseded_by_id` |
+| Default retrieval | Exclude superseded memories |
+| History access | Query superseded memories with `include_superseded=True` |
+| Different subjects | Not considered conflicts (even if similar content) |
+
+Example:
+1. Store "User's favorite color is red"
+2. Later store "User's favorite color is blue"
+3. "...is red" gets `superseded_by_id` = "...is blue"
+4. Only "...is blue" appears in retrieval
+
 ## Errors
 
 | Condition | Response |
@@ -242,11 +292,14 @@ uv run ash chat "What does my wife like?"
 ```
 
 - [ ] Person model exists in `src/ash/db/models.py`
-- [ ] Memory model has owner_user_id and subject_person_id
-- [ ] Migration 002 adds Person table, migration 003 renames knowledge to memories
+- [ ] Memory model has owner_user_id, chat_id, subject_person_ids (JSON array), superseded_at, superseded_by_id
+- [ ] Migration 002 adds chat_id, migration 003 adds supersession columns, migration 004 converts subject_person_id to subject_person_ids
 - [ ] MemoryManager has person resolution methods
-- [ ] `remember` tool accepts subject parameter
+- [ ] MemoryManager.add_memory() checks for conflicts and supersedes old memories
+- [ ] `remember` tool accepts subjects array and facts batch parameter
 - [ ] `recall` tool accepts about filter
 - [ ] Known people appear in system prompt
 - [ ] Memories show subject attribution in context
 - [ ] Agent calls `get_known_people()` before LLM call
+- [ ] Superseded memories excluded from search_memories by default
+- [ ] Superseded memories can be retrieved with include_superseded=True

@@ -135,17 +135,13 @@ ash sandbox build
 
 ## Verifying Security
 
-Run security tests:
+Run security tests with pytest:
 
 ```bash
-ash sandbox verify
+uv run pytest tests/test_sandbox_verify.py -v
 ```
 
-This checks:
-- Container isolation
-- Resource limits
-- Network restrictions
-- Filesystem restrictions
+Or use the `/test-sandbox` skill for manual verification prompts.
 
 ## Troubleshooting
 

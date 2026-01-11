@@ -114,7 +114,9 @@ class SkillRegistry:
                 skill_file = skill_dir / "SKILL.md"
                 if skill_file.exists():
                     try:
-                        self._load_markdown_skill(skill_file, default_name=skill_dir.name)
+                        self._load_markdown_skill(
+                            skill_file, default_name=skill_dir.name
+                        )
                     except Exception as e:
                         logger.warning(f"Failed to load skill from {skill_file}: {e}")
 
@@ -216,16 +218,14 @@ class SkillRegistry:
         """
         resolved = {}
 
-        # Parse defaults from spec
+        # Parse defaults from spec using shared method
         defaults = {}
         names = []
         for item in config_spec:
-            if "=" in item:
-                name, default = item.split("=", 1)
-                names.append(name.strip())
-                defaults[name.strip()] = default.strip()
-            else:
-                names.append(item.strip())
+            name, default = SkillDefinition.parse_config_spec(item)
+            names.append(name)
+            if default is not None:
+                defaults[name] = default
 
         # Load skill-local config
         skill_config = {}
@@ -243,7 +243,9 @@ class SkillRegistry:
             # 2. Central config
             elif name in central_config:
                 value = central_config[name]
-                resolved[name] = _resolve_env_refs(value) if isinstance(value, str) else str(value)
+                resolved[name] = (
+                    _resolve_env_refs(value) if isinstance(value, str) else str(value)
+                )
             # 3. Environment variable
             elif os.environ.get(name):
                 resolved[name] = os.environ[name]
@@ -253,15 +255,75 @@ class SkillRegistry:
 
         return resolved
 
-    def _load_markdown_skill(
-        self, path: Path, default_name: str | None = None
-    ) -> None:
+    def _create_skill_definition(
+        self,
+        name: str,
+        description: str,
+        instructions: str,
+        data: dict[str, Any],
+        skill_path: Path | None,
+    ) -> SkillDefinition:
+        """Create a SkillDefinition from parsed data.
+
+        Args:
+            name: Skill name.
+            description: Skill description.
+            instructions: Skill instructions (markdown body or YAML field).
+            data: Full parsed data dict (for optional fields).
+            skill_path: Path to skill directory (for config.toml loading).
+
+        Returns:
+            SkillDefinition instance.
+        """
+        requirements = self._parse_requirements(data)
+
+        # Parse config spec
+        config_spec = data.get("config", [])
+        if not isinstance(config_spec, list):
+            config_spec = []
+
+        # Resolve config values
+        config_values = self._resolve_config_values(name, config_spec, skill_path)
+
+        return SkillDefinition(
+            name=name,
+            description=description,
+            instructions=instructions,
+            model=data.get("model") or data.get("preferred_model"),  # backward compat
+            required_tools=data.get("required_tools", []),
+            input_schema=data.get("input_schema", {}),
+            max_iterations=data.get("max_iterations", 5),
+            requires=requirements,
+            config=config_spec,
+            config_values=config_values,
+            skill_path=skill_path,
+        )
+
+    def _register_skill(self, skill: SkillDefinition, source_path: Path) -> None:
+        """Register a skill, logging warnings for overrides.
+
+        Args:
+            skill: Skill definition to register.
+            source_path: Path where skill was loaded from.
+        """
+        if skill.name in self._skills:
+            logger.warning(f"Skill '{skill.name}' overwritten by {source_path}")
+
+        # Check availability and log if not available
+        is_available, reason = skill.is_available()
+        if not is_available:
+            logger.debug(f"Skill '{skill.name}' not available: {reason}")
+
+        self._skills[skill.name] = skill
+        logger.debug(f"Loaded skill: {skill.name} from {source_path}")
+
+    def _load_markdown_skill(self, path: Path, default_name: str | None = None) -> None:
         """Load a skill from a markdown file with YAML frontmatter.
 
         Format:
             ---
             description: What the skill does
-            preferred_model: fast  # optional
+            model: fast  # optional model alias
             ---
 
             Instructions go here as markdown body.
@@ -293,40 +355,17 @@ class SkillRegistry:
         if not instructions:
             raise ValueError("Skill missing instructions (markdown body)")
 
-        requirements = self._parse_requirements(data)
-
-        # Parse config spec
-        config_spec = data.get("config", [])
-        if not isinstance(config_spec, list):
-            config_spec = []
-
         # Determine skill path (directory containing SKILL.md)
         skill_path = path.parent if path.name == "SKILL.md" else None
 
-        # Resolve config values
-        config_values = self._resolve_config_values(name, config_spec, skill_path)
-
-        skill = SkillDefinition(
+        skill = self._create_skill_definition(
             name=name,
             description=data["description"],
             instructions=instructions,
-            preferred_model=data.get("preferred_model"),
-            required_tools=data.get("required_tools", []),
-            input_schema=data.get("input_schema", {}),
-            max_iterations=data.get("max_iterations", 5),
-            requires=requirements,
-            config=config_spec,
-            config_values=config_values,
+            data=data,
             skill_path=skill_path,
         )
-
-        # Check availability and log if not available
-        is_available, reason = skill.is_available()
-        if not is_available:
-            logger.debug(f"Skill '{skill.name}' not available: {reason}")
-
-        self._skills[skill.name] = skill
-        logger.debug(f"Loaded skill: {skill.name} from {path}")
+        self._register_skill(skill, path)
 
     def _load_yaml_skill(self, path: Path) -> None:
         """Load a skill from a pure YAML file (backward compatibility).
@@ -348,37 +387,15 @@ class SkillRegistry:
         if "instructions" not in data:
             raise ValueError("Skill missing required field: instructions")
 
-        requirements = self._parse_requirements(data)
-
-        # Parse config spec
-        config_spec = data.get("config", [])
-        if not isinstance(config_spec, list):
-            config_spec = []
-
         # YAML files don't have a skill directory, so no skill-local config
-        config_values = self._resolve_config_values(name, config_spec, None)
-
-        skill = SkillDefinition(
+        skill = self._create_skill_definition(
             name=name,
             description=data["description"],
             instructions=data["instructions"],
-            preferred_model=data.get("preferred_model"),
-            required_tools=data.get("required_tools", []),
-            input_schema=data.get("input_schema", {}),
-            max_iterations=data.get("max_iterations", 5),
-            requires=requirements,
-            config=config_spec,
-            config_values=config_values,
+            data=data,
             skill_path=None,
         )
-
-        # Check availability and log if not available
-        is_available, reason = skill.is_available()
-        if not is_available:
-            logger.debug(f"Skill '{skill.name}' not available: {reason}")
-
-        self._skills[skill.name] = skill
-        logger.debug(f"Loaded skill: {skill.name} from {path}")
+        self._register_skill(skill, path)
 
     def register(self, skill: SkillDefinition) -> None:
         """Register a skill directly.
@@ -432,7 +449,9 @@ class SkillRegistry:
         """
         return [skill for skill in self._skills.values() if skill.is_available()[0]]
 
-    def get_definitions(self, include_unavailable: bool = False) -> list[dict[str, Any]]:
+    def get_definitions(
+        self, include_unavailable: bool = False
+    ) -> list[dict[str, Any]]:
         """Get skill definitions for LLM.
 
         Args:
@@ -441,11 +460,7 @@ class SkillRegistry:
         Returns:
             List of skill definitions with name, description, and input_schema.
         """
-        skills = (
-            self._skills.values()
-            if include_unavailable
-            else self.list_available()
-        )
+        skills = self._skills.values() if include_unavailable else self.list_available()
         return [
             {
                 "name": skill.name,

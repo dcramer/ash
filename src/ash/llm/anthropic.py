@@ -8,8 +8,6 @@ from typing import Any
 import anthropic
 
 from ash.llm.base import LLMProvider
-
-logger = logging.getLogger(__name__)
 from ash.llm.types import (
     CompletionResponse,
     ContentBlock,
@@ -23,6 +21,8 @@ from ash.llm.types import (
     ToolUse,
     Usage,
 )
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
 

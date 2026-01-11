@@ -56,7 +56,10 @@ class ServiceManager:
                 await asyncio.sleep(0.5)
                 status = await self._backend.status()
                 if status.state == ServiceState.RUNNING:
-                    return True, f"Service started using {self.backend_name} (PID {status.pid})"
+                    return (
+                        True,
+                        f"Service started using {self.backend_name} (PID {status.pid})",
+                    )
                 return True, f"Service started using {self.backend_name}"
             return False, "Service failed to start"
         except Exception as e:
@@ -114,12 +117,18 @@ class ServiceManager:
             Tuple of (success, message).
         """
         if not self._backend.supports_install:
-            return False, f"Auto-start not supported with {self.backend_name} backend. Requires systemd (Linux) or launchd (macOS)."
+            return (
+                False,
+                f"Auto-start not supported with {self.backend_name} backend. Requires systemd (Linux) or launchd (macOS).",
+            )
 
         try:
             success = await self._backend.install()
             if success:
-                return True, f"Installed as {self.backend_name} service (will start on login)"
+                return (
+                    True,
+                    f"Installed as {self.backend_name} service (will start on login)",
+                )
             return False, "Installation failed"
         except NotImplementedError as e:
             return False, str(e)
@@ -140,9 +149,7 @@ class ServiceManager:
         except Exception as e:
             return False, f"Error uninstalling service: {e}"
 
-    async def logs(
-        self, follow: bool = False, lines: int = 50
-    ) -> AsyncIterator[str]:
+    async def logs(self, follow: bool = False, lines: int = 50) -> AsyncIterator[str]:
         """Stream service logs.
 
         Args:
@@ -180,7 +187,7 @@ class ServiceManager:
 
         # Read last N lines
         try:
-            with open(path) as f:
+            with path.open() as f:  # noqa: ASYNC230
                 all_lines = f.readlines()
                 for line in all_lines[-lines:]:
                     yield line.rstrip()

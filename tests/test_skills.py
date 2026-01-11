@@ -115,7 +115,7 @@ class TestSkillDefinition:
         assert skill.name == "test"
         assert skill.description == "Test skill"
         assert skill.instructions == "Do something"
-        assert skill.preferred_model is None
+        assert skill.model is None
         assert skill.required_tools == []
         assert skill.input_schema == {}
         assert skill.max_iterations == 5
@@ -125,12 +125,15 @@ class TestSkillDefinition:
             name="summarize",
             description="Summarize text",
             instructions="Create summaries",
-            preferred_model="fast",
+            model="fast",
             required_tools=["bash"],
-            input_schema={"type": "object", "properties": {"content": {"type": "string"}}},
+            input_schema={
+                "type": "object",
+                "properties": {"content": {"type": "string"}},
+            },
             max_iterations=3,
         )
-        assert skill.preferred_model == "fast"
+        assert skill.model == "fast"
         assert skill.required_tools == ["bash"]
         assert skill.max_iterations == 3
 
@@ -265,8 +268,12 @@ class TestSkillRegistry:
 
     def test_list_names(self):
         registry = SkillRegistry()
-        registry.register(SkillDefinition(name="a", description="A", instructions="Do A"))
-        registry.register(SkillDefinition(name="b", description="B", instructions="Do B"))
+        registry.register(
+            SkillDefinition(name="a", description="A", instructions="Do A")
+        )
+        registry.register(
+            SkillDefinition(name="b", description="B", instructions="Do B")
+        )
         names = registry.list_names()
         assert "a" in names
         assert "b" in names
@@ -343,7 +350,7 @@ Do something useful.
         (skill_dir / "SKILL.md").write_text(
             """---
 description: Summarize text
-preferred_model: fast
+model: fast
 required_tools:
   - bash
 max_iterations: 3
@@ -364,7 +371,7 @@ Create summaries. Be concise.
         registry.discover(tmp_path, include_bundled=False)
 
         skill = registry.get("summarize")
-        assert skill.preferred_model == "fast"
+        assert skill.model == "fast"
         assert skill.required_tools == ["bash"]
         assert skill.max_iterations == 3
         assert "content" in skill.input_schema.get("properties", {})
@@ -456,7 +463,7 @@ Do something.
 
         (skill_dir / "SKILL.md").write_text(
             """---
-preferred_model: fast
+model: fast
 ---
 
 Instructions without description.
@@ -547,7 +554,10 @@ class TestSkillExecutor:
         return ToolExecutor(tool_registry)
 
     async def test_execute_skill_not_found(
-        self, skill_registry: SkillRegistry, tool_executor: ToolExecutor, config: AshConfig
+        self,
+        skill_registry: SkillRegistry,
+        tool_executor: ToolExecutor,
+        config: AshConfig,
     ):
         executor = SkillExecutor(skill_registry, tool_executor, config)
         result = await executor.execute(
@@ -585,7 +595,10 @@ class TestSkillExecutor:
         assert "not available" in result.content
 
     async def test_execute_missing_required_input(
-        self, skill_registry: SkillRegistry, tool_executor: ToolExecutor, config: AshConfig
+        self,
+        skill_registry: SkillRegistry,
+        tool_executor: ToolExecutor,
+        config: AshConfig,
     ):
         skill_registry.register(
             SkillDefinition(
@@ -610,14 +623,19 @@ class TestSkillExecutor:
         assert "content" in result.content
 
     async def test_execute_successful(
-        self, skill_registry: SkillRegistry, tool_executor: ToolExecutor, config: AshConfig
+        self,
+        skill_registry: SkillRegistry,
+        tool_executor: ToolExecutor,
+        config: AshConfig,
     ):
         executor = SkillExecutor(skill_registry, tool_executor, config)
 
         with patch("ash.skills.executor.create_llm_provider") as mock_create:
             mock_provider = AsyncMock()
             mock_provider.complete.return_value = CompletionResponse(
-                message=Message(role=Role.ASSISTANT, content="Skill completed successfully"),
+                message=Message(
+                    role=Role.ASSISTANT, content="Skill completed successfully"
+                ),
                 usage=Usage(input_tokens=100, output_tokens=50),
             )
             mock_create.return_value = mock_provider
@@ -633,7 +651,10 @@ class TestSkillExecutor:
             assert result.iterations == 1
 
     async def test_execute_with_tool_use(
-        self, skill_registry: SkillRegistry, tool_executor: ToolExecutor, config: AshConfig
+        self,
+        skill_registry: SkillRegistry,
+        tool_executor: ToolExecutor,
+        config: AshConfig,
     ):
         executor = SkillExecutor(skill_registry, tool_executor, config)
 
@@ -666,7 +687,10 @@ class TestSkillExecutor:
             assert result.iterations == 2
 
     async def test_execute_max_iterations(
-        self, skill_registry: SkillRegistry, tool_executor: ToolExecutor, config: AshConfig
+        self,
+        skill_registry: SkillRegistry,
+        tool_executor: ToolExecutor,
+        config: AshConfig,
     ):
         skill_registry.register(
             SkillDefinition(
@@ -703,14 +727,17 @@ class TestSkillExecutor:
             assert "maximum iterations" in result.content.lower()
 
     async def test_execute_model_alias_resolution(
-        self, skill_registry: SkillRegistry, tool_executor: ToolExecutor, config: AshConfig
+        self,
+        skill_registry: SkillRegistry,
+        tool_executor: ToolExecutor,
+        config: AshConfig,
     ):
         skill_registry.register(
             SkillDefinition(
                 name="fast_skill",
                 description="Uses fast model",
                 instructions="Do something quickly",
-                preferred_model="fast",
+                model="fast",
             )
         )
 
@@ -735,14 +762,17 @@ class TestSkillExecutor:
             assert mock_create.call_args[0][0] == "anthropic"
 
     async def test_execute_unknown_model_alias_falls_back(
-        self, skill_registry: SkillRegistry, tool_executor: ToolExecutor, config: AshConfig
+        self,
+        skill_registry: SkillRegistry,
+        tool_executor: ToolExecutor,
+        config: AshConfig,
     ):
         skill_registry.register(
             SkillDefinition(
                 name="unknown_model_skill",
                 description="Uses unknown model",
                 instructions="Do something",
-                preferred_model="nonexistent",
+                model="nonexistent",
             )
         )
 
@@ -810,7 +840,9 @@ class TestUseSkillTool:
     ) -> SkillExecutor:
         return SkillExecutor(skill_registry, tool_executor, config)
 
-    def test_properties(self, skill_registry: SkillRegistry, skill_executor: SkillExecutor):
+    def test_properties(
+        self, skill_registry: SkillRegistry, skill_executor: SkillExecutor
+    ):
         tool = UseSkillTool(skill_registry, skill_executor)
         assert tool.name == "use_skill"
         assert "skill" in tool.input_schema["required"]
@@ -915,7 +947,7 @@ class TestWorkspaceSkillsIntegration:
         (summarize_dir / "SKILL.md").write_text(
             """---
 description: Summarize text concisely
-preferred_model: fast
+model: fast
 max_iterations: 3
 input_schema:
   type: object
@@ -952,12 +984,12 @@ Explain clearly for beginners.
         assert registry.has("explain")
 
         summarize = registry.get("summarize")
-        assert summarize.preferred_model == "fast"
+        assert summarize.model == "fast"
         assert summarize.max_iterations == 3
         assert "content" in summarize.input_schema.get("required", [])
 
         explain = registry.get("explain")
-        assert explain.preferred_model is None
+        assert explain.model is None
         assert explain.max_iterations == 5  # default
 
     def test_list_skills_from_workspace(self, workspace_with_skills: Path):
@@ -969,3 +1001,288 @@ Explain clearly for beginners.
         names = [s["name"] for s in definitions]
         assert "summarize" in names
         assert "explain" in names
+
+
+# =============================================================================
+# parse_config_spec Tests
+# =============================================================================
+
+
+class TestParseConfigSpec:
+    """Tests for SkillDefinition.parse_config_spec() helper."""
+
+    def test_parse_required_config(self):
+        name, default = SkillDefinition.parse_config_spec("API_KEY")
+        assert name == "API_KEY"
+        assert default is None
+
+    def test_parse_config_with_default(self):
+        name, default = SkillDefinition.parse_config_spec("TIMEOUT=30")
+        assert name == "TIMEOUT"
+        assert default == "30"
+
+    def test_parse_config_with_equals_in_value(self):
+        name, default = SkillDefinition.parse_config_spec(
+            "URL=http://example.com?foo=bar"
+        )
+        assert name == "URL"
+        assert default == "http://example.com?foo=bar"
+
+    def test_parse_config_with_whitespace(self):
+        name, default = SkillDefinition.parse_config_spec("  KEY  =  value  ")
+        assert name == "KEY"
+        assert default == "value"
+
+    def test_parse_config_empty_default(self):
+        name, default = SkillDefinition.parse_config_spec("KEY=")
+        assert name == "KEY"
+        assert default == ""
+
+
+# =============================================================================
+# Config Resolution Tests
+# =============================================================================
+
+
+class TestSkillConfigResolution:
+    """Tests for skill config resolution."""
+
+    def test_config_from_env_var(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "test"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Test skill with config
+config:
+  - API_KEY
+---
+
+Use the API key.
+"""
+        )
+
+        with patch.dict("os.environ", {"API_KEY": "env_value"}):
+            registry = SkillRegistry()
+            registry.discover(tmp_path, include_bundled=False)
+
+            skill = registry.get("test")
+            assert skill.config_values.get("API_KEY") == "env_value"
+            assert skill.is_config_valid()[0] is True
+
+    def test_config_from_default(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "test"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Test skill with default config
+config:
+  - TIMEOUT=30
+---
+
+Use timeout.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("test")
+        assert skill.config_values.get("TIMEOUT") == "30"
+
+    def test_config_from_central_config(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "test"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Test skill with config
+config:
+  - API_KEY
+---
+
+Use the API key.
+"""
+        )
+
+        central_config = {"test": {"API_KEY": "central_value"}}
+        registry = SkillRegistry(central_config=central_config)
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("test")
+        assert skill.config_values.get("API_KEY") == "central_value"
+
+    def test_missing_required_config_makes_skill_unavailable(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "test"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Test skill with required config
+config:
+  - REQUIRED_KEY
+---
+
+Needs the key.
+"""
+        )
+
+        # No config provided
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("test")
+        is_available, reason = skill.is_available()
+        assert is_available is False
+        assert "REQUIRED_KEY" in reason
+
+
+# =============================================================================
+# list_available Tests
+# =============================================================================
+
+
+class TestListAvailable:
+    """Tests for list_available filtering."""
+
+    def test_list_available_filters_unavailable(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Available skill
+        available_dir = skills_dir / "available"
+        available_dir.mkdir()
+        (available_dir / "SKILL.md").write_text(
+            """---
+description: Available skill
+---
+
+Always available.
+"""
+        )
+
+        # Unavailable skill (missing required config)
+        unavailable_dir = skills_dir / "unavailable"
+        unavailable_dir.mkdir()
+        (unavailable_dir / "SKILL.md").write_text(
+            """---
+description: Unavailable skill
+config:
+  - MISSING_KEY
+---
+
+Needs missing key.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        # Should have both registered
+        assert len(registry) == 2
+        assert registry.has("available")
+        assert registry.has("unavailable")
+
+        # But only one available
+        available = registry.list_available()
+        assert len(available) == 1
+        assert available[0].name == "available"
+
+    def test_get_definitions_respects_availability(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        # Available skill
+        available_dir = skills_dir / "available"
+        available_dir.mkdir()
+        (available_dir / "SKILL.md").write_text(
+            """---
+description: Available skill
+---
+
+Always available.
+"""
+        )
+
+        # Unavailable skill (requires non-existent binary)
+        unavailable_dir = skills_dir / "unavailable"
+        unavailable_dir.mkdir()
+        (unavailable_dir / "SKILL.md").write_text(
+            """---
+description: Unavailable skill
+requires:
+  bins:
+    - nonexistent-binary-xyz
+---
+
+Needs missing binary.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        # Default: only available
+        defs = registry.get_definitions()
+        names = [d["name"] for d in defs]
+        assert "available" in names
+        assert "unavailable" not in names
+
+        # With include_unavailable=True
+        defs_all = registry.get_definitions(include_unavailable=True)
+        names_all = [d["name"] for d in defs_all]
+        assert "available" in names_all
+        assert "unavailable" in names_all
+
+
+# =============================================================================
+# Skill Override Tests
+# =============================================================================
+
+
+class TestSkillOverride:
+    """Tests for skill override behavior."""
+
+    def test_workspace_skill_overrides_bundled(self, tmp_path: Path, caplog):
+        """Workspace skills should override bundled skills with same name."""
+        # This test verifies the override warning is logged
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "test"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: First skill
+---
+
+First version.
+"""
+        )
+
+        # Also create a flat markdown with same name (will override)
+        (skills_dir / "test.md").write_text(
+            """---
+description: Second skill (override)
+---
+
+Second version.
+"""
+        )
+
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            registry = SkillRegistry()
+            registry.discover(tmp_path, include_bundled=False)
+
+        # The second one should have overwritten the first
+        skill = registry.get("test")
+        assert skill.description == "Second skill (override)"
+
+        # Should have logged a warning
+        assert any("overwritten" in record.message for record in caplog.records)

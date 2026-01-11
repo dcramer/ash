@@ -237,8 +237,12 @@ class TestNamedModelConfigs:
         """Test [models.<alias>] configuration."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929"),
-                "fast": ModelConfig(provider="anthropic", model="claude-3-5-haiku-20241022"),
+                "default": ModelConfig(
+                    provider="anthropic", model="claude-sonnet-4-5-20250929"
+                ),
+                "fast": ModelConfig(
+                    provider="anthropic", model="claude-3-5-haiku-20241022"
+                ),
             }
         )
         assert "default" in config.models
@@ -250,8 +254,12 @@ class TestNamedModelConfigs:
         """Test get_model() lookup."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929"),
-                "fast": ModelConfig(provider="anthropic", model="claude-3-5-haiku-20241022"),
+                "default": ModelConfig(
+                    provider="anthropic", model="claude-sonnet-4-5-20250929"
+                ),
+                "fast": ModelConfig(
+                    provider="anthropic", model="claude-3-5-haiku-20241022"
+                ),
             }
         )
         model = config.get_model("fast")
@@ -262,7 +270,9 @@ class TestNamedModelConfigs:
         """Test get_model() with unknown alias raises ConfigError."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929"),
+                "default": ModelConfig(
+                    provider="anthropic", model="claude-sonnet-4-5-20250929"
+                ),
             }
         )
         with pytest.raises(ConfigError) as exc_info:
@@ -274,8 +284,12 @@ class TestNamedModelConfigs:
         """Test list_models() returns sorted aliases."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929"),
-                "fast": ModelConfig(provider="anthropic", model="claude-3-5-haiku-20241022"),
+                "default": ModelConfig(
+                    provider="anthropic", model="claude-sonnet-4-5-20250929"
+                ),
+                "fast": ModelConfig(
+                    provider="anthropic", model="claude-3-5-haiku-20241022"
+                ),
                 "capable": ModelConfig(provider="openai", model="gpt-4o"),
             }
         )
@@ -286,7 +300,9 @@ class TestNamedModelConfigs:
         """Test default_model property returns 'default' alias."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929"),
+                "default": ModelConfig(
+                    provider="anthropic", model="claude-sonnet-4-5-20250929"
+                ),
             }
         )
         assert config.default_model.provider == "anthropic"
@@ -296,7 +312,9 @@ class TestNamedModelConfigs:
         """Test API key resolution from provider-level config."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929"),
+                "default": ModelConfig(
+                    provider="anthropic", model="claude-sonnet-4-5-20250929"
+                ),
             },
             anthropic=ProviderConfig(api_key=SecretStr("test-key")),
         )
@@ -309,7 +327,9 @@ class TestNamedModelConfigs:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929"),
+                "default": ModelConfig(
+                    provider="anthropic", model="claude-sonnet-4-5-20250929"
+                ),
             }
         )
         api_key = config.resolve_api_key("default")
@@ -321,7 +341,9 @@ class TestNamedModelConfigs:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929"),
+                "default": ModelConfig(
+                    provider="anthropic", model="claude-sonnet-4-5-20250929"
+                ),
             },
             anthropic=ProviderConfig(api_key=SecretStr("config-key")),
         )
@@ -333,7 +355,9 @@ class TestNamedModelConfigs:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929"),
+                "default": ModelConfig(
+                    provider="anthropic", model="claude-sonnet-4-5-20250929"
+                ),
             }
         )
         api_key = config.resolve_api_key("default")
@@ -384,7 +408,7 @@ class TestBackwardCompatibility:
                 default_llm=LLMConfig(
                     provider="anthropic",
                     model="claude-sonnet-4-5-20250929",
-                )
+                ),
             )
         # models.default should win
         assert config.models["default"].provider == "openai"

@@ -96,7 +96,7 @@ class TestTelegramMessageHandler:
         """Create a mock provider."""
         provider = MagicMock()
         provider.name = "telegram"
-        provider.send = AsyncMock()
+        provider.send = AsyncMock(return_value="123")  # Returns message ID
         provider.send_streaming = AsyncMock(return_value="123")
         provider.send_typing = AsyncMock()
         provider.set_reaction = AsyncMock()
@@ -246,9 +246,7 @@ class TestTelegramMessageHandler:
         handler.clear_all_sessions()
         assert len(handler._sessions) == 0
 
-    async def test_message_persistence(
-        self, handler, database, incoming_message
-    ):
+    async def test_message_persistence(self, handler, database, incoming_message):
         """Test messages are persisted to database."""
         await handler.handle_message(incoming_message)
 

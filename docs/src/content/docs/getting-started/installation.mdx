@@ -68,12 +68,34 @@ Run the setup wizard to create your configuration:
 uv run ash setup
 ```
 
-Or create `~/.ash/config.toml` manually:
+Or generate a template config with sensible defaults:
+
+```bash
+uv run ash init
+```
+
+Both create `~/.ash/config.toml` with Haiku as default and Sonnet for complex tasks. Just fill in your API key.
+
+You can also create `~/.ash/config.toml` manually:
 
 ```toml
 [models.default]
 provider = "anthropic"
+model = "claude-haiku-4-5-20251001"
+temperature = 0.7
+max_tokens = 4096
+
+[models.sonnet]
+provider = "anthropic"
 model = "claude-sonnet-4-5-20250929"
+max_tokens = 8192
+
+# Override model for specific skills that need more reasoning power
+[skills.debug]
+model = "sonnet"
+
+[skills.code-review]
+model = "sonnet"
 ```
 
 See [Configuration Overview](/configuration/overview/) for all options.
@@ -86,13 +108,11 @@ The sandbox isolates command execution for security. Build the image:
 uv run ash sandbox build
 ```
 
-Verify the sandbox:
+Check sandbox status:
 
 ```bash
-uv run ash sandbox verify
+uv run ash sandbox status
 ```
-
-This runs security tests to ensure proper isolation.
 
 ## Database Setup
 

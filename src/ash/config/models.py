@@ -48,7 +48,9 @@ class TelegramConfig(BaseModel):
     allowed_users: list[str] = []
     webhook_url: str | None = None
     # Group chat settings
-    allowed_groups: list[str] = []  # Group IDs (empty = allow all with authorized users)
+    allowed_groups: list[
+        str
+    ] = []  # Group IDs (empty = allow all with authorized users)
     group_mode: Literal["mention", "always"] = "mention"  # How to respond in groups
 
 
@@ -110,6 +112,14 @@ class MemoryConfig(BaseModel):
     system_prompt_buffer: int = 8000  # Reserve tokens for system prompt
 
 
+class ConversationConfig(BaseModel):
+    """Configuration for conversation context management."""
+
+    recency_window: int = 10  # Always include last N messages
+    gap_threshold_minutes: int = 15  # Signal gap if longer than this
+    reply_context_window: int = 3  # Messages before/after reply target
+
+
 class BraveSearchConfig(BaseModel):
     """Configuration for Brave Search API."""
 
@@ -154,6 +164,7 @@ class AshConfig(BaseModel):
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    conversation: ConversationConfig = Field(default_factory=ConversationConfig)
     embeddings: EmbeddingsConfig | None = None
     brave_search: BraveSearchConfig | None = None
     sentry: SentryConfig | None = None
@@ -189,7 +200,9 @@ class AshConfig(BaseModel):
                             self.anthropic.api_key = self.default_llm.api_key
                     elif self.default_llm.provider == "openai":
                         if self.openai is None:
-                            self.openai = ProviderConfig(api_key=self.default_llm.api_key)
+                            self.openai = ProviderConfig(
+                                api_key=self.default_llm.api_key
+                            )
                         elif self.openai.api_key is None:
                             self.openai.api_key = self.default_llm.api_key
         return self
@@ -217,9 +230,7 @@ class AshConfig(BaseModel):
         """
         if alias not in self.models:
             available = ", ".join(sorted(self.models.keys()))
-            raise ConfigError(
-                f"Unknown model alias '{alias}'. Available: {available}"
-            )
+            raise ConfigError(f"Unknown model alias '{alias}'. Available: {available}")
         return self.models[alias]
 
     def list_models(self) -> list[str]:

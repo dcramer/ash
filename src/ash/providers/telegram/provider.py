@@ -9,7 +9,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
-from aiogram.types import Message as TelegramMessage, ReactionTypeEmoji
+from aiogram.types import Message as TelegramMessage
+from aiogram.types import ReactionTypeEmoji
 
 from ash.providers.base import (
     ImageAttachment,
@@ -160,6 +161,162 @@ class TelegramProvider(Provider):
         pattern = rf"@{re.escape(self._bot_username)}\b"
         return re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
 
+    # --- Message sending helpers ---
+
+    async def _send_with_fallback(
+        self,
+        chat_id: int,
+        text: str,
+        reply_to: int | None = None,
+        parse_mode: ParseMode | None = ParseMode.MARKDOWN,
+    ) -> TelegramMessage:
+        """Send a message with automatic plain-text fallback on parse errors.
+
+        Args:
+            chat_id: Telegram chat ID.
+            text: Message text.
+            reply_to: Message ID to reply to.
+            parse_mode: Parse mode (falls back to None on error).
+
+        Returns:
+            Sent Telegram message.
+        """
+        try:
+            return await self._bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_to_message_id=reply_to,
+                parse_mode=parse_mode,
+            )
+        except TelegramBadRequest as e:
+            if "can't parse" in str(e).lower() and parse_mode is not None:
+                logger.debug(f"Markdown parsing failed, sending as plain text: {e}")
+                return await self._bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_to_message_id=reply_to,
+                    parse_mode=None,
+                )
+            raise
+
+    async def _edit_with_fallback(
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        parse_mode: ParseMode | None = ParseMode.MARKDOWN,
+    ) -> bool:
+        """Edit a message with automatic plain-text fallback on parse errors.
+
+        Args:
+            chat_id: Telegram chat ID.
+            message_id: Message ID to edit.
+            text: New message text.
+            parse_mode: Parse mode (falls back to None on error).
+
+        Returns:
+            True if edit succeeded, False if it failed (e.g., rate limit).
+        """
+        try:
+            await self._bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                parse_mode=parse_mode,
+            )
+            return True
+        except TelegramBadRequest as e:
+            if "can't parse" in str(e).lower() and parse_mode is not None:
+                logger.debug(f"Markdown parsing failed, editing as plain text: {e}")
+                try:
+                    await self._bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        parse_mode=None,
+                    )
+                    return True
+                except Exception as e2:
+                    logger.debug(f"Plain text edit also failed: {e2}")
+                    return False
+            raise
+        except Exception as e:
+            logger.debug(f"Edit failed: {e}")
+            return False
+
+    # --- Message processing helpers ---
+
+    def _should_process_message(
+        self, message: TelegramMessage
+    ) -> tuple[int, str | None] | None:
+        """Check if a message should be processed (user + group access).
+
+        Args:
+            message: Telegram message to check.
+
+        Returns:
+            (user_id, username) tuple if should process, None otherwise.
+        """
+        if not message.from_user:
+            return None
+
+        user_id = message.from_user.id
+        username = message.from_user.username
+
+        # Check user authorization
+        if not self._is_user_allowed(user_id, username):
+            logger.warning(f"Unauthorized user: {user_id} (@{username})")
+            return None
+
+        # Check group access
+        is_group = message.chat.type in ("group", "supergroup")
+        if is_group:
+            if not self._is_group_allowed(message.chat.id):
+                logger.debug(f"Group not allowed: {message.chat.id}")
+                return None
+            if self._group_mode == "mention" and not self._is_mentioned(message):
+                return None
+
+        return user_id, username
+
+    def _to_incoming_message(
+        self,
+        message: TelegramMessage,
+        user_id: int,
+        username: str | None,
+        text: str,
+        images: list[ImageAttachment] | None = None,
+    ) -> IncomingMessage:
+        """Convert a Telegram message to an IncomingMessage.
+
+        Args:
+            message: Source Telegram message.
+            user_id: User ID (already validated).
+            username: Username (already validated).
+            text: Processed text (with mentions stripped if needed).
+            images: Optional image attachments.
+
+        Returns:
+            IncomingMessage for handler processing.
+        """
+        return IncomingMessage(
+            id=str(message.message_id),
+            chat_id=str(message.chat.id),
+            user_id=str(user_id),
+            text=text,
+            username=username,
+            display_name=message.from_user.full_name if message.from_user else None,
+            reply_to_message_id=str(message.reply_to_message.message_id)
+            if message.reply_to_message
+            else None,
+            images=images or [],
+            metadata={
+                "chat_type": message.chat.type,
+                "chat_title": message.chat.title,
+            },
+            timestamp=message.date,
+        )
+
     async def start(self, handler: MessageHandler) -> None:
         """Start the Telegram bot.
 
@@ -225,17 +382,11 @@ class TelegramProvider(Provider):
         @self._dp.message(Command("start"))
         async def handle_start(message: TelegramMessage) -> None:
             """Handle /start command."""
-            if not message.from_user:
+            access = self._should_process_message(message)
+            if not access:
                 return
 
-            user_id = message.from_user.id
-            username = message.from_user.username
-
-            if not self._is_user_allowed(user_id, username):
-                logger.warning(f"Unauthorized user: {user_id} (@{username})")
-                return
-
-            name = message.from_user.first_name or "there"
+            name = message.from_user.first_name if message.from_user else "there"
             await message.answer(
                 f"Hello, {name}! I'm Ash, your personal assistant.\n\n"
                 "Send me a message and I'll help you with tasks, answer questions, "
@@ -246,14 +397,7 @@ class TelegramProvider(Provider):
         @self._dp.message(Command("help"))
         async def handle_help(message: TelegramMessage) -> None:
             """Handle /help command."""
-            if not message.from_user:
-                return
-
-            user_id = message.from_user.id
-            username = message.from_user.username
-
-            if not self._is_user_allowed(user_id, username):
-                logger.warning(f"Unauthorized user: {user_id} (@{username})")
+            if not self._should_process_message(message):
                 return
 
             await message.answer(
@@ -269,25 +413,10 @@ class TelegramProvider(Provider):
         @self._dp.message(F.photo)
         async def handle_photo(message: TelegramMessage) -> None:
             """Handle photo messages."""
-            if not message.from_user:
+            access = self._should_process_message(message)
+            if not access:
                 return
-
-            user_id = message.from_user.id
-            username = message.from_user.username
-
-            if not self._is_user_allowed(user_id, username):
-                logger.warning(f"Unauthorized user: {user_id} (@{username})")
-                return
-
-            # Group chat handling
-            is_group = message.chat.type in ("group", "supergroup")
-            if is_group:
-                if not self._is_group_allowed(message.chat.id):
-                    logger.debug(f"Group not allowed: {message.chat.id}")
-                    return
-                # In mention mode, only respond to photos when mentioned in caption
-                if self._group_mode == "mention" and not self._is_mentioned(message):
-                    return
+            user_id, username = access
 
             # Get the largest photo (best quality)
             photo = message.photo[-1] if message.photo else None
@@ -313,29 +442,15 @@ class TelegramProvider(Provider):
             )
 
             # Strip bot mention from caption if in group
+            is_group = message.chat.type in ("group", "supergroup")
             caption = message.caption or ""
             if is_group and caption:
                 caption = self._strip_mention(caption)
 
-            # Create incoming message with image
-            incoming = IncomingMessage(
-                id=str(message.message_id),
-                chat_id=str(message.chat.id),
-                user_id=str(user_id),
-                text=caption,
-                username=username,
-                display_name=message.from_user.full_name,
-                reply_to_message_id=str(message.reply_to_message.message_id)
-                if message.reply_to_message
-                else None,
-                images=[image],
-                metadata={
-                    "chat_type": message.chat.type,
-                    "chat_title": message.chat.title,
-                },
+            incoming = self._to_incoming_message(
+                message, user_id, username, caption, images=[image]
             )
 
-            # Call handler
             if self._handler:
                 try:
                     await self._handler(incoming)
@@ -344,51 +459,26 @@ class TelegramProvider(Provider):
 
         @self._dp.message(F.text)
         async def handle_message(message: TelegramMessage) -> None:
-            if not message.text or not message.from_user:
+            """Handle text messages."""
+            if not message.text:
                 return
 
-            user_id = message.from_user.id
-            username = message.from_user.username
-            logger.info(f"Received text message from @{username} ({user_id}): {message.text[:50]}")
-
-            # Check if user is allowed
-            if not self._is_user_allowed(user_id, username):
-                logger.warning(f"Unauthorized user: {user_id} (@{username})")
+            access = self._should_process_message(message)
+            if not access:
                 return
+            user_id, username = access
 
-            # Group chat handling
-            is_group = message.chat.type in ("group", "supergroup")
-            if is_group:
-                # Check if group is allowed
-                if not self._is_group_allowed(message.chat.id):
-                    logger.debug(f"Group not allowed: {message.chat.id}")
-                    return
-
-                # In mention mode, only respond when mentioned
-                if self._group_mode == "mention" and not self._is_mentioned(message):
-                    return
-
-            # Strip bot mention from text if present
-            text = self._strip_mention(message.text) if is_group else message.text
-
-            # Convert to internal message format
-            incoming = IncomingMessage(
-                id=str(message.message_id),
-                chat_id=str(message.chat.id),
-                user_id=str(user_id),
-                text=text,
-                username=username,
-                display_name=message.from_user.full_name,
-                reply_to_message_id=str(message.reply_to_message.message_id)
-                if message.reply_to_message
-                else None,
-                metadata={
-                    "chat_type": message.chat.type,
-                    "chat_title": message.chat.title,
-                },
+            logger.info(
+                f"Received text message from @{username} ({user_id}): "
+                f"{message.text[:50]}"
             )
 
-            # Call handler
+            # Strip bot mention from text if in group
+            is_group = message.chat.type in ("group", "supergroup")
+            text = self._strip_mention(message.text) if is_group else message.text
+
+            incoming = self._to_incoming_message(message, user_id, username, text)
+
             if self._handler:
                 try:
                     await self._handler(incoming)
@@ -409,30 +499,14 @@ class TelegramProvider(Provider):
             if message.parse_mode
             else ParseMode.MARKDOWN
         )
-
-        try:
-            sent = await self._bot.send_message(
-                chat_id=int(message.chat_id),
-                text=message.text,
-                reply_to_message_id=int(message.reply_to_message_id)
-                if message.reply_to_message_id
-                else None,
-                parse_mode=parse_mode,
-            )
-        except TelegramBadRequest as e:
-            # Markdown parsing failed, retry without formatting
-            if "can't parse" in str(e).lower():
-                logger.debug(f"Markdown parsing failed, sending as plain text: {e}")
-                sent = await self._bot.send_message(
-                    chat_id=int(message.chat_id),
-                    text=message.text,
-                    reply_to_message_id=int(message.reply_to_message_id)
-                    if message.reply_to_message_id
-                    else None,
-                )
-            else:
-                raise
-
+        sent = await self._send_with_fallback(
+            chat_id=int(message.chat_id),
+            text=message.text,
+            reply_to=int(message.reply_to_message_id)
+            if message.reply_to_message_id
+            else None,
+            parse_mode=parse_mode,
+        )
         return str(sent.message_id)
 
     async def send_streaming(
@@ -454,87 +528,57 @@ class TelegramProvider(Provider):
         Returns:
             Final message ID.
         """
-        # Collect content from stream, sending typing indicators while waiting
         content = ""
         message_id: str | None = None
         last_edit = 0.0
-        use_markdown = True  # Fall back to plain text if markdown parsing fails
+        use_markdown = True
+
+        chat_id_int = int(chat_id)
+        reply_to_int = int(reply_to) if reply_to else None
 
         async for chunk in stream:
             content += chunk
-
             now = asyncio.get_event_loop().time()
 
             # Send first message once we have content
             if message_id is None and content.strip():
+                parse_mode = ParseMode.MARKDOWN if use_markdown else None
                 try:
-                    sent = await self._bot.send_message(
-                        chat_id=int(chat_id),
-                        text=content,
-                        reply_to_message_id=int(reply_to) if reply_to else None,
-                        parse_mode=ParseMode.MARKDOWN if use_markdown else None,
+                    sent = await self._send_with_fallback(
+                        chat_id_int, content, reply_to_int, parse_mode
                     )
-                except TelegramBadRequest as e:
-                    if "can't parse" in str(e).lower():
-                        use_markdown = False
-                        sent = await self._bot.send_message(
-                            chat_id=int(chat_id),
-                            text=content,
-                            reply_to_message_id=int(reply_to) if reply_to else None,
-                        )
-                    else:
-                        raise
-                message_id = str(sent.message_id)
+                    message_id = str(sent.message_id)
+                except TelegramBadRequest:
+                    # Fallback already tried in helper, disable markdown for future
+                    use_markdown = False
+                    raise
                 last_edit = now
+
             elif message_id and now - last_edit >= EDIT_INTERVAL:
-                # Rate limit edits
-                try:
-                    await self._bot.edit_message_text(
-                        chat_id=int(chat_id),
-                        message_id=int(message_id),
-                        text=content,
-                        parse_mode=ParseMode.MARKDOWN if use_markdown else None,
-                    )
+                # Rate-limited edits during streaming
+                parse_mode = ParseMode.MARKDOWN if use_markdown else None
+                success = await self._edit_with_fallback(
+                    chat_id_int, int(message_id), content, parse_mode
+                )
+                if success:
                     last_edit = now
-                except TelegramBadRequest as e:
-                    if "can't parse" in str(e).lower():
-                        use_markdown = False
-                        # Don't retry mid-stream edits, just continue
-                    else:
-                        logger.debug(f"Edit failed: {e}")
-                except Exception as e:
-                    logger.debug(f"Edit failed (likely rate limit): {e}")
+                else:
+                    # Edit failed, likely markdown issue - disable for future
+                    use_markdown = False
 
         # Final edit with complete content
         if message_id and content:
-            try:
-                await self._bot.edit_message_text(
-                    chat_id=int(chat_id),
-                    message_id=int(message_id),
-                    text=content,
-                    parse_mode=ParseMode.MARKDOWN if use_markdown else None,
-                )
-            except TelegramBadRequest as e:
-                if "can't parse" in str(e).lower():
-                    # Final fallback to plain text
-                    try:
-                        await self._bot.edit_message_text(
-                            chat_id=int(chat_id),
-                            message_id=int(message_id),
-                            text=content,
-                        )
-                    except Exception as e2:
-                        logger.warning(f"Final edit failed: {e2}")
-                else:
-                    logger.warning(f"Final edit failed: {e}")
-            except Exception as e:
-                logger.warning(f"Final edit failed: {e}")
+            parse_mode = ParseMode.MARKDOWN if use_markdown else None
+            await self._edit_with_fallback(
+                chat_id_int, int(message_id), content, parse_mode
+            )
         elif not message_id:
             # No content was streamed, send empty response
-            sent = await self._bot.send_message(
-                chat_id=int(chat_id),
-                text="I couldn't generate a response.",
-                reply_to_message_id=int(reply_to) if reply_to else None,
+            sent = await self._send_with_fallback(
+                chat_id_int,
+                "I couldn't generate a response.",
+                reply_to_int,
+                None,
             )
             message_id = str(sent.message_id)
 
@@ -557,25 +601,7 @@ class TelegramProvider(Provider):
             parse_mode: Text parsing mode.
         """
         pm = ParseMode(parse_mode.upper()) if parse_mode else ParseMode.MARKDOWN
-
-        try:
-            await self._bot.edit_message_text(
-                chat_id=int(chat_id),
-                message_id=int(message_id),
-                text=text,
-                parse_mode=pm,
-            )
-        except TelegramBadRequest as e:
-            if "can't parse" in str(e).lower():
-                # Markdown parsing failed, retry without formatting
-                logger.debug(f"Markdown parsing failed, editing as plain text: {e}")
-                await self._bot.edit_message_text(
-                    chat_id=int(chat_id),
-                    message_id=int(message_id),
-                    text=text,
-                )
-            else:
-                raise
+        await self._edit_with_fallback(int(chat_id), int(message_id), text, pm)
 
     async def delete(self, chat_id: str, message_id: str) -> None:
         """Delete a message.

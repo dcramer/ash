@@ -16,11 +16,21 @@ class RememberTool(Tool):
     - User shares important preferences or facts about themselves or others
     - Information will be relevant to future conversations
 
+    DO NOT use for:
+    - Speech patterns, verbal tics, or conversation style ("says bud", "uses emojis")
+    - Trivial acknowledgments or casual remarks
+    - Temporary emotional states or moods
+    - Information only relevant to the current conversation
+    - Observations about HOW the user communicates rather than WHAT they communicate
+
     Facts should be stored as complete, standalone statements that will
     make sense when retrieved later without context.
 
     For facts about specific people, specify the subject to enable better
     retrieval later (e.g., "my wife", "Sarah", "my boss").
+
+    IMPORTANT: When storing multiple facts, use the 'facts' array parameter
+    to batch them in a single call instead of calling remember multiple times.
     """
 
     def __init__(self, memory_manager: "MemoryManager"):
@@ -38,12 +48,14 @@ class RememberTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Store a fact or preference in long-term memory. "
-            "IMPORTANT: Always store as a complete, standalone statement. "
+            "Store facts or preferences in long-term memory. "
+            "Use 'facts' array to batch multiple memories in one call. "
+            "Only store facts that will be USEFUL in future conversations. "
+            "DO NOT store: speech patterns, verbal tics, conversation quirks, "
+            "temporary moods, or anything that won't matter later. "
             "If the fact is about a specific person (not the user), specify the subject. "
-            "Good: 'Sarah's birthday is March 15th' with subject='my wife' or subject='Sarah'. "
-            "Good: 'User prefers dark mode' with no subject (general user preference). "
-            "Bad: 'March 15th', 'likes it'."
+            "Good: 'Sarah's birthday is March 15th', 'User prefers dark mode'. "
+            "Bad: 'User says bud', 'User uses lowercase', 'User seems happy today'."
         )
 
     @property
@@ -54,17 +66,57 @@ class RememberTool(Tool):
                 "content": {
                     "type": "string",
                     "description": (
-                        "A complete, standalone statement. "
-                        "Examples: 'Sarah likes Italian food', 'User prefers Python', "
-                        "'Boss's name is Michael', 'User's birthday is March 15th'."
+                        "A single fact to store. Use 'facts' array instead for multiple items. "
+                        "Examples: 'Sarah likes Italian food', 'User prefers Python'."
                     ),
                 },
-                "subject": {
-                    "type": "string",
+                "facts": {
+                    "type": "array",
+                    "maxItems": 20,
                     "description": (
-                        "Who this fact is about, if not general user info. "
-                        "Use relationship terms the user uses: 'my wife', 'my boss', 'Sarah'. "
-                        "Leave empty for general facts about the user."
+                        "Batch multiple facts in one call. Each fact can have different subjects/shared settings. "
+                        "ALWAYS use this instead of calling remember multiple times."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {
+                                "type": "string",
+                                "description": "The fact to store.",
+                            },
+                            "subjects": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "maxItems": 10,
+                                "description": (
+                                    "Who this fact is about. Array of references like "
+                                    "['Sarah'], ['my wife', 'John'], ['Mom', 'Dad']. "
+                                    "Omit for general facts about the user."
+                                ),
+                            },
+                            "expires_in_days": {
+                                "type": "integer",
+                                "description": "Days until expiry (optional).",
+                            },
+                            "shared": {
+                                "type": "boolean",
+                                "description": (
+                                    "True for group/team facts ('we', 'our team', 'everyone'). "
+                                    "False (default) for personal facts."
+                                ),
+                            },
+                        },
+                        "required": ["content"],
+                    },
+                },
+                "subjects": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 10,
+                    "description": (
+                        "Who this fact is about. Array of references like "
+                        "['Sarah'], ['my wife', 'John'], ['Mom', 'Dad']. "
+                        "Omit for general facts about the user."
                     ),
                 },
                 "expires_in_days": {
@@ -74,73 +126,140 @@ class RememberTool(Tool):
                 "shared": {
                     "type": "boolean",
                     "description": (
-                        "If true, this memory is shared with everyone in the chat "
-                        "(e.g., team facts, group reminders). Default is false (personal memory)."
+                        "Set to true for group/team facts that everyone in the chat should see. "
+                        "Use for: 'our team meeting', 'the project deadline', 'everyone should know'. "
+                        "Default is false (personal memory only visible to this user)."
                     ),
                 },
             },
-            "required": ["content"],
         }
+
+    async def _store_single_fact(
+        self,
+        content: str,
+        subject_refs: list[str] | None,
+        expires_in_days: int | None,
+        is_shared: bool,
+        context: ToolContext,
+    ) -> str:
+        """Store a single fact and return a status message."""
+        # Resolve subjects to person IDs
+        subject_person_ids: list[str] = []
+        new_people: list[str] = []
+        existing_people: list[str] = []
+
+        if subject_refs and context.user_id:
+            # Runtime limit check (defense in depth)
+            if len(subject_refs) > 10:
+                raise ValueError("Too many subjects: maximum 10 per fact")
+            for ref in subject_refs:
+                result = await self._memory.resolve_or_create_person(
+                    owner_user_id=context.user_id,
+                    reference=ref,
+                    content_hint=content,
+                )
+                subject_person_ids.append(result.person_id)
+                if result.created:
+                    new_people.append(result.person_name)
+                else:
+                    existing_people.append(result.person_name)
+
+        # Memory scoping:
+        # - Personal: owner_user_id set, chat_id NULL - only visible to user
+        # - Group: owner_user_id NULL, chat_id set - visible to everyone in chat
+        if is_shared:
+            owner_user_id = None
+            chat_id = context.chat_id
+        else:
+            owner_user_id = context.user_id
+            chat_id = None
+
+        await self._memory.add_memory(
+            content=content,
+            source="remember_tool",
+            expires_in_days=expires_in_days,
+            owner_user_id=owner_user_id,
+            chat_id=chat_id,
+            subject_person_ids=subject_person_ids if subject_person_ids else None,
+        )
+
+        # Build status message
+        status = content
+        extras = []
+        if is_shared:
+            extras.append("shared")
+        if new_people:
+            extras.append(f"new: {', '.join(new_people)}")
+        if existing_people:
+            extras.append(f"about: {', '.join(existing_people)}")
+
+        if extras:
+            status += f" ({'; '.join(extras)})"
+        return status
 
     async def execute(
         self,
         input_data: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
-        """Store the fact in memory.
+        """Store facts in memory.
 
         Args:
-            input_data: Must contain 'content' key.
+            input_data: Contains 'content' (single) or 'facts' (batch).
             context: Execution context.
 
         Returns:
             Tool result confirming storage.
         """
-        content = input_data.get("content")
-        if not content:
-            return ToolResult.error("Missing required parameter: content")
+        facts = input_data.get("facts", [])
+        single_content = input_data.get("content")
 
-        subject_ref = input_data.get("subject")
-        expires_in_days = input_data.get("expires_in_days")
-        is_shared = input_data.get("shared", False)
+        # Build list of facts to store
+        if facts:
+            # Runtime limit check (defense in depth)
+            if len(facts) > 20:
+                return ToolResult.error("Too many facts: maximum 20 per call")
+            items_to_store = facts
+        elif single_content:
+            items_to_store = [input_data]
+        else:
+            return ToolResult.error("Missing required parameter: content or facts")
 
         try:
-            # Resolve subject to person ID
-            subject_person_id = None
-            person_created = False
-            subject_name = None
+            stored = []
+            errors = []
 
-            if subject_ref and context.user_id:
-                result = await self._memory.resolve_or_create_person(
-                    owner_user_id=context.user_id,
-                    reference=subject_ref,
-                    content_hint=content,
-                )
-                subject_person_id = result.person_id
-                person_created = result.created
-                subject_name = result.person_name
+            for item in items_to_store:
+                content = item.get("content")
+                if not content:
+                    errors.append("Skipped item with missing content")
+                    continue
 
-            # Shared memories have no owner (visible to everyone)
-            # Personal memories are owned by the current user
-            owner_user_id = None if is_shared else context.user_id
+                try:
+                    status = await self._store_single_fact(
+                        content=content,
+                        subject_refs=item.get("subjects"),
+                        expires_in_days=item.get("expires_in_days"),
+                        is_shared=item.get("shared", False),
+                        context=context,
+                    )
+                    stored.append(status)
+                except Exception as e:
+                    errors.append(f"Failed to store '{content[:30]}...': {e}")
 
-            await self._memory.add_memory(
-                content=content,
-                source="remember_tool",
-                expires_in_days=expires_in_days,
-                owner_user_id=owner_user_id,
-                subject_person_id=subject_person_id,
-            )
+            # Build response
+            if not stored and errors:
+                return ToolResult.error("\n".join(errors))
 
-            response = f"Remembered: {content}"
-            if is_shared:
-                response += " (shared with everyone)"
-            if subject_person_id and person_created:
-                response += f" (created new person record for '{subject_name}')"
-            elif subject_person_id:
-                response += f" (about {subject_name})"
+            lines = [f"Remembered {len(stored)} fact(s):"]
+            for s in stored:
+                lines.append(f"  - {s}")
+            if errors:
+                lines.append(f"\n{len(errors)} error(s):")
+                for e in errors:
+                    lines.append(f"  - {e}")
 
-            return ToolResult.success(response)
+            return ToolResult.success("\n".join(lines))
         except Exception as e:
             return ToolResult.error(f"Failed to store memory: {e}")
 
@@ -232,6 +351,7 @@ class RecallTool(Tool):
                 limit=5,
                 subject_person_id=person_id,
                 owner_user_id=context.user_id,
+                chat_id=context.chat_id,
             )
 
             if not results:

@@ -60,11 +60,19 @@ class Database:
             pool_pre_ping=True,
         )
 
-        # Load sqlite-vec extension for vector search
+        # Configure SQLite connection for better concurrency
         @event.listens_for(self._engine.sync_engine, "connect")
-        def _load_sqlite_vec(dbapi_conn, connection_record):
+        def _configure_sqlite(dbapi_conn, connection_record):
             # aiosqlite wraps: AsyncAdapt -> aiosqlite.Connection -> sqlite3.Connection
             conn = dbapi_conn._connection._conn
+
+            # Set busy timeout to 30 seconds (wait before "database is locked")
+            conn.execute("PRAGMA busy_timeout = 30000")
+
+            # Enable WAL mode for better concurrent read/write performance
+            conn.execute("PRAGMA journal_mode = WAL")
+
+            # Load sqlite-vec extension for vector search
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)

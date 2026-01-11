@@ -4,11 +4,8 @@ This module provides automated verification of sandbox security and functionalit
 It tests that the sandbox properly restricts dangerous operations while allowing
 legitimate use cases.
 
-See SANDBOX.md for the full specification of expected behaviors.
-
 Run verification:
-    ash sandbox verify     # Automated tests
-    ash sandbox prompts    # Manual test cases
+    uv run pytest tests/test_sandbox_verify.py -v
 
 Test Categories:
     SECURITY: Privilege escalation, filesystem restrictions, container isolation
@@ -27,6 +24,7 @@ from ash.sandbox.manager import SandboxConfig
 
 class TestCategory(Enum):
     """Categories of verification tests."""
+
     SECURITY = "security"
     RESOURCES = "resources"
     NETWORK = "network"
@@ -36,7 +34,8 @@ class TestCategory(Enum):
 
 class TestResult(Enum):
     """Result of a verification test."""
-    PASS = "pass"
+
+    PASS = "pass"  # noqa: S105
     FAIL = "fail"
     SKIP = "skip"
 
@@ -44,6 +43,7 @@ class TestResult(Enum):
 @dataclass
 class VerificationTest:
     """A single verification test case."""
+
     name: str
     description: str
     category: TestCategory
@@ -59,6 +59,7 @@ class VerificationTest:
 @dataclass
 class TestOutput:
     """Output from running a verification test."""
+
     test: VerificationTest
     result: TestResult
     actual_exit_code: int
@@ -148,7 +149,6 @@ VERIFICATION_TESTS: list[VerificationTest] = [
         command="find /usr -perm -4000 2>/dev/null | head -5 || echo 'none found'",
         expect_success=True,
     ),
-
     # ===================
     # RESOURCE LIMIT TESTS
     # ===================
@@ -163,7 +163,7 @@ VERIFICATION_TESTS: list[VerificationTest] = [
     ),
     VerificationTest(
         name="tmp_writable",
-        description="/tmp is writable (tmpfs)",
+        description="/tmp is writable (tmpfs)",  # noqa: S108
         category=TestCategory.RESOURCES,
         command="echo 'test' > /tmp/test_file && cat /tmp/test_file && rm /tmp/test_file",
         expect_success=True,
@@ -179,13 +179,12 @@ VERIFICATION_TESTS: list[VerificationTest] = [
     ),
     VerificationTest(
         name="tmp_noexec",
-        description="/tmp has noexec (can't run scripts directly)",
+        description="/tmp has noexec (can't run scripts directly)",  # noqa: S108
         category=TestCategory.RESOURCES,
         command="echo '#!/bin/bash\necho hello' > /tmp/test.sh && chmod +x /tmp/test.sh && /tmp/test.sh 2>&1",
         expect_success=False,
         expect_error_contains="Permission denied",
     ),
-
     # ===================
     # FUNCTIONAL TESTS
     # ===================
@@ -253,7 +252,6 @@ VERIFICATION_TESTS: list[VerificationTest] = [
         expect_success=True,
         expect_output_contains="curl",
     ),
-
     # ===================
     # NETWORK TESTS
     # ===================
@@ -285,7 +283,6 @@ VERIFICATION_TESTS: list[VerificationTest] = [
         requires_network=True,
         timeout=15,
     ),
-
     # ===================
     # EDGE CASE TESTS
     # ===================
@@ -351,7 +348,9 @@ class SandboxVerifier:
             config: Sandbox configuration.
             network_enabled: Whether network tests should run.
         """
-        self._config = config or SandboxConfig(network_mode="bridge" if network_enabled else "none")
+        self._config = config or SandboxConfig(
+            network_mode="bridge" if network_enabled else "none"
+        )
         self._network_enabled = network_enabled
         self._executor: SandboxExecutor | None = None
 

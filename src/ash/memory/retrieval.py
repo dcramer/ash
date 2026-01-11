@@ -186,18 +186,25 @@ class SemanticRetriever:
         query: str,
         limit: int = 10,
         include_expired: bool = False,
+        include_superseded: bool = False,
         subject_person_id: str | None = None,
         owner_user_id: str | None = None,
+        chat_id: str | None = None,
     ) -> list[SearchResult]:
         """Search memories by semantic similarity.
+
+        Memory scoping:
+        - Personal: owner_user_id set - only visible to that user
+        - Group: owner_user_id NULL, chat_id set - visible to everyone in that chat
 
         Args:
             query: Search query.
             limit: Maximum results.
             include_expired: Include expired entries.
+            include_superseded: Include superseded entries.
             subject_person_id: Optional filter to memories about a specific person.
-            owner_user_id: Optional filter to memories owned by a specific user.
-                For group chats, this ensures User A's memories aren't returned for User B.
+            owner_user_id: Filter to user's personal memories.
+            chat_id: Filter to include group memories for this chat.
 
         Returns:
             List of search results with similarity scores.
@@ -217,16 +224,34 @@ class SemanticRetriever:
                 "(m.expires_at IS NULL OR m.expires_at > datetime('now'))"
             )
 
+        if not include_superseded:
+            where_clauses.append("m.superseded_at IS NULL")
+
         if subject_person_id:
-            where_clauses.append("m.subject_person_id = :subject_person_id")
+            # Use JSON function to check if person_id is in the array
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM json_each(m.subject_person_ids) "
+                "WHERE json_each.value = :subject_person_id)"
+            )
             params["subject_person_id"] = subject_person_id
 
-        if owner_user_id:
-            # Include shared memories (NULL owner) AND user's personal memories
-            where_clauses.append(
-                "(m.owner_user_id IS NULL OR m.owner_user_id = :owner_user_id)"
-            )
-            params["owner_user_id"] = owner_user_id
+        # Memory visibility scoping
+        if owner_user_id or chat_id:
+            visibility_conditions = []
+
+            if owner_user_id:
+                # User's personal memories
+                visibility_conditions.append("m.owner_user_id = :owner_user_id")
+                params["owner_user_id"] = owner_user_id
+
+            if chat_id:
+                # Group memories for this chat (owner_user_id is NULL, chat_id matches)
+                visibility_conditions.append(
+                    "(m.owner_user_id IS NULL AND m.chat_id = :chat_id)"
+                )
+                params["chat_id"] = chat_id
+
+            where_clauses.append(f"({' OR '.join(visibility_conditions)})")
 
         where_clause = ""
         if where_clauses:
@@ -237,16 +262,14 @@ class SemanticRetriever:
                 me.memory_id,
                 m.content,
                 m.metadata,
-                m.subject_person_id,
-                p.name as subject_name,
+                m.subject_person_ids,
                 vec_distance_cosine(me.embedding, :query_embedding) as distance
             FROM memory_embeddings me
             JOIN memories m ON me.memory_id = m.id
-            LEFT JOIN people p ON m.subject_person_id = p.id
             {where_clause}
             ORDER BY distance ASC
             LIMIT :limit
-        """)
+        """)  # noqa: S608 - where_clause is built from hardcoded conditions
 
         result = await self._session.execute(sql, params)
         rows = result.fetchall()
@@ -256,11 +279,10 @@ class SemanticRetriever:
                 id=row[0],
                 content=row[1],
                 metadata={
-                    **(json.loads(row[2]) if row[2] else {}),
-                    "subject_person_id": row[3],
-                    "subject_name": row[4],
+                    **((json.loads(row[2]) if row[2] else {}) or {}),
+                    "subject_person_ids": json.loads(row[3]) if row[3] else None,
                 },
-                similarity=1.0 - row[5],  # Convert distance to similarity
+                similarity=1.0 - row[4],  # Convert distance to similarity
                 source_type="memory",
             )
             for row in rows
@@ -272,6 +294,7 @@ class SemanticRetriever:
         limit: int = 10,
         subject_person_id: str | None = None,
         owner_user_id: str | None = None,
+        chat_id: str | None = None,
     ) -> list[SearchResult]:
         """Search both messages and memories.
 
@@ -279,7 +302,8 @@ class SemanticRetriever:
             query: Search query.
             limit: Maximum results (combined).
             subject_person_id: Optional filter for memories about a specific person.
-            owner_user_id: Optional filter to memories owned by a specific user.
+            owner_user_id: Filter to user's personal memories.
+            chat_id: Filter to include group memories for this chat.
 
         Returns:
             List of search results sorted by similarity.
@@ -287,8 +311,11 @@ class SemanticRetriever:
         # Search both sources with limit
         messages = await self.search_messages(query, limit=limit)
         memories = await self.search_memories(
-            query, limit=limit, subject_person_id=subject_person_id,
-            owner_user_id=owner_user_id
+            query,
+            limit=limit,
+            subject_person_id=subject_person_id,
+            owner_user_id=owner_user_id,
+            chat_id=chat_id,
         )
 
         # Combine and sort by similarity

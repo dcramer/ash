@@ -163,8 +163,7 @@ class MemoryStore:
         Returns:
             True if message exists, False otherwise.
         """
-        from sqlalchemy import cast, func
-        from sqlalchemy.dialects.sqlite import JSON
+        from sqlalchemy import func
 
         # Check if any message in this session has this external_id in metadata
         stmt = select(Message).where(
@@ -174,6 +173,103 @@ class MemoryStore:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    async def get_message_by_external_id(
+        self,
+        session_id: str,
+        external_id: str,
+    ) -> Message | None:
+        """Find message by external ID (e.g., Telegram message ID).
+
+        Searches both user messages (external_id) and assistant messages
+        (bot_response_id) to support reply-to functionality.
+
+        Args:
+            session_id: Session ID.
+            external_id: External message ID.
+
+        Returns:
+            Message if found, None otherwise.
+        """
+        from sqlalchemy import func, or_
+
+        # Check for external_id in user messages or bot_response_id in metadata
+        stmt = select(Message).where(
+            Message.session_id == session_id,
+            or_(
+                func.json_extract(Message.metadata_, "$.external_id") == external_id,
+                func.json_extract(Message.metadata_, "$.bot_response_id")
+                == external_id,
+            ),
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_messages_around(
+        self,
+        session_id: str,
+        message_id: str,
+        window: int = 3,
+    ) -> list[Message]:
+        """Get messages around a specific message.
+
+        Returns the target message plus N messages before and after it,
+        sorted chronologically.
+
+        Args:
+            session_id: Session ID.
+            message_id: Target message ID.
+            window: Number of messages before and after (default 3).
+
+        Returns:
+            List of messages sorted by created_at.
+        """
+        # Get the target message to find its timestamp
+        target_stmt = select(Message).where(Message.id == message_id)
+        target_result = await self._session.execute(target_stmt)
+        target = target_result.scalar_one_or_none()
+
+        if not target:
+            return []
+
+        # Get messages before (including target)
+        before_stmt = (
+            select(Message)
+            .where(
+                Message.session_id == session_id,
+                Message.created_at <= target.created_at,
+            )
+            .order_by(Message.created_at.desc())
+            .limit(window + 1)  # +1 for the target itself
+        )
+        before_result = await self._session.execute(before_stmt)
+        before_messages = list(before_result.scalars().all())
+
+        # Get messages after
+        after_stmt = (
+            select(Message)
+            .where(
+                Message.session_id == session_id,
+                Message.created_at > target.created_at,
+            )
+            .order_by(Message.created_at.asc())
+            .limit(window)
+        )
+        after_result = await self._session.execute(after_stmt)
+        after_messages = list(after_result.scalars().all())
+
+        # Combine and deduplicate
+        all_messages = before_messages + after_messages
+        seen_ids = set()
+        unique_messages = []
+        for msg in all_messages:
+            if msg.id not in seen_ids:
+                seen_ids.add(msg.id)
+                unique_messages.append(msg)
+
+        # Sort chronologically
+        unique_messages.sort(key=lambda m: m.created_at)
+        return unique_messages
 
     # Person operations
 
@@ -342,17 +438,23 @@ class MemoryStore:
         expires_at: datetime | None = None,
         metadata: dict[str, Any] | None = None,
         owner_user_id: str | None = None,
-        subject_person_id: str | None = None,
+        chat_id: str | None = None,
+        subject_person_ids: list[str] | None = None,
     ) -> Memory:
         """Add a memory entry.
+
+        Memory scoping:
+        - Personal: owner_user_id set, chat_id NULL - only visible to that user
+        - Group: owner_user_id NULL, chat_id set - visible to everyone in that chat
 
         Args:
             content: Memory content.
             source: Source of memory.
             expires_at: When this memory expires.
             metadata: Optional metadata.
-            owner_user_id: User who added this memory.
-            subject_person_id: Person this memory is about.
+            owner_user_id: User who added this memory (NULL for group memories).
+            chat_id: Chat this memory belongs to (NULL for personal memories).
+            subject_person_ids: List of person IDs this memory is about.
 
         Returns:
             Created memory entry.
@@ -364,7 +466,8 @@ class MemoryStore:
             expires_at=expires_at,
             metadata_=metadata,
             owner_user_id=owner_user_id,
-            subject_person_id=subject_person_id,
+            chat_id=chat_id,
+            subject_person_ids=subject_person_ids,
         )
         self._session.add(memory)
         await self._session.flush()
@@ -374,12 +477,14 @@ class MemoryStore:
         self,
         limit: int = 100,
         include_expired: bool = False,
+        include_superseded: bool = False,
     ) -> list[Memory]:
         """Get memory entries.
 
         Args:
             limit: Maximum number of entries.
             include_expired: Include expired entries.
+            include_superseded: Include superseded entries.
 
         Returns:
             List of memory entries.
@@ -388,9 +493,10 @@ class MemoryStore:
 
         if not include_expired:
             now = datetime.now(UTC)
-            stmt = stmt.where(
-                (Memory.expires_at.is_(None)) | (Memory.expires_at > now)
-            )
+            stmt = stmt.where((Memory.expires_at.is_(None)) | (Memory.expires_at > now))
+
+        if not include_superseded:
+            stmt = stmt.where(Memory.superseded_at.is_(None))
 
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
@@ -400,6 +506,7 @@ class MemoryStore:
         person_id: str,
         limit: int = 50,
         include_expired: bool = False,
+        include_superseded: bool = False,
     ) -> list[Memory]:
         """Get memory entries about a specific person.
 
@@ -407,25 +514,75 @@ class MemoryStore:
             person_id: Person ID.
             limit: Maximum number of entries.
             include_expired: Include expired entries.
+            include_superseded: Include superseded entries.
 
         Returns:
             List of memory entries about this person.
         """
+        from sqlalchemy import text
+
+        # Use SQLite JSON function to check if person_id is in the array
+        # json_each unpacks the array so we can search for the value
         stmt = (
             select(Memory)
-            .where(Memory.subject_person_id == person_id)
+            .where(
+                text(
+                    "EXISTS (SELECT 1 FROM json_each(memories.subject_person_ids) "
+                    "WHERE json_each.value = :person_id)"
+                ).bindparams(person_id=person_id)
+            )
             .order_by(Memory.created_at.desc())
             .limit(limit)
         )
 
         if not include_expired:
             now = datetime.now(UTC)
-            stmt = stmt.where(
-                (Memory.expires_at.is_(None)) | (Memory.expires_at > now)
-            )
+            stmt = stmt.where((Memory.expires_at.is_(None)) | (Memory.expires_at > now))
+
+        if not include_superseded:
+            stmt = stmt.where(Memory.superseded_at.is_(None))
 
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def mark_memory_superseded(
+        self,
+        memory_id: str,
+        superseded_by_id: str,
+    ) -> bool:
+        """Mark a memory as superseded by another memory.
+
+        Args:
+            memory_id: ID of the memory to mark as superseded.
+            superseded_by_id: ID of the newer memory that supersedes this one.
+
+        Returns:
+            True if updated, False if memory not found.
+        """
+        stmt = select(Memory).where(Memory.id == memory_id)
+        result = await self._session.execute(stmt)
+        memory = result.scalar_one_or_none()
+
+        if not memory:
+            return False
+
+        memory.superseded_at = datetime.now(UTC)
+        memory.superseded_by_id = superseded_by_id
+        await self._session.flush()
+        return True
+
+    async def get_memory(self, memory_id: str) -> Memory | None:
+        """Get memory by ID.
+
+        Args:
+            memory_id: Memory ID.
+
+        Returns:
+            Memory or None if not found.
+        """
+        stmt = select(Memory).where(Memory.id == memory_id)
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
 
     # User profile operations
 
