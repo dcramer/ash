@@ -27,7 +27,7 @@ class RememberTool(Tool):
         """Initialize remember tool.
 
         Args:
-            memory_manager: Memory manager for storing knowledge.
+            memory_manager: Memory manager for storing memories.
         """
         self._memory = memory_manager
 
@@ -80,7 +80,7 @@ class RememberTool(Tool):
         input_data: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
-        """Store the fact in the knowledge base.
+        """Store the fact in memory.
 
         Args:
             input_data: Must contain 'content' key.
@@ -112,7 +112,7 @@ class RememberTool(Tool):
                 person_created = result.created
                 subject_name = result.person_name
 
-            await self._memory.add_knowledge(
+            await self._memory.add_memory(
                 content=content,
                 source="remember_tool",
                 expires_in_days=expires_in_days,
@@ -177,7 +177,7 @@ class RecallTool(Tool):
                 "about": {
                     "type": "string",
                     "description": (
-                        "Optional: filter to knowledge about a specific person. "
+                        "Optional: filter to memories about a specific person. "
                         "Use same reference as user: 'my wife', 'Sarah', 'boss'."
                     ),
                 },

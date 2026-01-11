@@ -1,4 +1,4 @@
-"""Memory store for conversation history and knowledge."""
+"""Memory store for conversation history and memories."""
 
 import uuid
 from datetime import UTC, datetime
@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ash.db.models import (
-    Knowledge,
+    Memory,
     Message,
     Person,
     Session,
@@ -19,7 +19,7 @@ from ash.db.models import (
 
 
 class MemoryStore:
-    """Store and retrieve conversation history and knowledge."""
+    """Store and retrieve conversation history and memories."""
 
     def __init__(self, session: AsyncSession):
         """Initialize memory store.
@@ -333,9 +333,9 @@ class MemoryStore:
 
         return person
 
-    # Knowledge operations
+    # Memory operations
 
-    async def add_knowledge(
+    async def add_memory(
         self,
         content: str,
         source: str | None = None,
@@ -343,21 +343,21 @@ class MemoryStore:
         metadata: dict[str, Any] | None = None,
         owner_user_id: str | None = None,
         subject_person_id: str | None = None,
-    ) -> Knowledge:
-        """Add knowledge to the knowledge base.
+    ) -> Memory:
+        """Add a memory entry.
 
         Args:
-            content: Knowledge content.
-            source: Source of knowledge.
-            expires_at: When this knowledge expires.
+            content: Memory content.
+            source: Source of memory.
+            expires_at: When this memory expires.
             metadata: Optional metadata.
-            owner_user_id: User who added this knowledge.
-            subject_person_id: Person this knowledge is about.
+            owner_user_id: User who added this memory.
+            subject_person_id: Person this memory is about.
 
         Returns:
-            Created knowledge entry.
+            Created memory entry.
         """
-        knowledge = Knowledge(
+        memory = Memory(
             id=str(uuid.uuid4()),
             content=content,
             source=source,
@@ -366,42 +366,42 @@ class MemoryStore:
             owner_user_id=owner_user_id,
             subject_person_id=subject_person_id,
         )
-        self._session.add(knowledge)
+        self._session.add(memory)
         await self._session.flush()
-        return knowledge
+        return memory
 
-    async def get_knowledge(
+    async def get_memories(
         self,
         limit: int = 100,
         include_expired: bool = False,
-    ) -> list[Knowledge]:
-        """Get knowledge entries.
+    ) -> list[Memory]:
+        """Get memory entries.
 
         Args:
             limit: Maximum number of entries.
             include_expired: Include expired entries.
 
         Returns:
-            List of knowledge entries.
+            List of memory entries.
         """
-        stmt = select(Knowledge).order_by(Knowledge.created_at.desc()).limit(limit)
+        stmt = select(Memory).order_by(Memory.created_at.desc()).limit(limit)
 
         if not include_expired:
             now = datetime.now(UTC)
             stmt = stmt.where(
-                (Knowledge.expires_at.is_(None)) | (Knowledge.expires_at > now)
+                (Memory.expires_at.is_(None)) | (Memory.expires_at > now)
             )
 
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_knowledge_about_person(
+    async def get_memories_about_person(
         self,
         person_id: str,
         limit: int = 50,
         include_expired: bool = False,
-    ) -> list[Knowledge]:
-        """Get knowledge entries about a specific person.
+    ) -> list[Memory]:
+        """Get memory entries about a specific person.
 
         Args:
             person_id: Person ID.
@@ -409,19 +409,19 @@ class MemoryStore:
             include_expired: Include expired entries.
 
         Returns:
-            List of knowledge entries about this person.
+            List of memory entries about this person.
         """
         stmt = (
-            select(Knowledge)
-            .where(Knowledge.subject_person_id == person_id)
-            .order_by(Knowledge.created_at.desc())
+            select(Memory)
+            .where(Memory.subject_person_id == person_id)
+            .order_by(Memory.created_at.desc())
             .limit(limit)
         )
 
         if not include_expired:
             now = datetime.now(UTC)
             stmt = stmt.where(
-                (Knowledge.expires_at.is_(None)) | (Knowledge.expires_at > now)
+                (Memory.expires_at.is_(None)) | (Memory.expires_at > now)
             )
 
         result = await self._session.execute(stmt)

@@ -3,7 +3,7 @@
 from ash.db.engine import Database, get_database, init_database
 from ash.db.models import (
     Base,
-    Knowledge,
+    Memory,
     Message,
     Session,
     ToolExecution,
@@ -17,7 +17,7 @@ __all__ = [
     "init_database",
     # Models
     "Base",
-    "Knowledge",
+    "Memory",
     "Message",
     "Session",
     "ToolExecution",

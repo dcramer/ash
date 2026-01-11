@@ -19,11 +19,11 @@ class SearchResult:
     content: str
     similarity: float
     metadata: dict[str, Any] | None = None
-    source_type: str = "message"  # 'message' or 'knowledge'
+    source_type: str = "message"  # 'message' or 'memory'
 
 
 class SemanticRetriever:
-    """Semantic search over messages and knowledge using vector embeddings."""
+    """Semantic search over messages and memories using vector embeddings."""
 
     def __init__(
         self,
@@ -58,8 +58,8 @@ class SemanticRetriever:
 
         await self._session.execute(
             text(f"""
-                CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_embeddings USING vec0(
-                    knowledge_id TEXT PRIMARY KEY,
+                CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
+                    memory_id TEXT PRIMARY KEY,
                     embedding FLOAT[{dimensions}]
                 )
             """)
@@ -91,28 +91,28 @@ class SemanticRetriever:
             {"id": message_id, "embedding": embedding_blob},
         )
 
-    async def index_knowledge(self, knowledge_id: str, content: str) -> None:
-        """Index a knowledge entry for semantic search.
+    async def index_memory(self, memory_id: str, content: str) -> None:
+        """Index a memory entry for semantic search.
 
         Args:
-            knowledge_id: Knowledge ID.
-            content: Knowledge content to embed.
+            memory_id: Memory ID.
+            content: Memory content to embed.
         """
         embedding = await self._embeddings.embed(content)
         embedding_blob = self._serialize_embedding(embedding)
 
         # Delete existing embedding if any
         await self._session.execute(
-            text("DELETE FROM knowledge_embeddings WHERE knowledge_id = :id"),
-            {"id": knowledge_id},
+            text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
+            {"id": memory_id},
         )
 
         # Insert new embedding
         await self._session.execute(
             text(
-                "INSERT INTO knowledge_embeddings (knowledge_id, embedding) VALUES (:id, :embedding)"
+                "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (:id, :embedding)"
             ),
-            {"id": knowledge_id, "embedding": embedding_blob},
+            {"id": memory_id, "embedding": embedding_blob},
         )
 
     async def search_messages(
@@ -181,20 +181,20 @@ class SemanticRetriever:
             for row in rows
         ]
 
-    async def search_knowledge(
+    async def search_memories(
         self,
         query: str,
         limit: int = 10,
         include_expired: bool = False,
         subject_person_id: str | None = None,
     ) -> list[SearchResult]:
-        """Search knowledge by semantic similarity.
+        """Search memories by semantic similarity.
 
         Args:
             query: Search query.
             limit: Maximum results.
             include_expired: Include expired entries.
-            subject_person_id: Optional filter to knowledge about a specific person.
+            subject_person_id: Optional filter to memories about a specific person.
 
         Returns:
             List of search results with similarity scores.
@@ -211,11 +211,11 @@ class SemanticRetriever:
 
         if not include_expired:
             where_clauses.append(
-                "(k.expires_at IS NULL OR k.expires_at > datetime('now'))"
+                "(m.expires_at IS NULL OR m.expires_at > datetime('now'))"
             )
 
         if subject_person_id:
-            where_clauses.append("k.subject_person_id = :subject_person_id")
+            where_clauses.append("m.subject_person_id = :subject_person_id")
             params["subject_person_id"] = subject_person_id
 
         where_clause = ""
@@ -224,15 +224,15 @@ class SemanticRetriever:
 
         sql = text(f"""
             SELECT
-                ke.knowledge_id,
-                k.content,
-                k.metadata,
-                k.subject_person_id,
+                me.memory_id,
+                m.content,
+                m.metadata,
+                m.subject_person_id,
                 p.name as subject_name,
-                vec_distance_cosine(ke.embedding, :query_embedding) as distance
-            FROM knowledge_embeddings ke
-            JOIN knowledge k ON ke.knowledge_id = k.id
-            LEFT JOIN people p ON k.subject_person_id = p.id
+                vec_distance_cosine(me.embedding, :query_embedding) as distance
+            FROM memory_embeddings me
+            JOIN memories m ON me.memory_id = m.id
+            LEFT JOIN people p ON m.subject_person_id = p.id
             {where_clause}
             ORDER BY distance ASC
             LIMIT :limit
@@ -251,7 +251,7 @@ class SemanticRetriever:
                     "subject_name": row[4],
                 },
                 similarity=1.0 - row[5],  # Convert distance to similarity
-                source_type="knowledge",
+                source_type="memory",
             )
             for row in rows
         ]
@@ -262,24 +262,24 @@ class SemanticRetriever:
         limit: int = 10,
         subject_person_id: str | None = None,
     ) -> list[SearchResult]:
-        """Search both messages and knowledge.
+        """Search both messages and memories.
 
         Args:
             query: Search query.
             limit: Maximum results (combined).
-            subject_person_id: Optional filter for knowledge about a specific person.
+            subject_person_id: Optional filter for memories about a specific person.
 
         Returns:
             List of search results sorted by similarity.
         """
         # Search both sources with limit
         messages = await self.search_messages(query, limit=limit)
-        knowledge = await self.search_knowledge(
+        memories = await self.search_memories(
             query, limit=limit, subject_person_id=subject_person_id
         )
 
         # Combine and sort by similarity
-        combined = messages + knowledge
+        combined = messages + memories
         combined.sort(key=lambda x: x.similarity, reverse=True)
 
         return combined[:limit]
@@ -295,15 +295,15 @@ class SemanticRetriever:
             {"id": message_id},
         )
 
-    async def delete_knowledge_embedding(self, knowledge_id: str) -> None:
-        """Delete a knowledge embedding.
+    async def delete_memory_embedding(self, memory_id: str) -> None:
+        """Delete a memory embedding.
 
         Args:
-            knowledge_id: Knowledge ID.
+            memory_id: Memory ID.
         """
         await self._session.execute(
-            text("DELETE FROM knowledge_embeddings WHERE knowledge_id = :id"),
-            {"id": knowledge_id},
+            text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
+            {"id": memory_id},
         )
 
     def _serialize_embedding(self, embedding: list[float]) -> bytes:

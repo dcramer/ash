@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message as TelegramMessage, ReactionTypeEmoji
 
@@ -188,7 +189,12 @@ class TelegramProvider(Provider):
             logger.info("Starting Telegram bot in polling mode")
             # Don't drop pending updates - we'll check for duplicates in the handler
             await self._bot.delete_webhook(drop_pending_updates=False)
-            await self._dp.start_polling(self._bot)
+            # Disable aiogram's signal handling - let the app handle SIGINT/SIGTERM
+            await self._dp.start_polling(
+                self._bot,
+                handle_signals=False,
+                close_bot_session=False,  # We close it ourselves in stop()
+            )
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -398,18 +404,34 @@ class TelegramProvider(Provider):
         Returns:
             Sent message ID.
         """
-        parse_mode = None
-        if message.parse_mode:
-            parse_mode = ParseMode(message.parse_mode.upper())
-
-        sent = await self._bot.send_message(
-            chat_id=int(message.chat_id),
-            text=message.text,
-            reply_to_message_id=int(message.reply_to_message_id)
-            if message.reply_to_message_id
-            else None,
-            parse_mode=parse_mode,
+        parse_mode = (
+            ParseMode(message.parse_mode.upper())
+            if message.parse_mode
+            else ParseMode.MARKDOWN
         )
+
+        try:
+            sent = await self._bot.send_message(
+                chat_id=int(message.chat_id),
+                text=message.text,
+                reply_to_message_id=int(message.reply_to_message_id)
+                if message.reply_to_message_id
+                else None,
+                parse_mode=parse_mode,
+            )
+        except TelegramBadRequest as e:
+            # Markdown parsing failed, retry without formatting
+            if "can't parse" in str(e).lower():
+                logger.debug(f"Markdown parsing failed, sending as plain text: {e}")
+                sent = await self._bot.send_message(
+                    chat_id=int(message.chat_id),
+                    text=message.text,
+                    reply_to_message_id=int(message.reply_to_message_id)
+                    if message.reply_to_message_id
+                    else None,
+                )
+            else:
+                raise
 
         return str(sent.message_id)
 
@@ -436,6 +458,7 @@ class TelegramProvider(Provider):
         content = ""
         message_id: str | None = None
         last_edit = 0.0
+        use_markdown = True  # Fall back to plain text if markdown parsing fails
 
         async for chunk in stream:
             content += chunk
@@ -444,11 +467,23 @@ class TelegramProvider(Provider):
 
             # Send first message once we have content
             if message_id is None and content.strip():
-                sent = await self._bot.send_message(
-                    chat_id=int(chat_id),
-                    text=content,
-                    reply_to_message_id=int(reply_to) if reply_to else None,
-                )
+                try:
+                    sent = await self._bot.send_message(
+                        chat_id=int(chat_id),
+                        text=content,
+                        reply_to_message_id=int(reply_to) if reply_to else None,
+                        parse_mode=ParseMode.MARKDOWN if use_markdown else None,
+                    )
+                except TelegramBadRequest as e:
+                    if "can't parse" in str(e).lower():
+                        use_markdown = False
+                        sent = await self._bot.send_message(
+                            chat_id=int(chat_id),
+                            text=content,
+                            reply_to_message_id=int(reply_to) if reply_to else None,
+                        )
+                    else:
+                        raise
                 message_id = str(sent.message_id)
                 last_edit = now
             elif message_id and now - last_edit >= EDIT_INTERVAL:
@@ -458,8 +493,15 @@ class TelegramProvider(Provider):
                         chat_id=int(chat_id),
                         message_id=int(message_id),
                         text=content,
+                        parse_mode=ParseMode.MARKDOWN if use_markdown else None,
                     )
                     last_edit = now
+                except TelegramBadRequest as e:
+                    if "can't parse" in str(e).lower():
+                        use_markdown = False
+                        # Don't retry mid-stream edits, just continue
+                    else:
+                        logger.debug(f"Edit failed: {e}")
                 except Exception as e:
                     logger.debug(f"Edit failed (likely rate limit): {e}")
 
@@ -470,7 +512,21 @@ class TelegramProvider(Provider):
                     chat_id=int(chat_id),
                     message_id=int(message_id),
                     text=content,
+                    parse_mode=ParseMode.MARKDOWN if use_markdown else None,
                 )
+            except TelegramBadRequest as e:
+                if "can't parse" in str(e).lower():
+                    # Final fallback to plain text
+                    try:
+                        await self._bot.edit_message_text(
+                            chat_id=int(chat_id),
+                            message_id=int(message_id),
+                            text=content,
+                        )
+                    except Exception as e2:
+                        logger.warning(f"Final edit failed: {e2}")
+                else:
+                    logger.warning(f"Final edit failed: {e}")
             except Exception as e:
                 logger.warning(f"Final edit failed: {e}")
         elif not message_id:
@@ -500,14 +556,26 @@ class TelegramProvider(Provider):
             text: New text content.
             parse_mode: Text parsing mode.
         """
-        pm = ParseMode(parse_mode.upper()) if parse_mode else None
+        pm = ParseMode(parse_mode.upper()) if parse_mode else ParseMode.MARKDOWN
 
-        await self._bot.edit_message_text(
-            chat_id=int(chat_id),
-            message_id=int(message_id),
-            text=text,
-            parse_mode=pm,
-        )
+        try:
+            await self._bot.edit_message_text(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                text=text,
+                parse_mode=pm,
+            )
+        except TelegramBadRequest as e:
+            if "can't parse" in str(e).lower():
+                # Markdown parsing failed, retry without formatting
+                logger.debug(f"Markdown parsing failed, editing as plain text: {e}")
+                await self._bot.edit_message_text(
+                    chat_id=int(chat_id),
+                    message_id=int(message_id),
+                    text=text,
+                )
+            else:
+                raise
 
     async def delete(self, chat_id: str, message_id: str) -> None:
         """Delete a message.

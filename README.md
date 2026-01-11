@@ -35,9 +35,9 @@ uv sync --all-groups
    export TELEGRAM_BOT_TOKEN=your-token
    ```
 
-3. Run migrations:
+3. Run setup (migrations + sandbox check):
    ```bash
-   uv run ash db migrate
+   uv run ash upgrade
    ```
 
 4. Start the assistant:

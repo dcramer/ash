@@ -138,54 +138,54 @@ class TestMessageOperations:
         assert messages == []
 
 
-class TestKnowledgeOperations:
-    """Tests for knowledge base operations."""
+class TestMemoryOperations:
+    """Tests for memory entry operations."""
 
-    async def test_add_knowledge(self, memory_store):
-        knowledge = await memory_store.add_knowledge(
+    async def test_add_memory(self, memory_store):
+        memory = await memory_store.add_memory(
             content="Python is a programming language.",
             source="manual",
         )
-        assert knowledge.id is not None
-        assert knowledge.content == "Python is a programming language."
-        assert knowledge.source == "manual"
+        assert memory.id is not None
+        assert memory.content == "Python is a programming language."
+        assert memory.source == "manual"
 
-    async def test_add_knowledge_with_expiry(self, memory_store):
+    async def test_add_memory_with_expiry(self, memory_store):
         expires = datetime.now(UTC) + timedelta(days=7)
-        knowledge = await memory_store.add_knowledge(
-            content="Temporary knowledge",
+        memory = await memory_store.add_memory(
+            content="Temporary memory",
             expires_at=expires,
         )
-        assert knowledge.expires_at == expires
+        assert memory.expires_at == expires
 
-    async def test_get_knowledge(self, memory_store):
-        await memory_store.add_knowledge(content="Fact 1")
-        await memory_store.add_knowledge(content="Fact 2")
+    async def test_get_memories(self, memory_store):
+        await memory_store.add_memory(content="Fact 1")
+        await memory_store.add_memory(content="Fact 2")
 
-        knowledge = await memory_store.get_knowledge()
-        assert len(knowledge) == 2
+        memories = await memory_store.get_memories()
+        assert len(memories) == 2
 
-    async def test_get_knowledge_excludes_expired(self, memory_store):
-        # Add expired knowledge
+    async def test_get_memories_excludes_expired(self, memory_store):
+        # Add expired memory
         past = datetime.now(UTC) - timedelta(days=1)
-        await memory_store.add_knowledge(
+        await memory_store.add_memory(
             content="Expired fact",
             expires_at=past,
         )
-        # Add valid knowledge
-        await memory_store.add_knowledge(content="Valid fact")
+        # Add valid memory
+        await memory_store.add_memory(content="Valid fact")
 
-        knowledge = await memory_store.get_knowledge(include_expired=False)
-        assert len(knowledge) == 1
-        assert knowledge[0].content == "Valid fact"
+        memories = await memory_store.get_memories(include_expired=False)
+        assert len(memories) == 1
+        assert memories[0].content == "Valid fact"
 
-    async def test_get_knowledge_includes_expired(self, memory_store):
+    async def test_get_memories_includes_expired(self, memory_store):
         past = datetime.now(UTC) - timedelta(days=1)
-        await memory_store.add_knowledge(content="Expired", expires_at=past)
-        await memory_store.add_knowledge(content="Valid")
+        await memory_store.add_memory(content="Expired", expires_at=past)
+        await memory_store.add_memory(content="Valid")
 
-        knowledge = await memory_store.get_knowledge(include_expired=True)
-        assert len(knowledge) == 2
+        memories = await memory_store.get_memories(include_expired=True)
+        assert len(memories) == 2
 
 
 class TestUserProfileOperations:
@@ -306,10 +306,10 @@ class TestMemoryManager:
         """Create a mock semantic retriever."""
         retriever = MagicMock()
         retriever.search_messages = AsyncMock(return_value=[])
-        retriever.search_knowledge = AsyncMock(return_value=[])
+        retriever.search_memories = AsyncMock(return_value=[])
         retriever.search_all = AsyncMock(return_value=[])
         retriever.index_message = AsyncMock()
-        retriever.index_knowledge = AsyncMock()
+        retriever.index_memory = AsyncMock()
         return retriever
 
     @pytest.fixture
@@ -331,7 +331,7 @@ class TestMemoryManager:
 
         assert isinstance(context, RetrievedContext)
         assert context.messages == []
-        assert context.knowledge == []
+        assert context.memories == []
 
     async def test_get_context_for_message_with_results(
         self, memory_manager, mock_retriever
@@ -345,12 +345,12 @@ class TestMemoryManager:
                 source_type="message",
             )
         ]
-        mock_retriever.search_knowledge.return_value = [
+        mock_retriever.search_memories.return_value = [
             SearchResult(
-                id="know-1",
+                id="mem-1",
                 content="User preference",
                 similarity=0.8,
-                source_type="knowledge",
+                source_type="memory",
             )
         ]
 
@@ -362,8 +362,8 @@ class TestMemoryManager:
 
         assert len(context.messages) == 1
         assert context.messages[0].content == "Previous conversation"
-        assert len(context.knowledge) == 1
-        assert context.knowledge[0].content == "User preference"
+        assert len(context.memories) == 1
+        assert context.memories[0].content == "User preference"
 
     async def test_persist_turn(self, memory_manager, memory_store, mock_retriever):
         """Test persisting a conversation turn."""
@@ -391,28 +391,28 @@ class TestMemoryManager:
         # Check indexing was called
         assert mock_retriever.index_message.call_count == 2
 
-    async def test_add_knowledge(self, memory_manager, memory_store, mock_retriever):
-        """Test adding knowledge."""
-        knowledge = await memory_manager.add_knowledge(
+    async def test_add_memory(self, memory_manager, memory_store, mock_retriever):
+        """Test adding memory entry."""
+        memory = await memory_manager.add_memory(
             content="User likes Python",
             source="remember_tool",
         )
 
-        assert knowledge.content == "User likes Python"
-        assert knowledge.source == "remember_tool"
+        assert memory.content == "User likes Python"
+        assert memory.source == "remember_tool"
 
         # Check indexing was called
-        mock_retriever.index_knowledge.assert_called_once()
+        mock_retriever.index_memory.assert_called_once()
 
-    async def test_add_knowledge_with_expiration(self, memory_manager):
-        """Test adding knowledge with expiration."""
-        knowledge = await memory_manager.add_knowledge(
+    async def test_add_memory_with_expiration(self, memory_manager):
+        """Test adding memory with expiration."""
+        memory = await memory_manager.add_memory(
             content="Temporary fact",
             expires_in_days=7,
         )
 
-        assert knowledge.expires_at is not None
-        assert knowledge.expires_at > datetime.now(UTC)
+        assert memory.expires_at is not None
+        assert memory.expires_at > datetime.now(UTC)
 
     async def test_search(self, memory_manager, mock_retriever):
         """Test searching all memory."""
@@ -441,7 +441,7 @@ class TestRememberTool:
     def mock_memory_manager(self):
         """Create a mock memory manager."""
         manager = MagicMock()
-        manager.add_knowledge = AsyncMock()
+        manager.add_memory = AsyncMock()
         return manager
 
     @pytest.fixture
@@ -459,7 +459,7 @@ class TestRememberTool:
 
         assert not result.is_error
         assert "Remembered" in result.content
-        mock_memory_manager.add_knowledge.assert_called_once_with(
+        mock_memory_manager.add_memory.assert_called_once_with(
             content="User prefers dark mode",
             source="remember_tool",
             expires_in_days=None,
@@ -475,7 +475,7 @@ class TestRememberTool:
             context,
         )
 
-        mock_memory_manager.add_knowledge.assert_called_once_with(
+        mock_memory_manager.add_memory.assert_called_once_with(
             content="Temporary note",
             source="remember_tool",
             expires_in_days=30,
@@ -493,7 +493,7 @@ class TestRememberTool:
 
     async def test_remember_handles_error(self, remember_tool, mock_memory_manager):
         """Test error handling when storage fails."""
-        mock_memory_manager.add_knowledge.side_effect = Exception("DB error")
+        mock_memory_manager.add_memory.side_effect = Exception("DB error")
         context = ToolContext()
 
         result = await remember_tool.execute(
@@ -527,7 +527,7 @@ class TestRecallTool:
                 id="1",
                 content="User likes Python",
                 similarity=0.9,
-                source_type="knowledge",
+                source_type="memory",
             ),
             SearchResult(
                 id="2",
@@ -542,7 +542,7 @@ class TestRecallTool:
         assert not result.is_error
         assert "Found relevant memories" in result.content
         assert "User likes Python" in result.content
-        assert "[knowledge]" in result.content
+        assert "[memory]" in result.content
         assert "[message]" in result.content
 
     async def test_recall_no_results(self, recall_tool, mock_memory_manager):

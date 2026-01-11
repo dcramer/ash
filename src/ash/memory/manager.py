@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ash.db.models import Knowledge, Person
+from ash.db.models import Memory, Person
 from ash.memory.retrieval import SearchResult, SemanticRetriever
 from ash.memory.store import MemoryStore
 
@@ -59,7 +59,7 @@ class RetrievedContext:
     """Context retrieved from memory for LLM prompt augmentation."""
 
     messages: list[SearchResult]
-    knowledge: list[SearchResult]
+    memories: list[SearchResult]
 
 
 class MemoryManager:
@@ -93,7 +93,7 @@ class MemoryManager:
         user_id: str,
         user_message: str,
         max_messages: int = 5,
-        max_knowledge: int = 10,
+        max_memories: int = 10,
         min_message_similarity: float = 0.3,
         exclude_message_ids: set[str] | None = None,
     ) -> RetrievedContext:
@@ -104,18 +104,18 @@ class MemoryManager:
             user_id: User ID (for future use).
             user_message: The user's message to find relevant context for.
             max_messages: Maximum number of past messages to retrieve.
-            max_knowledge: Maximum number of knowledge entries to retrieve.
+            max_memories: Maximum number of memory entries to retrieve.
             min_message_similarity: Minimum similarity threshold for messages.
-                Knowledge entries are always included (ranked by relevance)
-                since a personal assistant typically has a small knowledge base
+                Memory entries are always included (ranked by relevance)
+                since a personal assistant typically has a small memory store
                 where all stored facts are potentially useful.
             exclude_message_ids: Message IDs to exclude (e.g., already in context).
 
         Returns:
-            Retrieved context with messages and knowledge.
+            Retrieved context with messages and memories.
         """
         messages: list[SearchResult] = []
-        knowledge: list[SearchResult] = []
+        memories: list[SearchResult] = []
 
         try:
             # Search past messages (across all sessions for this retrieval)
@@ -137,19 +137,19 @@ class MemoryManager:
             logger.warning("Failed to search messages, continuing without", exc_info=True)
 
         try:
-            # Search knowledge base - include top N without filtering
+            # Search memory store - include top N without filtering
             # For a personal assistant, stored facts are always relevant
             # The retriever already ranks by similarity, so top N are best matches
-            knowledge = await self._retriever.search_knowledge(
+            memories = await self._retriever.search_memories(
                 query=user_message,
-                limit=max_knowledge,
+                limit=max_memories,
             )
         except Exception:
-            logger.warning("Failed to search knowledge, continuing without", exc_info=True)
+            logger.warning("Failed to search memories, continuing without", exc_info=True)
 
         return RetrievedContext(
             messages=messages,
-            knowledge=knowledge,
+            memories=memories,
         )
 
     async def persist_turn(
@@ -189,7 +189,7 @@ class MemoryManager:
         except Exception:
             logger.warning("Failed to index messages, continuing without", exc_info=True)
 
-    async def add_knowledge(
+    async def add_memory(
         self,
         content: str,
         source: str = "user",
@@ -197,26 +197,26 @@ class MemoryManager:
         expires_in_days: int | None = None,
         owner_user_id: str | None = None,
         subject_person_id: str | None = None,
-    ) -> Knowledge:
-        """Add knowledge entry (used by remember tool).
+    ) -> Memory:
+        """Add memory entry (used by remember tool).
 
         Args:
-            content: Knowledge content.
-            source: Source of knowledge (default: "user").
+            content: Memory content.
+            source: Source of memory (default: "user").
             expires_at: Explicit expiration datetime.
             expires_in_days: Days until expiration (alternative to expires_at).
-            owner_user_id: User who added this knowledge.
-            subject_person_id: Person this knowledge is about.
+            owner_user_id: User who added this memory.
+            subject_person_id: Person this memory is about.
 
         Returns:
-            Created knowledge entry.
+            Created memory entry.
         """
         # Calculate expiration if days provided
         if expires_in_days is not None and expires_at is None:
             expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
 
-        # Store knowledge
-        knowledge = await self._store.add_knowledge(
+        # Store memory
+        memory = await self._store.add_memory(
             content=content,
             source=source,
             expires_at=expires_at,
@@ -226,11 +226,11 @@ class MemoryManager:
 
         # Index for semantic search
         try:
-            await self._retriever.index_knowledge(knowledge.id, content)
+            await self._retriever.index_memory(memory.id, content)
         except Exception:
-            logger.warning("Failed to index knowledge, continuing", exc_info=True)
+            logger.warning("Failed to index memory, continuing", exc_info=True)
 
-        return knowledge
+        return memory
 
     async def search(
         self,
@@ -243,7 +243,7 @@ class MemoryManager:
         Args:
             query: Search query.
             limit: Maximum results.
-            subject_person_id: Optional filter to knowledge about a specific person.
+            subject_person_id: Optional filter to memories about a specific person.
 
         Returns:
             List of search results sorted by relevance.

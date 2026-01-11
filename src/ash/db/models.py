@@ -71,10 +71,10 @@ class Message(Base):
 
 
 class Person(Base):
-    """Person entity that knowledge can be about.
+    """Person entity that memories can be about.
 
     Tracks people the user mentions (wife, boss, friends, etc.) so that
-    knowledge can be properly attributed and retrieved.
+    memories can be properly attributed and retrieved.
     """
 
     __tablename__ = "people"
@@ -94,15 +94,15 @@ class Person(Base):
         DateTime, default=utc_now, onupdate=utc_now, nullable=False
     )
 
-    knowledge_entries: Mapped[list["Knowledge"]] = relationship(
-        "Knowledge", back_populates="subject_person"
+    memories: Mapped[list["Memory"]] = relationship(
+        "Memory", back_populates="subject_person"
     )
 
 
-class Knowledge(Base):
-    """Knowledge base entry."""
+class Memory(Base):
+    """Memory entry - a stored fact or piece of information."""
 
-    __tablename__ = "knowledge"
+    __tablename__ = "memories"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -124,7 +124,7 @@ class Knowledge(Base):
     )
 
     subject_person: Mapped["Person | None"] = relationship(
-        "Person", back_populates="knowledge_entries"
+        "Person", back_populates="memories"
     )
 
 

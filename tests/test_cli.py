@@ -89,38 +89,38 @@ class TestDbCommand:
         assert "migrate" in result.stdout or "migrations" in result.stdout.lower()
 
 
-class TestKnowledgeCommand:
-    """Tests for 'ash knowledge' command."""
+class TestMemoryCommand:
+    """Tests for 'ash memory' command."""
 
-    def test_knowledge_search_requires_query(self, cli_runner, config_file):
+    def test_memory_search_requires_query(self, cli_runner, config_file):
         result = cli_runner.invoke(
-            app, ["knowledge", "search", "--config", str(config_file)]
+            app, ["memory", "search", "--config", str(config_file)]
         )
         assert result.exit_code == 1
         assert "--query" in result.stdout or "required" in result.stdout.lower()
 
-    def test_knowledge_add_requires_query(self, cli_runner, config_file):
+    def test_memory_add_requires_query(self, cli_runner, config_file):
         result = cli_runner.invoke(
-            app, ["knowledge", "add", "--config", str(config_file)]
+            app, ["memory", "add", "--config", str(config_file)]
         )
         assert result.exit_code == 1
         assert "--query" in result.stdout or "required" in result.stdout.lower()
 
-    def test_knowledge_remove_requires_id(self, cli_runner, config_file):
+    def test_memory_remove_requires_id(self, cli_runner, config_file):
         result = cli_runner.invoke(
-            app, ["knowledge", "remove", "--config", str(config_file)]
+            app, ["memory", "remove", "--config", str(config_file)]
         )
         assert result.exit_code == 1
         assert "--id" in result.stdout or "required" in result.stdout.lower()
 
-    def test_knowledge_unknown_action(self, cli_runner, config_file):
+    def test_memory_unknown_action(self, cli_runner, config_file):
         result = cli_runner.invoke(
-            app, ["knowledge", "unknown", "--config", str(config_file)]
+            app, ["memory", "unknown", "--config", str(config_file)]
         )
         assert result.exit_code == 1
 
-    def test_knowledge_help(self, cli_runner):
-        result = cli_runner.invoke(app, ["knowledge", "--help"])
+    def test_memory_help(self, cli_runner):
+        result = cli_runner.invoke(app, ["memory", "--help"])
         assert result.exit_code == 0
         assert "list" in result.stdout
         assert "search" in result.stdout
@@ -224,7 +224,7 @@ class TestAppHelp:
         assert "chat" in result.stdout
         assert "config" in result.stdout
         assert "db" in result.stdout
-        assert "knowledge" in result.stdout
+        assert "memory" in result.stdout
         assert "sessions" in result.stdout
         assert "sandbox" in result.stdout
         assert "upgrade" in result.stdout

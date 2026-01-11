@@ -1,6 +1,7 @@
 """Alembic migration environment with async support."""
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -8,6 +9,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from ash.config.paths import get_database_path
 from ash.db.models import Base
 
 config = context.config
@@ -16,6 +18,12 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+# Override the database URL with the ash config path
+# This ensures migrations go to the correct location (~/.ash/data/memory.db)
+database_path = get_database_path()
+database_path.parent.mkdir(parents=True, exist_ok=True)
+config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database_path}")
 
 
 def run_migrations_offline() -> None:

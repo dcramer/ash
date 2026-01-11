@@ -1,0 +1,37 @@
+---
+title: Ash
+description: Personal assistant agent with sandboxed tool execution
+template: splash
+hero:
+  tagline: Personal assistant agent with sandboxed tool execution
+  actions:
+    - text: Get Started
+      link: /getting-started/quick-start/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/dcramer/ash
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## Features
+
+<CardGrid stagger>
+  <Card title="Sandboxed Execution" icon="shield">
+    Execute tools safely in isolated Docker containers with comprehensive
+    security controls.
+  </Card>
+  <Card title="Memory & Knowledge" icon="document">
+    Persistent memory system with semantic search for context-aware
+    conversations.
+  </Card>
+  <Card title="Multi-Provider LLMs" icon="puzzle">
+    Support for multiple LLM providers including Anthropic, OpenAI, and local
+    models.
+  </Card>
+  <Card title="Extensible Skills" icon="setting">
+    Configurable skill system for customizing assistant capabilities.
+  </Card>
+</CardGrid>

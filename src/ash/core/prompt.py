@@ -76,7 +76,7 @@ class SystemPromptBuilder:
     - Workspace info
     - Sandbox configuration
     - Runtime info (OS, model, time, etc.)
-    - Memory context (knowledge, past conversations)
+    - Memory context (memories, past conversations)
     """
 
     def __init__(
@@ -348,11 +348,11 @@ class SystemPromptBuilder:
         """
         context_items: list[str] = []
 
-        for item in memory.knowledge:
+        for item in memory.memories:
             subject_attr = ""
             if item.metadata and item.metadata.get("subject_name"):
                 subject_attr = f" (about {item.metadata['subject_name']})"
-            context_items.append(f"- [Knowledge{subject_attr}] {item.content}")
+            context_items.append(f"- [Memory{subject_attr}] {item.content}")
 
         for item in memory.messages:
             context_items.append(f"- [Past conversation] {item.content}")

@@ -509,18 +509,20 @@ CREATE VIRTUAL TABLE message_embeddings USING vec0(
     embedding FLOAT[1536]
 );
 
--- Knowledge base
-CREATE TABLE knowledge (
+-- Memory entries
+CREATE TABLE memories (
     id TEXT PRIMARY KEY,
     content TEXT NOT NULL,
     source TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP,
+    owner_user_id TEXT,
+    subject_person_id TEXT,
     metadata JSON
 );
 
-CREATE VIRTUAL TABLE knowledge_embeddings USING vec0(
-    knowledge_id TEXT PRIMARY KEY,
+CREATE VIRTUAL TABLE memory_embeddings USING vec0(
+    memory_id TEXT PRIMARY KEY,
     embedding FLOAT[1536]
 );
 
@@ -601,7 +603,7 @@ uv sync --all-groups
 uv run pre-commit install
 
 # Database migrations
-uv run ash db migrate               # Apply all pending migrations
+uv run ash upgrade                  # Apply migrations + check sandbox
 uv run ash db rollback              # Rollback last migration
 uv run ash db status                # Show migration status
 uv run alembic revision --autogenerate -m "description"  # Create new migration

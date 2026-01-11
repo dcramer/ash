@@ -1,6 +1,6 @@
 # Memory
 
-> Hybrid memory system with automatic context retrieval, explicit memory tools, and person-aware knowledge
+> Hybrid memory system with automatic context retrieval, explicit memory tools, and person-aware memories
 
 Files: `src/ash/memory/manager.py`, `src/ash/memory/store.py`, `src/ash/memory/retrieval.py`, `src/ash/memory/embeddings.py`, `src/ash/tools/builtin/memory.py`, `src/ash/core/agent.py`, `src/ash/db/models.py`
 
@@ -10,18 +10,18 @@ Files: `src/ash/memory/manager.py`, `src/ash/memory/store.py`, `src/ash/memory/r
 
 - Retrieve relevant context via semantic search before each LLM call
 - Apply similarity threshold (default 0.3) to filter irrelevant messages
-- Include top N knowledge entries regardless of similarity (personal assistant has small KB)
-- Include retrieved context (messages, knowledge) in system prompt
+- Include top N memory entries regardless of similarity (personal assistant has small memory store)
+- Include retrieved context (messages, memories) in system prompt
 - Store conversation messages to database after each turn
 - Index messages for semantic search via embeddings
 - Link sessions to provider/chat_id/user_id
 - Persist data across restarts
-- Provide `remember` tool to store facts in knowledge base
+- Provide `remember` tool to store facts in memory
 - Provide `recall` tool for explicit memory search
-- Index knowledge entries for semantic search
-- Support optional expiration on knowledge entries
-- Track knowledge ownership (which user added it)
-- Track knowledge subject (which person the fact is about)
+- Index memory entries for semantic search
+- Support optional expiration on memory entries
+- Track memory ownership (which user added it)
+- Track memory subject (which person the fact is about)
 - Support Person entities with name, relationship, and aliases
 - Include known people in system prompt for context
 - Degrade gracefully if embedding service unavailable
@@ -55,10 +55,10 @@ class Person(Base):
     updated_at: datetime
 ```
 
-### Knowledge (updated)
+### Memory
 
 ```python
-class Knowledge(Base):
+class Memory(Base):
     id: str
     content: str
     source: str | None
@@ -83,7 +83,7 @@ class MemoryManager:
         user_id: str,
         user_message: str,
         max_messages: int = 5,
-        max_knowledge: int = 10,
+        max_memories: int = 10,
         min_message_similarity: float = 0.3,
     ) -> RetrievedContext: ...
 
@@ -94,14 +94,14 @@ class MemoryManager:
         assistant_response: str,
     ) -> None: ...
 
-    async def add_knowledge(
+    async def add_memory(
         self,
         content: str,
         source: str = "user",
         expires_at: datetime | None = None,
         owner_user_id: str | None = None,
         subject_person_id: str | None = None,
-    ) -> Knowledge: ...
+    ) -> Memory: ...
 
     async def search(
         self,
@@ -128,7 +128,7 @@ class MemoryManager:
 @dataclass
 class RetrievedContext:
     messages: list[SearchResult]
-    knowledge: list[SearchResult]  # Includes subject_name in metadata
+    memories: list[SearchResult]  # Includes subject_name in metadata
 ```
 
 ### PersonResolutionResult
@@ -180,7 +180,7 @@ class PersonResolutionResult:
 |----------|----------|
 | Every message | Auto-retrieve relevant context (semantic search on user's message) |
 | Auto-retrieval (messages) | Returns up to 5 messages above 0.3 similarity |
-| Auto-retrieval (knowledge) | Returns up to 10 knowledge entries ranked by relevance with subject attribution |
+| Auto-retrieval (memories) | Returns up to 10 memory entries ranked by relevance with subject attribution |
 | User says "remember my wife's name is Sarah" | Agent uses `remember` with subject="my wife", creates Person entity |
 | Subsequent "she likes Italian food" | Agent uses `remember` with subject="my wife", links to existing Person |
 | User asks "what does my wife like?" | Agent may use `recall` with about="my wife" for targeted search |
@@ -213,13 +213,13 @@ The user has told you about these people:
 Use these when interpreting references like 'my wife' or 'Sarah'.
 ```
 
-Knowledge context includes subject attribution:
+Memory context includes subject attribution:
 
 ```
 ## Relevant Context from Memory
 
-- [Knowledge (about Sarah)] Sarah likes Italian food
-- [Knowledge] User prefers concise responses
+- [Memory (about Sarah)] Sarah likes Italian food
+- [Memory] User prefers concise responses
 ```
 
 ## Errors
@@ -242,11 +242,11 @@ uv run ash chat "What does my wife like?"
 ```
 
 - [ ] Person model exists in `src/ash/db/models.py`
-- [ ] Knowledge model has owner_user_id and subject_person_id
-- [ ] Migration 002 adds Person table and Knowledge columns
+- [ ] Memory model has owner_user_id and subject_person_id
+- [ ] Migration 002 adds Person table, migration 003 renames knowledge to memories
 - [ ] MemoryManager has person resolution methods
 - [ ] `remember` tool accepts subject parameter
 - [ ] `recall` tool accepts about filter
 - [ ] Known people appear in system prompt
-- [ ] Knowledge shows subject attribution in context
+- [ ] Memories show subject attribution in context
 - [ ] Agent calls `get_known_people()` before LLM call

@@ -64,6 +64,7 @@ def serve(
             level=logging.INFO,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
+        logger = logging.getLogger(__name__)
 
         from ash.config import WorkspaceLoader, load_config
         from ash.config.paths import get_pid_path
@@ -690,7 +691,7 @@ def db(
 
 
 @app.command()
-def knowledge(
+def memory(
     action: Annotated[
         str,
         typer.Argument(help="Action: list, search, add, remove, clear, stats"),
@@ -707,7 +708,7 @@ def knowledge(
         str | None,
         typer.Option(
             "--id",
-            help="Knowledge entry ID (for remove)",
+            help="Memory entry ID (for remove)",
         ),
     ] = None,
     source: Annotated[
@@ -758,15 +759,15 @@ def knowledge(
         ),
     ] = False,
 ) -> None:
-    """Manage knowledge entries.
+    """Manage memory entries.
 
     Examples:
-        ash knowledge list                    # List all knowledge
-        ash knowledge search -q "api keys"    # Search knowledge
-        ash knowledge add -q "User prefers dark mode"
-        ash knowledge remove --id <uuid>      # Remove specific entry
-        ash knowledge clear                   # Clear all knowledge
-        ash knowledge stats                   # Show statistics
+        ash memory list                    # List all memories
+        ash memory search -q "api keys"    # Search memories
+        ash memory add -q "User prefers dark mode"
+        ash memory remove --id <uuid>      # Remove specific entry
+        ash memory clear                   # Clear all memories
+        ash memory stats                   # Show statistics
     """
     import asyncio
     from datetime import UTC, datetime, timedelta
@@ -797,30 +798,30 @@ def knowledge(
                 if action == "list":
                     from sqlalchemy import select
 
-                    from ash.db.models import Knowledge
+                    from ash.db.models import Memory as MemoryModel
 
-                    # Get knowledge entries
+                    # Get memory entries
                     stmt = (
-                        select(Knowledge)
-                        .order_by(Knowledge.created_at.desc())
+                        select(MemoryModel)
+                        .order_by(MemoryModel.created_at.desc())
                         .limit(limit)
                     )
 
                     if not include_expired:
                         now = datetime.now(UTC)
                         stmt = stmt.where(
-                            (Knowledge.expires_at.is_(None))
-                            | (Knowledge.expires_at > now)
+                            (MemoryModel.expires_at.is_(None))
+                            | (MemoryModel.expires_at > now)
                         )
 
                     result = await session.execute(stmt)
                     entries = result.scalars().all()
 
                     if not entries:
-                        console.print("[yellow]No knowledge entries found[/yellow]")
+                        console.print("[yellow]No memory entries found[/yellow]")
                         return
 
-                    table = Table(title="Knowledge Entries")
+                    table = Table(title="Memory Entries")
                     table.add_column("ID", style="dim", max_width=8)
                     table.add_column("Created", style="dim")
                     table.add_column("Source", style="cyan")
@@ -863,21 +864,21 @@ def knowledge(
 
                     from sqlalchemy import select
 
-                    from ash.db.models import Knowledge
+                    from ash.db.models import Memory as MemoryModel
 
                     # Text-based search (semantic search requires embeddings setup)
                     stmt = (
-                        select(Knowledge)
-                        .where(Knowledge.content.ilike(f"%{query}%"))
-                        .order_by(Knowledge.created_at.desc())
+                        select(MemoryModel)
+                        .where(MemoryModel.content.ilike(f"%{query}%"))
+                        .order_by(MemoryModel.created_at.desc())
                         .limit(limit)
                     )
 
                     if not include_expired:
                         now = datetime.now(UTC)
                         stmt = stmt.where(
-                            (Knowledge.expires_at.is_(None))
-                            | (Knowledge.expires_at > now)
+                            (MemoryModel.expires_at.is_(None))
+                            | (MemoryModel.expires_at > now)
                         )
 
                     result = await session.execute(stmt)
@@ -885,11 +886,11 @@ def knowledge(
 
                     if not entries:
                         console.print(
-                            f"[yellow]No knowledge found matching '{query}'[/yellow]"
+                            f"[yellow]No memories found matching '{query}'[/yellow]"
                         )
                         return
 
-                    table = Table(title=f"Knowledge Search: '{query}'")
+                    table = Table(title=f"Memory Search: '{query}'")
                     table.add_column("ID", style="dim", max_width=8)
                     table.add_column("Created", style="dim")
                     table.add_column("Source", style="cyan")
@@ -926,14 +927,14 @@ def knowledge(
                     if expires_days:
                         expires_at = datetime.now(UTC) + timedelta(days=expires_days)
 
-                    entry = await store.add_knowledge(
+                    entry = await store.add_memory(
                         content=query,
                         source=source,
                         expires_at=expires_at,
                     )
                     await session.commit()
 
-                    console.print(f"[green]Added knowledge entry: {entry.id[:8]}[/green]")
+                    console.print(f"[green]Added memory entry: {entry.id[:8]}[/green]")
                     if expires_at:
                         console.print(
                             f"[dim]Expires: {expires_at.strftime('%Y-%m-%d')}[/dim]"
@@ -946,16 +947,16 @@ def knowledge(
 
                     from sqlalchemy import delete, select
 
-                    from ash.db.models import Knowledge
+                    from ash.db.models import Memory as MemoryModel
 
                     # Find entries matching the ID prefix
-                    stmt = select(Knowledge).where(Knowledge.id.startswith(entry_id))
+                    stmt = select(MemoryModel).where(MemoryModel.id.startswith(entry_id))
                     result = await session.execute(stmt)
                     entries = result.scalars().all()
 
                     if not entries:
                         console.print(
-                            f"[red]No knowledge entry found with ID: {entry_id}[/red]"
+                            f"[red]No memory entry found with ID: {entry_id}[/red]"
                         )
                         raise typer.Exit(1)
 
@@ -981,22 +982,22 @@ def knowledge(
                     from sqlalchemy import text
 
                     await session.execute(
-                        text("DELETE FROM knowledge_embeddings WHERE knowledge_id = :id"),
+                        text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
                         {"id": entry.id},
                     )
 
-                    # Delete the knowledge entry
+                    # Delete the memory entry
                     await session.execute(
-                        delete(Knowledge).where(Knowledge.id == entry.id)
+                        delete(MemoryModel).where(MemoryModel.id == entry.id)
                     )
                     await session.commit()
 
-                    console.print(f"[green]Removed knowledge entry: {entry.id[:8]}[/green]")
+                    console.print(f"[green]Removed memory entry: {entry.id[:8]}[/green]")
 
                 elif action == "clear":
                     if not force:
                         console.print(
-                            "[yellow]This will delete ALL knowledge entries.[/yellow]"
+                            "[yellow]This will delete ALL memory entries.[/yellow]"
                         )
                         confirm = typer.confirm("Are you sure?")
                         if not confirm:
@@ -1005,50 +1006,50 @@ def knowledge(
 
                     from sqlalchemy import delete, text
 
-                    from ash.db.models import Knowledge
+                    from ash.db.models import Memory as MemoryModel
 
                     # Clear embeddings first
-                    await session.execute(text("DELETE FROM knowledge_embeddings"))
+                    await session.execute(text("DELETE FROM memory_embeddings"))
 
-                    # Delete all knowledge entries
-                    result = await session.execute(delete(Knowledge))
+                    # Delete all memory entries
+                    result = await session.execute(delete(MemoryModel))
                     await session.commit()
 
                     console.print(
-                        f"[green]Cleared {result.rowcount} knowledge entries[/green]"
+                        f"[green]Cleared {result.rowcount} memory entries[/green]"
                     )
 
                 elif action == "stats":
                     from sqlalchemy import func, select
 
-                    from ash.db.models import Knowledge
+                    from ash.db.models import Memory as MemoryModel
 
                     now = datetime.now(UTC)
 
                     # Total count
-                    total = await session.scalar(select(func.count(Knowledge.id)))
+                    total = await session.scalar(select(func.count(MemoryModel.id)))
 
                     # Active (non-expired) count
-                    active_stmt = select(func.count(Knowledge.id)).where(
-                        (Knowledge.expires_at.is_(None)) | (Knowledge.expires_at > now)
+                    active_stmt = select(func.count(MemoryModel.id)).where(
+                        (MemoryModel.expires_at.is_(None)) | (MemoryModel.expires_at > now)
                     )
                     active = await session.scalar(active_stmt)
 
                     # Expired count
-                    expired_stmt = select(func.count(Knowledge.id)).where(
-                        Knowledge.expires_at <= now
+                    expired_stmt = select(func.count(MemoryModel.id)).where(
+                        MemoryModel.expires_at <= now
                     )
                     expired = await session.scalar(expired_stmt)
 
                     # By source
                     source_counts = await session.execute(
-                        select(Knowledge.source, func.count(Knowledge.id)).group_by(
-                            Knowledge.source
+                        select(MemoryModel.source, func.count(MemoryModel.id)).group_by(
+                            MemoryModel.source
                         )
                     )
                     source_stats = dict(source_counts.all())
 
-                    table = Table(title="Knowledge Statistics")
+                    table = Table(title="Memory Statistics")
                     table.add_column("Metric", style="cyan")
                     table.add_column("Count", style="green", justify="right")
 
