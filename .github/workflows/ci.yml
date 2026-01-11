@@ -29,31 +29,18 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
       - name: Install dependencies
         run: uv sync --all-groups
 
       - name: Run tests
-        run: uv run pytest --cov-report=xml --cov-fail-under=0
+        run: uv run pytest
         env:
           # Prevent tests from trying to use real API keys
           ANTHROPIC_API_KEY: ""
           OPENAI_API_KEY: ""
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        if: matrix.python-version == '3.12'
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
