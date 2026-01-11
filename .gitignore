@@ -68,6 +68,3 @@ workspace/*
 !workspace/SOUL.md
 !workspace/USER.md
 !workspace/TOOLS.md
-
-# direnv
-.envrc
