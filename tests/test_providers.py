@@ -99,6 +99,8 @@ class TestTelegramMessageHandler:
         provider.send = AsyncMock()
         provider.send_streaming = AsyncMock(return_value="123")
         provider.send_typing = AsyncMock()
+        provider.set_reaction = AsyncMock()
+        provider.clear_reaction = AsyncMock()
         return provider
 
     @pytest.fixture

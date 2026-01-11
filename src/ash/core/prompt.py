@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ash.config import AshConfig, Workspace
+    from ash.db.models import Person
     from ash.memory.manager import RetrievedContext
     from ash.skills import SkillRegistry
     from ash.tools import ToolRegistry
@@ -60,6 +61,7 @@ class PromptContext:
 
     runtime: RuntimeInfo | None = None
     memory: RetrievedContext | None = None
+    known_people: list["Person"] | None = None
     extra_context: dict[str, Any] = field(default_factory=dict)
 
 
@@ -144,7 +146,13 @@ class SystemPromptBuilder:
             if runtime_section:
                 parts.append(f"\n\n{runtime_section}")
 
-        # 8. Memory context
+        # 8. Known people context
+        if context.known_people:
+            people_section = self._build_people_section(context.known_people)
+            if people_section:
+                parts.append(f"\n\n{people_section}")
+
+        # 9. Memory context
         if context.memory:
             memory_section = self._build_memory_section(context.memory)
             if memory_section:
@@ -297,8 +305,40 @@ class SystemPromptBuilder:
 
         return "\n".join(lines)
 
+    def _build_people_section(self, people: list["Person"]) -> str:
+        """Build known people section.
+
+        Args:
+            people: List of Person objects.
+
+        Returns:
+            People section string or empty if no people.
+        """
+        if not people:
+            return ""
+
+        lines = [
+            "## Known People",
+            "",
+            "The user has told you about these people:",
+            "",
+        ]
+
+        for person in people:
+            desc_parts = [f"**{person.name}**"]
+            if person.relation:
+                desc_parts.append(f"({person.relation})")
+            lines.append(f"- {' '.join(desc_parts)}")
+
+        lines.append("")
+        lines.append(
+            "Use these when interpreting references like 'my wife' or 'Sarah'."
+        )
+
+        return "\n".join(lines)
+
     def _build_memory_section(self, memory: RetrievedContext) -> str:
-        """Build memory context section.
+        """Build memory context section with subject attribution.
 
         Args:
             memory: Retrieved memory context.
@@ -307,8 +347,13 @@ class SystemPromptBuilder:
             Memory section string or empty if no context.
         """
         context_items: list[str] = []
+
         for item in memory.knowledge:
-            context_items.append(f"- [Knowledge] {item.content}")
+            subject_attr = ""
+            if item.metadata and item.metadata.get("subject_name"):
+                subject_attr = f" (about {item.metadata['subject_name']})"
+            context_items.append(f"- [Knowledge{subject_attr}] {item.content}")
+
         for item in memory.messages:
             context_items.append(f"- [Past conversation] {item.content}")
 

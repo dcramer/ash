@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import Message as TelegramMessage
+from aiogram.types import Message as TelegramMessage, ReactionTypeEmoji
 
 from ash.providers.base import (
     ImageAttachment,
@@ -186,30 +186,31 @@ class TelegramProvider(Provider):
         else:
             # Polling mode
             logger.info("Starting Telegram bot in polling mode")
-            await self._bot.delete_webhook(drop_pending_updates=True)
-
-            # Explicitly consume any pending updates to avoid replaying old messages
-            try:
-                # Get all pending updates (up to 100)
-                updates = await self._bot.get_updates(limit=100, timeout=1)
-                if updates:
-                    # Mark all as read by requesting with offset = last_id + 1
-                    last_update_id = updates[-1].update_id
-                    await self._bot.get_updates(offset=last_update_id + 1, limit=1, timeout=1)
-                    logger.info(f"Cleared {len(updates)} pending update(s)")
-            except Exception as e:
-                logger.warning(f"Failed to clear pending updates: {e}")
-
+            # Don't drop pending updates - we'll check for duplicates in the handler
+            await self._bot.delete_webhook(drop_pending_updates=False)
             await self._dp.start_polling(self._bot)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         self._running = False
 
-        if self._webhook_url:
-            await self._bot.delete_webhook()
+        # Stop the dispatcher polling
+        try:
+            await self._dp.stop_polling()
+        except Exception as e:
+            logger.debug(f"Error stopping polling: {e}")
 
-        await self._bot.session.close()
+        if self._webhook_url:
+            try:
+                await self._bot.delete_webhook()
+            except Exception as e:
+                logger.debug(f"Error deleting webhook: {e}")
+
+        try:
+            await self._bot.session.close()
+        except Exception as e:
+            logger.debug(f"Error closing bot session: {e}")
+
         logger.info("Telegram bot stopped")
 
     def _setup_handlers(self) -> None:
@@ -530,6 +531,42 @@ class TelegramProvider(Provider):
             chat_id=int(chat_id),
             action="typing",
         )
+
+    async def set_reaction(
+        self, chat_id: str, message_id: str, emoji: str = "👀"
+    ) -> None:
+        """Set a reaction on a message.
+
+        Args:
+            chat_id: Chat containing the message.
+            message_id: Message to react to.
+            emoji: Emoji to use for reaction (default: eyes - "looking at it").
+        """
+        try:
+            await self._bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+        except Exception as e:
+            # Reactions may not be available in all chats
+            logger.warning(f"Failed to set reaction: {e}")
+
+    async def clear_reaction(self, chat_id: str, message_id: str) -> None:
+        """Clear reactions from a message.
+
+        Args:
+            chat_id: Chat containing the message.
+            message_id: Message to clear reactions from.
+        """
+        try:
+            await self._bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                reaction=[],
+            )
+        except Exception as e:
+            logger.debug(f"Failed to clear reaction: {e}")
 
     async def process_webhook_update(self, update_data: dict) -> None:
         """Process a webhook update.

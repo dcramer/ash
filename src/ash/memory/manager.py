@@ -1,16 +1,57 @@
 """Memory manager for orchestrating retrieval and persistence."""
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ash.db.models import Knowledge
+from ash.db.models import Knowledge, Person
 from ash.memory.retrieval import SearchResult, SemanticRetriever
 from ash.memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
+
+
+# Known relationship terms for parsing references
+RELATIONSHIP_TERMS = {
+    "wife",
+    "husband",
+    "partner",
+    "spouse",
+    "mom",
+    "mother",
+    "dad",
+    "father",
+    "parent",
+    "son",
+    "daughter",
+    "child",
+    "kid",
+    "brother",
+    "sister",
+    "sibling",
+    "boss",
+    "manager",
+    "coworker",
+    "colleague",
+    "friend",
+    "best friend",
+    "roommate",
+    "doctor",
+    "therapist",
+    "dentist",
+}
+
+
+@dataclass
+class PersonResolutionResult:
+    """Result of person resolution."""
+
+    person_id: str
+    created: bool
+    person_name: str
 
 
 @dataclass
@@ -54,6 +95,7 @@ class MemoryManager:
         max_messages: int = 5,
         max_knowledge: int = 10,
         min_message_similarity: float = 0.3,
+        exclude_message_ids: set[str] | None = None,
     ) -> RetrievedContext:
         """Retrieve relevant context before LLM call.
 
@@ -67,6 +109,7 @@ class MemoryManager:
                 Knowledge entries are always included (ranked by relevance)
                 since a personal assistant typically has a small knowledge base
                 where all stored facts are potentially useful.
+            exclude_message_ids: Message IDs to exclude (e.g., already in context).
 
         Returns:
             Retrieved context with messages and knowledge.
@@ -76,12 +119,20 @@ class MemoryManager:
 
         try:
             # Search past messages (across all sessions for this retrieval)
+            # Request extra results to account for exclusions
+            extra = len(exclude_message_ids) if exclude_message_ids else 0
             all_messages = await self._retriever.search_messages(
                 query=user_message,
-                limit=max_messages,
+                limit=max_messages + extra,
             )
-            # Filter messages by similarity threshold (they can be noisy)
-            messages = [m for m in all_messages if m.similarity >= min_message_similarity]
+            # Filter by similarity threshold AND exclude duplicates
+            for m in all_messages:
+                if m.similarity >= min_message_similarity:
+                    if exclude_message_ids and m.id in exclude_message_ids:
+                        continue
+                    messages.append(m)
+                    if len(messages) >= max_messages:
+                        break
         except Exception:
             logger.warning("Failed to search messages, continuing without", exc_info=True)
 
@@ -114,17 +165,21 @@ class MemoryManager:
             user_message: User's message.
             assistant_response: Assistant's response.
         """
-        # Store messages
+        from ash.core.tokens import estimate_tokens
+
+        # Store messages with token estimates
         user_msg = await self._store.add_message(
             session_id=session_id,
             role="user",
             content=user_message,
+            token_count=estimate_tokens(user_message),
         )
 
         assistant_msg = await self._store.add_message(
             session_id=session_id,
             role="assistant",
             content=assistant_response,
+            token_count=estimate_tokens(assistant_response),
         )
 
         # Index for semantic search
@@ -140,6 +195,8 @@ class MemoryManager:
         source: str = "user",
         expires_at: datetime | None = None,
         expires_in_days: int | None = None,
+        owner_user_id: str | None = None,
+        subject_person_id: str | None = None,
     ) -> Knowledge:
         """Add knowledge entry (used by remember tool).
 
@@ -148,6 +205,8 @@ class MemoryManager:
             source: Source of knowledge (default: "user").
             expires_at: Explicit expiration datetime.
             expires_in_days: Days until expiration (alternative to expires_at).
+            owner_user_id: User who added this knowledge.
+            subject_person_id: Person this knowledge is about.
 
         Returns:
             Created knowledge entry.
@@ -161,6 +220,8 @@ class MemoryManager:
             content=content,
             source=source,
             expires_at=expires_at,
+            owner_user_id=owner_user_id,
+            subject_person_id=subject_person_id,
         )
 
         # Index for semantic search
@@ -175,14 +236,159 @@ class MemoryManager:
         self,
         query: str,
         limit: int = 5,
+        subject_person_id: str | None = None,
     ) -> list[SearchResult]:
         """Search all memory (used by recall tool).
 
         Args:
             query: Search query.
             limit: Maximum results.
+            subject_person_id: Optional filter to knowledge about a specific person.
 
         Returns:
             List of search results sorted by relevance.
         """
-        return await self._retriever.search_all(query, limit=limit)
+        return await self._retriever.search_all(
+            query, limit=limit, subject_person_id=subject_person_id
+        )
+
+    # Person operations
+
+    async def find_person(
+        self,
+        owner_user_id: str,
+        reference: str,
+    ) -> Person | None:
+        """Find a person by reference (for recall tool).
+
+        Args:
+            owner_user_id: User who owns this person reference.
+            reference: Name, relationship, or alias.
+
+        Returns:
+            Person if found, None otherwise.
+        """
+        return await self._store.find_person_by_reference(owner_user_id, reference)
+
+    async def get_known_people(self, owner_user_id: str) -> list[Person]:
+        """Get all known people for a user (for prompt context).
+
+        Args:
+            owner_user_id: User ID.
+
+        Returns:
+            List of people.
+        """
+        return await self._store.get_people_for_user(owner_user_id)
+
+    async def resolve_or_create_person(
+        self,
+        owner_user_id: str,
+        reference: str,
+        content_hint: str | None = None,
+    ) -> PersonResolutionResult:
+        """Resolve a reference to a person, creating if needed.
+
+        Args:
+            owner_user_id: User who owns this person reference.
+            reference: How user referred to the person ("my wife", "Sarah", "boss").
+            content_hint: The content being stored, may contain the person's name.
+
+        Returns:
+            PersonResolutionResult with person_id and whether it was created.
+        """
+        # Try to find existing person
+        existing = await self._store.find_person_by_reference(owner_user_id, reference)
+        if existing:
+            return PersonResolutionResult(
+                person_id=existing.id,
+                created=False,
+                person_name=existing.name,
+            )
+
+        # Need to create - determine name and relationship
+        name, relationship = self._parse_person_reference(reference, content_hint)
+
+        person = await self._store.create_person(
+            owner_user_id=owner_user_id,
+            name=name,
+            relationship=relationship,
+            aliases=[reference] if reference.lower() != name.lower() else None,
+        )
+
+        return PersonResolutionResult(
+            person_id=person.id,
+            created=True,
+            person_name=person.name,
+        )
+
+    def _parse_person_reference(
+        self,
+        reference: str,
+        content_hint: str | None = None,
+    ) -> tuple[str, str | None]:
+        """Parse a person reference into name and relationship.
+
+        Args:
+            reference: How user referred to the person.
+            content_hint: Content that might contain the actual name.
+
+        Returns:
+            Tuple of (name, relationship).
+        """
+        ref_lower = reference.lower().strip()
+
+        # Remove "my " prefix if present
+        relationship: str | None = None
+        if ref_lower.startswith("my "):
+            relationship = ref_lower[3:]  # "wife", "boss", etc.
+        else:
+            relationship = None
+
+        # If reference is a relationship term, try to extract name from content
+        if relationship and relationship in RELATIONSHIP_TERMS:
+            if content_hint:
+                # Try to extract a name from content
+                name = self._extract_name_from_content(content_hint, relationship)
+                if name:
+                    return name, relationship
+            # Use capitalized relationship as placeholder name
+            return relationship.title(), relationship
+
+        # Reference is likely a name
+        return reference.title(), relationship
+
+    def _extract_name_from_content(
+        self,
+        content: str,
+        relationship: str,
+    ) -> str | None:
+        """Try to extract a person's name from content.
+
+        Looks for patterns like:
+        - "Sarah's birthday is..."
+        - "wife's name is Sarah"
+        - "My wife Sarah likes..."
+        """
+        # Pattern: "X's name is Y"
+        name_is_pattern = rf"{relationship}'s name is (\w+)"
+        match = re.search(name_is_pattern, content, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        # Pattern: "My [relationship] [Name]" at start or after comma
+        my_pattern = rf"(?:^|,\s*)my {relationship} (\w+)"
+        match = re.search(my_pattern, content, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        # Pattern: "[Name]'s" at the start (possessive name)
+        possessive_pattern = r"^(\w+)'s\s"
+        match = re.search(possessive_pattern, content)
+        if match:
+            name = match.group(1)
+            # Avoid false positives like "User's"
+            if name.lower() not in ["user", "my", "the", "their", "his", "her"]:
+                return name
+
+        return None

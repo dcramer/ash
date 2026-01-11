@@ -79,6 +79,7 @@ class SandboxExecutor:
         command: str,
         timeout: int | None = None,
         reuse_container: bool = True,
+        environment: dict[str, str] | None = None,
     ) -> ExecutionResult:
         """Execute a command in the sandbox.
 
@@ -86,6 +87,7 @@ class SandboxExecutor:
             command: Shell command to execute.
             timeout: Execution timeout in seconds.
             reuse_container: Reuse existing container if available.
+            environment: Extra environment variables for this command.
 
         Returns:
             Execution result.
@@ -102,12 +104,18 @@ class SandboxExecutor:
         # Get or create container
         container_id = await self._get_or_create_container(reuse_container)
 
+        # Merge base environment with per-command environment
+        merged_env = {**self._environment}
+        if environment:
+            merged_env.update(environment)
+
         # Execute command
         try:
             exit_code, stdout, stderr = await self._manager.exec_command(
                 container_id,
                 command,
                 timeout=timeout,
+                environment=merged_env if merged_env else None,
             )
 
             timed_out = exit_code == -1 and "timed out" in stderr.lower()

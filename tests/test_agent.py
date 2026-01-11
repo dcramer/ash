@@ -203,7 +203,10 @@ class TestAgentConfig:
         assert config.model is None
         assert config.max_tokens == 4096
         assert config.temperature is None  # None = use provider default
-        assert config.max_tool_iterations == 10
+        assert config.max_tool_iterations == 25  # MAX_TOOL_ITERATIONS constant
+        assert config.context_token_budget == 100000
+        assert config.recency_window == 10
+        assert config.system_prompt_buffer == 8000
 
     def test_custom_values(self):
         config = AgentConfig(
@@ -411,6 +414,8 @@ class TestSessionState:
         )
         assert session.session_id == "sess-1"
         assert session.messages == []
+        assert session._token_counts == []
+        assert session._message_ids == []
 
     def test_add_user_message(self, session):
         msg = session.add_user_message("Hello")
@@ -509,6 +514,126 @@ class TestSessionState:
         restored = SessionState.from_json(json_str)
         assert restored.session_id == session.session_id
         assert len(restored.messages) == 1
+
+    # Tests for smart pruning
+
+    def test_get_messages_for_llm_no_budget(self, session):
+        """Without budget, returns all messages."""
+        session.add_user_message("Hello")
+        session.add_assistant_message("Hi!")
+        session.add_user_message("How are you?")
+        session.add_assistant_message("I'm good!")
+
+        messages = session.get_messages_for_llm()
+        assert len(messages) == 4
+
+    def test_get_messages_for_llm_with_large_budget(self, session):
+        """With large budget, returns all messages."""
+        session.add_user_message("Hello")
+        session.add_assistant_message("Hi!")
+
+        messages = session.get_messages_for_llm(token_budget=10000)
+        assert len(messages) == 2
+
+    def test_get_messages_for_llm_keeps_recency_window(self, session):
+        """Recency window is always kept even when budget is tight."""
+        # Add 15 messages with explicit token counts
+        for i in range(15):
+            if i % 2 == 0:
+                session.add_user_message(f"Message {i}")
+            else:
+                session.add_assistant_message(f"Response {i}")
+
+        # Set explicit token counts (100 tokens each message)
+        session.set_token_counts([100] * 15)
+
+        # Budget of 500 with recency_window=5 means:
+        # - Recency window uses 5 * 100 = 500 tokens (exactly fits)
+        # - No room for older messages
+        messages = session.get_messages_for_llm(token_budget=500, recency_window=5)
+        assert len(messages) == 5
+
+        # Verify it's the last 5 messages
+        assert messages[0].content == "Message 10"
+        assert messages[-1].content == "Message 14"
+
+    def test_get_messages_for_llm_prunes_old_messages(self, session):
+        """Old messages are pruned when budget is tight."""
+        # Add messages with known token counts
+        session.add_user_message("a" * 100)  # ~26 tokens
+        session.add_assistant_message("b" * 100)  # ~26 tokens
+        session.add_user_message("c" * 100)  # ~26 tokens
+        session.add_assistant_message("d" * 100)  # ~26 tokens
+
+        # Set token counts (simulating DB load)
+        session.set_token_counts([30, 30, 30, 30])
+
+        # Budget of 70 with recency window of 2 = keep last 2 (60 tokens)
+        # Then try to fit more from older = 0 more fit
+        messages = session.get_messages_for_llm(token_budget=70, recency_window=2)
+        assert len(messages) == 2  # Only recency window fits
+
+    def test_get_messages_for_llm_adds_older_when_budget_allows(self, session):
+        """Older messages included when budget allows."""
+        session.add_user_message("a" * 40)  # ~11 tokens
+        session.add_assistant_message("b" * 40)  # ~11 tokens
+        session.add_user_message("c" * 40)  # ~11 tokens
+        session.add_assistant_message("d" * 40)  # ~11 tokens
+
+        session.set_token_counts([15, 15, 15, 15])
+
+        # Budget of 100 with recency of 2 = 30 used, 70 remaining
+        # Can fit both older messages (30 tokens)
+        messages = session.get_messages_for_llm(token_budget=100, recency_window=2)
+        assert len(messages) == 4
+
+    def test_set_and_get_token_counts(self, session):
+        """Token counts can be set and used."""
+        session.add_user_message("Hello")
+        session.add_assistant_message("Hi!")
+
+        session.set_token_counts([10, 15])
+
+        # _get_token_counts should return cached values
+        counts = session._get_token_counts()
+        assert counts == [10, 15]
+
+    def test_set_and_get_message_ids(self, session):
+        """Message IDs can be set and retrieved."""
+        session.add_user_message("Hello")
+        session.add_assistant_message("Hi!")
+
+        session.set_message_ids(["msg-1", "msg-2"])
+
+        recent = session.get_recent_message_ids(2)
+        assert recent == {"msg-1", "msg-2"}
+
+    def test_get_recent_message_ids_subset(self, session):
+        """Only recent message IDs returned."""
+        session.add_user_message("M1")
+        session.add_user_message("M2")
+        session.add_user_message("M3")
+        session.add_user_message("M4")
+
+        session.set_message_ids(["id-1", "id-2", "id-3", "id-4"])
+
+        recent = session.get_recent_message_ids(2)
+        assert recent == {"id-3", "id-4"}
+
+    def test_get_recent_message_ids_empty(self, session):
+        """Returns empty set when no IDs set."""
+        recent = session.get_recent_message_ids(5)
+        assert recent == set()
+
+    def test_token_counts_estimated_when_not_cached(self, session):
+        """Token counts are estimated for new messages."""
+        session.add_user_message("Hello there!")
+        session.add_assistant_message("Hi!")
+
+        # No cached counts, so should estimate
+        counts = session._get_token_counts()
+        assert len(counts) == 2
+        assert all(c > 0 for c in counts)
 
 
 class TestWorkspace:

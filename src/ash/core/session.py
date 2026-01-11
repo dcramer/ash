@@ -17,6 +17,9 @@ class SessionState:
     user_id: str
     messages: list[Message] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Token tracking for smart pruning (populated from DB)
+    _token_counts: list[int] = field(default_factory=list, repr=False)
+    _message_ids: list[str] = field(default_factory=list, repr=False)
 
     def add_user_message(self, content: str) -> Message:
         """Add a user message to the session.
@@ -69,13 +72,140 @@ class SessionState:
         self.messages.append(message)
         return message
 
-    def get_messages_for_llm(self) -> list[Message]:
-        """Get messages formatted for LLM.
+    def get_messages_for_llm(
+        self,
+        token_budget: int | None = None,
+        recency_window: int = 10,
+    ) -> list[Message]:
+        """Get messages formatted for LLM, pruned to fit token budget.
+
+        Args:
+            token_budget: Maximum tokens for messages (None = no limit).
+            recency_window: Always keep at least this many recent messages.
 
         Returns:
-            List of messages.
+            List of messages within token budget.
         """
-        return self.messages.copy()
+        if token_budget is None or not self.messages:
+            return self.messages.copy()
+
+        # Get token counts (use cached or estimate)
+        token_counts = self._get_token_counts()
+
+        # Always include the recency window
+        n_messages = len(self.messages)
+        recency_start = max(0, n_messages - recency_window)
+
+        # Calculate tokens in recency window
+        recency_tokens = sum(token_counts[recency_start:])
+
+        if recency_tokens >= token_budget:
+            # Even recency window exceeds budget - return what fits
+            return self._fit_to_budget(
+                self.messages[recency_start:],
+                token_counts[recency_start:],
+                token_budget,
+            )
+
+        # Budget remaining for older messages
+        remaining_budget = token_budget - recency_tokens
+
+        # Add older messages from most recent backward until budget exhausted
+        older_messages = self.messages[:recency_start]
+        older_tokens = token_counts[:recency_start]
+
+        included_older: list[Message] = []
+        for msg, tokens in zip(reversed(older_messages), reversed(older_tokens)):
+            if tokens <= remaining_budget:
+                included_older.insert(0, msg)
+                remaining_budget -= tokens
+            else:
+                break  # No more room
+
+        return included_older + self.messages[recency_start:]
+
+    def _get_token_counts(self) -> list[int]:
+        """Get token counts for all messages, estimating if not cached."""
+        from ash.core.tokens import estimate_message_tokens
+
+        if len(self._token_counts) == len(self.messages):
+            return self._token_counts
+
+        # Estimate missing counts
+        counts: list[int] = []
+        for i, msg in enumerate(self.messages):
+            if i < len(self._token_counts):
+                counts.append(self._token_counts[i])
+            else:
+                content = msg.content
+                if isinstance(content, str):
+                    counts.append(estimate_message_tokens(msg.role.value, content))
+                else:
+                    # Convert content blocks to dict format for estimation
+                    blocks = [self._content_block_to_dict(b) for b in content]
+                    counts.append(estimate_message_tokens(msg.role.value, blocks))
+
+        return counts
+
+    def _fit_to_budget(
+        self,
+        messages: list[Message],
+        token_counts: list[int],
+        budget: int,
+    ) -> list[Message]:
+        """Fit messages to budget, keeping most recent."""
+        result: list[Message] = []
+        remaining = budget
+
+        for msg, tokens in zip(reversed(messages), reversed(token_counts)):
+            if tokens <= remaining:
+                result.insert(0, msg)
+                remaining -= tokens
+            else:
+                break
+
+        return result
+
+    @staticmethod
+    def _content_block_to_dict(block: ContentBlock) -> dict[str, Any]:
+        """Convert content block to dict for token estimation."""
+        if isinstance(block, TextContent):
+            return {"type": "text", "text": block.text}
+        elif isinstance(block, ToolUse):
+            return {"type": "tool_use", "name": block.name, "input": block.input}
+        elif isinstance(block, ToolResult):
+            return {"type": "tool_result", "content": block.content}
+        return {}
+
+    def set_token_counts(self, counts: list[int]) -> None:
+        """Set cached token counts from DB.
+
+        Args:
+            counts: Token counts for messages (same order as messages).
+        """
+        self._token_counts = counts
+
+    def set_message_ids(self, ids: list[str]) -> None:
+        """Set message IDs (from DB) for deduplication.
+
+        Args:
+            ids: Message IDs corresponding to messages list.
+        """
+        self._message_ids = ids
+
+    def get_recent_message_ids(self, recency_window: int) -> set[str]:
+        """Get message IDs in the recency window.
+
+        Args:
+            recency_window: Number of recent messages.
+
+        Returns:
+            Set of message IDs.
+        """
+        if not self._message_ids:
+            return set()
+        start = max(0, len(self._message_ids) - recency_window)
+        return set(self._message_ids[start:])
 
     def get_pending_tool_uses(self) -> list[ToolUse]:
         """Get tool uses from the last assistant message that need results.

@@ -241,11 +241,18 @@ class SkillExecutor:
                 result_text = response.message.get_text() or ""
                 break
 
+            # Build SKILL_* env vars from skill config
+            skill_env = {
+                f"SKILL_{name.upper()}": value
+                for name, value in skill.config_values.items()
+            }
+
             # Execute tools
             tool_context = ToolContext(
                 session_id=context.session_id,
                 user_id=context.user_id,
                 chat_id=context.chat_id,
+                env=skill_env,
             )
 
             tool_results: list[TextContent | ToolUse | Any] = []

@@ -15,6 +15,10 @@ class ToolContext:
     provider: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    # Extra environment variables to pass to sandbox
+    # e.g., {"SKILL_API_KEY": "abc123"}
+    env: dict[str, str] = field(default_factory=dict)
+
 
 @dataclass
 class ToolResult:

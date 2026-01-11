@@ -114,16 +114,22 @@ class BashTool(Tool):
         timeout = input_data.get("timeout", 60)
 
         try:
-            return await self._execute_sandboxed(command, timeout)
+            return await self._execute_sandboxed(command, timeout, context.env)
         except Exception as e:
             return ToolResult.error(f"Execution error: {e}")
 
-    async def _execute_sandboxed(self, command: str, timeout: int) -> ToolResult:
+    async def _execute_sandboxed(
+        self,
+        command: str,
+        timeout: int,
+        environment: dict[str, str] | None = None,
+    ) -> ToolResult:
         """Execute command in Docker sandbox."""
         result = await self._executor.execute(
             command,
             timeout=timeout,
             reuse_container=True,
+            environment=environment,
         )
 
         # Truncate output if too long

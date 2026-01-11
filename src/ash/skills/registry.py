@@ -1,6 +1,7 @@
 """Skill registry for discovering and loading skills from workspace."""
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,22 @@ FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 BUNDLED_SKILLS_DIR = Path(__file__).parent / "bundled"
 
 
+def _resolve_env_refs(value: str) -> str:
+    """Resolve $VAR references in a value.
+
+    Args:
+        value: Value that may contain $VAR references.
+
+    Returns:
+        Value with $VAR references resolved from environment.
+    """
+    if not value.startswith("$"):
+        return value
+
+    env_var = value[1:]
+    return os.environ.get(env_var, "")
+
+
 class SkillRegistry:
     """Registry for skill definitions.
 
@@ -28,9 +45,19 @@ class SkillRegistry:
     Supports markdown files with YAML frontmatter (preferred) or pure YAML.
     """
 
-    def __init__(self) -> None:
-        """Initialize empty registry."""
+    def __init__(
+        self,
+        central_config: dict[str, dict[str, str]] | None = None,
+    ) -> None:
+        """Initialize empty registry.
+
+        Args:
+            central_config: Central skill config from ~/.ash/config.toml.
+                           Dict mapping skill name to config values.
+                           e.g., {"check-muni": {"API_KEY": "abc123"}}
+        """
         self._skills: dict[str, SkillDefinition] = {}
+        self._central_config = central_config or {}
 
     def load_bundled(self) -> None:
         """Load bundled skills shipped with Ash.
@@ -134,6 +161,98 @@ class SkillRegistry:
             os=requires.get("os", []),
         )
 
+    def _load_skill_config(self, skill_path: Path) -> dict[str, str]:
+        """Load config.toml from skill directory.
+
+        Args:
+            skill_path: Path to skill directory.
+
+        Returns:
+            Dict of config values (may be empty).
+        """
+        config_file = skill_path / "config.toml"
+        if not config_file.exists():
+            return {}
+
+        try:
+            import tomllib
+
+            with config_file.open("rb") as f:
+                data = tomllib.load(f)
+
+            # Flatten to string values and resolve env refs
+            config = {}
+            for key, value in data.items():
+                if isinstance(value, str):
+                    config[key] = _resolve_env_refs(value)
+                else:
+                    config[key] = str(value)
+            return config
+        except Exception as e:
+            logger.warning(f"Failed to load skill config from {config_file}: {e}")
+            return {}
+
+    def _resolve_config_values(
+        self,
+        skill_name: str,
+        config_spec: list[str],
+        skill_path: Path | None,
+    ) -> dict[str, str]:
+        """Resolve config values from layered sources.
+
+        Resolution order (first match wins):
+        1. Skill-local config.toml
+        2. Central config from ~/.ash/config.toml
+        3. Environment variables
+        4. Defaults from config spec
+
+        Args:
+            skill_name: Name of the skill.
+            config_spec: List of config specs (e.g., ["API_KEY", "TIMEOUT=30"]).
+            skill_path: Path to skill directory (for loading config.toml).
+
+        Returns:
+            Dict of resolved config values.
+        """
+        resolved = {}
+
+        # Parse defaults from spec
+        defaults = {}
+        names = []
+        for item in config_spec:
+            if "=" in item:
+                name, default = item.split("=", 1)
+                names.append(name.strip())
+                defaults[name.strip()] = default.strip()
+            else:
+                names.append(item.strip())
+
+        # Load skill-local config
+        skill_config = {}
+        if skill_path and skill_path.is_dir():
+            skill_config = self._load_skill_config(skill_path)
+
+        # Get central config for this skill
+        central_config = self._central_config.get(skill_name, {})
+
+        # Resolve each config value
+        for name in names:
+            # 1. Skill-local config.toml
+            if name in skill_config:
+                resolved[name] = skill_config[name]
+            # 2. Central config
+            elif name in central_config:
+                value = central_config[name]
+                resolved[name] = _resolve_env_refs(value) if isinstance(value, str) else str(value)
+            # 3. Environment variable
+            elif os.environ.get(name):
+                resolved[name] = os.environ[name]
+            # 4. Default from spec
+            elif name in defaults:
+                resolved[name] = defaults[name]
+
+        return resolved
+
     def _load_markdown_skill(
         self, path: Path, default_name: str | None = None
     ) -> None:
@@ -175,6 +294,18 @@ class SkillRegistry:
             raise ValueError("Skill missing instructions (markdown body)")
 
         requirements = self._parse_requirements(data)
+
+        # Parse config spec
+        config_spec = data.get("config", [])
+        if not isinstance(config_spec, list):
+            config_spec = []
+
+        # Determine skill path (directory containing SKILL.md)
+        skill_path = path.parent if path.name == "SKILL.md" else None
+
+        # Resolve config values
+        config_values = self._resolve_config_values(name, config_spec, skill_path)
+
         skill = SkillDefinition(
             name=name,
             description=data["description"],
@@ -184,6 +315,9 @@ class SkillRegistry:
             input_schema=data.get("input_schema", {}),
             max_iterations=data.get("max_iterations", 5),
             requires=requirements,
+            config=config_spec,
+            config_values=config_values,
+            skill_path=skill_path,
         )
 
         # Check availability and log if not available
@@ -215,6 +349,15 @@ class SkillRegistry:
             raise ValueError("Skill missing required field: instructions")
 
         requirements = self._parse_requirements(data)
+
+        # Parse config spec
+        config_spec = data.get("config", [])
+        if not isinstance(config_spec, list):
+            config_spec = []
+
+        # YAML files don't have a skill directory, so no skill-local config
+        config_values = self._resolve_config_values(name, config_spec, None)
+
         skill = SkillDefinition(
             name=name,
             description=data["description"],
@@ -224,6 +367,9 @@ class SkillRegistry:
             input_schema=data.get("input_schema", {}),
             max_iterations=data.get("max_iterations", 5),
             requires=requirements,
+            config=config_spec,
+            config_values=config_values,
+            skill_path=None,
         )
 
         # Check availability and log if not available

@@ -70,6 +70,35 @@ class Message(Base):
     session: Mapped["Session"] = relationship("Session", back_populates="messages")
 
 
+class Person(Base):
+    """Person entity that knowledge can be about.
+
+    Tracks people the user mentions (wife, boss, friends, etc.) so that
+    knowledge can be properly attributed and retrieved.
+    """
+
+    __tablename__ = "people"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    relation: Mapped[str | None] = mapped_column(String, nullable=True)
+    aliases: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata", JSON, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    knowledge_entries: Mapped[list["Knowledge"]] = relationship(
+        "Knowledge", back_populates="subject_person"
+    )
+
+
 class Knowledge(Base):
     """Knowledge base entry."""
 
@@ -84,6 +113,18 @@ class Knowledge(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata", JSON, nullable=True
+    )
+
+    # Owner tracking - who added this fact
+    owner_user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # Subject tracking - who/what is this fact about
+    subject_person_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("people.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    subject_person: Mapped["Person | None"] = relationship(
+        "Person", back_populates="knowledge_entries"
     )
 
 
@@ -122,4 +163,24 @@ class ToolExecution(Base):
 
     session: Mapped["Session | None"] = relationship(
         "Session", back_populates="tool_executions"
+    )
+
+
+class SkillState(Base):
+    """Persistent state storage for skills.
+
+    Skills can store key-value pairs that persist across invocations.
+    State can be global (user_id=None) or per-user.
+    """
+
+    __tablename__ = "skill_state"
+
+    skill_name: Mapped[str] = mapped_column(String, primary_key=True)
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(
+        String, primary_key=True, nullable=False, default=""
+    )
+    value: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
     )

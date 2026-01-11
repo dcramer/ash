@@ -104,6 +104,10 @@ class MemoryConfig(BaseModel):
 
     database_path: Path = Field(default_factory=get_database_path)
     max_context_messages: int = 20
+    # Smart pruning configuration
+    context_token_budget: int = 100000  # Target context window size in tokens
+    recency_window: int = 10  # Always keep last N messages
+    system_prompt_buffer: int = 8000  # Reserve tokens for system prompt
 
 
 class BraveSearchConfig(BaseModel):
@@ -153,6 +157,9 @@ class AshConfig(BaseModel):
     embeddings: EmbeddingsConfig | None = None
     brave_search: BraveSearchConfig | None = None
     sentry: SentryConfig | None = None
+    # Skill-specific configuration: [skills.<name>] sections
+    # Maps skill name to config key-value pairs
+    skills: dict[str, dict[str, str]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _migrate_default_llm(self) -> "AshConfig":
@@ -291,3 +298,14 @@ class AshConfig(BaseModel):
             return SecretStr(env_value)
 
         return None
+
+    def get_skill_config(self, skill_name: str) -> dict[str, str]:
+        """Get config values for a skill from [skills.<name>] section.
+
+        Args:
+            skill_name: The skill name to look up.
+
+        Returns:
+            Dict of config key-value pairs, empty if no config found.
+        """
+        return self.skills.get(skill_name, {})

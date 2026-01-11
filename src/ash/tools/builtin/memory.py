@@ -13,11 +13,14 @@ class RememberTool(Tool):
 
     Use when:
     - User explicitly asks to remember something
-    - User shares important preferences or facts about themselves
+    - User shares important preferences or facts about themselves or others
     - Information will be relevant to future conversations
 
     Facts should be stored as complete, standalone statements that will
     make sense when retrieved later without context.
+
+    For facts about specific people, specify the subject to enable better
+    retrieval later (e.g., "my wife", "Sarah", "my boss").
     """
 
     def __init__(self, memory_manager: "MemoryManager"):
@@ -37,9 +40,10 @@ class RememberTool(Tool):
         return (
             "Store a fact or preference in long-term memory. "
             "IMPORTANT: Always store as a complete, standalone statement. "
-            "Good: 'User's name is David', 'User prefers dark mode', 'User works at Acme Corp'. "
-            "Bad: 'David', 'dark mode', 'likes it'. "
-            "The stored fact must make sense without any conversation context."
+            "If the fact is about a specific person (not the user), specify the subject. "
+            "Good: 'Sarah's birthday is March 15th' with subject='my wife' or subject='Sarah'. "
+            "Good: 'User prefers dark mode' with no subject (general user preference). "
+            "Bad: 'March 15th', 'likes it'."
         )
 
     @property
@@ -50,9 +54,17 @@ class RememberTool(Tool):
                 "content": {
                     "type": "string",
                     "description": (
-                        "A complete, standalone statement about the user. "
-                        "Examples: 'User's name is David', 'User prefers Python over JavaScript', "
-                        "'User is allergic to peanuts', 'User's birthday is March 15th'."
+                        "A complete, standalone statement. "
+                        "Examples: 'Sarah likes Italian food', 'User prefers Python', "
+                        "'Boss's name is Michael', 'User's birthday is March 15th'."
+                    ),
+                },
+                "subject": {
+                    "type": "string",
+                    "description": (
+                        "Who this fact is about, if not general user info. "
+                        "Use relationship terms the user uses: 'my wife', 'my boss', 'Sarah'. "
+                        "Leave empty for general facts about the user."
                     ),
                 },
                 "expires_in_days": {
@@ -81,15 +93,40 @@ class RememberTool(Tool):
         if not content:
             return ToolResult.error("Missing required parameter: content")
 
+        subject_ref = input_data.get("subject")
         expires_in_days = input_data.get("expires_in_days")
 
         try:
+            # Resolve subject to person ID
+            subject_person_id = None
+            person_created = False
+            subject_name = None
+
+            if subject_ref and context.user_id:
+                result = await self._memory.resolve_or_create_person(
+                    owner_user_id=context.user_id,
+                    reference=subject_ref,
+                    content_hint=content,
+                )
+                subject_person_id = result.person_id
+                person_created = result.created
+                subject_name = result.person_name
+
             await self._memory.add_knowledge(
                 content=content,
                 source="remember_tool",
                 expires_in_days=expires_in_days,
+                owner_user_id=context.user_id,
+                subject_person_id=subject_person_id,
             )
-            return ToolResult.success(f"Remembered: {content}")
+
+            response = f"Remembered: {content}"
+            if subject_person_id and person_created:
+                response += f" (created new person record for '{subject_name}')"
+            elif subject_person_id:
+                response += f" (about {subject_name})"
+
+            return ToolResult.success(response)
         except Exception as e:
             return ToolResult.error(f"Failed to store memory: {e}")
 
@@ -123,8 +160,9 @@ class RecallTool(Tool):
     def description(self) -> str:
         return (
             "Search memory with a custom query. "
+            "Can optionally filter by person (e.g., 'what do I know about my wife?'). "
             "Only use if you need information NOT already in your context. "
-            "Check 'Relevant Context from Memory' first - if the answer is there, just respond directly."
+            "Check 'Relevant Context from Memory' first."
         )
 
     @property
@@ -135,6 +173,13 @@ class RecallTool(Tool):
                 "query": {
                     "type": "string",
                     "description": "What to search for in memory.",
+                },
+                "about": {
+                    "type": "string",
+                    "description": (
+                        "Optional: filter to knowledge about a specific person. "
+                        "Use same reference as user: 'my wife', 'Sarah', 'boss'."
+                    ),
                 },
             },
             "required": ["query"],
@@ -158,17 +203,35 @@ class RecallTool(Tool):
         if not query:
             return ToolResult.error("Missing required parameter: query")
 
+        about_ref = input_data.get("about")
+
         try:
-            results = await self._memory.search(query, limit=5)
+            # If searching about a specific person, filter results
+            person_id = None
+            if about_ref and context.user_id:
+                person = await self._memory.find_person(context.user_id, about_ref)
+                if person:
+                    person_id = person.id
+
+            results = await self._memory.search(
+                query,
+                limit=5,
+                subject_person_id=person_id,
+            )
 
             if not results:
+                if about_ref:
+                    return ToolResult.success(f"No memories found about {about_ref}.")
                 return ToolResult.success("No relevant memories found.")
 
-            # Format results
+            # Format results with subject attribution
             lines = ["Found relevant memories:"]
             for result in results:
                 source = result.source_type
-                lines.append(f"- [{source}] {result.content}")
+                subject_label = ""
+                if result.metadata and result.metadata.get("subject_name"):
+                    subject_label = f" (about {result.metadata['subject_name']})"
+                lines.append(f"- [{source}{subject_label}] {result.content}")
 
             return ToolResult.success("\n".join(lines))
         except Exception as e:

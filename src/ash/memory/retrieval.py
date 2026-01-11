@@ -186,6 +186,7 @@ class SemanticRetriever:
         query: str,
         limit: int = 10,
         include_expired: bool = False,
+        subject_person_id: str | None = None,
     ) -> list[SearchResult]:
         """Search knowledge by semantic similarity.
 
@@ -193,6 +194,7 @@ class SemanticRetriever:
             query: Search query.
             limit: Maximum results.
             include_expired: Include expired entries.
+            subject_person_id: Optional filter to knowledge about a specific person.
 
         Returns:
             List of search results with similarity scores.
@@ -200,43 +202,55 @@ class SemanticRetriever:
         query_embedding = await self._embeddings.embed(query)
         embedding_blob = self._serialize_embedding(query_embedding)
 
-        if include_expired:
-            sql = text("""
-                SELECT
-                    ke.knowledge_id,
-                    k.content,
-                    k.metadata,
-                    vec_distance_cosine(ke.embedding, :query_embedding) as distance
-                FROM knowledge_embeddings ke
-                JOIN knowledge k ON ke.knowledge_id = k.id
-                ORDER BY distance ASC
-                LIMIT :limit
-            """)
-        else:
-            sql = text("""
-                SELECT
-                    ke.knowledge_id,
-                    k.content,
-                    k.metadata,
-                    vec_distance_cosine(ke.embedding, :query_embedding) as distance
-                FROM knowledge_embeddings ke
-                JOIN knowledge k ON ke.knowledge_id = k.id
-                WHERE k.expires_at IS NULL OR k.expires_at > datetime('now')
-                ORDER BY distance ASC
-                LIMIT :limit
-            """)
+        # Build dynamic query with optional filters
+        where_clauses = []
+        params: dict[str, Any] = {
+            "query_embedding": embedding_blob,
+            "limit": limit,
+        }
 
-        result = await self._session.execute(
-            sql, {"query_embedding": embedding_blob, "limit": limit}
-        )
+        if not include_expired:
+            where_clauses.append(
+                "(k.expires_at IS NULL OR k.expires_at > datetime('now'))"
+            )
+
+        if subject_person_id:
+            where_clauses.append("k.subject_person_id = :subject_person_id")
+            params["subject_person_id"] = subject_person_id
+
+        where_clause = ""
+        if where_clauses:
+            where_clause = "WHERE " + " AND ".join(where_clauses)
+
+        sql = text(f"""
+            SELECT
+                ke.knowledge_id,
+                k.content,
+                k.metadata,
+                k.subject_person_id,
+                p.name as subject_name,
+                vec_distance_cosine(ke.embedding, :query_embedding) as distance
+            FROM knowledge_embeddings ke
+            JOIN knowledge k ON ke.knowledge_id = k.id
+            LEFT JOIN people p ON k.subject_person_id = p.id
+            {where_clause}
+            ORDER BY distance ASC
+            LIMIT :limit
+        """)
+
+        result = await self._session.execute(sql, params)
         rows = result.fetchall()
 
         return [
             SearchResult(
                 id=row[0],
                 content=row[1],
-                metadata=json.loads(row[2]) if row[2] else None,
-                similarity=1.0 - row[3],  # Convert distance to similarity
+                metadata={
+                    **(json.loads(row[2]) if row[2] else {}),
+                    "subject_person_id": row[3],
+                    "subject_name": row[4],
+                },
+                similarity=1.0 - row[5],  # Convert distance to similarity
                 source_type="knowledge",
             )
             for row in rows
@@ -246,19 +260,23 @@ class SemanticRetriever:
         self,
         query: str,
         limit: int = 10,
+        subject_person_id: str | None = None,
     ) -> list[SearchResult]:
         """Search both messages and knowledge.
 
         Args:
             query: Search query.
             limit: Maximum results (combined).
+            subject_person_id: Optional filter for knowledge about a specific person.
 
         Returns:
             List of search results sorted by similarity.
         """
         # Search both sources with limit
         messages = await self.search_messages(query, limit=limit)
-        knowledge = await self.search_knowledge(query, limit=limit)
+        knowledge = await self.search_knowledge(
+            query, limit=limit, subject_person_id=subject_person_id
+        )
 
         # Combine and sort by similarity
         combined = messages + knowledge

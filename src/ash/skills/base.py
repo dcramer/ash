@@ -4,6 +4,7 @@ import os
 import platform
 import shutil
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -63,13 +64,70 @@ class SkillDefinition:
     max_iterations: int = 5
     requires: SkillRequirements = field(default_factory=SkillRequirements)
 
+    # Config: list of env var names with optional =default suffix
+    # e.g., ["API_KEY", "TIMEOUT=30"]
+    config: list[str] = field(default_factory=list)
+
+    # Resolved config values (populated by registry)
+    config_values: dict[str, str] = field(default_factory=dict)
+
+    # Path to skill directory (for loading config.toml)
+    skill_path: Path | None = None
+
     def is_available(self) -> tuple[bool, str | None]:
         """Check if this skill is available on the current system.
 
         Returns:
             Tuple of (is_available, reason_if_not).
         """
-        return self.requires.check()
+        # Check system requirements first
+        ok, msg = self.requires.check()
+        if not ok:
+            return ok, msg
+
+        # Check config requirements
+        return self.is_config_valid()
+
+    def is_config_valid(self) -> tuple[bool, str | None]:
+        """Check if all required config values are present.
+
+        Returns:
+            Tuple of (is_valid, error_message).
+        """
+        for item in self.config:
+            # Split on first = to get name and optional default
+            if "=" in item:
+                # Has default, so not required
+                continue
+            name = item.strip()
+            if name not in self.config_values:
+                return False, f"Missing required config: {name}"
+        return True, None
+
+    def get_config_defaults(self) -> dict[str, str]:
+        """Get default values from config declarations.
+
+        Returns:
+            Dict of name -> default value for items with defaults.
+        """
+        defaults = {}
+        for item in self.config:
+            if "=" in item:
+                name, default = item.split("=", 1)
+                defaults[name.strip()] = default.strip()
+        return defaults
+
+    def get_config_names(self) -> list[str]:
+        """Get list of config variable names.
+
+        Returns:
+            List of config names without defaults.
+        """
+        names = []
+        for item in self.config:
+            name = item.split("=")[0].strip()
+            names.append(name)
+        return names
 
 
 @dataclass

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ash.core.prompt import PromptContext, SystemPromptBuilder
+from ash.core.session import SessionState
+from ash.core.tokens import estimate_tokens
 from ash.llm import LLMProvider, ToolDefinition
 from ash.llm.types import (
     StreamEventType,
@@ -21,12 +23,13 @@ if TYPE_CHECKING:
 
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
+    from ash.db.models import Person
     from ash.memory.manager import MemoryManager, RetrievedContext
     from ash.skills import SkillExecutor, SkillRegistry
 
 logger = logging.getLogger(__name__)
 
-MAX_TOOL_ITERATIONS = 10
+MAX_TOOL_ITERATIONS = 25
 
 
 @dataclass
@@ -41,6 +44,10 @@ class AgentConfig:
     max_tokens: int = 4096
     temperature: float | None = None  # None = use provider default
     max_tool_iterations: int = MAX_TOOL_ITERATIONS
+    # Smart pruning configuration
+    context_token_budget: int = 100000  # Target context window size
+    recency_window: int = 10  # Always keep last N messages
+    system_prompt_buffer: int = 8000  # Reserve for system prompt
 
 
 @dataclass
@@ -90,11 +97,16 @@ class Agent:
         """Get the base system prompt (without memory context)."""
         return self._prompt_builder.build(PromptContext(runtime=self._runtime))
 
-    def _build_system_prompt(self, context: RetrievedContext | None = None) -> str:
+    def _build_system_prompt(
+        self,
+        context: RetrievedContext | None = None,
+        known_people: list["Person"] | None = None,
+    ) -> str:
         """Build system prompt with optional memory context.
 
         Args:
             context: Retrieved memory context.
+            known_people: List of known people for the user.
 
         Returns:
             Complete system prompt.
@@ -102,6 +114,7 @@ class Agent:
         prompt_context = PromptContext(
             runtime=self._runtime,
             memory=context,
+            known_people=known_people,
         )
         return self._prompt_builder.build(prompt_context)
 
@@ -139,20 +152,40 @@ class Agent:
         Returns:
             Agent response.
         """
-        # Retrieve memory context before processing
+        # Get message IDs in recency window for deduplication
+        recent_message_ids = session.get_recent_message_ids(self._config.recency_window)
+
+        # Retrieve memory context and known people before processing
         memory_context: RetrievedContext | None = None
+        known_people: list[Person] | None = None
         if self._memory:
             try:
                 memory_context = await self._memory.get_context_for_message(
                     session_id=session.session_id,
                     user_id=session.user_id,
                     user_message=user_message,
+                    exclude_message_ids=recent_message_ids,
                 )
             except Exception:
                 logger.warning("Failed to retrieve memory context", exc_info=True)
 
-        # Build system prompt with memory context
-        system_prompt = self._build_system_prompt(memory_context)
+            # Get known people for context
+            if session.user_id:
+                try:
+                    known_people = await self._memory.get_known_people(session.user_id)
+                except Exception:
+                    logger.warning("Failed to get known people", exc_info=True)
+
+        # Build system prompt with memory context and known people
+        system_prompt = self._build_system_prompt(memory_context, known_people)
+
+        # Calculate message token budget (context budget - system prompt - buffer)
+        system_tokens = estimate_tokens(system_prompt)
+        message_budget = (
+            self._config.context_token_budget
+            - system_tokens
+            - self._config.system_prompt_buffer
+        )
 
         # Add user message to session
         session.add_user_message(user_message)
@@ -164,9 +197,12 @@ class Agent:
         while iterations < self._config.max_tool_iterations:
             iterations += 1
 
-            # Call LLM
+            # Call LLM with pruned messages
             response = await self._llm.complete(
-                messages=session.get_messages_for_llm(),
+                messages=session.get_messages_for_llm(
+                    token_budget=message_budget,
+                    recency_window=self._config.recency_window,
+                ),
                 model=self._config.model,
                 tools=self._get_tool_definitions(),
                 system=system_prompt,
@@ -274,20 +310,40 @@ class Agent:
         Yields:
             Text chunks.
         """
-        # Retrieve memory context before processing
+        # Get message IDs in recency window for deduplication
+        recent_message_ids = session.get_recent_message_ids(self._config.recency_window)
+
+        # Retrieve memory context and known people before processing
         memory_context: RetrievedContext | None = None
+        known_people: list[Person] | None = None
         if self._memory:
             try:
                 memory_context = await self._memory.get_context_for_message(
                     session_id=session.session_id,
                     user_id=session.user_id,
                     user_message=user_message,
+                    exclude_message_ids=recent_message_ids,
                 )
             except Exception:
                 logger.warning("Failed to retrieve memory context", exc_info=True)
 
-        # Build system prompt with memory context
-        system_prompt = self._build_system_prompt(memory_context)
+            # Get known people for context
+            if session.user_id:
+                try:
+                    known_people = await self._memory.get_known_people(session.user_id)
+                except Exception:
+                    logger.warning("Failed to get known people", exc_info=True)
+
+        # Build system prompt with memory context and known people
+        system_prompt = self._build_system_prompt(memory_context, known_people)
+
+        # Calculate message token budget (context budget - system prompt - buffer)
+        system_tokens = estimate_tokens(system_prompt)
+        message_budget = (
+            self._config.context_token_budget
+            - system_tokens
+            - self._config.system_prompt_buffer
+        )
 
         # Add user message to session
         session.add_user_message(user_message)
@@ -306,7 +362,10 @@ class Agent:
             current_tool_args = ""
 
             async for chunk in self._llm.stream(
-                messages=session.get_messages_for_llm(),
+                messages=session.get_messages_for_llm(
+                    token_budget=message_budget,
+                    recency_window=self._config.recency_window,
+                ),
                 model=self._config.model,
                 tools=self._get_tool_definitions(),
                 system=system_prompt,
@@ -564,8 +623,8 @@ async def create_agent(
     # Create tool executor (needed by skill executor)
     tool_executor = ToolExecutor(tool_registry)
 
-    # Discover and register skills
-    skill_registry = SkillRegistry()
+    # Discover and register skills (pass central config for skill-specific settings)
+    skill_registry = SkillRegistry(central_config=config.skills)
     skill_registry.discover(config.workspace)
     logger.info(f"Discovered {len(skill_registry)} skills from workspace")
 
@@ -603,6 +662,9 @@ async def create_agent(
             model=model_config.model,
             max_tokens=model_config.max_tokens,
             temperature=model_config.temperature,
+            context_token_budget=config.memory.context_token_budget,
+            recency_window=config.memory.recency_window,
+            system_prompt_buffer=config.memory.system_prompt_buffer,
         ),
     )
 

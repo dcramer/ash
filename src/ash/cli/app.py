@@ -151,11 +151,19 @@ def serve(
             )
             server = uvicorn.Server(uvicorn_config)
 
+            # Track tasks for cleanup
+            telegram_task: asyncio.Task | None = None
+            shutdown_event = asyncio.Event()
+
             # Set up signal handlers for graceful shutdown
             loop = asyncio.get_running_loop()
 
             def handle_signal():
                 server.should_exit = True
+                shutdown_event.set()
+                # Cancel telegram polling if running
+                if telegram_task and not telegram_task.done():
+                    telegram_task.cancel()
 
             for sig in (signal_module.SIGTERM, signal_module.SIGINT):
                 loop.add_signal_handler(sig, handle_signal)
@@ -174,16 +182,30 @@ def serve(
                         await asyncio.sleep(0.1)
 
                     if handler:
-                        await telegram_provider.start(handler.handle_message)
+                        try:
+                            await telegram_provider.start(handler.handle_message)
+                        except asyncio.CancelledError:
+                            logger.info("Telegram polling cancelled")
                     else:
                         console.print(
                             "[red]Failed to get Telegram handler after timeout[/red]"
                         )
 
-                await asyncio.gather(server.serve(), start_telegram())
+                telegram_task = asyncio.create_task(start_telegram())
+                try:
+                    await asyncio.gather(server.serve(), telegram_task)
+                except asyncio.CancelledError:
+                    pass
             else:
                 await server.serve()
         finally:
+            # Stop telegram provider gracefully
+            if telegram_provider:
+                try:
+                    await telegram_provider.stop()
+                except Exception as e:
+                    logger.warning(f"Error stopping Telegram provider: {e}")
+
             # Clean up PID file on exit
             remove_pid_file(pid_path)
 

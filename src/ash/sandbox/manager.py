@@ -260,6 +260,7 @@ class SandboxManager:
         timeout: int | None = None,
         user: str = "sandbox",
         work_dir: str | None = None,
+        environment: dict[str, str] | None = None,
     ) -> tuple[int, str, str]:
         """Execute a command in a container.
 
@@ -269,6 +270,7 @@ class SandboxManager:
             timeout: Execution timeout (uses config default if None).
             user: User to run command as.
             work_dir: Working directory for command.
+            environment: Environment variables for this command.
 
         Returns:
             Tuple of (exit_code, stdout, stderr).
@@ -288,6 +290,11 @@ class SandboxManager:
 
         if work_dir:
             exec_config["workdir"] = work_dir
+
+        if environment:
+            exec_config["environment"] = [
+                f"{k}={v}" for k, v in environment.items()
+            ]
 
         loop = asyncio.get_event_loop()
 
@@ -320,8 +327,9 @@ class SandboxManager:
         )
         exit_code = inspect_result.get("ExitCode", -1)
 
-        stdout = output[0].decode("utf-8") if output[0] else ""
-        stderr = output[1].decode("utf-8") if output[1] else ""
+        # Decode output, handling binary content gracefully
+        stdout = output[0].decode("utf-8", errors="replace") if output[0] else ""
+        stderr = output[1].decode("utf-8", errors="replace") if output[1] else ""
 
         return exit_code, stdout, stderr
 

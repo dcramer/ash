@@ -429,7 +429,9 @@ class TestMemoryManager:
 
         assert len(results) == 1
         assert results[0].content == "Result 1"
-        mock_retriever.search_all.assert_called_once_with("test query", limit=5)
+        mock_retriever.search_all.assert_called_once_with(
+            "test query", limit=5, subject_person_id=None
+        )
 
 
 class TestRememberTool:
@@ -461,6 +463,8 @@ class TestRememberTool:
             content="User prefers dark mode",
             source="remember_tool",
             expires_in_days=None,
+            owner_user_id="u1",
+            subject_person_id=None,
         )
 
     async def test_remember_with_expiration(self, remember_tool, mock_memory_manager):
@@ -475,6 +479,8 @@ class TestRememberTool:
             content="Temporary note",
             source="remember_tool",
             expires_in_days=30,
+            owner_user_id=None,
+            subject_person_id=None,
         )
 
     async def test_remember_missing_content(self, remember_tool):

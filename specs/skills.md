@@ -15,6 +15,10 @@ Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/execut
 - Support pure YAML: `skills/<name>.yaml` (backward compatibility)
 - Each skill defines: name, description, instructions, preferred_model, required_tools
 - Support skill requirements: bins, env, os filtering
+- Support skill config: list of env var names with optional defaults
+- Load config values from layered sources (skill config.toml → central config → env vars → defaults)
+- Mark skill unavailable if required config missing
+- Pass resolved config to sandbox as `SKILL_*` environment variables
 - Filter unavailable skills from system prompt and iteration
 - SkillRegistry discovers and loads skills from bundled + workspace
 - SkillExecutor creates sub-agent loop with skill instructions as system prompt
@@ -48,6 +52,9 @@ Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/execut
 workspace/skills/
   summarize/
     SKILL.md
+    config.toml           # Optional: skill-local config values
+    scripts/              # Optional: executable scripts
+      main.py
   explain/
     SKILL.md
 ```
@@ -67,6 +74,9 @@ requires:
   os:
     - linux
     - darwin
+config:
+  - API_KEY                   # Required (no default)
+  - MAX_LENGTH=1000           # Optional with default
 input_schema:
   type: object
   properties:
@@ -88,6 +98,41 @@ Use the requested format for output.
 ```
 
 Note: `name` defaults to the directory name (e.g., `skills/summarize/` → `summarize`).
+
+### Skill Config Format
+
+Skills declare config requirements in SKILL.md. Values are provided via layered sources.
+
+**SKILL.md config declaration:**
+```yaml
+config:
+  - API_KEY                   # Required (no default)
+  - DEFAULT_VALUE=fallback    # Optional with default
+```
+
+**Skill-local config.toml (gitignored):**
+```toml
+# workspace/skills/<name>/config.toml
+API_KEY = "$MY_API_KEY"       # Reference env var
+DEFAULT_VALUE = "custom"       # Literal value
+```
+
+**Central config.toml:**
+```toml
+# ~/.ash/config.toml
+[skills.summarize]
+API_KEY = "abc123"
+```
+
+**Resolution order (first match wins):**
+1. Skill's `config.toml`
+2. Central `[skills.<name>]` section
+3. Environment variable by name
+4. Default from SKILL.md (after `=`)
+
+**Passed to sandbox as:**
+- `SKILL_API_KEY`
+- `SKILL_DEFAULT_VALUE`
 
 ### YAML Skill Format (Backward Compatibility)
 
@@ -135,10 +180,26 @@ class SkillDefinition:
     input_schema: dict[str, Any] = field(default_factory=dict)
     max_iterations: int = 5
     requires: SkillRequirements = field(default_factory=SkillRequirements)
+    config: list[str] = field(default_factory=list)  # Env var names with optional =default
+    config_values: dict[str, str] = field(default_factory=dict)  # Resolved values
+    skill_path: Path | None = None  # Path to skill directory
 
     def is_available(self) -> tuple[bool, str | None]:
         """Check if skill is available on current system."""
-        return self.requires.check()
+        # Check requirements first
+        ok, msg = self.requires.check()
+        if not ok:
+            return ok, msg
+        # Check config
+        return self.is_config_valid()
+
+    def is_config_valid(self) -> tuple[bool, str | None]:
+        """Check if all required config values are present."""
+        for item in self.config:
+            name = item.split("=")[0]
+            if "=" not in item and name not in self.config_values:
+                return False, f"Missing required config: {name}"
+        return True, None
 
 @dataclass
 class SkillContext:
@@ -264,6 +325,10 @@ Skills shipped with Ash in `src/ash/skills/bundled/`:
 | Skill with `requires.env` not set | Filtered from prompt/iteration | Still registered |
 | Skill with `requires.os` not matching | Filtered from prompt/iteration | Still registered |
 | Workspace skill same name as bundled | Workspace overrides bundled | Customization |
+| Skill with `config` declared | Registry loads config.toml if exists | Layered resolution |
+| Config value `$VAR` | Resolved from environment | Env var expansion |
+| Required config missing | Skill marked unavailable | Filtered from prompt |
+| Config provided | Passed as `SKILL_*` env vars to sandbox | Uppercase, prefixed |
 
 ## Errors
 
@@ -277,6 +342,8 @@ Skills shipped with Ash in `src/ash/skills/bundled/`:
 | Missing description | Logged warning, skill skipped |
 | Empty instructions | Logged warning, skill skipped |
 | Model alias not found | Uses default model, logs warning |
+| Required config missing | SkillResult.error("Skill 'name' not available: Missing required config: X") |
+| Config.toml parse error | Logged warning, config values empty |
 
 ## Verification
 
@@ -305,6 +372,33 @@ EOF
 
 # Verify filtering (skill should not appear on Linux)
 uv run ash chat "What skills are available?"
+
+# Test skill config
+mkdir -p workspace/skills/config-test
+cat > workspace/skills/config-test/SKILL.md << 'EOF'
+---
+description: Test config loading
+required_tools:
+  - bash
+config:
+  - TEST_KEY
+  - OPTIONAL_KEY=default
+---
+Echo the SKILL_* env vars.
+EOF
+
+# Without config, skill should be unavailable
+uv run ash chat "What skills are available?"
+# config-test should NOT be listed
+
+# Add config
+cat > workspace/skills/config-test/config.toml << 'EOF'
+TEST_KEY = "hello"
+EOF
+
+# Now skill should be available
+uv run ash chat "use the config-test skill"
+# Should see SKILL_TEST_KEY=hello, SKILL_OPTIONAL_KEY=default
 ```
 
 - Bundled skills loaded from src/ash/skills/bundled/
@@ -320,3 +414,7 @@ uv run ash chat "What skills are available?"
 - Invalid files skipped with warning
 - Skills with unmet requirements filtered from prompt
 - Skills with unmet requirements return error on execution
+- Skills with `config` load values from config.toml
+- Config values resolved from layered sources
+- Required config missing marks skill unavailable
+- Config passed as SKILL_* env vars to sandbox
