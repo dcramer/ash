@@ -341,10 +341,10 @@ def make_tool_use(
 
 @pytest.fixture
 def cli_runner():
-    """Create a Typer CLI test runner."""
+    """Create a Typer CLI test runner with colors disabled."""
     from typer.testing import CliRunner
 
-    return CliRunner()
+    return CliRunner(env={"NO_COLOR": "1"})
 
 
 @pytest.fixture
