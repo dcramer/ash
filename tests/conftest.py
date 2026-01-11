@@ -344,7 +344,7 @@ def cli_runner():
     """Create a Typer CLI test runner with colors disabled."""
     from typer.testing import CliRunner
 
-    return CliRunner(env={"NO_COLOR": "1"})
+    return CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
 
 
 @pytest.fixture
