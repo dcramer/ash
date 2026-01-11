@@ -614,6 +614,13 @@ async def create_agent(
 
     # Set up memory manager if database available and embeddings configured
     memory_manager: MemoryManager | None = None
+    if not db_session:
+        logger.info("Memory tools disabled: no database session")
+    elif not config.embeddings:
+        logger.info(
+            "Memory tools disabled: [embeddings] not configured. "
+            "Add [embeddings] section to config for remember/recall tools."
+        )
     if db_session and config.embeddings:
         try:
             from ash.llm import create_registry

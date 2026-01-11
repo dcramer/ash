@@ -113,13 +113,14 @@ def serve(
         workspace = workspace_loader.load()
 
         # Create agent with all dependencies
-        # Note: Server manages its own database sessions per-request,
-        # so we don't pass db_session here. Memory tools require CLI mode.
+        # Create a persistent session for memory tools (remember, recall)
+        # This session lives for the duration of the server
         console.print("[bold]Setting up agent...[/bold]")
+        memory_session = await database.session().__aenter__()
         components = await create_agent(
             config=ash_config,
             workspace=workspace,
-            db_session=None,  # Server handles sessions per-request
+            db_session=memory_session,
             model_alias="default",
         )
         agent = components.agent
