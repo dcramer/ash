@@ -15,7 +15,7 @@ Use **uv**: `uv sync --all-groups`, `uv run pytest`, `uv run ruff check --fix .`
 | `uv run ash upgrade` | Run migrations, check sandbox |
 | `uv run ash sandbox build` | Build sandbox image |
 | `uv run ash sandbox verify` | Run security tests |
-| `uv run ash memory <action>` | Manage memories (list, search, add, remove, clear, stats) |
+| `uv run ash memory <action>` | Manage memories (list, search, add, remove, gc, stats) |
 | `uv run ash sessions <action>` | Manage sessions (list, search, export, clear) |
 
 ## Conventions
@@ -26,14 +26,6 @@ Use **uv**: `uv sync --all-groups`, `uv run pytest`, `uv run ruff check --fix .`
 - ABC for interfaces in `*/base.py`
 - Tests in `tests/`
 
-## Verification
-
-| Method | Command |
-|--------|---------|
-| Unit tests | `uv run pytest tests/ -v` |
-| CLI testing | `uv run ash chat "prompt"` |
-| Sandbox verification | `uv run ash sandbox verify` |
-
 ## Commit Attribution
 
 AI commits MUST include:
@@ -43,25 +35,37 @@ Co-Authored-By: (the agent model's name and attribution byline)
 
 ## Specifications
 
-Every feature MUST have a spec in `specs/<feature>.md`. See `SPECS.md` for format.
+Use `/write-spec` skill for new features. See `.claude/skills/write-spec.md`
 
-- Update spec BEFORE implementing changes
-- Update spec AFTER discovering new behaviors/errors
-- Keep specs concise - no prose, only testable requirements
+Use `/verify-spec` skill to check implementation. See `.claude/skills/verify-spec.md`
 
-## Skills
+- Specs live in `specs/<feature>.md`
+- Update spec BEFORE implementing
+- Format defined in `SPECS.md`
 
-| Skill | Purpose |
-|-------|---------|
-| `/write-spec <feature>` | Create or update a spec. See `.claude/skills/write-spec.md` |
-| `/verify-spec <feature>` | Verify implementation matches spec. See `.claude/skills/verify-spec.md` |
-| `/write-docs <page>` | Create or update documentation. See `.claude/skills/write-docs.md` |
-| `/commit` | Create commits following project conventions |
-| `/create-pr` | Create pull requests |
-| `/find-bugs` | Find bugs before merging |
+## Database
+
+Use `/create-migration` skill for schema changes. See `.claude/skills/create-migration.md`
+
+- Run migrations: `uv run alembic upgrade head`
+- Check status: `uv run alembic current`
+
+## Documentation
+
+Use `/write-docs` skill for docs site pages. See `.claude/skills/write-docs.md`
+
+- Docs site: `docs/` (Astro Starlight)
+- Run locally: `cd docs && pnpm dev`
+
+## Other Skills
+
+| Skill | When to use |
+|-------|-------------|
+| `/commit` | Creating commits |
+| `/create-pr` | Opening pull requests |
+| `/find-bugs` | Pre-merge review |
 
 ## Reference
 
 - `SPECS.md` - Spec format and index
 - `ARCHITECTURE.md` - Tech stack and roadmap
-- `docs/` - Documentation site (Astro Starlight)

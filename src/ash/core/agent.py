@@ -171,6 +171,7 @@ class Agent:
                     session_id=session.session_id,
                     user_id=effective_user_id,
                     user_message=user_message,
+                    chat_id=session.chat_id,
                     exclude_message_ids=recent_message_ids,
                 )
             except Exception:
@@ -252,13 +253,24 @@ class Agent:
             )
 
             for tool_use in pending_tools:
-                logger.debug(f"Executing tool: {tool_use.name}")
+                # Log tool call with input (truncated)
+                input_str = str(tool_use.input)
+                if len(input_str) > 200:
+                    input_str = input_str[:200] + "..."
+                logger.info(f"Tool call: {tool_use.name} | input: {input_str}")
 
                 result = await self._tools.execute(
                     tool_use.name,
                     tool_use.input,
                     tool_context,
                 )
+
+                # Log tool result (truncated)
+                result_str = result.content
+                if len(result_str) > 500:
+                    result_str = result_str[:500] + "..."
+                status = "error" if result.is_error else "ok"
+                logger.info(f"Tool result: {tool_use.name} | {status} | {result_str}")
 
                 tool_calls.append(
                     {
@@ -336,6 +348,7 @@ class Agent:
                     session_id=session.session_id,
                     user_id=effective_user_id,
                     user_message=user_message,
+                    chat_id=session.chat_id,
                     exclude_message_ids=recent_message_ids,
                 )
             except Exception:
@@ -469,7 +482,11 @@ class Agent:
             yield "\n\n"  # Separator before tool results
 
             for tool_use in pending_tools:
-                logger.debug(f"Executing tool: {tool_use.name}")
+                # Log tool call with input (truncated)
+                input_str = str(tool_use.input)
+                if len(input_str) > 200:
+                    input_str = input_str[:200] + "..."
+                logger.info(f"Tool call: {tool_use.name} | input: {input_str}")
                 yield f"[Running {tool_use.name}...]\n"
 
                 result = await self._tools.execute(
@@ -477,6 +494,13 @@ class Agent:
                     tool_use.input,
                     tool_context,
                 )
+
+                # Log tool result (truncated)
+                result_str = result.content
+                if len(result_str) > 500:
+                    result_str = result_str[:500] + "..."
+                status = "error" if result.is_error else "ok"
+                logger.info(f"Tool result: {tool_use.name} | {status} | {result_str}")
 
                 # Add tool result to session
                 session.add_tool_result(

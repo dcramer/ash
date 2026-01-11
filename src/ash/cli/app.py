@@ -710,7 +710,7 @@ def db(
 def memory(
     action: Annotated[
         str,
-        typer.Argument(help="Action: list, search, add, remove, clear, stats"),
+        typer.Argument(help="Action: list, search, add, remove, clear, stats, gc"),
     ],
     query: Annotated[
         str | None,
@@ -774,16 +774,50 @@ def memory(
             help="Force action without confirmation",
         ),
     ] = False,
+    all_entries: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Remove all entries (for remove action)",
+        ),
+    ] = False,
+    user_id: Annotated[
+        str | None,
+        typer.Option(
+            "--user",
+            "-u",
+            help="Filter by owner user ID",
+        ),
+    ] = None,
+    chat_id: Annotated[
+        str | None,
+        typer.Option(
+            "--chat",
+            help="Filter by chat ID",
+        ),
+    ] = None,
+    scope: Annotated[
+        str | None,
+        typer.Option(
+            "--scope",
+            help="Filter by scope: personal, shared, or global",
+        ),
+    ] = None,
 ) -> None:
     """Manage memory entries.
 
     Examples:
         ash memory list                    # List all memories
+        ash memory list --scope personal   # List personal memories only
+        ash memory list --scope shared     # List shared/group memories
+        ash memory list --user bob         # List memories owned by bob
         ash memory search -q "api keys"    # Search memories
         ash memory add -q "User prefers dark mode"
         ash memory remove --id <uuid>      # Remove specific entry
-        ash memory clear                   # Clear all memories
+        ash memory remove --all            # Remove all entries
         ash memory stats                   # Show statistics
+        ash memory stats --scope shared    # Stats for shared memories
+        ash memory gc                      # Remove expired and superseded memories
     """
     import asyncio
     from datetime import UTC, datetime, timedelta
@@ -811,6 +845,11 @@ def memory(
 
         try:
             async with database.session() as session:
+                # Validate scope option
+                if scope and scope not in ("personal", "shared", "global"):
+                    console.print("[red]--scope must be: personal, shared, or global[/red]")
+                    raise typer.Exit(1)
+
                 if action == "list":
                     from sqlalchemy import select
 
@@ -830,6 +869,24 @@ def memory(
                             | (MemoryModel.expires_at > now)
                         )
 
+                    # Apply user/chat/scope filters
+                    if user_id:
+                        stmt = stmt.where(MemoryModel.owner_user_id == user_id)
+                    if chat_id:
+                        stmt = stmt.where(MemoryModel.chat_id == chat_id)
+                    if scope == "personal":
+                        stmt = stmt.where(MemoryModel.owner_user_id.isnot(None))
+                    elif scope == "shared":
+                        stmt = stmt.where(
+                            MemoryModel.owner_user_id.is_(None),
+                            MemoryModel.chat_id.isnot(None),
+                        )
+                    elif scope == "global":
+                        stmt = stmt.where(
+                            MemoryModel.owner_user_id.is_(None),
+                            MemoryModel.chat_id.is_(None),
+                        )
+
                     result = await session.execute(stmt)
                     entries = result.scalars().all()
 
@@ -837,21 +894,31 @@ def memory(
                         console.print("[yellow]No memory entries found[/yellow]")
                         return
 
+                    # Build table with scope column
                     table = Table(title="Memory Entries")
                     table.add_column("ID", style="dim", max_width=8)
+                    table.add_column("Scope", style="magenta", max_width=10)
                     table.add_column("Created", style="dim")
                     table.add_column("Source", style="cyan")
                     table.add_column("Expires", style="yellow")
-                    table.add_column("Content", style="white", max_width=50)
+                    table.add_column("Content", style="white", max_width=45)
 
                     now = datetime.now(UTC)
                     for entry in entries:
                         content = (
-                            entry.content[:80] + "..."
-                            if len(entry.content) > 80
+                            entry.content[:70] + "..."
+                            if len(entry.content) > 70
                             else entry.content
                         )
                         content = content.replace("\n", " ")
+
+                        # Determine scope
+                        if entry.owner_user_id:
+                            entry_scope = f"[cyan]{entry.owner_user_id[:8]}[/cyan]"
+                        elif entry.chat_id:
+                            entry_scope = f"[yellow]{entry.chat_id[:8]}[/yellow]"
+                        else:
+                            entry_scope = "[dim]global[/dim]"
 
                         if entry.expires_at:
                             if entry.expires_at < now:
@@ -864,6 +931,7 @@ def memory(
 
                         table.add_row(
                             entry.id[:8],
+                            entry_scope,
                             entry.created_at.strftime("%Y-%m-%d"),
                             entry.source or "[dim]-[/dim]",
                             expires,
@@ -895,6 +963,24 @@ def memory(
                         stmt = stmt.where(
                             (MemoryModel.expires_at.is_(None))
                             | (MemoryModel.expires_at > now)
+                        )
+
+                    # Apply user/chat/scope filters
+                    if user_id:
+                        stmt = stmt.where(MemoryModel.owner_user_id == user_id)
+                    if chat_id:
+                        stmt = stmt.where(MemoryModel.chat_id == chat_id)
+                    if scope == "personal":
+                        stmt = stmt.where(MemoryModel.owner_user_id.isnot(None))
+                    elif scope == "shared":
+                        stmt = stmt.where(
+                            MemoryModel.owner_user_id.is_(None),
+                            MemoryModel.chat_id.isnot(None),
+                        )
+                    elif scope == "global":
+                        stmt = stmt.where(
+                            MemoryModel.owner_user_id.is_(None),
+                            MemoryModel.chat_id.is_(None),
                         )
 
                     result = await session.execute(stmt)
@@ -957,58 +1043,120 @@ def memory(
                         )
 
                 elif action == "remove":
-                    if not entry_id:
-                        console.print("[red]--id is required to remove an entry[/red]")
+                    if not entry_id and not all_entries:
+                        console.print("[red]--id or --all is required to remove entries[/red]")
                         raise typer.Exit(1)
 
                     from sqlalchemy import delete, select
 
                     from ash.db.models import Memory as MemoryModel
 
-                    # Find entries matching the ID prefix
-                    stmt = select(MemoryModel).where(MemoryModel.id.startswith(entry_id))
-                    result = await session.execute(stmt)
-                    entries = result.scalars().all()
+                    if all_entries:
+                        # Build filter description for confirmation
+                        filter_desc = []
+                        if user_id:
+                            filter_desc.append(f"user={user_id}")
+                        if chat_id:
+                            filter_desc.append(f"chat={chat_id}")
+                        if scope:
+                            filter_desc.append(f"scope={scope}")
 
-                    if not entries:
+                        scope_msg = f" matching [{', '.join(filter_desc)}]" if filter_desc else ""
+
+                        if not force:
+                            console.print(
+                                f"[yellow]This will remove ALL memory entries{scope_msg}.[/yellow]"
+                            )
+                            confirm = typer.confirm("Are you sure?")
+                            if not confirm:
+                                console.print("[dim]Cancelled[/dim]")
+                                return
+
+                        from sqlalchemy import text
+
+                        # Build delete statement with filters
+                        delete_stmt = delete(MemoryModel)
+                        if user_id:
+                            delete_stmt = delete_stmt.where(MemoryModel.owner_user_id == user_id)
+                        if chat_id:
+                            delete_stmt = delete_stmt.where(MemoryModel.chat_id == chat_id)
+                        if scope == "personal":
+                            delete_stmt = delete_stmt.where(MemoryModel.owner_user_id.isnot(None))
+                        elif scope == "shared":
+                            delete_stmt = delete_stmt.where(
+                                MemoryModel.owner_user_id.is_(None),
+                                MemoryModel.chat_id.isnot(None),
+                            )
+                        elif scope == "global":
+                            delete_stmt = delete_stmt.where(
+                                MemoryModel.owner_user_id.is_(None),
+                                MemoryModel.chat_id.is_(None),
+                            )
+
+                        # Clear embeddings (table may not exist)
+                        # Note: For filtered deletes, we'd need to select IDs first
+                        # For now, only clear all embeddings if no filters
+                        if not (user_id or chat_id or scope):
+                            try:
+                                await session.execute(text("DELETE FROM memory_embeddings"))
+                            except Exception:
+                                pass  # Table doesn't exist yet
+
+                        # Delete memory entries
+                        result = await session.execute(delete_stmt)
+                        await session.commit()
+
                         console.print(
-                            f"[red]No memory entry found with ID: {entry_id}[/red]"
+                            f"[green]Removed {result.rowcount} memory entries[/green]"
                         )
-                        raise typer.Exit(1)
+                    else:
+                        # Find entries matching the ID prefix
+                        stmt = select(MemoryModel).where(MemoryModel.id.startswith(entry_id))
+                        result = await session.execute(stmt)
+                        entries = result.scalars().all()
 
-                    if len(entries) > 1:
-                        console.print(
-                            f"[red]Multiple entries match '{entry_id}'. "
-                            "Please provide a more specific ID.[/red]"
+                        if not entries:
+                            console.print(
+                                f"[red]No memory entry found with ID: {entry_id}[/red]"
+                            )
+                            raise typer.Exit(1)
+
+                        if len(entries) > 1:
+                            console.print(
+                                f"[red]Multiple entries match '{entry_id}'. "
+                                "Please provide a more specific ID.[/red]"
+                            )
+                            for e in entries:
+                                console.print(f"  - {e.id}")
+                            raise typer.Exit(1)
+
+                        entry = entries[0]
+
+                        if not force:
+                            console.print(f"[yellow]Content: {entry.content[:100]}...[/yellow]")
+                            confirm = typer.confirm("Remove this entry?")
+                            if not confirm:
+                                console.print("[dim]Cancelled[/dim]")
+                                return
+
+                        # Delete embedding if exists (table may not exist)
+                        from sqlalchemy import text
+
+                        try:
+                            await session.execute(
+                                text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
+                                {"id": entry.id},
+                            )
+                        except Exception:
+                            pass  # Table doesn't exist yet
+
+                        # Delete the memory entry
+                        await session.execute(
+                            delete(MemoryModel).where(MemoryModel.id == entry.id)
                         )
-                        for e in entries:
-                            console.print(f"  - {e.id}")
-                        raise typer.Exit(1)
+                        await session.commit()
 
-                    entry = entries[0]
-
-                    if not force:
-                        console.print(f"[yellow]Content: {entry.content[:100]}...[/yellow]")
-                        confirm = typer.confirm("Remove this entry?")
-                        if not confirm:
-                            console.print("[dim]Cancelled[/dim]")
-                            return
-
-                    # Delete embedding if exists
-                    from sqlalchemy import text
-
-                    await session.execute(
-                        text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
-                        {"id": entry.id},
-                    )
-
-                    # Delete the memory entry
-                    await session.execute(
-                        delete(MemoryModel).where(MemoryModel.id == entry.id)
-                    )
-                    await session.commit()
-
-                    console.print(f"[green]Removed memory entry: {entry.id[:8]}[/green]")
+                        console.print(f"[green]Removed memory entry: {entry.id[:8]}[/green]")
 
                 elif action == "clear":
                     if not force:
@@ -1024,8 +1172,11 @@ def memory(
 
                     from ash.db.models import Memory as MemoryModel
 
-                    # Clear embeddings first
-                    await session.execute(text("DELETE FROM memory_embeddings"))
+                    # Clear embeddings first (table may not exist)
+                    try:
+                        await session.execute(text("DELETE FROM memory_embeddings"))
+                    except Exception:
+                        pass  # Table doesn't exist yet
 
                     # Delete all memory entries
                     result = await session.execute(delete(MemoryModel))
@@ -1042,47 +1193,173 @@ def memory(
 
                     now = datetime.now(UTC)
 
+                    # Build base filter
+                    base_filters = []
+                    if user_id:
+                        base_filters.append(MemoryModel.owner_user_id == user_id)
+                    if chat_id:
+                        base_filters.append(MemoryModel.chat_id == chat_id)
+                    if scope == "personal":
+                        base_filters.append(MemoryModel.owner_user_id.isnot(None))
+                    elif scope == "shared":
+                        base_filters.append(MemoryModel.owner_user_id.is_(None))
+                        base_filters.append(MemoryModel.chat_id.isnot(None))
+                    elif scope == "global":
+                        base_filters.append(MemoryModel.owner_user_id.is_(None))
+                        base_filters.append(MemoryModel.chat_id.is_(None))
+
+                    def apply_filters(stmt):
+                        for f in base_filters:
+                            stmt = stmt.where(f)
+                        return stmt
+
                     # Total count
-                    total = await session.scalar(select(func.count(MemoryModel.id)))
+                    total_stmt = select(func.count(MemoryModel.id))
+                    total = await session.scalar(apply_filters(total_stmt))
 
                     # Active (non-expired) count
                     active_stmt = select(func.count(MemoryModel.id)).where(
                         (MemoryModel.expires_at.is_(None)) | (MemoryModel.expires_at > now)
                     )
-                    active = await session.scalar(active_stmt)
+                    active = await session.scalar(apply_filters(active_stmt))
 
                     # Expired count
                     expired_stmt = select(func.count(MemoryModel.id)).where(
                         MemoryModel.expires_at <= now
                     )
-                    expired = await session.scalar(expired_stmt)
+                    expired = await session.scalar(apply_filters(expired_stmt))
+
+                    # Superseded count
+                    superseded_stmt = select(func.count(MemoryModel.id)).where(
+                        MemoryModel.superseded_at.isnot(None)
+                    )
+                    superseded = await session.scalar(apply_filters(superseded_stmt))
+
+                    # By scope (only if no scope filter)
+                    scope_stats = {}
+                    if not scope:
+                        personal_stmt = select(func.count(MemoryModel.id)).where(
+                            MemoryModel.owner_user_id.isnot(None)
+                        )
+                        scope_stats["personal"] = await session.scalar(apply_filters(personal_stmt)) or 0
+
+                        shared_stmt = select(func.count(MemoryModel.id)).where(
+                            MemoryModel.owner_user_id.is_(None),
+                            MemoryModel.chat_id.isnot(None),
+                        )
+                        scope_stats["shared"] = await session.scalar(apply_filters(shared_stmt)) or 0
+
+                        global_stmt = select(func.count(MemoryModel.id)).where(
+                            MemoryModel.owner_user_id.is_(None),
+                            MemoryModel.chat_id.is_(None),
+                        )
+                        scope_stats["global"] = await session.scalar(apply_filters(global_stmt)) or 0
 
                     # By source
-                    source_counts = await session.execute(
-                        select(MemoryModel.source, func.count(MemoryModel.id)).group_by(
-                            MemoryModel.source
-                        )
-                    )
+                    source_stmt = select(
+                        MemoryModel.source, func.count(MemoryModel.id)
+                    ).group_by(MemoryModel.source)
+                    source_counts = await session.execute(apply_filters(source_stmt))
                     source_stats = dict(source_counts.all())
 
-                    table = Table(title="Memory Statistics")
+                    # Build title with filters
+                    filter_desc = []
+                    if user_id:
+                        filter_desc.append(f"user={user_id}")
+                    if chat_id:
+                        filter_desc.append(f"chat={chat_id}")
+                    if scope:
+                        filter_desc.append(f"scope={scope}")
+                    title = "Memory Statistics"
+                    if filter_desc:
+                        title += f" [{', '.join(filter_desc)}]"
+
+                    table = Table(title=title)
                     table.add_column("Metric", style="cyan")
                     table.add_column("Count", style="green", justify="right")
 
                     table.add_row("Total Entries", str(total or 0))
                     table.add_row("Active", str(active or 0))
                     table.add_row("Expired", str(expired or 0))
-                    table.add_row("", "")  # Spacer
+                    table.add_row("Superseded", str(superseded or 0))
 
+                    if scope_stats:
+                        table.add_row("", "")  # Spacer
+                        table.add_row("[bold]By Scope[/bold]", "")
+                        table.add_row("  Personal", str(scope_stats.get("personal", 0)))
+                        table.add_row("  Shared", str(scope_stats.get("shared", 0)))
+                        table.add_row("  Global", str(scope_stats.get("global", 0)))
+
+                    table.add_row("", "")  # Spacer
+                    table.add_row("[bold]By Source[/bold]", "")
                     for src, count in sorted(source_stats.items(), key=lambda x: -x[1]):
                         src_label = src if src else "(no source)"
                         table.add_row(f"  {src_label}", str(count))
 
                     console.print(table)
 
+                elif action == "gc":
+                    from sqlalchemy import delete, select, text
+
+                    from ash.db.models import Memory as MemoryModel
+
+                    now = datetime.now(UTC)
+
+                    # Count entries to be cleaned
+                    expired_stmt = select(MemoryModel.id).where(
+                        MemoryModel.expires_at <= now
+                    )
+                    expired_result = await session.execute(expired_stmt)
+                    expired_ids = [r[0] for r in expired_result.all()]
+
+                    superseded_stmt = select(MemoryModel.id).where(
+                        MemoryModel.superseded_at.isnot(None)
+                    )
+                    superseded_result = await session.execute(superseded_stmt)
+                    superseded_ids = [r[0] for r in superseded_result.all()]
+
+                    # Combine and deduplicate
+                    ids_to_remove = set(expired_ids) | set(superseded_ids)
+
+                    if not ids_to_remove:
+                        console.print("[green]No expired or superseded memories to clean up[/green]")
+                        return
+
+                    if not force:
+                        console.print(
+                            f"[yellow]Found {len(expired_ids)} expired and "
+                            f"{len(superseded_ids)} superseded memories to remove.[/yellow]"
+                        )
+                        confirm = typer.confirm("Proceed with cleanup?")
+                        if not confirm:
+                            console.print("[dim]Cancelled[/dim]")
+                            return
+
+                    # Delete embeddings for these memories
+                    try:
+                        for memory_id in ids_to_remove:
+                            await session.execute(
+                                text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
+                                {"id": memory_id},
+                            )
+                    except Exception:
+                        pass  # Table doesn't exist yet
+
+                    # Delete the memory entries
+                    delete_stmt = delete(MemoryModel).where(
+                        MemoryModel.id.in_(ids_to_remove)
+                    )
+                    result = await session.execute(delete_stmt)
+                    await session.commit()
+
+                    console.print(
+                        f"[green]Garbage collected {result.rowcount} memories "
+                        f"({len(expired_ids)} expired, {len(superseded_ids)} superseded)[/green]"
+                    )
+
                 else:
                     console.print(f"[red]Unknown action: {action}[/red]")
-                    console.print("Valid actions: list, search, add, remove, clear, stats")
+                    console.print("Valid actions: list, search, add, remove, clear, stats, gc")
                     raise typer.Exit(1)
 
         finally:
@@ -1330,8 +1607,11 @@ def sessions(
                     from ash.db.models import Message, ToolExecution
                     from ash.db.models import Session as DbSession
 
-                    # Clear message embeddings first
-                    await session.execute(text("DELETE FROM message_embeddings"))
+                    # Clear message embeddings first (table may not exist)
+                    try:
+                        await session.execute(text("DELETE FROM message_embeddings"))
+                    except Exception:
+                        pass  # Table doesn't exist yet
 
                     # Delete in order due to foreign keys
                     await session.execute(delete(ToolExecution))
