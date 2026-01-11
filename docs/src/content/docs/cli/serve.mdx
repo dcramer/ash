@@ -10,7 +10,7 @@ Start the HTTP server for Telegram integration and webhooks.
 ## Usage
 
 ```bash
-ash serve [OPTIONS]
+uv run ash serve [OPTIONS]
 ```
 
 ## Options
@@ -27,7 +27,7 @@ ash serve [OPTIONS]
 Start with defaults (polling mode):
 
 ```bash
-ash serve
+uv run ash serve
 ```
 
 ## Custom Host/Port
@@ -35,7 +35,7 @@ ash serve
 Bind to all interfaces:
 
 ```bash
-ash serve --host 0.0.0.0 --port 3000
+uv run ash serve --host 0.0.0.0 --port 3000
 ```
 
 ## Webhook Mode
@@ -43,7 +43,7 @@ ash serve --host 0.0.0.0 --port 3000
 Use webhooks instead of polling:
 
 ```bash
-ash serve --webhook
+uv run ash serve --webhook
 ```
 
 Requires `[telegram].webhook_url` to be configured.
@@ -72,7 +72,7 @@ Press `Ctrl+C` to gracefully stop the server.
 For production deployments:
 
 ```bash
-ash serve --host 0.0.0.0 --port 8080 --webhook
+uv run ash serve --host 0.0.0.0 --port 8080 --webhook
 ```
 
 Use a reverse proxy (nginx, Caddy) for TLS.

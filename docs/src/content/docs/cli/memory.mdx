@@ -10,7 +10,7 @@ Manage persistent memories that Ash uses across conversations.
 ## Usage
 
 ```bash
-ash memory COMMAND [OPTIONS]
+uv run ash memory COMMAND [OPTIONS]
 ```
 
 ## Commands
@@ -20,7 +20,7 @@ ash memory COMMAND [OPTIONS]
 List all memories:
 
 ```bash
-ash memory list
+uv run ash memory list
 ```
 
 Options:
@@ -33,7 +33,7 @@ Options:
 Search memories semantically:
 
 ```bash
-ash memory search -q "project ideas"
+uv run ash memory search -q "project ideas"
 ```
 
 Options:
@@ -47,7 +47,7 @@ Options:
 Add a new memory:
 
 ```bash
-ash memory add -q "Remember to check logs every morning"
+uv run ash memory add -q "Remember to check logs every morning"
 ```
 
 Options:
@@ -60,7 +60,7 @@ Options:
 Remove a memory by ID:
 
 ```bash
-ash memory remove --id abc123
+uv run ash memory remove --id abc123
 ```
 
 Options:
@@ -73,7 +73,7 @@ Options:
 Remove all memories:
 
 ```bash
-ash memory clear
+uv run ash memory clear
 ```
 
 ### stats
@@ -81,7 +81,7 @@ ash memory clear
 Show memory statistics:
 
 ```bash
-ash memory stats
+uv run ash memory stats
 ```
 
 ## Examples
@@ -89,17 +89,17 @@ ash memory stats
 Add a reminder:
 
 ```bash
-ash memory add -q "Prefer concise code examples"
+uv run ash memory add -q "Prefer concise code examples"
 ```
 
 Find project-related memories:
 
 ```bash
-ash memory search -q "project"
+uv run ash memory search -q "project"
 ```
 
 List recent memories:
 
 ```bash
-ash memory list --limit 10
+uv run ash memory list --limit 10
 ```

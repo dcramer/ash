@@ -10,7 +10,7 @@ Manage the SQLite database and migrations.
 ## Usage
 
 ```bash
-ash db COMMAND [OPTIONS]
+uv run ash db COMMAND [OPTIONS]
 ```
 
 ## Commands
@@ -20,7 +20,7 @@ ash db COMMAND [OPTIONS]
 Apply pending migrations:
 
 ```bash
-ash db migrate
+uv run ash db migrate
 ```
 
 ### rollback
@@ -28,7 +28,7 @@ ash db migrate
 Rollback the last migration:
 
 ```bash
-ash db rollback
+uv run ash db rollback
 ```
 
 Options:
@@ -41,7 +41,7 @@ Options:
 Show migration status:
 
 ```bash
-ash db status
+uv run ash db status
 ```
 
 Shows:
@@ -54,25 +54,25 @@ Shows:
 Apply all pending migrations:
 
 ```bash
-ash db migrate
+uv run ash db migrate
 ```
 
 Check current state:
 
 ```bash
-ash db status
+uv run ash db status
 ```
 
 Rollback last migration:
 
 ```bash
-ash db rollback
+uv run ash db rollback
 ```
 
 Rollback multiple migrations:
 
 ```bash
-ash db rollback --steps 3
+uv run ash db rollback --steps 3
 ```
 
 ## Database Location

@@ -10,7 +10,7 @@ Run all necessary setup and upgrade tasks.
 ## Usage
 
 ```bash
-ash upgrade
+uv run ash upgrade
 ```
 
 ## What It Does
@@ -30,7 +30,7 @@ Run after:
 After installation:
 
 ```bash
-ash upgrade
+uv run ash upgrade
 ```
 
 After updating:
@@ -38,7 +38,7 @@ After updating:
 ```bash
 git pull
 uv sync
-ash upgrade
+uv run ash upgrade
 ```
 
 ## Output
@@ -55,12 +55,12 @@ Verifying sandbox...
 If migrations fail, check:
 
 ```bash
-ash db status
+uv run ash db status
 ```
 
 If sandbox verification fails, rebuild:
 
 ```bash
-ash sandbox build
-ash sandbox status
+uv run ash sandbox build
+uv run ash sandbox status
 ```

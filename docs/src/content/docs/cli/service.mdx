@@ -10,7 +10,7 @@ Run Ash as a background service for persistent operation.
 ## Usage
 
 ```bash
-ash service COMMAND [OPTIONS]
+uv run ash service COMMAND [OPTIONS]
 ```
 
 ## Commands
@@ -20,7 +20,7 @@ ash service COMMAND [OPTIONS]
 Start Ash as a background service:
 
 ```bash
-ash service start
+uv run ash service start
 ```
 
 Options:
@@ -34,7 +34,7 @@ Options:
 Stop the running service:
 
 ```bash
-ash service stop
+uv run ash service stop
 ```
 
 ### restart
@@ -42,7 +42,7 @@ ash service stop
 Restart the service:
 
 ```bash
-ash service restart
+uv run ash service restart
 ```
 
 ### status
@@ -50,7 +50,7 @@ ash service restart
 Check service status:
 
 ```bash
-ash service status
+uv run ash service status
 ```
 
 Shows:
@@ -63,7 +63,7 @@ Shows:
 View service logs:
 
 ```bash
-ash service logs
+uv run ash service logs
 ```
 
 Options:
@@ -77,7 +77,7 @@ Options:
 Install as a system service:
 
 ```bash
-ash service install
+uv run ash service install
 ```
 
 Creates a systemd unit file (Linux) or launchd plist (macOS).
@@ -87,7 +87,7 @@ Creates a systemd unit file (Linux) or launchd plist (macOS).
 Remove system service:
 
 ```bash
-ash service uninstall
+uv run ash service uninstall
 ```
 
 ## Examples
@@ -95,24 +95,24 @@ ash service uninstall
 Start in background:
 
 ```bash
-ash service start
+uv run ash service start
 ```
 
 Check if running:
 
 ```bash
-ash service status
+uv run ash service status
 ```
 
 Follow logs:
 
 ```bash
-ash service logs -f
+uv run ash service logs -f
 ```
 
 Install for auto-start:
 
 ```bash
-ash service install
+uv run ash service install
 sudo systemctl enable ash
 ```

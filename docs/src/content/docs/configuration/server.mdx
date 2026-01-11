@@ -29,13 +29,13 @@ webhook_path = "/webhook"
 Start with default settings:
 
 ```bash
-ash serve
+uv run ash serve
 ```
 
 Override host and port:
 
 ```bash
-ash serve --host 0.0.0.0 --port 3000
+uv run ash serve --host 0.0.0.0 --port 3000
 ```
 
 ## Endpoints
@@ -90,5 +90,5 @@ webhook_path = "/webhook"
 Start in webhook mode:
 
 ```bash
-ash serve --webhook
+uv run ash serve --webhook
 ```

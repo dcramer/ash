@@ -119,23 +119,27 @@ Environment variables take precedence over config file values.
 
 ## Minimal Configuration
 
-The minimum required configuration:
+Ash requires both Anthropic (for the LLM) and OpenAI (for memory embeddings) API keys. The minimal config:
 
 ```toml
+[anthropic]
+api_key = "sk-ant-..."
+
+[openai]
+api_key = "sk-..."
+
 [models.default]
 provider = "anthropic"
 model = "claude-haiku-4-5-20251001"
-```
 
-With `ANTHROPIC_API_KEY` set in your environment.
+[embeddings]
+provider = "openai"
+model = "text-embedding-3-small"
+```
 
 For a better experience, add a "sonnet" alias for complex tasks:
 
 ```toml
-[models.default]
-provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
-
 [models.sonnet]
 provider = "anthropic"
 model = "claude-sonnet-4-5-20250929"
@@ -146,25 +150,25 @@ model = "claude-sonnet-4-5-20250929"
 View current configuration:
 
 ```bash
-ash config show
+uv run ash config show
 ```
 
 Validate configuration:
 
 ```bash
-ash config validate
+uv run ash config validate
 ```
 
 Run interactive setup:
 
 ```bash
-ash setup
+uv run ash setup
 ```
 
 Reconfigure a specific section:
 
 ```bash
-ash setup --section models
+uv run ash setup --section models
 ```
 
 ## Configuration Sections

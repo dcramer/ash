@@ -10,7 +10,7 @@ Manage the Docker sandbox for secure command execution.
 ## Usage
 
 ```bash
-ash sandbox COMMAND [OPTIONS]
+uv run ash sandbox COMMAND [OPTIONS]
 ```
 
 ## Commands
@@ -20,7 +20,7 @@ ash sandbox COMMAND [OPTIONS]
 Build the sandbox Docker image:
 
 ```bash
-ash sandbox build
+uv run ash sandbox build
 ```
 
 Options:
@@ -31,7 +31,7 @@ Options:
 Check sandbox status:
 
 ```bash
-ash sandbox status
+uv run ash sandbox status
 ```
 
 Shows:
@@ -44,7 +44,7 @@ Shows:
 Remove stopped containers:
 
 ```bash
-ash sandbox clean
+uv run ash sandbox clean
 ```
 
 Options:
@@ -55,20 +55,20 @@ Options:
 Initial setup:
 
 ```bash
-ash sandbox build
-ash sandbox status
+uv run ash sandbox build
+uv run ash sandbox status
 ```
 
 Clean up containers:
 
 ```bash
-ash sandbox clean
+uv run ash sandbox clean
 ```
 
 Full cleanup including image:
 
 ```bash
-ash sandbox clean --force
+uv run ash sandbox clean --force
 ```
 
 ## Verification
@@ -96,7 +96,7 @@ docker info
 Check configuration:
 
 ```bash
-ash config show
+uv run ash config show
 ```
 
 Review the `[sandbox]` section for issues.

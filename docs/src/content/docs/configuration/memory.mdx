@@ -56,31 +56,31 @@ database_path = "/var/lib/ash/memory.db"
 List stored memories:
 
 ```bash
-ash memory list
+uv run ash memory list
 ```
 
 Search memories:
 
 ```bash
-ash memory search -q "project ideas"
+uv run ash memory search -q "project ideas"
 ```
 
 Add a memory:
 
 ```bash
-ash memory add -q "Remember to check logs daily"
+uv run ash memory add -q "Remember to check logs daily"
 ```
 
 Clear all memories:
 
 ```bash
-ash memory clear
+uv run ash memory clear
 ```
 
 View statistics:
 
 ```bash
-ash memory stats
+uv run ash memory stats
 ```
 
 ## Sessions
@@ -88,19 +88,19 @@ ash memory stats
 Conversations are organized into sessions. View sessions:
 
 ```bash
-ash sessions list
+uv run ash sessions list
 ```
 
 Search message history:
 
 ```bash
-ash sessions search -q "keyword"
+uv run ash sessions search -q "keyword"
 ```
 
 Export a session:
 
 ```bash
-ash sessions export --id <session-id>
+uv run ash sessions export --id <session-id>
 ```
 
 ## Database Migrations
@@ -108,11 +108,11 @@ ash sessions export --id <session-id>
 Run migrations after updates:
 
 ```bash
-ash db migrate
+uv run ash db migrate
 ```
 
 Check migration status:
 
 ```bash
-ash db status
+uv run ash db status
 ```

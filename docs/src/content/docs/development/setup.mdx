@@ -41,11 +41,13 @@ Set up a development environment for contributing to Ash.
    uv run pre-commit install
    ```
 
-4. **Set up environment**
+4. **Run setup wizard**
 
    ```bash
-   export ANTHROPIC_API_KEY=your-key
+   uv run ash setup
    ```
+
+   This configures your API keys (Anthropic + OpenAI) and preferences.
 
 5. **Run database migrations**
 

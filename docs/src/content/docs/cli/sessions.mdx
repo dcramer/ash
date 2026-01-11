@@ -10,7 +10,7 @@ Manage conversation history and sessions.
 ## Usage
 
 ```bash
-ash sessions COMMAND [OPTIONS]
+uv run ash sessions COMMAND [OPTIONS]
 ```
 
 ## Commands
@@ -20,7 +20,7 @@ ash sessions COMMAND [OPTIONS]
 List all sessions:
 
 ```bash
-ash sessions list
+uv run ash sessions list
 ```
 
 Options:
@@ -33,7 +33,7 @@ Options:
 Search message history:
 
 ```bash
-ash sessions search -q "docker commands"
+uv run ash sessions search -q "docker commands"
 ```
 
 Options:
@@ -47,7 +47,7 @@ Options:
 Export a session to JSON:
 
 ```bash
-ash sessions export --id <session-id>
+uv run ash sessions export --id <session-id>
 ```
 
 Options:
@@ -61,7 +61,7 @@ Options:
 Clear all session history:
 
 ```bash
-ash sessions clear
+uv run ash sessions clear
 ```
 
 ## Examples
@@ -69,17 +69,17 @@ ash sessions clear
 View recent sessions:
 
 ```bash
-ash sessions list --limit 5
+uv run ash sessions list --limit 5
 ```
 
 Find conversations about Python:
 
 ```bash
-ash sessions search -q "python"
+uv run ash sessions search -q "python"
 ```
 
 Export a session:
 
 ```bash
-ash sessions export --id abc123 -o session.json
+uv run ash sessions export --id abc123 -o session.json
 ```

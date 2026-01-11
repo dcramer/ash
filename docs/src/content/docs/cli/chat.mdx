@@ -10,7 +10,7 @@ Start an interactive conversation or send a single prompt.
 ## Usage
 
 ```bash
-ash chat [OPTIONS] [PROMPT]
+uv run ash chat [OPTIONS] [PROMPT]
 ```
 
 ## Arguments
@@ -32,7 +32,7 @@ ash chat [OPTIONS] [PROMPT]
 Start an interactive session:
 
 ```bash
-ash chat
+uv run ash chat
 ```
 
 Type messages and press Enter. Type `exit` or `quit` to end.
@@ -42,7 +42,7 @@ Type messages and press Enter. Type `exit` or `quit` to end.
 Send a single prompt and exit:
 
 ```bash
-ash chat "What's the weather like?"
+uv run ash chat "What's the weather like?"
 ```
 
 ## Model Selection
@@ -50,7 +50,7 @@ ash chat "What's the weather like?"
 Use a different model:
 
 ```bash
-ash chat --model fast "Quick question"
+uv run ash chat --model fast "Quick question"
 ```
 
 Models are defined in your config under `[models.*]`.
@@ -60,7 +60,7 @@ Models are defined in your config under `[models.*]`.
 Disable streaming for CI/CD or scripting:
 
 ```bash
-ash chat --no-streaming "Generate a report"
+uv run ash chat --no-streaming "Generate a report"
 ```
 
 ## Examples
@@ -68,7 +68,7 @@ ash chat --no-streaming "Generate a report"
 Interactive session:
 
 ```bash
-ash chat
+uv run ash chat
 > Hello!
 Hi! How can I help you today?
 > exit
@@ -77,11 +77,11 @@ Hi! How can I help you today?
 Quick question:
 
 ```bash
-ash chat "How do I list files in bash?"
+uv run ash chat "How do I list files in bash?"
 ```
 
 Using a specific model:
 
 ```bash
-ash chat -m reasoning "Explain quantum computing"
+uv run ash chat -m reasoning "Explain quantum computing"
 ```
