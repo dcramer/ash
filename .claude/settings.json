@@ -68,6 +68,7 @@
     "deny": []
   },
   "enabledPlugins": {
-    "plugin-dev@claude-code-plugins": true
+    "plugin-dev@claude-code-plugins": true,
+    "frontend-design@claude-code-plugins": true
   }
 }
