@@ -89,22 +89,70 @@ class TestDbCommand:
         assert "migrate" in result.stdout or "migrations" in result.stdout.lower()
 
 
-class TestMemoryCommand:
-    """Tests for 'ash memory' command."""
+class TestKnowledgeCommand:
+    """Tests for 'ash knowledge' command."""
 
-    def test_memory_search_requires_query(self, cli_runner, config_file):
+    def test_knowledge_search_requires_query(self, cli_runner, config_file):
         result = cli_runner.invoke(
-            app, ["memory", "search", "--config", str(config_file)]
+            app, ["knowledge", "search", "--config", str(config_file)]
         )
         assert result.exit_code == 1
         assert "--query" in result.stdout or "required" in result.stdout.lower()
 
-    def test_memory_unknown_action(self, cli_runner, config_file):
+    def test_knowledge_add_requires_query(self, cli_runner, config_file):
         result = cli_runner.invoke(
-            app, ["memory", "unknown", "--config", str(config_file)]
+            app, ["knowledge", "add", "--config", str(config_file)]
         )
-        # Will fail because no config found or unknown action
         assert result.exit_code == 1
+        assert "--query" in result.stdout or "required" in result.stdout.lower()
+
+    def test_knowledge_remove_requires_id(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app, ["knowledge", "remove", "--config", str(config_file)]
+        )
+        assert result.exit_code == 1
+        assert "--id" in result.stdout or "required" in result.stdout.lower()
+
+    def test_knowledge_unknown_action(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app, ["knowledge", "unknown", "--config", str(config_file)]
+        )
+        assert result.exit_code == 1
+
+    def test_knowledge_help(self, cli_runner):
+        result = cli_runner.invoke(app, ["knowledge", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.stdout
+        assert "search" in result.stdout
+        assert "add" in result.stdout
+        assert "remove" in result.stdout
+        assert "clear" in result.stdout
+        assert "stats" in result.stdout
+
+
+class TestSessionsCommand:
+    """Tests for 'ash sessions' command."""
+
+    def test_sessions_search_requires_query(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app, ["sessions", "search", "--config", str(config_file)]
+        )
+        assert result.exit_code == 1
+        assert "--query" in result.stdout or "required" in result.stdout.lower()
+
+    def test_sessions_unknown_action(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app, ["sessions", "unknown", "--config", str(config_file)]
+        )
+        assert result.exit_code == 1
+
+    def test_sessions_help(self, cli_runner):
+        result = cli_runner.invoke(app, ["sessions", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.stdout
+        assert "search" in result.stdout
+        assert "export" in result.stdout
+        assert "clear" in result.stdout
 
 
 class TestServeCommand:
@@ -176,6 +224,7 @@ class TestAppHelp:
         assert "chat" in result.stdout
         assert "config" in result.stdout
         assert "db" in result.stdout
-        assert "memory" in result.stdout
+        assert "knowledge" in result.stdout
+        assert "sessions" in result.stdout
         assert "sandbox" in result.stdout
         assert "upgrade" in result.stdout

@@ -187,6 +187,19 @@ class TelegramProvider(Provider):
             # Polling mode
             logger.info("Starting Telegram bot in polling mode")
             await self._bot.delete_webhook(drop_pending_updates=True)
+
+            # Explicitly consume any pending updates to avoid replaying old messages
+            try:
+                # Get all pending updates (up to 100)
+                updates = await self._bot.get_updates(limit=100, timeout=1)
+                if updates:
+                    # Mark all as read by requesting with offset = last_id + 1
+                    last_update_id = updates[-1].update_id
+                    await self._bot.get_updates(offset=last_update_id + 1, limit=1, timeout=1)
+                    logger.info(f"Cleared {len(updates)} pending update(s)")
+            except Exception as e:
+                logger.warning(f"Failed to clear pending updates: {e}")
+
             await self._dp.start_polling(self._bot)
 
     async def stop(self) -> None:

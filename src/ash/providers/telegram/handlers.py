@@ -25,7 +25,7 @@ class TelegramMessageHandler:
         provider: "TelegramProvider",
         agent: Agent,
         database: Database,
-        streaming: bool = True,
+        streaming: bool = False,
     ):
         """Initialize handler.
 
@@ -63,6 +63,13 @@ class TelegramMessageHandler:
 
             # Get or create session
             session = await self._get_or_create_session(message)
+
+            # Repair session if it has incomplete tool use (e.g., from interruption)
+            if session.has_incomplete_tool_use():
+                logger.warning(
+                    f"Session {session.session_id} has incomplete tool use, repairing..."
+                )
+                session.repair_incomplete_tool_use()
 
             if self._streaming:
                 # Stream response
@@ -209,20 +216,26 @@ class TelegramMessageHandler:
         # Send typing indicator
         await self._provider.send_typing(message.chat_id)
 
-        # Stream response
-        response_stream = self._agent.process_message_streaming(
-            message.text,
-            session,
-        )
+        # Stream response while capturing content
+        response_content = ""
+
+        async def capturing_stream():
+            nonlocal response_content
+            async for chunk in self._agent.process_message_streaming(
+                message.text,
+                session,
+            ):
+                response_content += chunk
+                yield chunk
 
         await self._provider.send_streaming(
             chat_id=message.chat_id,
-            stream=response_stream,
+            stream=capturing_stream(),
             reply_to=message.id,
         )
 
-        # Persist message to database
-        await self._persist_messages(session, message.text)
+        # Persist both user message and assistant response
+        await self._persist_messages(session, message.text, response_content)
 
     async def _handle_sync(
         self,

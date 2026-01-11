@@ -15,6 +15,8 @@ Use **uv**: `uv sync --all-groups`, `uv run pytest`, `uv run ruff check --fix .`
 | `uv run ash upgrade` | Run migrations, check sandbox |
 | `uv run ash sandbox build` | Build sandbox image |
 | `uv run ash sandbox verify` | Run security tests |
+| `uv run ash knowledge <action>` | Manage knowledge (list, search, add, remove, clear, stats) |
+| `uv run ash sessions <action>` | Manage sessions (list, search, export, clear) |
 
 ## Conventions
 

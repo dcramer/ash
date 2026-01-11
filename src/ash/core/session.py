@@ -95,6 +95,39 @@ class SessionState:
 
         return [block for block in last_message.content if isinstance(block, ToolUse)]
 
+    def has_incomplete_tool_use(self) -> bool:
+        """Check if session has tool_use without matching tool_result.
+
+        This can happen if a message was interrupted during tool execution.
+
+        Returns:
+            True if there are incomplete tool uses.
+        """
+        return len(self.get_pending_tool_uses()) > 0
+
+    def repair_incomplete_tool_use(self) -> bool:
+        """Repair session state with incomplete tool_use blocks.
+
+        If the last assistant message has tool_use without tool_result,
+        add error tool_results to make the session valid.
+
+        Returns:
+            True if repairs were made, False otherwise.
+        """
+        pending = self.get_pending_tool_uses()
+        if not pending:
+            return False
+
+        # Add error tool_results for each pending tool_use
+        for tool_use in pending:
+            self.add_tool_result(
+                tool_use_id=tool_use.id,
+                content="[Tool execution was interrupted]",
+                is_error=True,
+            )
+
+        return True
+
     def get_last_text_response(self) -> str | None:
         """Get the text content of the last assistant message.
 

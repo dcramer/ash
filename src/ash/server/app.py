@@ -65,7 +65,7 @@ class AshServer:
                     provider=self._telegram_provider,
                     agent=self._agent,
                     database=self._database,
-                    streaming=True,
+                    streaming=False,
                 )
                 # Start in polling mode if no webhook
                 # Webhook mode is handled via the routes

@@ -668,27 +668,57 @@ def db(
 
 
 @app.command()
-def memory(
+def knowledge(
     action: Annotated[
         str,
-        typer.Argument(help="Action: search, stats, export, clear"),
+        typer.Argument(help="Action: list, search, add, remove, clear, stats"),
     ],
     query: Annotated[
         str | None,
         typer.Option(
             "--query",
             "-q",
-            help="Search query",
+            help="Search query or content to add",
         ),
     ] = None,
-    output: Annotated[
-        Path | None,
+    entry_id: Annotated[
+        str | None,
         typer.Option(
-            "--output",
-            "-o",
-            help="Output file for export",
+            "--id",
+            help="Knowledge entry ID (for remove)",
         ),
     ] = None,
+    source: Annotated[
+        str | None,
+        typer.Option(
+            "--source",
+            "-s",
+            help="Source label for new entry",
+        ),
+    ] = "cli",
+    expires_days: Annotated[
+        int | None,
+        typer.Option(
+            "--expires",
+            "-e",
+            help="Days until expiration (for add)",
+        ),
+    ] = None,
+    include_expired: Annotated[
+        bool,
+        typer.Option(
+            "--include-expired",
+            help="Include expired entries",
+        ),
+    ] = False,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum entries to show",
+        ),
+    ] = 20,
     config_path: Annotated[
         Path | None,
         typer.Option(
@@ -706,7 +736,380 @@ def memory(
         ),
     ] = False,
 ) -> None:
-    """Manage conversation memory."""
+    """Manage knowledge entries.
+
+    Examples:
+        ash knowledge list                    # List all knowledge
+        ash knowledge search -q "api keys"    # Search knowledge
+        ash knowledge add -q "User prefers dark mode"
+        ash knowledge remove --id <uuid>      # Remove specific entry
+        ash knowledge clear                   # Clear all knowledge
+        ash knowledge stats                   # Show statistics
+    """
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    from rich.console import Console
+    from rich.table import Table
+
+    from ash.config import load_config
+    from ash.db import init_database
+
+    console = Console()
+
+    async def run_action() -> None:
+        # Load config and database
+        try:
+            ash_config = load_config(config_path)
+        except FileNotFoundError:
+            console.print(
+                "[red]No configuration found. Run 'ash config init' first.[/red]"
+            )
+            raise typer.Exit(1) from None
+
+        database = init_database(database_path=ash_config.memory.database_path)
+        await database.connect()
+
+        try:
+            async with database.session() as session:
+                if action == "list":
+                    from sqlalchemy import select
+
+                    from ash.db.models import Knowledge
+
+                    # Get knowledge entries
+                    stmt = (
+                        select(Knowledge)
+                        .order_by(Knowledge.created_at.desc())
+                        .limit(limit)
+                    )
+
+                    if not include_expired:
+                        now = datetime.now(UTC)
+                        stmt = stmt.where(
+                            (Knowledge.expires_at.is_(None))
+                            | (Knowledge.expires_at > now)
+                        )
+
+                    result = await session.execute(stmt)
+                    entries = result.scalars().all()
+
+                    if not entries:
+                        console.print("[yellow]No knowledge entries found[/yellow]")
+                        return
+
+                    table = Table(title="Knowledge Entries")
+                    table.add_column("ID", style="dim", max_width=8)
+                    table.add_column("Created", style="dim")
+                    table.add_column("Source", style="cyan")
+                    table.add_column("Expires", style="yellow")
+                    table.add_column("Content", style="white", max_width=50)
+
+                    now = datetime.now(UTC)
+                    for entry in entries:
+                        content = (
+                            entry.content[:80] + "..."
+                            if len(entry.content) > 80
+                            else entry.content
+                        )
+                        content = content.replace("\n", " ")
+
+                        if entry.expires_at:
+                            if entry.expires_at < now:
+                                expires = "[red]expired[/red]"
+                            else:
+                                days_left = (entry.expires_at - now).days
+                                expires = f"{days_left}d"
+                        else:
+                            expires = "[dim]never[/dim]"
+
+                        table.add_row(
+                            entry.id[:8],
+                            entry.created_at.strftime("%Y-%m-%d"),
+                            entry.source or "[dim]-[/dim]",
+                            expires,
+                            content,
+                        )
+
+                    console.print(table)
+                    console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
+
+                elif action == "search":
+                    if not query:
+                        console.print("[red]--query is required for search[/red]")
+                        raise typer.Exit(1)
+
+                    from sqlalchemy import select
+
+                    from ash.db.models import Knowledge
+
+                    # Text-based search (semantic search requires embeddings setup)
+                    stmt = (
+                        select(Knowledge)
+                        .where(Knowledge.content.ilike(f"%{query}%"))
+                        .order_by(Knowledge.created_at.desc())
+                        .limit(limit)
+                    )
+
+                    if not include_expired:
+                        now = datetime.now(UTC)
+                        stmt = stmt.where(
+                            (Knowledge.expires_at.is_(None))
+                            | (Knowledge.expires_at > now)
+                        )
+
+                    result = await session.execute(stmt)
+                    entries = result.scalars().all()
+
+                    if not entries:
+                        console.print(
+                            f"[yellow]No knowledge found matching '{query}'[/yellow]"
+                        )
+                        return
+
+                    table = Table(title=f"Knowledge Search: '{query}'")
+                    table.add_column("ID", style="dim", max_width=8)
+                    table.add_column("Created", style="dim")
+                    table.add_column("Source", style="cyan")
+                    table.add_column("Content", style="white", max_width=60)
+
+                    for entry in entries:
+                        content = (
+                            entry.content[:100] + "..."
+                            if len(entry.content) > 100
+                            else entry.content
+                        )
+                        content = content.replace("\n", " ")
+                        table.add_row(
+                            entry.id[:8],
+                            entry.created_at.strftime("%Y-%m-%d"),
+                            entry.source or "[dim]-[/dim]",
+                            content,
+                        )
+
+                    console.print(table)
+
+                elif action == "add":
+                    if not query:
+                        console.print(
+                            "[red]--query is required to specify content to add[/red]"
+                        )
+                        raise typer.Exit(1)
+
+                    from ash.memory.store import MemoryStore
+
+                    store = MemoryStore(session)
+
+                    expires_at = None
+                    if expires_days:
+                        expires_at = datetime.now(UTC) + timedelta(days=expires_days)
+
+                    entry = await store.add_knowledge(
+                        content=query,
+                        source=source,
+                        expires_at=expires_at,
+                    )
+                    await session.commit()
+
+                    console.print(f"[green]Added knowledge entry: {entry.id[:8]}[/green]")
+                    if expires_at:
+                        console.print(
+                            f"[dim]Expires: {expires_at.strftime('%Y-%m-%d')}[/dim]"
+                        )
+
+                elif action == "remove":
+                    if not entry_id:
+                        console.print("[red]--id is required to remove an entry[/red]")
+                        raise typer.Exit(1)
+
+                    from sqlalchemy import delete, select
+
+                    from ash.db.models import Knowledge
+
+                    # Find entries matching the ID prefix
+                    stmt = select(Knowledge).where(Knowledge.id.startswith(entry_id))
+                    result = await session.execute(stmt)
+                    entries = result.scalars().all()
+
+                    if not entries:
+                        console.print(
+                            f"[red]No knowledge entry found with ID: {entry_id}[/red]"
+                        )
+                        raise typer.Exit(1)
+
+                    if len(entries) > 1:
+                        console.print(
+                            f"[red]Multiple entries match '{entry_id}'. "
+                            "Please provide a more specific ID.[/red]"
+                        )
+                        for e in entries:
+                            console.print(f"  - {e.id}")
+                        raise typer.Exit(1)
+
+                    entry = entries[0]
+
+                    if not force:
+                        console.print(f"[yellow]Content: {entry.content[:100]}...[/yellow]")
+                        confirm = typer.confirm("Remove this entry?")
+                        if not confirm:
+                            console.print("[dim]Cancelled[/dim]")
+                            return
+
+                    # Delete embedding if exists
+                    from sqlalchemy import text
+
+                    await session.execute(
+                        text("DELETE FROM knowledge_embeddings WHERE knowledge_id = :id"),
+                        {"id": entry.id},
+                    )
+
+                    # Delete the knowledge entry
+                    await session.execute(
+                        delete(Knowledge).where(Knowledge.id == entry.id)
+                    )
+                    await session.commit()
+
+                    console.print(f"[green]Removed knowledge entry: {entry.id[:8]}[/green]")
+
+                elif action == "clear":
+                    if not force:
+                        console.print(
+                            "[yellow]This will delete ALL knowledge entries.[/yellow]"
+                        )
+                        confirm = typer.confirm("Are you sure?")
+                        if not confirm:
+                            console.print("[dim]Cancelled[/dim]")
+                            return
+
+                    from sqlalchemy import delete, text
+
+                    from ash.db.models import Knowledge
+
+                    # Clear embeddings first
+                    await session.execute(text("DELETE FROM knowledge_embeddings"))
+
+                    # Delete all knowledge entries
+                    result = await session.execute(delete(Knowledge))
+                    await session.commit()
+
+                    console.print(
+                        f"[green]Cleared {result.rowcount} knowledge entries[/green]"
+                    )
+
+                elif action == "stats":
+                    from sqlalchemy import func, select
+
+                    from ash.db.models import Knowledge
+
+                    now = datetime.now(UTC)
+
+                    # Total count
+                    total = await session.scalar(select(func.count(Knowledge.id)))
+
+                    # Active (non-expired) count
+                    active_stmt = select(func.count(Knowledge.id)).where(
+                        (Knowledge.expires_at.is_(None)) | (Knowledge.expires_at > now)
+                    )
+                    active = await session.scalar(active_stmt)
+
+                    # Expired count
+                    expired_stmt = select(func.count(Knowledge.id)).where(
+                        Knowledge.expires_at <= now
+                    )
+                    expired = await session.scalar(expired_stmt)
+
+                    # By source
+                    source_counts = await session.execute(
+                        select(Knowledge.source, func.count(Knowledge.id)).group_by(
+                            Knowledge.source
+                        )
+                    )
+                    source_stats = dict(source_counts.all())
+
+                    table = Table(title="Knowledge Statistics")
+                    table.add_column("Metric", style="cyan")
+                    table.add_column("Count", style="green", justify="right")
+
+                    table.add_row("Total Entries", str(total or 0))
+                    table.add_row("Active", str(active or 0))
+                    table.add_row("Expired", str(expired or 0))
+                    table.add_row("", "")  # Spacer
+
+                    for src, count in sorted(source_stats.items(), key=lambda x: -x[1]):
+                        src_label = src if src else "(no source)"
+                        table.add_row(f"  {src_label}", str(count))
+
+                    console.print(table)
+
+                else:
+                    console.print(f"[red]Unknown action: {action}[/red]")
+                    console.print("Valid actions: list, search, add, remove, clear, stats")
+                    raise typer.Exit(1)
+
+        finally:
+            await database.disconnect()
+
+    try:
+        asyncio.run(run_action())
+    except KeyboardInterrupt:
+        console.print("\n[dim]Cancelled[/dim]")
+
+
+@app.command()
+def sessions(
+    action: Annotated[
+        str,
+        typer.Argument(help="Action: list, search, export, clear"),
+    ],
+    query: Annotated[
+        str | None,
+        typer.Option(
+            "--query",
+            "-q",
+            help="Search query for messages",
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output file for export",
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum entries to show",
+        ),
+    ] = 20,
+    config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to configuration file",
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force action without confirmation",
+        ),
+    ] = False,
+) -> None:
+    """Manage conversation sessions and messages.
+
+    Examples:
+        ash sessions list                  # List recent sessions
+        ash sessions search -q "hello"     # Search messages
+        ash sessions export -o backup.json # Export all sessions
+        ash sessions clear                 # Clear all history
+    """
     import asyncio
     import json
 
@@ -733,12 +1136,54 @@ def memory(
 
         try:
             async with database.session() as session:
-                if action == "search":
+                if action == "list":
+                    from sqlalchemy import func, select
+
+                    from ash.db.models import Message
+                    from ash.db.models import Session as DbSession
+
+                    # Get sessions with message counts
+                    stmt = (
+                        select(
+                            DbSession,
+                            func.count(Message.id).label("message_count"),
+                        )
+                        .outerjoin(Message)
+                        .group_by(DbSession.id)
+                        .order_by(DbSession.updated_at.desc())
+                        .limit(limit)
+                    )
+                    result = await session.execute(stmt)
+                    rows = result.all()
+
+                    if not rows:
+                        console.print("[yellow]No sessions found[/yellow]")
+                        return
+
+                    table = Table(title="Conversation Sessions")
+                    table.add_column("ID", style="dim", max_width=8)
+                    table.add_column("Provider", style="cyan")
+                    table.add_column("Chat ID", style="dim", max_width=15)
+                    table.add_column("Messages", style="green", justify="right")
+                    table.add_column("Last Updated", style="dim")
+
+                    for sess, msg_count in rows:
+                        table.add_row(
+                            sess.id[:8],
+                            sess.provider,
+                            sess.chat_id[:15] if len(sess.chat_id) > 15 else sess.chat_id,
+                            str(msg_count),
+                            sess.updated_at.strftime("%Y-%m-%d %H:%M"),
+                        )
+
+                    console.print(table)
+                    console.print(f"\n[dim]Showing {len(rows)} sessions[/dim]")
+
+                elif action == "search":
                     if not query:
                         console.print("[red]--query is required for search[/red]")
                         raise typer.Exit(1)
 
-                    # Search through messages
                     from sqlalchemy import select
 
                     from ash.db.models import Message
@@ -749,7 +1194,7 @@ def memory(
                         .join(DbSession)
                         .where(Message.content.ilike(f"%{query}%"))
                         .order_by(Message.created_at.desc())
-                        .limit(20)
+                        .limit(limit)
                     )
                     result = await session.execute(stmt)
                     messages = result.scalars().all()
@@ -760,7 +1205,7 @@ def memory(
                         )
                         return
 
-                    table = Table(title=f"Search Results for '{query}'")
+                    table = Table(title=f"Message Search: '{query}'")
                     table.add_column("Time", style="dim")
                     table.add_column("Role", style="cyan")
                     table.add_column("Content", style="white", max_width=60)
@@ -771,59 +1216,12 @@ def memory(
                             if len(msg.content) > 100
                             else msg.content
                         )
+                        content = content.replace("\n", " ")
                         table.add_row(
                             msg.created_at.strftime("%Y-%m-%d %H:%M"),
                             msg.role,
                             content,
                         )
-
-                    console.print(table)
-
-                elif action == "stats":
-                    from sqlalchemy import func, select
-
-                    from ash.db.models import (
-                        Knowledge,
-                        Message,
-                        ToolExecution,
-                        UserProfile,
-                    )
-                    from ash.db.models import Session as DbSession
-
-                    # Gather statistics
-                    session_count = await session.scalar(
-                        select(func.count(DbSession.id))
-                    )
-                    message_count = await session.scalar(select(func.count(Message.id)))
-                    knowledge_count = await session.scalar(
-                        select(func.count(Knowledge.id))
-                    )
-                    user_count = await session.scalar(
-                        select(func.count(UserProfile.user_id))
-                    )
-                    tool_exec_count = await session.scalar(
-                        select(func.count(ToolExecution.id))
-                    )
-
-                    # Message breakdown by role
-                    role_counts = await session.execute(
-                        select(Message.role, func.count(Message.id)).group_by(
-                            Message.role
-                        )
-                    )
-                    role_stats = dict(role_counts.all())
-
-                    table = Table(title="Memory Statistics")
-                    table.add_column("Metric", style="cyan")
-                    table.add_column("Count", style="green", justify="right")
-
-                    table.add_row("Sessions", str(session_count or 0))
-                    table.add_row("Messages", str(message_count or 0))
-                    table.add_row("  - User", str(role_stats.get("user", 0)))
-                    table.add_row("  - Assistant", str(role_stats.get("assistant", 0)))
-                    table.add_row("Knowledge Entries", str(knowledge_count or 0))
-                    table.add_row("User Profiles", str(user_count or 0))
-                    table.add_row("Tool Executions", str(tool_exec_count or 0))
 
                     console.print(table)
 
@@ -837,10 +1235,10 @@ def memory(
                     sessions_result = await session.execute(
                         select(DbSession).order_by(DbSession.created_at)
                     )
-                    sessions = sessions_result.scalars().all()
+                    db_sessions = sessions_result.scalars().all()
 
                     export_data = []
-                    for sess in sessions:
+                    for sess in db_sessions:
                         messages_result = await session.execute(
                             select(Message)
                             .where(Message.session_id == sess.id)
@@ -855,8 +1253,10 @@ def memory(
                                 "chat_id": sess.chat_id,
                                 "user_id": sess.user_id,
                                 "created_at": sess.created_at.isoformat(),
+                                "updated_at": sess.updated_at.isoformat(),
                                 "messages": [
                                     {
+                                        "id": msg.id,
                                         "role": msg.role,
                                         "content": msg.content,
                                         "created_at": msg.created_at.isoformat(),
@@ -886,10 +1286,13 @@ def memory(
                             console.print("[dim]Cancelled[/dim]")
                             return
 
-                    from sqlalchemy import delete
+                    from sqlalchemy import delete, text
 
                     from ash.db.models import Message, ToolExecution
                     from ash.db.models import Session as DbSession
+
+                    # Clear message embeddings first
+                    await session.execute(text("DELETE FROM message_embeddings"))
 
                     # Delete in order due to foreign keys
                     await session.execute(delete(ToolExecution))
@@ -901,7 +1304,7 @@ def memory(
 
                 else:
                     console.print(f"[red]Unknown action: {action}[/red]")
-                    console.print("Valid actions: search, stats, export, clear")
+                    console.print("Valid actions: list, search, export, clear")
                     raise typer.Exit(1)
 
         finally:
