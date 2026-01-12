@@ -155,15 +155,9 @@ class ScheduleTaskTool(Tool):
             return ToolResult.error(f"Failed to write schedule: {e}")
 
         # Format confirmation
+        msg_preview = f"{message[:50]}..." if len(message) > 50 else message
         if trigger_at:
             return ToolResult.success(
-                f"Scheduled one-time task for {trigger_at}: {message[:50]}..."
-                if len(message) > 50
-                else f"Scheduled one-time task for {trigger_at}: {message}"
+                f"Scheduled one-time task for {trigger_at}: {msg_preview}"
             )
-        else:
-            return ToolResult.success(
-                f"Scheduled recurring task ({cron}): {message[:50]}..."
-                if len(message) > 50
-                else f"Scheduled recurring task ({cron}): {message}"
-            )
+        return ToolResult.success(f"Scheduled recurring task ({cron}): {msg_preview}")

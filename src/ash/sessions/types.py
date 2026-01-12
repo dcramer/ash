@@ -384,16 +384,16 @@ def parse_entry(data: dict[str, Any]) -> Entry:
     Raises:
         ValueError: If entry type is unknown.
     """
-    entry_type = data.get("type")
-    if entry_type == "session":
-        return SessionHeader.from_dict(data)
-    elif entry_type == "message":
-        return MessageEntry.from_dict(data)
-    elif entry_type == "tool_use":
-        return ToolUseEntry.from_dict(data)
-    elif entry_type == "tool_result":
-        return ToolResultEntry.from_dict(data)
-    elif entry_type == "compaction":
-        return CompactionEntry.from_dict(data)
-    else:
-        raise ValueError(f"Unknown entry type: {entry_type}")
+    match data.get("type"):
+        case "session":
+            return SessionHeader.from_dict(data)
+        case "message":
+            return MessageEntry.from_dict(data)
+        case "tool_use":
+            return ToolUseEntry.from_dict(data)
+        case "tool_result":
+            return ToolResultEntry.from_dict(data)
+        case "compaction":
+            return CompactionEntry.from_dict(data)
+        case unknown:
+            raise ValueError(f"Unknown entry type: {unknown}")

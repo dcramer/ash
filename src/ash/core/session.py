@@ -4,8 +4,13 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from ash.llm.types import ContentBlock, Message, Role, TextContent, ToolResult, ToolUse
-from ash.sessions.utils import content_block_to_dict, validate_tool_pairs
+from ash.llm.types import ContentBlock, Message, Role, ToolResult, ToolUse
+from ash.sessions.utils import (
+    DEFAULT_RECENCY_WINDOW,
+    content_block_from_dict,
+    content_block_to_dict,
+    prune_messages_to_budget,
+)
 
 
 @dataclass
@@ -76,7 +81,7 @@ class SessionState:
     def get_messages_for_llm(
         self,
         token_budget: int | None = None,
-        recency_window: int = 10,
+        recency_window: int = DEFAULT_RECENCY_WINDOW,
     ) -> list[Message]:
         """Get messages formatted for LLM, pruned to fit token budget.
 
@@ -93,46 +98,14 @@ class SessionState:
         # Get token counts (use cached or estimate)
         token_counts = self._get_token_counts()
 
-        # Always include the recency window
-        n_messages = len(self.messages)
-        recency_start = max(0, n_messages - recency_window)
-
-        # Calculate tokens in recency window
-        recency_tokens = sum(token_counts[recency_start:])
-
-        if recency_tokens >= token_budget:
-            # Even recency window exceeds budget - return what fits
-            pruned = self._fit_to_budget(
-                self.messages[recency_start:],
-                token_counts[recency_start:],
-                token_budget,
-            )
-            # Validate tool_use/tool_result pairs after pruning
-            validated, _ = validate_tool_pairs(pruned)
-            return validated
-
-        # Budget remaining for older messages
-        remaining_budget = token_budget - recency_tokens
-
-        # Add older messages from most recent backward until budget exhausted
-        older_messages = self.messages[:recency_start]
-        older_tokens = token_counts[:recency_start]
-
-        included_older: list[Message] = []
-        for msg, tokens in zip(
-            reversed(older_messages), reversed(older_tokens), strict=False
-        ):
-            if tokens <= remaining_budget:
-                included_older.insert(0, msg)
-                remaining_budget -= tokens
-            else:
-                break  # No more room
-
-        combined = included_older + self.messages[recency_start:]
-
-        # Validate tool_use/tool_result pairs - pruning may have orphaned some
-        validated, _ = validate_tool_pairs(combined)
-        return validated
+        # Use shared pruning logic
+        pruned, _ = prune_messages_to_budget(
+            self.messages,
+            token_counts,
+            token_budget,
+            recency_window,
+        )
+        return pruned
 
     def _get_token_counts(self) -> list[int]:
         """Get token counts for all messages, estimating if not cached."""
@@ -156,27 +129,6 @@ class SessionState:
                     counts.append(estimate_message_tokens(msg.role.value, blocks))
 
         return counts
-
-    def _fit_to_budget(
-        self,
-        messages: list[Message],
-        token_counts: list[int],
-        budget: int,
-    ) -> list[Message]:
-        """Fit messages to budget, keeping most recent."""
-        result: list[Message] = []
-        remaining = budget
-
-        for msg, tokens in zip(
-            reversed(messages), reversed(token_counts), strict=False
-        ):
-            if tokens <= remaining:
-                result.insert(0, msg)
-                remaining -= tokens
-            else:
-                break
-
-        return result
 
     def set_token_counts(self, counts: list[int]) -> None:
         """Set cached token counts from DB.
@@ -322,28 +274,7 @@ class SessionState:
         if isinstance(message.content, str):
             content = message.content
         else:
-            content = []
-            for block in message.content:
-                if isinstance(block, TextContent):
-                    content.append({"type": "text", "text": block.text})
-                elif isinstance(block, ToolUse):
-                    content.append(
-                        {
-                            "type": "tool_use",
-                            "id": block.id,
-                            "name": block.name,
-                            "input": block.input,
-                        }
-                    )
-                elif isinstance(block, ToolResult):
-                    content.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.tool_use_id,
-                            "content": block.content,
-                            "is_error": block.is_error,
-                        }
-                    )
+            content = [content_block_to_dict(block) for block in message.content]
 
         return {
             "role": message.role.value,
@@ -366,27 +297,11 @@ class SessionState:
         if isinstance(raw_content, str):
             content: str | list[ContentBlock] = raw_content
         else:
-            content = []
-            for block in raw_content:
-                block_type = block.get("type")
-                if block_type == "text":
-                    content.append(TextContent(text=block["text"]))
-                elif block_type == "tool_use":
-                    content.append(
-                        ToolUse(
-                            id=block["id"],
-                            name=block["name"],
-                            input=block["input"],
-                        )
-                    )
-                elif block_type == "tool_result":
-                    content.append(
-                        ToolResult(
-                            tool_use_id=block["tool_use_id"],
-                            content=block["content"],
-                            is_error=block.get("is_error", False),
-                        )
-                    )
+            content = [
+                block
+                for block_data in raw_content
+                if (block := content_block_from_dict(block_data)) is not None
+            ]
 
         return Message(role=role, content=content)
 

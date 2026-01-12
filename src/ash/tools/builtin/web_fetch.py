@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from ash.sandbox import SandboxExecutor
-from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
-from ash.tools.base import Tool, ToolContext, ToolResult
+from ash.tools.base import Tool, ToolContext, ToolResult, build_sandbox_manager_config
 from ash.tools.builtin.search_cache import SearchCache
 
 if TYPE_CHECKING:
@@ -298,7 +297,6 @@ class WebFetchTool(Tool):
             max_length: Maximum content length to return.
             timeout: Request timeout in seconds.
         """
-        self._sandbox_config = sandbox_config
         self._cache = cache
         self._max_length = max_length
         self._timeout = timeout
@@ -311,33 +309,10 @@ class WebFetchTool(Tool):
             )
 
         # Build sandbox config
-        manager_config = self._build_manager_config(sandbox_config, workspace_path)
-        self._executor = SandboxExecutor(config=manager_config)
-
-    def _build_manager_config(
-        self,
-        config: "SandboxConfig | None",
-        workspace_path: Path | None,
-    ) -> SandboxManagerConfig:
-        """Convert pydantic SandboxConfig to manager's dataclass config."""
-        if config is None:
-            return SandboxManagerConfig(
-                workspace_path=workspace_path,
-                network_mode="bridge",
-            )
-
-        return SandboxManagerConfig(
-            image=config.image,
-            timeout=config.timeout,
-            memory_limit=config.memory_limit,
-            cpu_limit=config.cpu_limit,
-            runtime=config.runtime,
-            network_mode=config.network_mode,
-            dns_servers=list(config.dns_servers) if config.dns_servers else [],
-            http_proxy=config.http_proxy,
-            workspace_path=workspace_path,
-            workspace_access=config.workspace_access,
+        manager_config = build_sandbox_manager_config(
+            sandbox_config, workspace_path, default_network_mode="bridge"
         )
+        self._executor = SandboxExecutor(config=manager_config)
 
     @property
     def name(self) -> str:

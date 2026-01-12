@@ -11,15 +11,7 @@ logger = logging.getLogger(__name__)
 
 @router.post("/telegram")
 async def telegram_webhook(request: Request) -> Response:
-    """Handle Telegram webhook updates.
-
-    Args:
-        request: Incoming request with update data.
-
-    Returns:
-        Empty response (Telegram expects 200 OK).
-    """
-    # Get provider from app state
+    """Handle Telegram webhook updates."""
     telegram_provider = getattr(request.app.state, "telegram_provider", None)
     if not telegram_provider:
         logger.error("Telegram provider not configured")

@@ -18,11 +18,19 @@ from ash.sessions.types import (
     ToolUseEntry,
     session_key,
 )
-from ash.sessions.utils import content_block_to_dict, validate_tool_pairs
+from ash.sessions.utils import (
+    DEFAULT_RECENCY_WINDOW,
+    content_block_from_dict,
+    content_block_to_dict,
+    fit_messages_to_budget,
+    prune_messages_to_budget,
+    validate_tool_pairs,
+)
 from ash.sessions.writer import SessionWriter
 
 __all__ = [
     "CompactionEntry",
+    "DEFAULT_RECENCY_WINDOW",
     "Entry",
     "MessageEntry",
     "SessionHeader",
@@ -31,8 +39,11 @@ __all__ = [
     "SessionWriter",
     "ToolResultEntry",
     "ToolUseEntry",
+    "content_block_from_dict",
     "content_block_to_dict",
+    "fit_messages_to_budget",
     "format_timestamp",
+    "prune_messages_to_budget",
     "session_key",
     "validate_tool_pairs",
 ]

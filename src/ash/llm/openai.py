@@ -140,6 +140,35 @@ class OpenAIProvider(LLMProvider):
             for tool in tools
         ]
 
+    def _build_request_kwargs(
+        self,
+        messages: list[Message],
+        model: str | None,
+        tools: list[ToolDefinition] | None,
+        system: str | None,
+        max_tokens: int,
+        temperature: float | None,
+        stream: bool = False,
+    ) -> dict[str, Any]:
+        """Build common request kwargs for complete and stream methods."""
+        kwargs: dict[str, Any] = {
+            "model": model or self.default_model,
+            "messages": self._convert_messages(messages, system),
+            "max_tokens": max_tokens,
+        }
+
+        if stream:
+            kwargs["stream"] = True
+
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+
+        converted_tools = self._convert_tools(tools)
+        if converted_tools:
+            kwargs["tools"] = converted_tools
+
+        return kwargs
+
     def _parse_response(
         self, response: openai.types.chat.ChatCompletion
     ) -> CompletionResponse:
@@ -202,21 +231,9 @@ class OpenAIProvider(LLMProvider):
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
             thinking: Extended thinking configuration (ignored for OpenAI).
         """
-        # Note: thinking parameter is ignored for OpenAI (Anthropic-specific feature)
-        kwargs: dict[str, Any] = {
-            "model": model or self.default_model,
-            "messages": self._convert_messages(messages, system),
-            "max_tokens": max_tokens,
-        }
-
-        # Only include temperature if explicitly set (reasoning models don't support it)
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-
-        converted_tools = self._convert_tools(tools)
-        if converted_tools:
-            kwargs["tools"] = converted_tools
-
+        kwargs = self._build_request_kwargs(
+            messages, model, tools, system, max_tokens, temperature
+        )
         response = await self._client.chat.completions.create(**kwargs)
         return self._parse_response(response)
 
@@ -242,29 +259,17 @@ class OpenAIProvider(LLMProvider):
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
             thinking: Extended thinking configuration (ignored for OpenAI).
         """
-        # Note: thinking parameter is ignored for OpenAI (Anthropic-specific feature)
-        kwargs: dict[str, Any] = {
-            "model": model or self.default_model,
-            "messages": self._convert_messages(messages, system),
-            "max_tokens": max_tokens,
-            "stream": True,
-        }
-
-        # Only include temperature if explicitly set (reasoning models don't support it)
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-
-        converted_tools = self._convert_tools(tools)
-        if converted_tools:
-            kwargs["tools"] = converted_tools
+        kwargs = self._build_request_kwargs(
+            messages, model, tools, system, max_tokens, temperature, stream=True
+        )
 
         current_tool_calls: dict[int, dict[str, Any]] = {}
 
-        stream = await self._client.chat.completions.create(**kwargs)
+        response_stream = await self._client.chat.completions.create(**kwargs)
 
         yield StreamChunk(type=StreamEventType.MESSAGE_START)
 
-        async for chunk in stream:
+        async for chunk in response_stream:
             if not chunk.choices:
                 continue
 

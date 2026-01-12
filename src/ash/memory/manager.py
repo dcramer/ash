@@ -82,6 +82,7 @@ class MemoryManager:
         store: MemoryStore,
         retriever: SemanticRetriever,
         db_session: AsyncSession,
+        max_entries: int | None = None,
     ):
         """Initialize memory manager.
 
@@ -89,10 +90,12 @@ class MemoryManager:
             store: Memory store for data access.
             retriever: Semantic retriever for vector search.
             db_session: Database session for direct queries.
+            max_entries: Optional cap on active memories (None = unlimited).
         """
         self._store = store
         self._retriever = retriever
         self._session = db_session
+        self._max_entries = max_entries
 
     async def get_context_for_message(
         self,
@@ -202,6 +205,18 @@ class MemoryManager:
                 )
         except Exception:
             logger.warning("Failed to check for conflicting memories", exc_info=True)
+
+        # Enforce max_entries limit if configured
+        if self._max_entries is not None:
+            try:
+                evicted = await self.enforce_max_entries(self._max_entries)
+                if evicted > 0:
+                    logger.info(
+                        "Evicted memories to enforce limit",
+                        extra={"evicted": evicted, "max_entries": self._max_entries},
+                    )
+            except Exception:
+                logger.warning("Failed to enforce max_entries limit", exc_info=True)
 
         return memory
 
@@ -443,11 +458,7 @@ class MemoryManager:
         ref_lower = reference.lower().strip()
 
         # Remove "my " prefix if present
-        relationship: str | None = None
-        if ref_lower.startswith("my "):
-            relationship = ref_lower[3:]  # "wife", "boss", etc.
-        else:
-            relationship = None
+        relationship = ref_lower[3:] if ref_lower.startswith("my ") else None
 
         # If reference is a relationship term, try to extract name from content
         if relationship and relationship in RELATIONSHIP_TERMS:
@@ -473,9 +484,15 @@ class MemoryManager:
         - "Sarah's birthday is..."
         - "wife's name is Sarah"
         - "My wife Sarah likes..."
+        - "wife is named Sarah"
+
+        Limitations:
+        - Only extracts single-word names (misses "Mary Jane", "Dr. Smith")
+        - Conservative matching to avoid false positives
+        - Names must start with a letter and contain only word characters
         """
-        # Pattern: "X's name is Y"
-        name_is_pattern = rf"{relationship}'s name is (\w+)"
+        # Pattern: "X's name is Y" or "X is named Y"
+        name_is_pattern = rf"{relationship}(?:'s name is| is named) (\w+)"
         match = re.search(name_is_pattern, content, re.IGNORECASE)
         if match:
             return match.group(1)
@@ -496,3 +513,143 @@ class MemoryManager:
                 return name
 
         return None
+
+    async def _delete_memories_with_embeddings(self, memory_ids: list[str]) -> None:
+        """Delete memories and their embeddings.
+
+        Args:
+            memory_ids: List of memory IDs to delete.
+        """
+        from sqlalchemy import delete, text
+
+        if not memory_ids:
+            return
+
+        # Delete embeddings first
+        for memory_id in memory_ids:
+            try:
+                await self._session.execute(
+                    text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
+                    {"id": memory_id},
+                )
+            except Exception:
+                logger.debug("Failed to delete embedding for %s", memory_id)
+
+        # Delete the memories
+        await self._session.execute(delete(Memory).where(Memory.id.in_(memory_ids)))
+
+    async def gc(self) -> tuple[int, int]:
+        """Garbage collect expired and superseded memories.
+
+        Removes memories that are either:
+        - Past their expires_at date
+        - Marked as superseded by another memory
+
+        Also cleans up associated embeddings.
+
+        Returns:
+            Tuple of (expired_count, superseded_count) deleted.
+        """
+        from sqlalchemy import select
+
+        now = datetime.now(UTC)
+
+        # Find expired memories
+        expired_stmt = select(Memory.id).where(Memory.expires_at <= now)
+        expired_result = await self._session.execute(expired_stmt)
+        expired_ids = [r[0] for r in expired_result.all()]
+
+        # Find superseded memories
+        superseded_stmt = select(Memory.id).where(Memory.superseded_at.isnot(None))
+        superseded_result = await self._session.execute(superseded_stmt)
+        superseded_ids = [r[0] for r in superseded_result.all()]
+
+        # Combine and deduplicate
+        all_ids = list(set(expired_ids) | set(superseded_ids))
+
+        if not all_ids:
+            return (0, 0)
+
+        await self._delete_memories_with_embeddings(all_ids)
+        await self._session.commit()
+
+        logger.info(
+            "Memory garbage collection complete",
+            extra={
+                "expired_count": len(expired_ids),
+                "superseded_count": len(superseded_ids),
+            },
+        )
+
+        return (len(expired_ids), len(superseded_ids))
+
+    async def enforce_max_entries(self, max_entries: int) -> int:
+        """Evict oldest memories if over the max_entries limit.
+
+        Eviction priority:
+        1. Superseded memories (oldest first)
+        2. Expired memories (oldest first)
+        3. Active memories older than 7 days (oldest first)
+
+        Args:
+            max_entries: Maximum number of active memories to keep.
+
+        Returns:
+            Number of memories evicted.
+        """
+        from sqlalchemy import func, select
+
+        # Count active (non-superseded, non-expired) memories
+        now = datetime.now(UTC)
+        count_stmt = (
+            select(func.count(Memory.id))
+            .where(Memory.superseded_at.is_(None))
+            .where((Memory.expires_at.is_(None)) | (Memory.expires_at > now))
+        )
+        result = await self._session.execute(count_stmt)
+        current_count = result.scalar() or 0
+
+        if current_count <= max_entries:
+            return 0
+
+        excess = current_count - max_entries
+        evicted = 0
+
+        # Build eviction queries in priority order
+        eviction_queries = [
+            # First: superseded memories (oldest first)
+            select(Memory.id)
+            .where(Memory.superseded_at.isnot(None))
+            .order_by(Memory.created_at.asc()),
+            # Second: expired memories (oldest first)
+            select(Memory.id)
+            .where(Memory.expires_at <= now)
+            .order_by(Memory.created_at.asc()),
+            # Third: active memories older than 7 days (oldest first)
+            select(Memory.id)
+            .where(Memory.superseded_at.is_(None))
+            .where((Memory.expires_at.is_(None)) | (Memory.expires_at > now))
+            .where(Memory.created_at < now - timedelta(days=7))
+            .order_by(Memory.created_at.asc()),
+        ]
+
+        for query in eviction_queries:
+            if evicted >= excess:
+                break
+
+            result = await self._session.execute(query.limit(excess - evicted))
+            ids_to_evict = [r[0] for r in result.all()]
+
+            if ids_to_evict:
+                await self._delete_memories_with_embeddings(ids_to_evict)
+                evicted += len(ids_to_evict)
+
+        await self._session.commit()
+
+        if evicted < excess:
+            logger.warning(
+                "Could not evict enough memories - all remaining are recent",
+                extra={"excess": excess, "evicted": evicted},
+            )
+
+        return evicted

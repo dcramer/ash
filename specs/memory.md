@@ -272,6 +272,34 @@ Example:
 3. "...is red" gets `superseded_by_id` = "...is blue"
 4. Only "...is blue" appears in retrieval
 
+## Retention
+
+### Configuration
+
+```python
+class MemoryConfig(BaseModel):
+    # ... existing fields ...
+    auto_gc: bool = True           # Run gc on server startup
+    max_entries: int | None = None # Cap on active memories (None = unlimited)
+```
+
+### Behaviors
+
+| Scenario | Behavior |
+|----------|----------|
+| Server starts with auto_gc=True | Run gc to remove expired + superseded |
+| Memory added, max_entries exceeded | Evict oldest superseded first, then oldest active |
+| Memory has expires_at in past | Excluded from retrieval, removed on gc |
+| Memory marked superseded | Excluded from retrieval, removed on gc |
+| gc runs | Delete expired + superseded memories and embeddings |
+
+### Eviction Priority
+
+When max_entries is exceeded:
+1. Superseded memories (oldest first)
+2. Expired memories (oldest first)
+3. Active memories (oldest first, excluding those added in last 7 days)
+
 ## Errors
 
 | Condition | Response |
@@ -281,6 +309,7 @@ Example:
 | No relevant context | Proceed with empty context |
 | Remember tool fails | Return error to LLM |
 | Person not found for filter | Return unfiltered results |
+| max_entries exceeded, all recent | Log warning, skip eviction |
 
 ## Verification
 
@@ -303,3 +332,7 @@ uv run ash chat "What does my wife like?"
 - [ ] Agent calls `get_known_people()` before LLM call
 - [ ] Superseded memories excluded from search_memories by default
 - [ ] Superseded memories can be retrieved with include_superseded=True
+- [ ] MemoryConfig has auto_gc (default True) and max_entries (default None)
+- [ ] Server runs gc on startup when auto_gc=True
+- [ ] MemoryManager.add_memory() enforces max_entries with eviction
+- [ ] `ash memory gc` removes expired + superseded entries

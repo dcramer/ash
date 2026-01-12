@@ -14,7 +14,7 @@ Budget levels:
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal
+from typing import Any
 
 
 class ThinkingLevel(str, Enum):
@@ -144,14 +144,7 @@ class ThinkingConfig:
         )
 
 
-# Type alias for thinking parameter
-ThinkingParam = (
-    ThinkingConfig
-    | ThinkingLevel
-    | Literal["off", "minimal", "low", "medium", "high"]
-    | int
-    | None
-)
+ThinkingParam = ThinkingConfig | ThinkingLevel | str | int | None
 
 
 def resolve_thinking(param: ThinkingParam) -> ThinkingConfig:
@@ -172,9 +165,7 @@ def resolve_thinking(param: ThinkingParam) -> ThinkingConfig:
         return ThinkingConfig.disabled()
     if isinstance(param, ThinkingConfig):
         return param
-    if isinstance(param, ThinkingLevel):
-        return ThinkingConfig.from_level(param)
-    if isinstance(param, str):
+    if isinstance(param, ThinkingLevel | str):
         return ThinkingConfig.from_level(param)
     if isinstance(param, int):
         return ThinkingConfig.from_budget(param)

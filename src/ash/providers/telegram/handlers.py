@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from ash.config.models import ConversationConfig
@@ -33,11 +33,13 @@ def format_gap_duration(minutes: float) -> str:
     """
     if minutes < 60:
         return f"{int(minutes)} minutes"
+
     hours = minutes / 60
+    if hours < 2:
+        return "about an hour"
     if hours < 24:
-        if hours < 2:
-            return "about an hour"
         return f"{int(hours)} hours"
+
     days = hours / 24
     if days < 2:
         return "about a day"
@@ -195,8 +197,6 @@ class TelegramMessageHandler:
         try:
             # Skip old messages (e.g., pending updates from when bot was offline)
             if message.timestamp:
-                from datetime import timedelta
-
                 age = datetime.now(UTC) - message.timestamp.replace(tzinfo=UTC)
                 if age > timedelta(minutes=5):
                     logger.info(

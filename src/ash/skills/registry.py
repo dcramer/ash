@@ -146,17 +146,12 @@ class SkillRegistry:
                 logger.warning(f"Failed to load skill from {md_file}: {e}")
 
         # Also support pure YAML for backward compatibility
-        for yaml_file in skills_dir.glob("*.yaml"):
-            try:
-                self._load_yaml_skill(yaml_file)
-            except Exception as e:
-                logger.warning(f"Failed to load skill from {yaml_file}: {e}")
-
-        for yml_file in skills_dir.glob("*.yml"):
-            try:
-                self._load_yaml_skill(yml_file)
-            except Exception as e:
-                logger.warning(f"Failed to load skill from {yml_file}: {e}")
+        for pattern in ("*.yaml", "*.yml"):
+            for yaml_file in skills_dir.glob(pattern):
+                try:
+                    self._load_yaml_skill(yaml_file)
+                except Exception as e:
+                    logger.warning(f"Failed to load skill from {yaml_file}: {e}")
 
         count_loaded = len(self._skills) - count_before
         if count_loaded > 0:

@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ash.sandbox import SandboxExecutor
-from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
-from ash.tools.base import Tool, ToolContext, ToolResult
+from ash.tools.base import Tool, ToolContext, ToolResult, build_sandbox_manager_config
 from ash.tools.builtin.search_cache import SearchCache
 from ash.tools.builtin.search_types import SearchResponse
 from ash.tools.retry import RetryConfig, with_retry
@@ -155,7 +154,6 @@ class WebSearchTool(Tool):
         """
         self._api_key = api_key
         self._max_results = max_results
-        self._sandbox_config = sandbox_config
         self._cache = cache
         self._retry_config = retry_config or RetryConfig()
 
@@ -167,36 +165,12 @@ class WebSearchTool(Tool):
             )
 
         # Build sandbox config with API key in environment
-        manager_config = self._build_manager_config(sandbox_config, workspace_path)
+        manager_config = build_sandbox_manager_config(
+            sandbox_config, workspace_path, default_network_mode="bridge"
+        )
         self._executor = SandboxExecutor(
             config=manager_config,
             environment={"BRAVE_API_KEY": api_key},
-        )
-
-    def _build_manager_config(
-        self,
-        config: "SandboxConfig | None",
-        workspace_path: Path | None,
-    ) -> SandboxManagerConfig:
-        """Convert pydantic SandboxConfig to manager's dataclass config."""
-        if config is None:
-            # Default to bridge mode for web search
-            return SandboxManagerConfig(
-                workspace_path=workspace_path,
-                network_mode="bridge",
-            )
-
-        return SandboxManagerConfig(
-            image=config.image,
-            timeout=config.timeout,
-            memory_limit=config.memory_limit,
-            cpu_limit=config.cpu_limit,
-            runtime=config.runtime,
-            network_mode=config.network_mode,
-            dns_servers=list(config.dns_servers) if config.dns_servers else [],
-            http_proxy=config.http_proxy,
-            workspace_path=workspace_path,
-            workspace_access=config.workspace_access,
         )
 
     @property

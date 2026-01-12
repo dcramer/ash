@@ -4,8 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ash.sandbox import SandboxExecutor
-from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
-from ash.tools.base import Tool, ToolContext, ToolResult
+from ash.tools.base import Tool, ToolContext, ToolResult, build_sandbox_manager_config
 from ash.tools.truncation import truncate_tail
 
 if TYPE_CHECKING:
@@ -41,30 +40,8 @@ class BashTool(Tool):
             sandbox_config: Sandbox configuration (pydantic model from config).
             workspace_path: Path to workspace to mount in sandbox.
         """
-        manager_config = self._build_manager_config(sandbox_config, workspace_path)
+        manager_config = build_sandbox_manager_config(sandbox_config, workspace_path)
         self._executor = SandboxExecutor(config=manager_config)
-
-    def _build_manager_config(
-        self,
-        config: "SandboxConfig | None",
-        workspace_path: Path | None,
-    ) -> SandboxManagerConfig:
-        """Convert pydantic SandboxConfig to manager's dataclass config."""
-        if config is None:
-            return SandboxManagerConfig(workspace_path=workspace_path)
-
-        return SandboxManagerConfig(
-            image=config.image,
-            timeout=config.timeout,
-            memory_limit=config.memory_limit,
-            cpu_limit=config.cpu_limit,
-            runtime=config.runtime,
-            network_mode=config.network_mode,
-            dns_servers=list(config.dns_servers) if config.dns_servers else [],
-            http_proxy=config.http_proxy,
-            workspace_path=workspace_path,
-            workspace_access=config.workspace_access,
-        )
 
     @property
     def name(self) -> str:

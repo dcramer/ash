@@ -10,6 +10,25 @@ import typer
 from ash.cli.console import console, dim, error, success, warning
 
 
+def _extract_message_text(content: str | list) -> str:
+    """Extract plain text from message content.
+
+    Args:
+        content: Either a string or a list of content blocks.
+
+    Returns:
+        Extracted text content.
+    """
+    if isinstance(content, str):
+        return content
+
+    text_parts = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text_parts.append(block.get("text", ""))
+    return "".join(text_parts)
+
+
 def register(app: typer.Typer) -> None:
     """Register the sessions command."""
 
@@ -182,13 +201,7 @@ async def _sessions_search(query: str, limit: int) -> None:
     table.add_column("Content", style="white", max_width=60)
 
     for session_key, msg in results:
-        content = msg.content if isinstance(msg.content, str) else ""
-        if not isinstance(msg.content, str):
-            # Extract text from content blocks
-            for block in msg.content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    content += block.get("text", "")
-
+        content = _extract_message_text(msg.content)
         if len(content) > 100:
             content = content[:100] + "..."
         content = content.replace("\n", " ")
@@ -230,17 +243,11 @@ async def _sessions_export(output: Path | None) -> None:
             if isinstance(entry, SessionHeader):
                 header = entry
             elif isinstance(entry, MessageEntry):
-                content = entry.content if isinstance(entry.content, str) else ""
-                if not isinstance(entry.content, str):
-                    for block in entry.content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            content += block.get("text", "")
-
                 messages.append(
                     {
                         "id": entry.id,
                         "role": entry.role,
-                        "content": content,
+                        "content": _extract_message_text(entry.content),
                         "created_at": entry.created_at.isoformat(),
                     }
                 )

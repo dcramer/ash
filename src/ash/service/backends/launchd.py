@@ -13,19 +13,16 @@ from ash.service.pid import get_process_info
 SERVICE_LABEL = "com.ash.agent"
 
 
-def _get_ash_path() -> str:
-    """Get the path to ash executable."""
+def _get_ash_command() -> tuple[str, list[str]]:
+    """Get the ash executable path and arguments.
+
+    Returns:
+        Tuple of (executable_path, arguments).
+    """
     ash_path = shutil.which("ash")
     if ash_path:
-        return ash_path
-    return sys.executable
-
-
-def _get_ash_args() -> list[str]:
-    """Get arguments for ash."""
-    if shutil.which("ash"):
-        return ["serve"]
-    return ["-m", "ash", "serve"]
+        return ash_path, ["serve"]
+    return sys.executable, ["-m", "ash", "serve"]
 
 
 class LaunchdBackend(ServiceBackend):
@@ -91,42 +88,15 @@ class LaunchdBackend(ServiceBackend):
         returncode, stdout, _ = await self._run_launchctl("list", SERVICE_LABEL)
 
         if returncode != 0:
-            # Service not loaded
             return ServiceStatus(state=ServiceState.STOPPED)
 
-        # Parse launchctl list output
-        # Format: PID\tStatus\tLabel
         lines = stdout.strip().split("\n")
         if not lines:
             return ServiceStatus(state=ServiceState.STOPPED)
 
-        # launchctl list <label> returns:
-        # {
-        #   "PID" = <pid>;
-        #   "LastExitStatus" = 0;
-        #   ...
-        # }
-        # Or just a single line: PID  Status  Label
-        pid = None
-        last_exit = None
+        pid = self._parse_launchctl_value(lines, "PID")
+        last_exit = self._parse_launchctl_value(lines, "LastExitStatus")
 
-        for line in lines:
-            line = line.strip()
-            if '"PID"' in line or "PID" in line:
-                # Try to extract PID
-                parts = line.replace('"', "").replace(";", "").split("=")
-                if len(parts) == 2:
-                    pid_str = parts[1].strip()
-                    if pid_str.isdigit():
-                        pid = int(pid_str)
-            elif "LastExitStatus" in line:
-                parts = line.replace('"', "").replace(";", "").split("=")
-                if len(parts) == 2:
-                    status_str = parts[1].strip()
-                    if status_str.isdigit():
-                        last_exit = int(status_str)
-
-        # If we have a PID, service is running
         if pid and pid > 0:
             resource_info = get_process_info(pid)
             return ServiceStatus(
@@ -136,7 +106,6 @@ class LaunchdBackend(ServiceBackend):
                 cpu_percent=resource_info.get("cpu_percent") if resource_info else None,
             )
 
-        # If last exit was non-zero, service failed
         if last_exit is not None and last_exit != 0:
             return ServiceStatus(
                 state=ServiceState.FAILED,
@@ -144,6 +113,26 @@ class LaunchdBackend(ServiceBackend):
             )
 
         return ServiceStatus(state=ServiceState.STOPPED)
+
+    def _parse_launchctl_value(self, lines: list[str], key: str) -> int | None:
+        """Parse an integer value from launchctl list output.
+
+        Args:
+            lines: Output lines from launchctl list.
+            key: Key to search for (e.g., 'PID', 'LastExitStatus').
+
+        Returns:
+            Parsed integer value or None if not found.
+        """
+        for line in lines:
+            if key not in line:
+                continue
+            parts = line.replace('"', "").replace(";", "").split("=")
+            if len(parts) == 2:
+                value_str = parts[1].strip()
+                if value_str.isdigit():
+                    return int(value_str)
+        return None
 
     async def install(self) -> bool:
         """Install and enable the launchd service."""
@@ -158,8 +147,7 @@ class LaunchdBackend(ServiceBackend):
 
     def _write_plist(self) -> None:
         """Generate and write the launchd plist file."""
-        ash_path = _get_ash_path()
-        ash_args = _get_ash_args()
+        ash_path, ash_args = _get_ash_command()
         log_path = get_service_log_path()
         ash_home = get_ash_home()
 

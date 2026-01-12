@@ -134,26 +134,16 @@ class SkillExecutor:
 
         # Build tool definitions - filter to allowed tools if specified
         all_tool_defs = self._tool_executor.get_definitions()
-        if config.allowed_tools:
-            allowed_set = set(config.allowed_tools)
-            tool_definitions = [
-                ToolDefinition(
-                    name=td["name"],
-                    description=td["description"],
-                    input_schema=td["input_schema"],
-                )
-                for td in all_tool_defs
-                if td["name"] in allowed_set
-            ]
-        else:
-            tool_definitions = [
-                ToolDefinition(
-                    name=td["name"],
-                    description=td["description"],
-                    input_schema=td["input_schema"],
-                )
-                for td in all_tool_defs
-            ]
+        allowed_set = set(config.allowed_tools) if config.allowed_tools else None
+        tool_definitions = [
+            ToolDefinition(
+                name=td["name"],
+                description=td["description"],
+                input_schema=td["input_schema"],
+            )
+            for td in all_tool_defs
+            if allowed_set is None or td["name"] in allowed_set
+        ]
 
         # Initialize conversation
         messages: list[Message] = [

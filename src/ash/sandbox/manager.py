@@ -6,10 +6,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+import docker
 from docker.errors import ImageNotFound, NotFound
 from docker.models.containers import Container
-
-import docker
 
 logger = logging.getLogger(__name__)
 
@@ -109,15 +108,12 @@ class SandboxManager:
         Args:
             dockerfile_path: Path to Dockerfile.
         """
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: self.client.images.build(
-                path=str(dockerfile_path.parent),
-                dockerfile=dockerfile_path.name,
-                tag=self._config.image,
-                rm=True,
-            ),
+        await asyncio.to_thread(
+            self.client.images.build,
+            path=str(dockerfile_path.parent),
+            dockerfile=dockerfile_path.name,
+            tag=self._config.image,
+            rm=True,
         )
 
     async def create_container(
@@ -209,10 +205,8 @@ class SandboxManager:
         if volumes:
             container_config["volumes"] = volumes
 
-        loop = asyncio.get_event_loop()
-        container = await loop.run_in_executor(
-            None,
-            lambda: self.client.containers.create(**container_config),
+        container = await asyncio.to_thread(
+            self.client.containers.create, **container_config
         )
 
         self._containers[container.id] = container
@@ -226,8 +220,7 @@ class SandboxManager:
             container_id: Container ID.
         """
         container = self._get_container(container_id)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, container.start)
+        await asyncio.to_thread(container.start)
         logger.debug(f"Started container {container_id[:12]}")
 
     async def stop_container(self, container_id: str, timeout: int = 10) -> None:
@@ -238,8 +231,7 @@ class SandboxManager:
             timeout: Stop timeout in seconds.
         """
         container = self._get_container(container_id)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: container.stop(timeout=timeout))
+        await asyncio.to_thread(container.stop, timeout=timeout)
         logger.debug(f"Stopped container {container_id[:12]}")
 
     async def remove_container(self, container_id: str, force: bool = True) -> None:
@@ -250,8 +242,7 @@ class SandboxManager:
             force: Force removal even if running.
         """
         container = self._get_container(container_id)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: container.remove(force=force))
+        await asyncio.to_thread(container.remove, force=force)
         self._containers.pop(container_id, None)
         logger.debug(f"Removed container {container_id[:12]}")
 
@@ -296,23 +287,16 @@ class SandboxManager:
         if environment:
             exec_config["environment"] = [f"{k}={v}" for k, v in environment.items()]
 
-        loop = asyncio.get_event_loop()
-
         # Create exec instance
-        exec_instance = await loop.run_in_executor(
-            None,
-            lambda: self.client.api.exec_create(container.id, **exec_config),
+        exec_instance = await asyncio.to_thread(
+            self.client.api.exec_create, container.id, **exec_config
         )
 
         # Start exec and get output with timeout
         try:
             output = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: self.client.api.exec_start(
-                        exec_instance["Id"],
-                        demux=True,
-                    ),
+                asyncio.to_thread(
+                    self.client.api.exec_start, exec_instance["Id"], demux=True
                 ),
                 timeout=timeout,
             )
@@ -321,9 +305,8 @@ class SandboxManager:
             return -1, "", f"Command timed out after {timeout} seconds"
 
         # Get exit code
-        inspect_result = await loop.run_in_executor(
-            None,
-            lambda: self.client.api.exec_inspect(exec_instance["Id"]),
+        inspect_result = await asyncio.to_thread(
+            self.client.api.exec_inspect, exec_instance["Id"]
         )
         exit_code = inspect_result.get("ExitCode", -1)
 

@@ -2,7 +2,12 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from ash.config.models import SandboxConfig
+    from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
 
 
 @dataclass
@@ -92,3 +97,42 @@ class Tool(ABC):
             "description": self.description,
             "input_schema": self.input_schema,
         }
+
+
+def build_sandbox_manager_config(
+    config: "SandboxConfig | None",
+    workspace_path: Path | None,
+    default_network_mode: Literal["none", "bridge"] = "none",
+) -> "SandboxManagerConfig":
+    """Convert pydantic SandboxConfig to manager's dataclass config.
+
+    Shared utility for sandbox-based tools (bash, web_fetch, web_search).
+
+    Args:
+        config: Pydantic SandboxConfig from application config, or None.
+        workspace_path: Path to workspace to mount in sandbox.
+        default_network_mode: Network mode when config is None (default: "none").
+
+    Returns:
+        SandboxManagerConfig dataclass for the sandbox executor.
+    """
+    from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
+
+    if config is None:
+        return SandboxManagerConfig(
+            workspace_path=workspace_path,
+            network_mode=default_network_mode,
+        )
+
+    return SandboxManagerConfig(
+        image=config.image,
+        timeout=config.timeout,
+        memory_limit=config.memory_limit,
+        cpu_limit=config.cpu_limit,
+        runtime=config.runtime,
+        network_mode=config.network_mode,
+        dns_servers=list(config.dns_servers) if config.dns_servers else [],
+        http_proxy=config.http_proxy,
+        workspace_path=workspace_path,
+        workspace_access=config.workspace_access,
+    )

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator
 
 from aiogram import Bot, Dispatcher, F
@@ -94,13 +95,9 @@ class TelegramProvider(Provider):
         if not self._allowed_users:
             return True
 
-        if str(user_id) in self._allowed_users:
-            return True
-
-        if username and f"@{username}" in self._allowed_users:
-            return True
-
-        return False
+        return str(user_id) in self._allowed_users or (
+            username is not None and f"@{username}" in self._allowed_users
+        )
 
     def _is_group_allowed(self, chat_id: int) -> bool:
         """Check if a group is allowed.
@@ -155,9 +152,6 @@ class TelegramProvider(Provider):
         """
         if not self._bot_username:
             return text
-        # Remove mention (case-insensitive)
-        import re
-
         pattern = rf"@{re.escape(self._bot_username)}\b"
         return re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
 

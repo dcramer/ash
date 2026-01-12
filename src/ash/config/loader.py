@@ -20,66 +20,52 @@ def _get_default_config_paths() -> list[Path]:
     ]
 
 
+def _get_nested(config: dict[str, Any], *keys: str) -> dict[str, Any] | None:
+    """Get nested dict by keys, returning None if any key is missing."""
+    section = config
+    for key in keys:
+        if key not in section or section[key] is None:
+            return None
+        section = section[key]
+    return section
+
+
+def _set_secret_from_env(section: dict[str, Any], key: str, env_var: str) -> None:
+    """Set a secret value from environment if not already set."""
+    if section.get(key) is None:
+        value = os.environ.get(env_var)
+        if value:
+            section[key] = SecretStr(value)
+
+
 def _resolve_env_secrets(config: dict[str, Any]) -> dict[str, Any]:
     """Resolve API keys from environment variables where not set in config."""
-    # Provider-level API keys
-    provider_env_mappings = {
+    provider_env_vars = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
     }
-    for provider, env_var in provider_env_mappings.items():
+
+    # Provider-level API keys
+    for provider, env_var in provider_env_vars.items():
         if provider in config:
-            if config[provider].get("api_key") is None:
-                value = os.environ.get(env_var)
-                if value:
-                    config[provider]["api_key"] = SecretStr(value)
+            _set_secret_from_env(config[provider], "api_key", env_var)
 
     # Legacy LLM config API keys (backward compatibility)
-    llm_env_mappings = {
-        ("default_llm", "api_key"): {
-            "anthropic": "ANTHROPIC_API_KEY",
-            "openai": "OPENAI_API_KEY",
-        },
-        ("fallback_llm", "api_key"): {
-            "anthropic": "ANTHROPIC_API_KEY",
-            "openai": "OPENAI_API_KEY",
-        },
-    }
-
-    for path, env_var_map in llm_env_mappings.items():
-        section = config
-        for key in path[:-1]:
-            if key not in section or section[key] is None:
-                break
-            section = section[key]
-        else:
-            final_key = path[-1]
-            if section.get(final_key) is None:
-                provider = section.get("provider")
-                if provider and provider in env_var_map:
-                    value = os.environ.get(env_var_map[provider])
-                    if value:
-                        section[final_key] = SecretStr(value)
+    for llm_key in ("default_llm", "fallback_llm"):
+        if section := _get_nested(config, llm_key):
+            provider = section.get("provider")
+            if provider in provider_env_vars:
+                _set_secret_from_env(section, "api_key", provider_env_vars[provider])
 
     # Other secrets (telegram, brave_search, sentry)
-    simple_mappings = {
-        ("telegram", "bot_token"): "TELEGRAM_BOT_TOKEN",
-        ("brave_search", "api_key"): "BRAVE_SEARCH_API_KEY",
-        ("sentry", "dsn"): "SENTRY_DSN",
-    }
-
-    for path, env_var in simple_mappings.items():
-        section = config
-        for key in path[:-1]:
-            if key not in section or section[key] is None:
-                break
-            section = section[key]
-        else:
-            final_key = path[-1]
-            if section.get(final_key) is None:
-                value = os.environ.get(env_var)
-                if value:
-                    section[final_key] = SecretStr(value)
+    simple_mappings = [
+        ("telegram", "bot_token", "TELEGRAM_BOT_TOKEN"),
+        ("brave_search", "api_key", "BRAVE_SEARCH_API_KEY"),
+        ("sentry", "dsn", "SENTRY_DSN"),
+    ]
+    for parent_key, secret_key, env_var in simple_mappings:
+        if (section := _get_nested(config, parent_key)) is not None:
+            _set_secret_from_env(section, secret_key, env_var)
 
     return config
 

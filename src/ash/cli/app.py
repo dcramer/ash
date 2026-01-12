@@ -9,6 +9,7 @@ from ash.cli.commands import (
     init,
     memory,
     sandbox,
+    schedule,
     serve,
     service,
     sessions,
@@ -30,6 +31,7 @@ setup.register(app)
 config.register(app)
 database.register(app)
 memory.register(app)
+schedule.register(app)
 sessions.register(app)
 upgrade.register(app)
 sandbox.register(app)

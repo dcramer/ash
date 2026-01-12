@@ -8,6 +8,25 @@ import typer
 from ash.cli.console import console, error, success
 
 
+def _run_service_action(action_name: str) -> None:
+    """Run a service manager action and handle the result.
+
+    Args:
+        action_name: Name of the ServiceManager method to call (start, stop, restart).
+    """
+    from ash.service import ServiceManager
+
+    manager = ServiceManager()
+    action = getattr(manager, action_name)
+    result, message = asyncio.run(action())
+
+    if result:
+        success(message)
+    else:
+        error(message)
+        raise typer.Exit(1)
+
+
 def register(app: typer.Typer) -> None:
     """Register service subcommands."""
     service_app = typer.Typer(help="Manage the Ash background service")
@@ -26,7 +45,6 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Start the Ash service."""
         if foreground:
-            # Import and run serve directly
             from ash.cli.commands.serve import _run_server
 
             try:
@@ -35,56 +53,17 @@ def register(app: typer.Typer) -> None:
                 console.print("\n[bold yellow]Server stopped[/bold yellow]")
             return
 
-        from ash.service import ServiceManager
-
-        manager = ServiceManager()
-
-        async def do_start():
-            return await manager.start()
-
-        result, message = asyncio.run(do_start())
-
-        if result:
-            success(message)
-        else:
-            error(message)
-            raise typer.Exit(1)
+        _run_service_action("start")
 
     @service_app.command("stop")
     def service_stop() -> None:
         """Stop the Ash service."""
-        from ash.service import ServiceManager
-
-        manager = ServiceManager()
-
-        async def do_stop():
-            return await manager.stop()
-
-        result, message = asyncio.run(do_stop())
-
-        if result:
-            success(message)
-        else:
-            error(message)
-            raise typer.Exit(1)
+        _run_service_action("stop")
 
     @service_app.command("restart")
     def service_restart() -> None:
         """Restart the Ash service."""
-        from ash.service import ServiceManager
-
-        manager = ServiceManager()
-
-        async def do_restart():
-            return await manager.restart()
-
-        result, message = asyncio.run(do_restart())
-
-        if result:
-            success(message)
-        else:
-            error(message)
-            raise typer.Exit(1)
+        _run_service_action("restart")
 
     @service_app.command("status")
     def service_status() -> None:
@@ -184,35 +163,9 @@ def register(app: typer.Typer) -> None:
     @service_app.command("install")
     def service_install() -> None:
         """Install Ash as an auto-starting service."""
-        from ash.service import ServiceManager
-
-        manager = ServiceManager()
-
-        async def do_install():
-            return await manager.install()
-
-        result, message = asyncio.run(do_install())
-
-        if result:
-            success(message)
-        else:
-            error(message)
-            raise typer.Exit(1)
+        _run_service_action("install")
 
     @service_app.command("uninstall")
     def service_uninstall() -> None:
         """Remove Ash from auto-starting services."""
-        from ash.service import ServiceManager
-
-        manager = ServiceManager()
-
-        async def do_uninstall():
-            return await manager.uninstall()
-
-        result, message = asyncio.run(do_uninstall())
-
-        if result:
-            success(message)
-        else:
-            error(message)
-            raise typer.Exit(1)
+        _run_service_action("uninstall")

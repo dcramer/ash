@@ -404,7 +404,7 @@ class WorkspaceLoader:
         # Load SOUL.md (personality)
         soul_path = self._path / self.SOUL_FILENAME
         if soul_path.exists():
-            raw_content = self._read_file(soul_path)
+            raw_content = soul_path.read_text(encoding="utf-8").strip()
             workspace.soul, workspace.soul_config = self._parse_soul(raw_content)
             logger.debug(f"Loaded SOUL.md ({len(workspace.soul)} chars)")
         else:
@@ -416,84 +416,44 @@ class WorkspaceLoader:
         return workspace
 
     def _parse_soul(self, content: str) -> tuple[str, SoulConfig]:
-        """Parse SOUL.md with optional frontmatter and inheritance.
-
-        Frontmatter format:
-            ---
-            extends: ash  # Inherit from built-in personality
-            ---
-
-            # Custom additions here...
-
-        Args:
-            content: Raw file content.
-
-        Returns:
-            Tuple of (final soul content, parsed config).
-        """
+        """Parse SOUL.md with optional frontmatter and inheritance."""
         config = SoulConfig()
         body = content
 
-        # Check for frontmatter
+        # Extract frontmatter if present
         match = FRONTMATTER_PATTERN.match(content)
         if match:
-            frontmatter_yaml = match.group(1)
             body = content[match.end() :].strip()
-
             try:
-                data = yaml.safe_load(frontmatter_yaml)
+                data = yaml.safe_load(match.group(1))
                 if isinstance(data, dict):
                     config.extends = data.get("extends")
-                    # Store any extra frontmatter fields
                     config.extra = {k: v for k, v in data.items() if k != "extends"}
             except yaml.YAMLError as e:
                 logger.warning(f"Failed to parse SOUL.md frontmatter: {e}")
 
-        # Build final soul content
+        # Resolve base personality if extending
         if config.extends:
             base_name = config.extends.lower().replace("-", "_").replace(" ", "_")
-            if base_name in PERSONALITIES:
-                base = PERSONALITIES[base_name]
-                if body:
-                    # Append custom content after base personality
-                    return f"{base}\n\n{body}", config
-                return base, config
-            else:
-                logger.warning(
-                    f"Unknown personality '{config.extends}', "
-                    f"available: {', '.join(PERSONALITIES.keys())}"
-                )
+            base = PERSONALITIES.get(base_name)
+            if base:
+                soul = f"{base}\n\n{body}" if body else base
+                return soul, config
+            logger.warning(
+                f"Unknown personality '{config.extends}', "
+                f"available: {', '.join(PERSONALITIES.keys())}"
+            )
 
-        # No inheritance or unknown base - use content as-is
         return body or PERSONALITIES["ash"], config
 
     def load_custom_file(self, filename: str, workspace: Workspace) -> str | None:
-        """Load a custom file from workspace.
-
-        Args:
-            filename: Name of file to load.
-            workspace: Workspace to add file to.
-
-        Returns:
-            File content or None if not found.
-        """
+        """Load a custom file from workspace, returning None if not found."""
         file_path = self._path / filename
-        if file_path.exists():
-            content = self._read_file(file_path)
-            workspace.custom_files[filename] = content
-            return content
-        return None
-
-    def _read_file(self, path: Path) -> str:
-        """Read file content.
-
-        Args:
-            path: File path.
-
-        Returns:
-            File content.
-        """
-        return path.read_text(encoding="utf-8").strip()
+        if not file_path.exists():
+            return None
+        content = file_path.read_text(encoding="utf-8").strip()
+        workspace.custom_files[filename] = content
+        return content
 
     def ensure_workspace(self) -> None:
         """Ensure workspace directory exists with default files."""

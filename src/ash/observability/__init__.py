@@ -8,7 +8,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Check availability
 try:
     import sentry_sdk
     from sentry_sdk.integrations.asyncio import AsyncioIntegration
@@ -22,12 +21,8 @@ except ImportError:
 def init_sentry(config: "SentryConfig", server_mode: bool = False) -> bool:
     """Initialize Sentry if configured.
 
-    Args:
-        config: Sentry configuration.
-        server_mode: Whether running in server mode (enables FastAPI integration).
-
-    Returns:
-        True if Sentry was initialized, False otherwise.
+    Returns True if Sentry was initialized, False otherwise.
+    Server mode enables FastAPI integration.
     """
     if not SENTRY_AVAILABLE:
         logger.debug("Sentry SDK not installed, skipping initialization")

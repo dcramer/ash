@@ -27,11 +27,7 @@ class ExecutionResult:
     @property
     def output(self) -> str:
         """Get combined output (stdout + stderr)."""
-        parts = []
-        if self.stdout:
-            parts.append(self.stdout)
-        if self.stderr:
-            parts.append(self.stderr)
+        parts = [p for p in (self.stdout, self.stderr) if p]
         return "\n".join(parts)
 
 
@@ -106,9 +102,7 @@ class SandboxExecutor:
         container_id = await self._get_or_create_container(reuse_container)
 
         # Merge base environment with per-command environment
-        merged_env = {**self._environment}
-        if environment:
-            merged_env.update(environment)
+        merged_env = {**self._environment, **(environment or {})}
 
         # Execute command
         try:

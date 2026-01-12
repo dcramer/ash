@@ -46,10 +46,9 @@ def create_table(
         Configured Rich Table.
     """
     table = Table(title=title)
-    for col in columns:
-        name = col[0]
-        if isinstance(col[1], dict):
-            table.add_column(name, **col[1])
+    for name, style_or_kwargs in columns:
+        if isinstance(style_or_kwargs, dict):
+            table.add_column(name, **style_or_kwargs)
         else:
-            table.add_column(name, style=col[1])
+            table.add_column(name, style=style_or_kwargs)
     return table

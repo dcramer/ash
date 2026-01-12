@@ -37,7 +37,7 @@ class IncomingMessage:
     @property
     def has_images(self) -> bool:
         """Check if message has attached images."""
-        return len(self.images) > 0
+        return bool(self.images)
 
 
 @dataclass

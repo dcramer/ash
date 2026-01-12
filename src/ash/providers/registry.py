@@ -61,7 +61,7 @@ class ProviderRegistry:
         Returns:
             True if provider exists.
         """
-        return name in self._providers
+        return name in self
 
     @property
     def providers(self) -> dict[str, Provider]:

@@ -120,18 +120,14 @@ class ScheduleEntry:
             if not message:
                 return None
 
-            trigger_at = None
-            if data.get("trigger_at"):
-                trigger_at = datetime.fromisoformat(data["trigger_at"])
+            def parse_datetime(key: str) -> datetime | None:
+                val = data.get(key)
+                return datetime.fromisoformat(val) if val else None
 
+            trigger_at = parse_datetime("trigger_at")
             cron = data.get("cron")
-            last_run = None
-            if data.get("last_run"):
-                last_run = datetime.fromisoformat(data["last_run"])
-
-            created_at = None
-            if data.get("created_at"):
-                created_at = datetime.fromisoformat(data["created_at"])
+            last_run = parse_datetime("last_run")
+            created_at = parse_datetime("created_at")
 
             if not trigger_at and not cron:
                 return None
@@ -199,6 +195,10 @@ class ScheduleWatcher:
     @property
     def schedule_file(self) -> Path:
         return self._schedule_file
+
+    def _write_lines(self, lines: list[str]) -> None:
+        """Write lines to the schedule file."""
+        self._schedule_file.write_text("\n".join(lines) + "\n" if lines else "")
 
     def on_due(self, handler: ScheduleHandler) -> ScheduleHandler:
         """Decorator to register a handler."""
@@ -285,28 +285,62 @@ class ScheduleWatcher:
                 else:
                     new_lines.append(line)
 
-            self._schedule_file.write_text(
-                "\n".join(new_lines) + "\n" if new_lines else ""
-            )
+            self._write_lines(new_lines)
 
     def get_entries(self) -> list[ScheduleEntry]:
         """Get all schedule entries."""
         if not self._schedule_file.exists():
             return []
-        entries = []
-        for i, line in enumerate(self._schedule_file.read_text().splitlines()):
-            entry = ScheduleEntry.from_line(line, i)
-            if entry:
-                entries.append(entry)
-        return entries
+        lines = self._schedule_file.read_text().splitlines()
+        return [
+            entry
+            for i, line in enumerate(lines)
+            if (entry := ScheduleEntry.from_line(line, i)) is not None
+        ]
 
     def get_stats(self) -> dict[str, Any]:
         entries = self.get_entries()
+        periodic_count = sum(1 for e in entries if e.is_periodic)
+        due_count = sum(1 for e in entries if e.is_due())
         return {
             "running": self._running,
             "schedule_file": str(self._schedule_file),
             "total": len(entries),
-            "one_shot": len([e for e in entries if not e.is_periodic]),
-            "periodic": len([e for e in entries if e.is_periodic]),
-            "due": len([e for e in entries if e.is_due()]),
+            "one_shot": len(entries) - periodic_count,
+            "periodic": periodic_count,
+            "due": due_count,
         }
+
+    def remove_entry(self, line_number: int) -> bool:
+        """Remove an entry by line number.
+
+        Args:
+            line_number: 0-based line number of entry to remove.
+
+        Returns:
+            True if entry was removed, False if not found.
+        """
+        if not self._schedule_file.exists():
+            return False
+
+        lines = self._schedule_file.read_text().splitlines()
+        if line_number < 0 or line_number >= len(lines):
+            return False
+
+        del lines[line_number]
+        self._write_lines(lines)
+        return True
+
+    def clear_all(self) -> int:
+        """Remove all schedule entries.
+
+        Returns:
+            Number of entries removed.
+        """
+        if not self._schedule_file.exists():
+            return 0
+
+        entries = self.get_entries()
+        count = len(entries)
+        self._schedule_file.write_text("")
+        return count

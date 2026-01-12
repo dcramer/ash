@@ -120,6 +120,15 @@ async def _run_server(
     )
     agent = components.agent
 
+    # Run memory garbage collection on startup if enabled
+    if ash_config.memory.auto_gc and components.memory_manager:
+        console.print("[dim]Running memory garbage collection...[/dim]")
+        expired, superseded = await components.memory_manager.gc()
+        if expired or superseded:
+            console.print(
+                f"[dim]Cleaned up {expired} expired, {superseded} superseded memories[/dim]"
+            )
+
     console.print(f"[dim]Tools: {', '.join(components.tool_registry.names)}[/dim]")
     if components.skill_registry:
         console.print(f"[dim]Skills: {len(components.skill_registry)} discovered[/dim]")

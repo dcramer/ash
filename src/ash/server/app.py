@@ -2,7 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
@@ -30,13 +30,6 @@ class AshServer:
         agent: "Agent",
         telegram_provider: "TelegramProvider | None" = None,
     ):
-        """Initialize server.
-
-        Args:
-            database: Database instance.
-            agent: Agent instance.
-            telegram_provider: Optional Telegram provider.
-        """
         self._database = database
         self._agent = agent
         self._telegram_provider = telegram_provider
@@ -113,35 +106,10 @@ def create_app(
     agent: "Agent",
     telegram_provider: "TelegramProvider | None" = None,
 ) -> FastAPI:
-    """Create the FastAPI application.
-
-    Args:
-        database: Database instance.
-        agent: Agent instance.
-        telegram_provider: Optional Telegram provider.
-
-    Returns:
-        FastAPI application.
-    """
+    """Create the FastAPI application."""
     server = AshServer(
         database=database,
         agent=agent,
         telegram_provider=telegram_provider,
     )
     return server.app
-
-
-def get_app_state(app: FastAPI) -> dict[str, Any]:
-    """Get application state for dependency injection.
-
-    Args:
-        app: FastAPI application.
-
-    Returns:
-        Dict with server, database, agent.
-    """
-    return {
-        "server": app.state.server,
-        "database": app.state.database,
-        "agent": app.state.agent,
-    }

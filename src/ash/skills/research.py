@@ -118,9 +118,6 @@ def build_subagent_config(
     """
     from ash.skills.base import SubagentConfig
 
-    # Research doesn't need extra context, but accepts it for consistency
-    _ = kwargs
-
     topic = input_data.get("topic")
     if not topic:
         raise ValueError(
@@ -406,9 +403,10 @@ def dedupe_and_rank_sources(
 
         # Limit per domain
         domain = source.domain
-        if domain_counts.get(domain, 0) >= config.max_per_domain:
+        current_count = domain_counts.get(domain, 0)
+        if current_count >= config.max_per_domain:
             continue
-        domain_counts[domain] = domain_counts.get(domain, 0) + 1
+        domain_counts[domain] = current_count + 1
 
         # Calculate relevance score
         source.relevance_score = calculate_relevance_score(source)

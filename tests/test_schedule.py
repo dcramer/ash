@@ -248,3 +248,103 @@ class TestScheduleWatcher:
 
         assert triggered == []
         assert "Future" in schedule_file.read_text()
+
+    def test_remove_entry_success(self, tmp_path: Path):
+        """Test removing an entry by line number."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+            '{"trigger_at": "2026-01-14T09:00:00+00:00", "message": "Task 3"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        result = watcher.remove_entry(1)  # Remove middle entry
+
+        assert result is True
+        content = schedule_file.read_text()
+        assert "Task 1" in content
+        assert "Task 2" not in content
+        assert "Task 3" in content
+
+    def test_remove_entry_first(self, tmp_path: Path):
+        """Test removing the first entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        result = watcher.remove_entry(0)
+
+        assert result is True
+        content = schedule_file.read_text()
+        assert "Task 1" not in content
+        assert "Task 2" in content
+
+    def test_remove_entry_last(self, tmp_path: Path):
+        """Test removing the last entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        result = watcher.remove_entry(1)
+
+        assert result is True
+        content = schedule_file.read_text()
+        assert "Task 1" in content
+        assert "Task 2" not in content
+
+    def test_remove_entry_invalid_line_number(self, tmp_path: Path):
+        """Test removing with invalid line number."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+
+        assert watcher.remove_entry(-1) is False
+        assert watcher.remove_entry(1) is False  # Only line 0 exists
+        assert watcher.remove_entry(100) is False
+
+    def test_remove_entry_missing_file(self, tmp_path: Path):
+        """Test removing from non-existent file."""
+        watcher = ScheduleWatcher(tmp_path / "schedule.jsonl")
+        assert watcher.remove_entry(0) is False
+
+    def test_clear_all_success(self, tmp_path: Path):
+        """Test clearing all entries."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+            '{"cron": "0 8 * * *", "message": "Task 3"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        count = watcher.clear_all()
+
+        assert count == 3
+        assert schedule_file.read_text() == ""
+
+    def test_clear_all_empty_file(self, tmp_path: Path):
+        """Test clearing an empty file."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text("")
+
+        watcher = ScheduleWatcher(schedule_file)
+        count = watcher.clear_all()
+
+        assert count == 0
+
+    def test_clear_all_missing_file(self, tmp_path: Path):
+        """Test clearing a non-existent file."""
+        watcher = ScheduleWatcher(tmp_path / "schedule.jsonl")
+        count = watcher.clear_all()
+
+        assert count == 0

@@ -75,6 +75,15 @@ class CompactionInfo:
 
 
 @dataclass
+class _MessageSetup:
+    """Internal setup data prepared before processing a message."""
+
+    effective_user_id: str
+    system_prompt: str
+    message_budget: int
+
+
+@dataclass
 class AgentResponse:
     """Response from the agent."""
 
@@ -155,16 +164,14 @@ class Agent:
         Returns:
             List of tool definitions.
         """
-        definitions = []
-        for tool_def in self._tools.get_definitions():
-            definitions.append(
-                ToolDefinition(
-                    name=tool_def["name"],
-                    description=tool_def["description"],
-                    input_schema=tool_def["input_schema"],
-                )
+        return [
+            ToolDefinition(
+                name=tool_def["name"],
+                description=tool_def["description"],
+                input_schema=tool_def["input_schema"],
             )
-        return definitions
+            for tool_def in self._tools.get_definitions()
+        ]
 
     async def _maybe_compact(self, session: SessionState) -> CompactionInfo | None:
         """Check if compaction is needed and run it if so.
@@ -231,6 +238,71 @@ class Agent:
             messages_removed=result.messages_removed,
         )
 
+    async def _prepare_message_context(
+        self,
+        user_message: str,
+        session: SessionState,
+        user_id: str | None,
+    ) -> _MessageSetup:
+        """Prepare context needed before processing a message.
+
+        Retrieves memory context, known people, builds system prompt,
+        and calculates token budget.
+
+        Args:
+            user_message: The user's message.
+            session: Session state.
+            user_id: Optional user ID override.
+
+        Returns:
+            Setup data for message processing.
+        """
+        effective_user_id = user_id or session.user_id
+
+        # Retrieve memory context and known people
+        memory_context: RetrievedContext | None = None
+        known_people: list[Person] | None = None
+
+        if self._memory:
+            try:
+                memory_context = await self._memory.get_context_for_message(
+                    user_id=effective_user_id,
+                    user_message=user_message,
+                    chat_id=session.chat_id,
+                )
+            except Exception:
+                logger.warning("Failed to retrieve memory context", exc_info=True)
+
+            if effective_user_id:
+                try:
+                    known_people = await self._memory.get_known_people(
+                        effective_user_id
+                    )
+                except Exception:
+                    logger.warning("Failed to get known people", exc_info=True)
+
+        # Build system prompt with all context
+        system_prompt = self._build_system_prompt(
+            context=memory_context,
+            known_people=known_people,
+            conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
+            has_reply_context=session.metadata.get("has_reply_context", False),
+        )
+
+        # Calculate message token budget
+        system_tokens = estimate_tokens(system_prompt)
+        message_budget = (
+            self._config.context_token_budget
+            - system_tokens
+            - self._config.system_prompt_buffer
+        )
+
+        return _MessageSetup(
+            effective_user_id=effective_user_id,
+            system_prompt=system_prompt,
+            message_budget=message_budget,
+        )
+
     async def process_message(
         self,
         user_message: str,
@@ -255,46 +327,8 @@ class Agent:
         Returns:
             Agent response.
         """
-        # Use provided user_id or fall back to session user_id
-        effective_user_id = user_id or session.user_id
-
-        # Retrieve memory context and known people before processing
-        memory_context: RetrievedContext | None = None
-        known_people: list[Person] | None = None
-        if self._memory:
-            try:
-                memory_context = await self._memory.get_context_for_message(
-                    user_id=effective_user_id,
-                    user_message=user_message,
-                    chat_id=session.chat_id,
-                )
-            except Exception:
-                logger.warning("Failed to retrieve memory context", exc_info=True)
-
-            # Get known people for context
-            if effective_user_id:
-                try:
-                    known_people = await self._memory.get_known_people(
-                        effective_user_id
-                    )
-                except Exception:
-                    logger.warning("Failed to get known people", exc_info=True)
-
-        # Build system prompt with memory context, known people, and conversation gap
-        system_prompt = self._build_system_prompt(
-            context=memory_context,
-            known_people=known_people,
-            conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
-            has_reply_context=session.metadata.get("has_reply_context", False),
-        )
-
-        # Calculate message token budget (context budget - system prompt - buffer)
-        system_tokens = estimate_tokens(system_prompt)
-        message_budget = (
-            self._config.context_token_budget
-            - system_tokens
-            - self._config.system_prompt_buffer
-        )
+        # Prepare context (memory, known people, system prompt, token budget)
+        setup = await self._prepare_message_context(user_message, session, user_id)
 
         # Add user message to session
         session.add_user_message(user_message)
@@ -312,12 +346,12 @@ class Agent:
             # Call LLM with pruned messages
             response = await self._llm.complete(
                 messages=session.get_messages_for_llm(
-                    token_budget=message_budget,
+                    token_budget=setup.message_budget,
                     recency_window=self._config.recency_window,
                 ),
                 model=self._config.model,
                 tools=self._get_tool_definitions(),
-                system=system_prompt,
+                system=setup.system_prompt,
                 max_tokens=self._config.max_tokens,
                 temperature=self._config.temperature,
                 thinking=self._config.thinking,
@@ -342,7 +376,7 @@ class Agent:
             # Execute tools with effective user_id (supports group chats)
             tool_context = ToolContext(
                 session_id=session.session_id,
-                user_id=effective_user_id,
+                user_id=setup.effective_user_id,
                 chat_id=session.chat_id,
                 provider=session.provider,
                 metadata=dict(session.metadata),
@@ -413,46 +447,8 @@ class Agent:
         Yields:
             Text chunks.
         """
-        # Use provided user_id or fall back to session user_id
-        effective_user_id = user_id or session.user_id
-
-        # Retrieve memory context and known people before processing
-        memory_context: RetrievedContext | None = None
-        known_people: list[Person] | None = None
-        if self._memory:
-            try:
-                memory_context = await self._memory.get_context_for_message(
-                    user_id=effective_user_id,
-                    user_message=user_message,
-                    chat_id=session.chat_id,
-                )
-            except Exception:
-                logger.warning("Failed to retrieve memory context", exc_info=True)
-
-            # Get known people for context
-            if effective_user_id:
-                try:
-                    known_people = await self._memory.get_known_people(
-                        effective_user_id
-                    )
-                except Exception:
-                    logger.warning("Failed to get known people", exc_info=True)
-
-        # Build system prompt with memory context, known people, and conversation gap
-        system_prompt = self._build_system_prompt(
-            context=memory_context,
-            known_people=known_people,
-            conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
-            has_reply_context=session.metadata.get("has_reply_context", False),
-        )
-
-        # Calculate message token budget (context budget - system prompt - buffer)
-        system_tokens = estimate_tokens(system_prompt)
-        message_budget = (
-            self._config.context_token_budget
-            - system_tokens
-            - self._config.system_prompt_buffer
-        )
+        # Prepare context (memory, known people, system prompt, token budget)
+        setup = await self._prepare_message_context(user_message, session, user_id)
 
         # Add user message to session
         session.add_user_message(user_message)
@@ -475,12 +471,12 @@ class Agent:
 
             async for chunk in self._llm.stream(
                 messages=session.get_messages_for_llm(
-                    token_budget=message_budget,
+                    token_budget=setup.message_budget,
                     recency_window=self._config.recency_window,
                 ),
                 model=self._config.model,
                 tools=self._get_tool_definitions(),
-                system=system_prompt,
+                system=setup.system_prompt,
                 max_tokens=self._config.max_tokens,
                 temperature=self._config.temperature,
                 thinking=self._config.thinking,
@@ -542,7 +538,7 @@ class Agent:
             # Execute tools (non-streaming) with effective user_id (supports group chats)
             tool_context = ToolContext(
                 session_id=session.session_id,
-                user_id=effective_user_id,
+                user_id=setup.effective_user_id,
                 chat_id=session.chat_id,
                 provider=session.provider,
                 metadata=dict(session.metadata),
@@ -725,7 +721,9 @@ async def create_agent(
             retriever = SemanticRetriever(db_session, embedding_generator)
             await retriever.initialize_vector_tables()
 
-            memory_manager = MemoryManager(store, retriever, db_session)
+            memory_manager = MemoryManager(
+                store, retriever, db_session, max_entries=config.memory.max_entries
+            )
 
             # Register memory tools
             tool_registry.register(RememberTool(memory_manager))

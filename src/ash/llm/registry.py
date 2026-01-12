@@ -27,15 +27,14 @@ def create_llm_provider(
     Raises:
         ValueError: If provider name is unknown.
     """
-    # Extract string from SecretStr if needed
     key = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
 
     if provider == "anthropic":
         return AnthropicProvider(api_key=key)
-    elif provider == "openai":
+    if provider == "openai":
         return OpenAIProvider(api_key=key)
-    else:
-        raise ValueError(f"Unknown LLM provider: {provider}")
+
+    raise ValueError(f"Unknown LLM provider: {provider}")
 
 
 class LLMRegistry:

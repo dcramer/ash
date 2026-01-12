@@ -206,6 +206,190 @@ class TestSandboxCommand:
         assert "Unknown action" in result.stdout
 
 
+class TestScheduleCommand:
+    """Tests for 'ash schedule' command."""
+
+    def test_schedule_help(self, cli_runner):
+        result = cli_runner.invoke(app, ["schedule", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.stdout
+        assert "stats" in result.stdout
+        assert "cancel" in result.stdout
+        assert "clear" in result.stdout
+
+    def test_schedule_unknown_action(self, cli_runner, monkeypatch, tmp_path):
+        # Mock config loading
+        from ash.config import models
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setattr(
+            "ash.config.load_config",
+            lambda: models.AshConfig(
+                models={
+                    "default": models.ModelConfig(
+                        provider="anthropic", model="claude-3-sonnet"
+                    )
+                },
+                workspace=workspace,
+            ),
+        )
+
+        result = cli_runner.invoke(app, ["schedule", "unknown"])
+        assert result.exit_code == 1
+        assert "Unknown action" in result.stdout
+
+    def test_schedule_cancel_requires_id(self, cli_runner, monkeypatch, tmp_path):
+        from ash.config import models
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setattr(
+            "ash.config.load_config",
+            lambda: models.AshConfig(
+                models={
+                    "default": models.ModelConfig(
+                        provider="anthropic", model="claude-3-sonnet"
+                    )
+                },
+                workspace=workspace,
+            ),
+        )
+
+        result = cli_runner.invoke(app, ["schedule", "cancel"])
+        assert result.exit_code == 1
+        assert "--id" in result.stdout or "required" in result.stdout.lower()
+
+    def test_schedule_list_empty(self, cli_runner, monkeypatch, tmp_path):
+        from ash.config import models
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setattr(
+            "ash.config.load_config",
+            lambda: models.AshConfig(
+                models={
+                    "default": models.ModelConfig(
+                        provider="anthropic", model="claude-3-sonnet"
+                    )
+                },
+                workspace=workspace,
+            ),
+        )
+
+        result = cli_runner.invoke(app, ["schedule", "list"])
+        assert result.exit_code == 0
+        assert "No scheduled tasks" in result.stdout
+
+    def test_schedule_list_with_entries(self, cli_runner, monkeypatch, tmp_path):
+        from ash.config import models
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        schedule_file = workspace / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Test task"}\n'
+        )
+        monkeypatch.setattr(
+            "ash.config.load_config",
+            lambda: models.AshConfig(
+                models={
+                    "default": models.ModelConfig(
+                        provider="anthropic", model="claude-3-sonnet"
+                    )
+                },
+                workspace=workspace,
+            ),
+        )
+
+        result = cli_runner.invoke(app, ["schedule", "list"])
+        assert result.exit_code == 0
+        assert "Test task" in result.stdout
+
+    def test_schedule_stats(self, cli_runner, monkeypatch, tmp_path):
+        from ash.config import models
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        schedule_file = workspace / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "One-shot"}\n'
+            '{"cron": "0 8 * * *", "message": "Periodic"}\n'
+        )
+        monkeypatch.setattr(
+            "ash.config.load_config",
+            lambda: models.AshConfig(
+                models={
+                    "default": models.ModelConfig(
+                        provider="anthropic", model="claude-3-sonnet"
+                    )
+                },
+                workspace=workspace,
+            ),
+        )
+
+        result = cli_runner.invoke(app, ["schedule", "stats"])
+        assert result.exit_code == 0
+        assert "Total tasks: 2" in result.stdout
+        assert "One-shot: 1" in result.stdout
+        assert "Periodic: 1" in result.stdout
+
+    def test_schedule_cancel_success(self, cli_runner, monkeypatch, tmp_path):
+        from ash.config import models
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        schedule_file = workspace / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task to cancel"}\n'
+        )
+        monkeypatch.setattr(
+            "ash.config.load_config",
+            lambda: models.AshConfig(
+                models={
+                    "default": models.ModelConfig(
+                        provider="anthropic", model="claude-3-sonnet"
+                    )
+                },
+                workspace=workspace,
+            ),
+        )
+
+        result = cli_runner.invoke(app, ["schedule", "cancel", "--id", "0"])
+        assert result.exit_code == 0
+        assert "Cancelled" in result.stdout
+
+        # Verify file is empty
+        assert schedule_file.read_text().strip() == ""
+
+    def test_schedule_clear_with_force(self, cli_runner, monkeypatch, tmp_path):
+        from ash.config import models
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        schedule_file = workspace / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+        )
+        monkeypatch.setattr(
+            "ash.config.load_config",
+            lambda: models.AshConfig(
+                models={
+                    "default": models.ModelConfig(
+                        provider="anthropic", model="claude-3-sonnet"
+                    )
+                },
+                workspace=workspace,
+            ),
+        )
+
+        result = cli_runner.invoke(app, ["schedule", "clear", "--force"])
+        assert result.exit_code == 0
+        assert "Cleared 2" in result.stdout
+        assert schedule_file.read_text() == ""
+
+
 class TestAppHelp:
     """Tests for main app help."""
 
@@ -223,6 +407,7 @@ class TestAppHelp:
         assert "config" in result.stdout
         assert "db" in result.stdout
         assert "memory" in result.stdout
+        assert "schedule" in result.stdout
         assert "sessions" in result.stdout
         assert "sandbox" in result.stdout
         assert "upgrade" in result.stdout

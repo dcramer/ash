@@ -50,22 +50,22 @@ def get_backend(name: str | None = None) -> ServiceBackend:
     if name is None:
         return detect_backend()
 
-    backends = {
-        "systemd": "ash.service.backends.systemd.SystemdBackend",
-        "launchd": "ash.service.backends.launchd.LaunchdBackend",
-        "generic": "ash.service.backends.generic.GenericBackend",
-    }
+    if name == "systemd":
+        from ash.service.backends.systemd import SystemdBackend
 
-    if name not in backends:
-        raise ValueError(f"Unknown backend: {name}. Available: {list(backends)}")
+        return SystemdBackend()
+    elif name == "launchd":
+        from ash.service.backends.launchd import LaunchdBackend
 
-    # Import dynamically to avoid loading unnecessary backends
-    module_path, class_name = backends[name].rsplit(".", 1)
-    import importlib
+        return LaunchdBackend()
+    elif name == "generic":
+        from ash.service.backends.generic import GenericBackend
 
-    module = importlib.import_module(module_path)
-    backend_class = getattr(module, class_name)
-    return backend_class()
+        return GenericBackend()
+    else:
+        raise ValueError(
+            f"Unknown backend: {name}. Available: ['systemd', 'launchd', 'generic']"
+        )
 
 
 __all__ = ["detect_backend", "get_backend"]

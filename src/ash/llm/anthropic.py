@@ -118,6 +118,48 @@ class AnthropicProvider(LLMProvider):
             for tool in tools
         ]
 
+    def _build_request_kwargs(
+        self,
+        messages: list[Message],
+        model: str | None,
+        tools: list[ToolDefinition] | None,
+        system: str | None,
+        max_tokens: int,
+        temperature: float | None,
+        thinking: "ThinkingConfig | None",
+    ) -> tuple[str, dict[str, Any]]:
+        """Build common request kwargs for complete and stream methods.
+
+        Returns:
+            Tuple of (model_name, kwargs dict).
+        """
+        model_name = model or self.default_model
+        kwargs: dict[str, Any] = {
+            "model": model_name,
+            "messages": self._convert_messages(messages),
+            "max_tokens": max_tokens,
+        }
+
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+
+        if system:
+            kwargs["system"] = system
+
+        converted_tools = self._convert_tools(tools)
+        if converted_tools:
+            kwargs["tools"] = converted_tools
+
+        if thinking and thinking.enabled:
+            thinking_params = thinking.to_api_params()
+            if thinking_params:
+                kwargs.update(thinking_params)
+                logger.debug(
+                    f"Extended thinking enabled with budget={thinking.effective_budget}"
+                )
+
+        return model_name, kwargs
+
     def _parse_response(self, response: anthropic.types.Message) -> CompletionResponse:
         """Parse Anthropic response to internal format."""
         content: list[ContentBlock] = []
@@ -167,35 +209,12 @@ class AnthropicProvider(LLMProvider):
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
             thinking: Extended thinking configuration.
         """
-        model_name = model or self.default_model
-        kwargs: dict[str, Any] = {
-            "model": model_name,
-            "messages": self._convert_messages(messages),
-            "max_tokens": max_tokens,
-        }
-
-        # Only include temperature if explicitly set (reasoning models don't support it)
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-
-        if system:
-            kwargs["system"] = system
-
-        converted_tools = self._convert_tools(tools)
-        if converted_tools:
-            kwargs["tools"] = converted_tools
-
-        # Add thinking configuration if enabled
-        if thinking and thinking.enabled:
-            thinking_params = thinking.to_api_params()
-            if thinking_params:
-                kwargs.update(thinking_params)
-                logger.debug(
-                    f"Extended thinking enabled with budget={thinking.effective_budget}"
-                )
+        model_name, kwargs = self._build_request_kwargs(
+            messages, model, tools, system, max_tokens, temperature, thinking
+        )
 
         assert self._semaphore is not None
-        semaphore = self._semaphore  # Capture for closure
+        semaphore = self._semaphore
         logger.debug(f"Waiting for API slot (model={model_name})")
 
         async def _make_request() -> anthropic.types.Message:
@@ -237,32 +256,9 @@ class AnthropicProvider(LLMProvider):
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
             thinking: Extended thinking configuration.
         """
-        model_name = model or self.default_model
-        kwargs: dict[str, Any] = {
-            "model": model_name,
-            "messages": self._convert_messages(messages),
-            "max_tokens": max_tokens,
-        }
-
-        # Only include temperature if explicitly set (reasoning models don't support it)
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-
-        if system:
-            kwargs["system"] = system
-
-        converted_tools = self._convert_tools(tools)
-        if converted_tools:
-            kwargs["tools"] = converted_tools
-
-        # Add thinking configuration if enabled
-        if thinking and thinking.enabled:
-            thinking_params = thinking.to_api_params()
-            if thinking_params:
-                kwargs.update(thinking_params)
-                logger.debug(
-                    f"Extended thinking enabled (stream) with budget={thinking.effective_budget}"
-                )
+        model_name, kwargs = self._build_request_kwargs(
+            messages, model, tools, system, max_tokens, temperature, thinking
+        )
 
         current_tool_id: str | None = None
         current_tool_name: str | None = None

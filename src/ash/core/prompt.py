@@ -233,23 +233,15 @@ class SystemPromptBuilder:
             "",
         ]
 
-        # List available skills
         lines.append("### Available Skills")
         lines.append("")
 
-        # Note: write_skill is a dedicated tool now, not listed here
-
-        # List registered skills
         available_skills = list(self._skills)
-        for skill in available_skills:
-            badge = "[subagent]" if skill.subagent else ""
-            if badge:
-                lines.append(f"- **{skill.name}** {badge}: {skill.description}")
-            else:
-                lines.append(f"- **{skill.name}**: {skill.description}")
-
-        if not available_skills:
-            lines.append("")
+        if available_skills:
+            for skill in available_skills:
+                badge = " [subagent]" if skill.subagent else ""
+                lines.append(f"- **{skill.name}**{badge}: {skill.description}")
+        else:
             lines.append("*No additional skills registered.*")
 
         return "\n".join(lines)

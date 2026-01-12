@@ -27,7 +27,7 @@ from ash.sessions.types import (
     ToolUseEntry,
     parse_entry,
 )
-from ash.sessions.utils import validate_tool_pairs
+from ash.sessions.utils import DEFAULT_RECENCY_WINDOW, prune_messages_to_budget
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ class SessionReader:
     async def load_messages_for_llm(
         self,
         token_budget: int | None = None,
-        recency_window: int = 10,
+        recency_window: int = DEFAULT_RECENCY_WINDOW,
         include_timestamps: bool = False,
     ) -> tuple[list[Message], list[str]]:
         """Load messages formatted for LLM API, with token-aware pruning.
@@ -132,57 +132,14 @@ class SessionReader:
             entries, include_timestamps=include_timestamps
         )
 
-        if token_budget is None or not messages:
-            return messages, message_ids
-
-        # Apply token-aware pruning (same algorithm as SessionState)
-        n_messages = len(messages)
-        recency_start = max(0, n_messages - recency_window)
-
-        # Calculate tokens in recency window
-        recency_tokens = sum(token_counts[recency_start:])
-
-        if recency_tokens >= token_budget:
-            # Even recency window exceeds budget - fit what we can
-            pruned_msgs, pruned_ids = self._fit_to_budget(
-                messages[recency_start:],
-                message_ids[recency_start:],
-                token_counts[recency_start:],
-                token_budget,
-            )
-            # Validate tool_use/tool_result pairs after pruning
-            return validate_tool_pairs(pruned_msgs, pruned_ids)
-
-        # Budget remaining for older messages
-        remaining_budget = token_budget - recency_tokens
-
-        # Add older messages from most recent backward
-        older_messages = messages[:recency_start]
-        older_ids = message_ids[:recency_start]
-        older_tokens = token_counts[:recency_start]
-
-        included_messages: list[Message] = []
-        included_ids: list[str] = []
-
-        for msg, msg_id, tokens in zip(
-            reversed(older_messages),
-            reversed(older_ids),
-            reversed(older_tokens),
-            strict=False,
-        ):
-            if tokens <= remaining_budget:
-                included_messages.insert(0, msg)
-                included_ids.insert(0, msg_id)
-                remaining_budget -= tokens
-            else:
-                break
-
-        # Combine older + recent
-        combined_messages = included_messages + messages[recency_start:]
-        combined_ids = included_ids + message_ids[recency_start:]
-
-        # Validate tool_use/tool_result pairs - pruning may have orphaned some
-        return validate_tool_pairs(combined_messages, combined_ids)
+        # Use shared pruning logic
+        return prune_messages_to_budget(
+            messages,
+            token_counts,
+            token_budget,
+            recency_window,
+            message_ids,
+        )
 
     def _build_messages(
         self,
@@ -205,80 +162,13 @@ class SessionReader:
         messages: list[Message] = []
         message_ids: list[str] = []
         token_counts: list[int] = []
-
-        # Track pending tool results to attach to user messages
         pending_results: list[ToolResult] = []
 
-        for entry in entries:
-            if isinstance(entry, SessionHeader):
-                continue  # Skip header
-
-            elif isinstance(entry, MessageEntry):
-                # If we have pending tool results, create a user message first
-                if pending_results:
-                    result_msg = Message(role=Role.USER, content=list(pending_results))
-                    messages.append(result_msg)
-                    message_ids.append("")  # Tool results don't have IDs
-                    token_counts.append(
-                        estimate_message_tokens(
-                            "user",
-                            [
-                                {"type": "tool_result", "content": r.content}
-                                for r in pending_results
-                            ],
-                        )
-                    )
-                    pending_results = []
-
-                # Convert entry content to proper format
-                content = self._convert_content(entry.content)
-
-                # Add timestamp prefix if enabled
-                if include_timestamps and entry.created_at:
-                    content = self._prefix_with_timestamp(content, entry.created_at)
-
-                role = Role(entry.role)
-                msg = Message(role=role, content=content)
-
-                messages.append(msg)
-                message_ids.append(entry.id)
-
-                # Use stored token count or estimate
-                if entry.token_count is not None:
-                    token_counts.append(entry.token_count)
-                else:
-                    token_counts.append(
-                        estimate_message_tokens(
-                            entry.role,
-                            entry.content
-                            if isinstance(entry.content, str)
-                            else entry.content,
-                        )
-                    )
-
-            elif isinstance(entry, ToolUseEntry):
-                # Tool uses are embedded in assistant messages
-                # They're recorded separately for logging but already in the message
-                pass
-
-            elif isinstance(entry, ToolResultEntry):
-                # Accumulate tool results to add as next user message
-                pending_results.append(
-                    ToolResult(
-                        tool_use_id=entry.tool_use_id,
-                        content=entry.output,
-                        is_error=not entry.success,
-                    )
-                )
-
-            elif isinstance(entry, CompactionEntry):
-                # Compaction markers don't create messages
-                pass
-
-        # Handle any remaining pending results
-        if pending_results:
-            result_msg = Message(role=Role.USER, content=list(pending_results))
-            messages.append(result_msg)
+        def flush_pending_results() -> None:
+            """Flush pending tool results as a user message."""
+            if not pending_results:
+                return
+            messages.append(Message(role=Role.USER, content=list(pending_results)))
             message_ids.append("")
             token_counts.append(
                 estimate_message_tokens(
@@ -289,7 +179,39 @@ class SessionReader:
                     ],
                 )
             )
+            pending_results.clear()
 
+        for entry in entries:
+            match entry:
+                case SessionHeader() | ToolUseEntry() | CompactionEntry():
+                    # Skip: header, tool uses (embedded in messages), compaction markers
+                    pass
+
+                case MessageEntry():
+                    flush_pending_results()
+
+                    content = self._convert_content(entry.content)
+                    if include_timestamps and entry.created_at:
+                        content = self._prefix_with_timestamp(content, entry.created_at)
+
+                    messages.append(Message(role=Role(entry.role), content=content))
+                    message_ids.append(entry.id)
+                    token_counts.append(
+                        entry.token_count
+                        if entry.token_count is not None
+                        else estimate_message_tokens(entry.role, entry.content)
+                    )
+
+                case ToolResultEntry():
+                    pending_results.append(
+                        ToolResult(
+                            tool_use_id=entry.tool_use_id,
+                            content=entry.output,
+                            is_error=not entry.success,
+                        )
+                    )
+
+        flush_pending_results()
         return messages, message_ids, token_counts
 
     def _convert_content(
@@ -308,25 +230,25 @@ class SessionReader:
 
         blocks: list[ContentBlock] = []
         for block in content:
-            block_type = block.get("type")
-            if block_type == "text":
-                blocks.append(TextContent(text=block["text"]))
-            elif block_type == "tool_use":
-                blocks.append(
-                    ToolUse(
-                        id=block["id"],
-                        name=block["name"],
-                        input=block["input"],
+            match block.get("type"):
+                case "text":
+                    blocks.append(TextContent(text=block["text"]))
+                case "tool_use":
+                    blocks.append(
+                        ToolUse(
+                            id=block["id"],
+                            name=block["name"],
+                            input=block["input"],
+                        )
                     )
-                )
-            elif block_type == "tool_result":
-                blocks.append(
-                    ToolResult(
-                        tool_use_id=block["tool_use_id"],
-                        content=block["content"],
-                        is_error=block.get("is_error", False),
+                case "tool_result":
+                    blocks.append(
+                        ToolResult(
+                            tool_use_id=block["tool_use_id"],
+                            content=block["content"],
+                            is_error=block.get("is_error", False),
+                        )
                     )
-                )
         return blocks if blocks else ""
 
     def _prefix_with_timestamp(
@@ -370,43 +292,6 @@ class SessionReader:
             result.insert(0, TextContent(text=ts_prefix.strip()))
 
         return result
-
-    def _fit_to_budget(
-        self,
-        messages: list[Message],
-        message_ids: list[str],
-        token_counts: list[int],
-        budget: int,
-    ) -> tuple[list[Message], list[str]]:
-        """Fit messages to budget, keeping most recent.
-
-        Args:
-            messages: Messages to fit.
-            message_ids: Corresponding IDs.
-            token_counts: Token counts per message.
-            budget: Maximum tokens.
-
-        Returns:
-            Tuple of (pruned messages, pruned IDs).
-        """
-        result_msgs: list[Message] = []
-        result_ids: list[str] = []
-        remaining = budget
-
-        for msg, msg_id, tokens in zip(
-            reversed(messages),
-            reversed(message_ids),
-            reversed(token_counts),
-            strict=False,
-        ):
-            if tokens <= remaining:
-                result_msgs.insert(0, msg)
-                result_ids.insert(0, msg_id)
-                remaining -= tokens
-            else:
-                break
-
-        return result_msgs, result_ids
 
     async def get_message_ids(self) -> set[str]:
         """Get all message IDs in the session.
@@ -520,14 +405,7 @@ class SessionReader:
 
         results: list[MessageEntry] = []
         for msg in reversed(messages):  # Most recent first
-            content = msg.content if isinstance(msg.content, str) else ""
-            if not isinstance(msg.content, str):
-                # Extract text from content blocks
-                for block in msg.content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        content += block.get("text", "")
-
-            if query_lower in content.lower():
+            if query_lower in msg._extract_text_content().lower():
                 results.append(msg)
                 if len(results) >= limit:
                     break

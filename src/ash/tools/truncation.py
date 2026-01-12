@@ -70,6 +70,95 @@ def _save_to_temp(content: str, prefix: str = "output") -> str:
     return str(path)
 
 
+def _truncate_output(
+    output: str,
+    max_bytes: int,
+    max_lines: int,
+    save_full: bool,
+    prefix: str,
+    keep_start: bool,
+) -> TruncationResult:
+    """Core truncation logic for both head and tail truncation.
+
+    Args:
+        output: Raw output string.
+        max_bytes: Maximum bytes to keep.
+        max_lines: Maximum lines to keep.
+        save_full: Whether to save full output to temp file if truncated.
+        prefix: Prefix for temp file name.
+        keep_start: If True, keep first N lines (head); otherwise keep last N (tail).
+
+    Returns:
+        TruncationResult with truncated content and metadata.
+    """
+    lines = output.splitlines(keepends=True)
+    total_lines = len(lines)
+    total_bytes = len(output.encode("utf-8"))
+
+    # Check if truncation needed
+    if total_bytes <= max_bytes and total_lines <= max_lines:
+        return TruncationResult(
+            content=output,
+            truncated=False,
+            total_lines=total_lines,
+            total_bytes=total_bytes,
+            output_lines=total_lines,
+            output_bytes=total_bytes,
+        )
+
+    # Determine truncation type
+    truncation_type: Literal["lines", "bytes"] = (
+        "lines" if total_lines > max_lines else "bytes"
+    )
+
+    # Truncate by lines first
+    kept_lines = lines[:max_lines] if keep_start else lines[-max_lines:]
+    truncated_content = "".join(kept_lines)
+
+    # Then check bytes
+    truncated_bytes = truncated_content.encode("utf-8")
+    if len(truncated_bytes) > max_bytes:
+        truncation_type = "bytes"
+        if keep_start:
+            truncated_content = truncated_bytes[:max_bytes].decode(
+                "utf-8", errors="ignore"
+            )
+        else:
+            truncated_content = truncated_bytes[-max_bytes:].decode(
+                "utf-8", errors="ignore"
+            )
+
+    # Save full output to temp file
+    full_path: str | None = None
+    if save_full:
+        full_path = _save_to_temp(output, prefix)
+
+    # Add truncation notice
+    if keep_start:
+        notice = f"\n\n... [truncated: {total_lines} total lines, {total_bytes:,} bytes"
+        if full_path:
+            notice += f" - full output: {full_path}"
+        notice += "]"
+        truncated_content += notice
+    else:
+        notice = f"[truncated: showing last {len(kept_lines)} of {total_lines} lines, {total_bytes:,} total bytes"
+        if full_path:
+            notice += f" - full output: {full_path}"
+        notice += "]\n\n"
+        truncated_content = notice + truncated_content
+
+    return TruncationResult(
+        content=truncated_content,
+        truncated=True,
+        truncation_type=truncation_type,
+        total_lines=total_lines,
+        total_bytes=total_bytes,
+        output_lines=len(kept_lines),
+        output_bytes=len(truncated_content.encode("utf-8")),
+        full_output_path=full_path,
+    )
+
+
 def truncate_head(
     output: str,
     max_bytes: int = MAX_OUTPUT_BYTES,
@@ -91,59 +180,8 @@ def truncate_head(
     Returns:
         TruncationResult with truncated content and metadata.
     """
-    lines = output.splitlines(keepends=True)
-    total_lines = len(lines)
-    total_bytes = len(output.encode("utf-8"))
-
-    # Check if truncation needed
-    if total_bytes <= max_bytes and total_lines <= max_lines:
-        return TruncationResult(
-            content=output,
-            truncated=False,
-            total_lines=total_lines,
-            total_bytes=total_bytes,
-            output_lines=total_lines,
-            output_bytes=total_bytes,
-        )
-
-    # Determine truncation type
-    truncation_type: Literal["lines", "bytes"]
-    if total_lines > max_lines:
-        truncation_type = "lines"
-    else:
-        truncation_type = "bytes"
-
-    # Truncate by lines first
-    kept_lines = lines[:max_lines]
-    truncated_content = "".join(kept_lines)
-
-    # Then check bytes
-    truncated_bytes = truncated_content.encode("utf-8")
-    if len(truncated_bytes) > max_bytes:
-        truncation_type = "bytes"
-        truncated_content = truncated_bytes[:max_bytes].decode("utf-8", errors="ignore")
-
-    # Save full output to temp file
-    full_path: str | None = None
-    if save_full:
-        full_path = _save_to_temp(output, prefix)
-
-    # Add truncation notice
-    notice = f"\n\n... [truncated: {total_lines} total lines, {total_bytes:,} bytes"
-    if full_path:
-        notice += f" - full output: {full_path}"
-    notice += "]"
-    truncated_content += notice
-
-    return TruncationResult(
-        content=truncated_content,
-        truncated=True,
-        truncation_type=truncation_type,
-        total_lines=total_lines,
-        total_bytes=total_bytes,
-        output_lines=len(kept_lines),
-        output_bytes=len(truncated_content.encode("utf-8")),
-        full_output_path=full_path,
+    return _truncate_output(
+        output, max_bytes, max_lines, save_full, prefix, keep_start=True
     )
 
 
@@ -168,62 +206,8 @@ def truncate_tail(
     Returns:
         TruncationResult with truncated content and metadata.
     """
-    lines = output.splitlines(keepends=True)
-    total_lines = len(lines)
-    total_bytes = len(output.encode("utf-8"))
-
-    # Check if truncation needed
-    if total_bytes <= max_bytes and total_lines <= max_lines:
-        return TruncationResult(
-            content=output,
-            truncated=False,
-            total_lines=total_lines,
-            total_bytes=total_bytes,
-            output_lines=total_lines,
-            output_bytes=total_bytes,
-        )
-
-    # Determine truncation type
-    truncation_type: Literal["lines", "bytes"]
-    if total_lines > max_lines:
-        truncation_type = "lines"
-    else:
-        truncation_type = "bytes"
-
-    # Truncate by lines first (keep last N)
-    kept_lines = lines[-max_lines:]
-    truncated_content = "".join(kept_lines)
-
-    # Then check bytes (keep last N bytes)
-    truncated_bytes = truncated_content.encode("utf-8")
-    if len(truncated_bytes) > max_bytes:
-        truncation_type = "bytes"
-        # Decode from end, may lose partial char at start
-        truncated_content = truncated_bytes[-max_bytes:].decode(
-            "utf-8", errors="ignore"
-        )
-
-    # Save full output to temp file
-    full_path: str | None = None
-    if save_full:
-        full_path = _save_to_temp(output, prefix)
-
-    # Add truncation notice at the beginning
-    notice = f"[truncated: showing last {len(kept_lines)} of {total_lines} lines, {total_bytes:,} total bytes"
-    if full_path:
-        notice += f" - full output: {full_path}"
-    notice += "]\n\n"
-    truncated_content = notice + truncated_content
-
-    return TruncationResult(
-        content=truncated_content,
-        truncated=True,
-        truncation_type=truncation_type,
-        total_lines=total_lines,
-        total_bytes=total_bytes,
-        output_lines=len(kept_lines),
-        output_bytes=len(truncated_content.encode("utf-8")),
-        full_output_path=full_path,
+    return _truncate_output(
+        output, max_bytes, max_lines, save_full, prefix, keep_start=False
     )
 
 

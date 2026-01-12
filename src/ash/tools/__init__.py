@@ -1,6 +1,6 @@
 """Tool system for agent capabilities."""
 
-from ash.tools.base import Tool, ToolContext, ToolResult
+from ash.tools.base import Tool, ToolContext, ToolResult, build_sandbox_manager_config
 from ash.tools.builtin import (
     BashTool,
     FileAccessTracker,
@@ -21,6 +21,7 @@ __all__ = [
     "Tool",
     "ToolContext",
     "ToolResult",
+    "build_sandbox_manager_config",
     # Registry & Executor
     "ToolExecutor",
     "ToolRegistry",

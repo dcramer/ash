@@ -198,22 +198,23 @@ class SemanticRetriever:
         results: list[SearchResult] = []
         for row in rows:
             subject_ids = json.loads(row[3]) if row[3] else None
+            base_metadata = json.loads(row[2]) if row[2] else {}
 
             # Build subject_name from resolved person IDs
-            subject_name: str | None = None
+            subject_name = None
             if subject_ids:
                 names = [
-                    person_names.get(pid) for pid in subject_ids if pid in person_names
+                    person_names[pid] for pid in subject_ids if pid in person_names
                 ]
                 if names:
-                    subject_name = ", ".join(n for n in names if n)
+                    subject_name = ", ".join(names)
 
             results.append(
                 SearchResult(
                     id=row[0],
                     content=row[1],
                     metadata={
-                        **((json.loads(row[2]) if row[2] else {}) or {}),
+                        **base_metadata,
                         "subject_person_ids": subject_ids,
                         "subject_name": subject_name,
                     },
@@ -249,33 +250,8 @@ class SemanticRetriever:
 
         return {row[0]: row[1] for row in rows}
 
-    async def search(
-        self,
-        query: str,
-        limit: int = 10,
-        subject_person_id: str | None = None,
-        owner_user_id: str | None = None,
-        chat_id: str | None = None,
-    ) -> list[SearchResult]:
-        """Search memories (alias for search_memories).
-
-        Args:
-            query: Search query.
-            limit: Maximum results.
-            subject_person_id: Optional filter for memories about a specific person.
-            owner_user_id: Filter to user's personal data.
-            chat_id: Filter to include group data for this chat.
-
-        Returns:
-            List of search results sorted by similarity.
-        """
-        return await self.search_memories(
-            query,
-            limit=limit,
-            subject_person_id=subject_person_id,
-            owner_user_id=owner_user_id,
-            chat_id=chat_id,
-        )
+    # Alias for backward compatibility
+    search = search_memories
 
     async def delete_memory_embedding(self, memory_id: str) -> None:
         """Delete a memory embedding.
@@ -290,24 +266,5 @@ class SemanticRetriever:
         await self._session.commit()
 
     def _serialize_embedding(self, embedding: list[float]) -> bytes:
-        """Serialize embedding to bytes for sqlite-vec.
-
-        Args:
-            embedding: Embedding vector.
-
-        Returns:
-            Serialized bytes.
-        """
+        """Serialize embedding to bytes for sqlite-vec."""
         return struct.pack(f"{len(embedding)}f", *embedding)
-
-    def _deserialize_embedding(self, data: bytes) -> list[float]:
-        """Deserialize embedding from bytes.
-
-        Args:
-            data: Serialized bytes.
-
-        Returns:
-            Embedding vector.
-        """
-        count = len(data) // 4  # 4 bytes per float
-        return list(struct.unpack(f"{count}f", data))
