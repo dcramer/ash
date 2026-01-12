@@ -44,6 +44,11 @@ export PATH="/usr/local/bin:/usr/bin:/bin"
 PS1='\[\033[1;33m\][sandbox]\[\033[0m\] \[\033[1;34m\]\w\[\033[0m\]\$ '
 
 # Prevent common escape techniques
+# Note: These aliases provide friendly error messages. Actual security comes from:
+# - cap_drop: ["ALL"] in container config (no CAP_SYS_ADMIN for mount)
+# - no-new-privileges security option
+# - non-root user (sandbox)
+# Bypasses like \mount or /bin/mount will fail at syscall level
 alias sudo='echo "sudo: permission denied"'
 alias su='echo "su: permission denied"'
 alias docker='echo "docker: permission denied"'
@@ -85,6 +90,9 @@ ENV SHELL=/bin/bash
 ENV TERM=xterm-256color
 # Minimal PATH
 ENV PATH=/usr/local/bin:/usr/bin:/bin
+# BASH_ENV ensures .bashrc is sourced for non-interactive shells
+# This loads security aliases (mount, sudo, su, docker blocked)
+ENV BASH_ENV=/home/sandbox/.bashrc
 
 # Labels for identification
 LABEL org.opencontainers.image.title="Ash Sandbox"

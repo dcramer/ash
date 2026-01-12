@@ -70,6 +70,7 @@
   "enabledPlugins": {
     "plugin-dev@claude-code-plugins": true,
     "frontend-design@claude-code-plugins": true,
-    "sentry-skills@sentry-skills": true
+    "sentry-skills@sentry-skills": true,
+    "pr-review-toolkit@claude-plugins-official": true
   }
 }

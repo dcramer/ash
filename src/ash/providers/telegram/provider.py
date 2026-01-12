@@ -141,6 +141,21 @@ class TelegramProvider(Provider):
 
         return False
 
+    def _is_reply(self, message: TelegramMessage) -> bool:
+        """Check if this message is a reply to any message.
+
+        Used to allow replies in a conversation thread even without explicit
+        mention. The handler will verify the reply target is part of an
+        existing conversation.
+
+        Args:
+            message: Telegram message to check.
+
+        Returns:
+            True if message is a reply to another message.
+        """
+        return message.reply_to_message is not None
+
     def _strip_mention(self, text: str) -> str:
         """Remove bot mention from text.
 
@@ -245,6 +260,9 @@ class TelegramProvider(Provider):
     ) -> tuple[int, str | None] | None:
         """Check if a message should be processed (user + group access).
 
+        Group authorization implies user authorization within that group context.
+        DMs still require explicit user authorization.
+
         Args:
             message: Telegram message to check.
 
@@ -257,18 +275,20 @@ class TelegramProvider(Provider):
         user_id = message.from_user.id
         username = message.from_user.username
 
-        # Check user authorization
-        if not self._is_user_allowed(user_id, username):
-            logger.warning(f"Unauthorized user: {user_id} (@{username})")
-            return None
-
-        # Check group access
         is_group = message.chat.type in ("group", "supergroup")
+
         if is_group:
+            # Group authorization implies user authorization within that group
             if not self._is_group_allowed(message.chat.id):
                 logger.debug(f"Group not allowed: {message.chat.id}")
                 return None
-            if self._group_mode == "mention" and not self._is_mentioned(message):
+            if self._group_mode == "mention":
+                if not self._is_mentioned(message) and not self._is_reply(message):
+                    return None
+        else:
+            # DMs require explicit user authorization
+            if not self._is_user_allowed(user_id, username):
+                logger.warning(f"Unauthorized user: {user_id} (@{username})")
                 return None
 
         return user_id, username
@@ -280,6 +300,8 @@ class TelegramProvider(Provider):
         username: str | None,
         text: str,
         images: list[ImageAttachment] | None = None,
+        *,
+        was_mentioned: bool = False,
     ) -> IncomingMessage:
         """Convert a Telegram message to an IncomingMessage.
 
@@ -289,6 +311,7 @@ class TelegramProvider(Provider):
             username: Username (already validated).
             text: Processed text (with mentions stripped if needed).
             images: Optional image attachments.
+            was_mentioned: Whether the bot was explicitly @-mentioned.
 
         Returns:
             IncomingMessage for handler processing.
@@ -307,6 +330,7 @@ class TelegramProvider(Provider):
             metadata={
                 "chat_type": message.chat.type,
                 "chat_title": message.chat.title,
+                "was_mentioned": was_mentioned,
             },
             timestamp=message.date,
         )
@@ -440,12 +464,18 @@ class TelegramProvider(Provider):
 
             # Strip bot mention from caption if in group
             is_group = message.chat.type in ("group", "supergroup")
+            was_mentioned = is_group and self._is_mentioned(message)
             caption = message.caption or ""
             if is_group and caption:
                 caption = self._strip_mention(caption)
 
             incoming = self._to_incoming_message(
-                message, user_id, username, caption, images=[image]
+                message,
+                user_id,
+                username,
+                caption,
+                images=[image],
+                was_mentioned=was_mentioned,
             )
 
             if self._handler:
@@ -472,9 +502,12 @@ class TelegramProvider(Provider):
 
             # Strip bot mention from text if in group
             is_group = message.chat.type in ("group", "supergroup")
+            was_mentioned = is_group and self._is_mentioned(message)
             text = self._strip_mention(message.text) if is_group else message.text
 
-            incoming = self._to_incoming_message(message, user_id, username, text)
+            incoming = self._to_incoming_message(
+                message, user_id, username, text, was_mentioned=was_mentioned
+            )
 
             if self._handler:
                 try:

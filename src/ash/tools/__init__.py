@@ -3,7 +3,6 @@
 from ash.tools.base import Tool, ToolContext, ToolResult, build_sandbox_manager_config
 from ash.tools.builtin import (
     BashTool,
-    FileAccessTracker,
     ReadFileTool,
     WebFetchTool,
     WebSearchTool,
@@ -33,7 +32,6 @@ __all__ = [
     "create_summarizer_from_config",
     # Built-in tools
     "BashTool",
-    "FileAccessTracker",
     "ReadFileTool",
     "WebFetchTool",
     "WebSearchTool",

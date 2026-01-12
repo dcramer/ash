@@ -52,15 +52,18 @@ class SummarizationResult:
     error: str | None = None
 
     def to_metadata(self) -> dict:
-        """Convert to metadata dict for ToolResult."""
+        """Convert to metadata dict for ToolResult.
+
+        Note: full_output_path is intentionally excluded from agent-facing
+        metadata since it's a host path the agent cannot access.
+        """
         meta = {
             "summarized": self.summarized,
             "original_bytes": self.original_bytes,
         }
         if self.summarized:
             meta["summary_bytes"] = self.summary_bytes
-            if self.full_output_path:
-                meta["full_output_path"] = self.full_output_path
+            # full_output_path excluded - host path not accessible to agent
         if self.error:
             meta["summarization_error"] = self.error
         return meta
@@ -122,10 +125,9 @@ class ToolResultSummarizer:
             summary = await self._generate_summary(content, content_type)
             summary_bytes = len(summary.encode("utf-8"))
 
-            # Add reference to full output
-            if full_path:
-                summary += f"\n\n[Full output ({original_bytes:,} bytes): {full_path}]"
-                summary_bytes = len(summary.encode("utf-8"))
+            # Note: don't expose host temp path to agent
+            summary += f"\n\n[Summarized from {original_bytes:,} bytes]"
+            summary_bytes = len(summary.encode("utf-8"))
 
             self._stats["calls"] += 1
             self._stats["bytes_saved"] += original_bytes - summary_bytes

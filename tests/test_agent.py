@@ -709,15 +709,17 @@ class TestSystemPromptBuilder:
         """Test that build includes sandbox info."""
         prompt = prompt_builder.build()
         assert "Sandbox" in prompt
-        assert "Docker sandbox" in prompt
+        assert "sandboxed environment" in prompt
 
     def test_build_with_runtime_info(self, prompt_builder):
-        """Test that runtime info is included when provided."""
+        """Test that runtime info is included when provided.
+
+        Note: os, arch, python are intentionally excluded to prevent
+        host system awareness. Only model/provider/timezone/time are shown.
+        """
         from ash.core.prompt import PromptContext, RuntimeInfo
 
         runtime = RuntimeInfo(
-            os="Linux",
-            python="3.12.0",
             model="claude-test",
             provider="anthropic",
             timezone="America/New_York",
@@ -727,7 +729,8 @@ class TestSystemPromptBuilder:
         prompt = prompt_builder.build(context)
 
         assert "Runtime" in prompt
-        assert "os=Linux" in prompt
-        assert "python=3.12.0" in prompt
         assert "model=claude-test" in prompt
         assert "America/New_York" in prompt
+        # Host system info (os, arch, python) should NOT be present
+        assert "os=" not in prompt
+        assert "python=" not in prompt

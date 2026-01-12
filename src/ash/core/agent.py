@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
     from ash.db.models import Person
+    from ash.memory.extractor import MemoryExtractor
     from ash.memory.manager import MemoryManager, RetrievedContext
     from ash.skills import SkillExecutor, SkillRegistry
 
@@ -64,6 +65,11 @@ class AgentConfig:
     compaction_reserve_tokens: int = 16384  # Buffer to trigger compaction
     compaction_keep_recent_tokens: int = 20000  # Always keep recent context
     compaction_summary_max_tokens: int = 2000  # Max tokens for summary
+    # Memory extraction configuration
+    extraction_enabled: bool = True  # Enable background memory extraction
+    extraction_min_message_length: int = 20  # Skip for short messages
+    extraction_debounce_seconds: int = 30  # Min seconds between extractions
+    extraction_confidence_threshold: float = 0.7  # Min confidence to store
 
 
 @dataclass
@@ -109,6 +115,7 @@ class Agent:
         prompt_builder: SystemPromptBuilder,
         runtime: RuntimeInfo | None = None,
         memory_manager: MemoryManager | None = None,
+        memory_extractor: MemoryExtractor | None = None,
         config: AgentConfig | None = None,
     ):
         """Initialize agent.
@@ -119,6 +126,7 @@ class Agent:
             prompt_builder: System prompt builder with full context.
             runtime: Runtime information for prompt.
             memory_manager: Optional memory manager for context retrieval.
+            memory_extractor: Optional memory extractor for background extraction.
             config: Agent configuration.
         """
         self._llm = llm
@@ -126,7 +134,9 @@ class Agent:
         self._prompt_builder = prompt_builder
         self._runtime = runtime
         self._memory = memory_manager
+        self._extractor = memory_extractor
         self._config = config or AgentConfig()
+        self._last_extraction_time: float | None = None
 
     @property
     def system_prompt(self) -> str:
@@ -145,6 +155,7 @@ class Agent:
         known_people: list[Person] | None = None,
         conversation_gap_minutes: float | None = None,
         has_reply_context: bool = False,
+        session_path: str | None = None,
     ) -> str:
         """Build system prompt with optional memory context.
 
@@ -153,6 +164,7 @@ class Agent:
             known_people: List of known people for the user.
             conversation_gap_minutes: Time since last message in conversation.
             has_reply_context: Whether this message is a reply with context.
+            session_path: Path to the session file for self-inspection.
 
         Returns:
             Complete system prompt.
@@ -170,6 +182,7 @@ class Agent:
             known_people=known_people,
             conversation_gap_minutes=conversation_gap_minutes,
             has_reply_context=has_reply_context,
+            session_path=session_path,
         )
         return self._prompt_builder.build(prompt_context)
 
@@ -258,6 +271,7 @@ class Agent:
         user_message: str,
         session: SessionState,
         user_id: str | None,
+        session_path: str | None = None,
     ) -> _MessageSetup:
         """Prepare context needed before processing a message.
 
@@ -268,6 +282,7 @@ class Agent:
             user_message: The user's message.
             session: Session state.
             user_id: Optional user ID override.
+            session_path: Optional path to session file for agent self-inspection.
 
         Returns:
             Setup data for message processing.
@@ -302,6 +317,7 @@ class Agent:
             known_people=known_people,
             conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
             has_reply_context=session.metadata.get("has_reply_context", False),
+            session_path=session_path,
         )
 
         # Calculate message token budget
@@ -318,12 +334,178 @@ class Agent:
             message_budget=message_budget,
         )
 
+    def _should_extract_memories(self, user_message: str) -> bool:
+        """Check if memory extraction should run for this message.
+
+        Uses lightweight heuristics to skip obviously non-memorable exchanges.
+
+        Args:
+            user_message: The user's message.
+
+        Returns:
+            True if extraction should proceed.
+        """
+        import time
+
+        # Check if extraction is enabled
+        if not self._config.extraction_enabled:
+            return False
+
+        # Check if extractor and memory manager are available
+        if not self._extractor or not self._memory:
+            return False
+
+        # Skip very short messages
+        if len(user_message) < self._config.extraction_min_message_length:
+            return False
+
+        # Debounce - skip if recent extraction
+        if self._last_extraction_time is not None:
+            elapsed = time.time() - self._last_extraction_time
+            if elapsed < self._config.extraction_debounce_seconds:
+                return False
+
+        return True
+
+    async def _extract_memories_background(
+        self,
+        session: SessionState,
+        user_id: str,
+        chat_id: str | None = None,
+    ) -> None:
+        """Background task to extract and store memories from conversation.
+
+        Args:
+            session: Session with conversation messages.
+            user_id: User ID for memory ownership.
+            chat_id: Optional chat ID for group memory scoping.
+        """
+        import time
+
+        from ash.llm.types import Message as LLMMessage
+        from ash.llm.types import Role
+
+        # Guard: should not be called without extractor and memory
+        if not self._extractor or not self._memory:
+            return
+
+        try:
+            # Update extraction time
+            self._last_extraction_time = time.time()
+
+            # Get existing memories to help extractor avoid duplicates
+            existing_memories: list[str] = []
+            if self._memory:
+                try:
+                    # Get recent context to show what's already known
+                    context = await self._memory.get_context_for_message(
+                        user_id=user_id,
+                        user_message="",  # Empty query gets recent memories
+                        chat_id=chat_id,
+                        max_memories=20,
+                    )
+                    existing_memories = [m.content for m in context.memories]
+                except Exception:
+                    logger.debug("Failed to get existing memories for extraction")
+
+            # Convert session messages to LLM Message format
+            llm_messages: list[LLMMessage] = []
+            for msg in session.messages:
+                if msg.role == Role.USER or msg.role == Role.ASSISTANT:
+                    text = msg.get_text()
+                    if text.strip():
+                        llm_messages.append(msg)
+
+            if not llm_messages:
+                return
+
+            # Run extraction
+            facts = await self._extractor.extract_from_conversation(
+                messages=llm_messages,
+                existing_memories=existing_memories,
+            )
+
+            # Store extracted facts
+            for fact in facts:
+                if fact.confidence < self._config.extraction_confidence_threshold:
+                    continue
+
+                try:
+                    # Resolve subjects to person IDs if needed
+                    subject_person_ids: list[str] | None = None
+                    if fact.subjects:  # self._memory guaranteed non-None by guard above
+                        subject_person_ids = []
+                        for subject in fact.subjects:
+                            try:
+                                result = await self._memory.resolve_or_create_person(
+                                    owner_user_id=user_id,
+                                    reference=subject,
+                                    content_hint=fact.content,
+                                )
+                                subject_person_ids.append(result.person_id)
+                            except Exception:
+                                logger.debug("Failed to resolve subject: %s", subject)
+
+                    # Store the memory
+                    await self._memory.add_memory(
+                        content=fact.content,
+                        source="background_extraction",
+                        owner_user_id=user_id if not fact.shared else None,
+                        chat_id=chat_id if fact.shared else None,
+                        subject_person_ids=subject_person_ids or None,
+                    )
+
+                    logger.debug(
+                        "Extracted memory: %s (confidence=%.2f)",
+                        fact.content[:50],
+                        fact.confidence,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to store extracted fact: %s",
+                        fact.content[:50],
+                        exc_info=True,
+                    )
+
+        except Exception:
+            logger.warning("Background memory extraction failed", exc_info=True)
+
+    def _spawn_memory_extraction(
+        self,
+        session: SessionState,
+        user_id: str,
+        chat_id: str | None = None,
+    ) -> None:
+        """Spawn a background task to extract memories (non-blocking).
+
+        Args:
+            session: Session with conversation messages.
+            user_id: User ID for memory ownership.
+            chat_id: Optional chat ID for group memory scoping.
+        """
+        import asyncio
+
+        def _handle_extraction_error(task: asyncio.Task[None]) -> None:
+            """Log any unhandled exceptions from the extraction task."""
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc:
+                logger.warning("Memory extraction task failed: %s", exc)
+
+        task = asyncio.create_task(
+            self._extract_memories_background(session, user_id, chat_id),
+            name="memory_extraction",
+        )
+        task.add_done_callback(_handle_extraction_error)
+
     async def process_message(
         self,
         user_message: str,
         session: SessionState,
         user_id: str | None = None,
         on_tool_start: OnToolStartCallback | None = None,
+        session_path: str | None = None,
     ) -> AgentResponse:
         """Process a user message and return response.
 
@@ -338,12 +520,15 @@ class Agent:
                 When provided, this is used for memory retrieval and known_people lookup.
             on_tool_start: Optional callback invoked before each tool execution.
                 Receives tool name and input dict.
+            session_path: Optional path to session file for agent self-inspection.
 
         Returns:
             Agent response.
         """
         # Prepare context (memory, known people, system prompt, token budget)
-        setup = await self._prepare_message_context(user_message, session, user_id)
+        setup = await self._prepare_message_context(
+            user_message, session, user_id, session_path
+        )
 
         # Add user message to session
         session.add_user_message(user_message)
@@ -380,6 +565,12 @@ class Agent:
             if not pending_tools:
                 # No tool calls, return text response
                 final_text = response.message.get_text() or ""
+
+                # Spawn background memory extraction (non-blocking)
+                if self._should_extract_memories(user_message):
+                    self._spawn_memory_extraction(
+                        session, setup.effective_user_id, session.chat_id
+                    )
 
                 return AgentResponse(
                     text=final_text,
@@ -431,6 +622,12 @@ class Agent:
         )
         final_text = "I've reached the maximum number of tool calls. Please try again with a simpler request."
 
+        # Spawn background memory extraction even on max iterations
+        if self._should_extract_memories(user_message):
+            self._spawn_memory_extraction(
+                session, setup.effective_user_id, session.chat_id
+            )
+
         return AgentResponse(
             text=final_text,
             tool_calls=tool_calls,
@@ -444,6 +641,7 @@ class Agent:
         session: SessionState,
         user_id: str | None = None,
         on_tool_start: OnToolStartCallback | None = None,
+        session_path: str | None = None,
     ) -> AsyncIterator[str]:
         """Process a user message with streaming response.
 
@@ -458,12 +656,15 @@ class Agent:
                 When provided, this is used for memory retrieval and known_people lookup.
             on_tool_start: Optional callback invoked before each tool execution.
                 Receives tool name and input dict.
+            session_path: Optional path to session file for agent self-inspection.
 
         Yields:
             Text chunks.
         """
         # Prepare context (memory, known people, system prompt, token budget)
-        setup = await self._prepare_message_context(user_message, session, user_id)
+        setup = await self._prepare_message_context(
+            user_message, session, user_id, session_path
+        )
 
         # Add user message to session
         session.add_user_message(user_message)
@@ -544,13 +745,21 @@ class Agent:
             if content_blocks:
                 session.add_assistant_message(content_blocks)
             else:
-                # Empty response
+                # Empty response - spawn extraction before returning
+                if self._should_extract_memories(user_message):
+                    self._spawn_memory_extraction(
+                        session, setup.effective_user_id, session.chat_id
+                    )
                 return
 
             # Get tool uses from what we just added
             pending_tools = [b for b in content_blocks if isinstance(b, ToolUse)]
             if not pending_tools:
-                # No tool calls, we're done
+                # No tool calls - spawn extraction before returning
+                if self._should_extract_memories(user_message):
+                    self._spawn_memory_extraction(
+                        session, setup.effective_user_id, session.chat_id
+                    )
                 return
 
             # Execute tools (non-streaming) with effective user_id (supports group chats)
@@ -580,7 +789,11 @@ class Agent:
                     is_error=result.is_error,
                 )
 
-        # Max iterations reached
+        # Max iterations reached - spawn extraction before final yield
+        if self._should_extract_memories(user_message):
+            self._spawn_memory_extraction(
+                session, setup.effective_user_id, session.chat_id
+            )
         yield "\n\n[Max tool iterations reached]"
 
 
@@ -637,7 +850,7 @@ async def create_agent(
     )
     from ash.skills import SkillExecutor, SkillRegistry
     from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
-    from ash.tools.builtin.files import FileAccessTracker, ReadFileTool, WriteFileTool
+    from ash.tools.builtin.files import ReadFileTool, WriteFileTool
     from ash.tools.builtin.memory import RecallTool, RememberTool
     from ash.tools.builtin.schedule import ScheduleTaskTool
     from ash.tools.builtin.search_cache import SearchCache
@@ -656,22 +869,21 @@ async def create_agent(
     # Create tool registry with core tools
     tool_registry = ToolRegistry()
 
-    # Register bash tool (always available)
-    tool_registry.register(
-        BashTool(
-            sandbox_config=config.sandbox,
-            workspace_path=config.workspace,
-        )
-    )
+    # Create shared sandbox executor for all sandbox-based tools
+    from ash.sandbox import SandboxExecutor
+    from ash.tools.base import build_sandbox_manager_config
 
-    # Register file tools (always available)
-    file_tracker = FileAccessTracker()
-    tool_registry.register(
-        ReadFileTool(workspace_path=config.workspace, tracker=file_tracker)
+    sandbox_manager_config = build_sandbox_manager_config(
+        config.sandbox, config.workspace
     )
-    tool_registry.register(
-        WriteFileTool(workspace_path=config.workspace, tracker=file_tracker)
-    )
+    shared_executor = SandboxExecutor(config=sandbox_manager_config)
+
+    # Register bash tool (uses shared executor)
+    tool_registry.register(BashTool(executor=shared_executor))
+
+    # Register file tools (use shared executor)
+    tool_registry.register(ReadFileTool(executor=shared_executor))
+    tool_registry.register(WriteFileTool(executor=shared_executor))
 
     # Register schedule tool (always available)
     schedule_file = config.workspace / "schedule.jsonl"
@@ -754,6 +966,37 @@ async def create_agent(
         except Exception:
             logger.warning("Failed to initialize memory", exc_info=True)
 
+    # Create memory extractor for background extraction (if memory and extraction enabled)
+    from ash.memory.extractor import MemoryExtractor
+
+    memory_extractor: MemoryExtractor | None = None
+    if memory_manager and config.memory.extraction_enabled:
+        # Resolve extraction model - use configured model or fallback to default
+        extraction_model_alias = config.memory.extraction_model or model_alias
+        try:
+            extraction_model_config = config.get_model(extraction_model_alias)
+            extraction_api_key = config.resolve_api_key(extraction_model_alias)
+
+            # Create a separate LLM provider for extraction
+            extraction_llm = create_llm_provider(
+                extraction_model_config.provider,
+                api_key=extraction_api_key.get_secret_value()
+                if extraction_api_key
+                else None,
+            )
+
+            memory_extractor = MemoryExtractor(
+                llm=extraction_llm,
+                model=extraction_model_config.model,
+                confidence_threshold=config.memory.extraction_confidence_threshold,
+            )
+            logger.debug(
+                "Memory extractor initialized (model=%s)",
+                extraction_model_config.model,
+            )
+        except Exception:
+            logger.warning("Failed to initialize memory extractor", exc_info=True)
+
     # Create tool executor (needed by skill executor)
     tool_executor = ToolExecutor(tool_registry)
 
@@ -763,7 +1006,6 @@ async def create_agent(
     logger.info(f"Discovered {len(skill_registry)} skills from workspace")
 
     # Create skill executor and register skill tools
-    skill_executor: SkillExecutor | None = None
     skill_executor = SkillExecutor(skill_registry, tool_executor, config)
     tool_registry.register(UseSkillTool(skill_registry, skill_executor))
     tool_registry.register(WriteSkillTool(skill_executor))
@@ -798,6 +1040,7 @@ async def create_agent(
         prompt_builder=prompt_builder,
         runtime=runtime,
         memory_manager=memory_manager,
+        memory_extractor=memory_extractor,
         config=AgentConfig(
             model=model_config.model,
             max_tokens=model_config.max_tokens,
@@ -810,6 +1053,10 @@ async def create_agent(
             compaction_reserve_tokens=config.memory.compaction_reserve_tokens,
             compaction_keep_recent_tokens=config.memory.compaction_keep_recent_tokens,
             compaction_summary_max_tokens=config.memory.compaction_summary_max_tokens,
+            extraction_enabled=config.memory.extraction_enabled,
+            extraction_min_message_length=config.memory.extraction_min_message_length,
+            extraction_debounce_seconds=config.memory.extraction_debounce_seconds,
+            extraction_confidence_threshold=config.memory.extraction_confidence_threshold,
         ),
     )
 

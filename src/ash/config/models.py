@@ -54,7 +54,7 @@ class TelegramConfig(BaseModel):
     # Group chat settings
     allowed_groups: list[
         str
-    ] = []  # Group IDs (empty = allow all with authorized users)
+    ] = []  # Group IDs (empty = all groups; authorized groups imply user auth)
     group_mode: Literal["mention", "always"] = "mention"  # How to respond in groups
 
 
@@ -122,6 +122,14 @@ class MemoryConfig(BaseModel):
     # Retention configuration
     auto_gc: bool = True  # Run gc on server startup
     max_entries: int | None = None  # Cap on active memories (None = unlimited)
+    # Background extraction configuration
+    extraction_enabled: bool = True  # Enable automatic memory extraction
+    extraction_model: str | None = (
+        None  # Model alias for extraction (None = use default)
+    )
+    extraction_min_message_length: int = 20  # Skip extraction for short messages
+    extraction_debounce_seconds: int = 30  # Minimum seconds between extractions
+    extraction_confidence_threshold: float = 0.7  # Minimum confidence to store
 
 
 class ConversationConfig(BaseModel):

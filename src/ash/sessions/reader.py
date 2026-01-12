@@ -159,6 +159,16 @@ class SessionReader:
         """
         from ash.core.tokens import estimate_message_tokens
 
+        # First pass: collect all tool_use IDs from both ToolUseEntry and message content
+        tool_use_ids: set[str] = set()
+        for entry in entries:
+            if isinstance(entry, ToolUseEntry):
+                tool_use_ids.add(entry.id)
+            elif isinstance(entry, MessageEntry) and isinstance(entry.content, list):
+                for block in entry.content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        tool_use_ids.add(block["id"])
+
         messages: list[Message] = []
         message_ids: list[str] = []
         token_counts: list[int] = []
@@ -191,6 +201,9 @@ class SessionReader:
                     flush_pending_results()
 
                     content = self._convert_content(entry.content)
+                    # Skip messages with empty content (would be rejected by API)
+                    if not content:
+                        continue
                     if include_timestamps and entry.created_at:
                         content = self._prefix_with_timestamp(content, entry.created_at)
 
@@ -203,13 +216,16 @@ class SessionReader:
                     )
 
                 case ToolResultEntry():
-                    pending_results.append(
-                        ToolResult(
-                            tool_use_id=entry.tool_use_id,
-                            content=entry.output,
-                            is_error=not entry.success,
+                    # Only include tool results that have matching tool_uses
+                    if entry.tool_use_id in tool_use_ids:
+                        pending_results.append(
+                            ToolResult(
+                                tool_use_id=entry.tool_use_id,
+                                content=entry.output,
+                                is_error=not entry.success,
+                            )
                         )
-                    )
+                    # Silently skip orphaned results - they'll be cleaned up
 
         flush_pending_results()
         return messages, message_ids, token_counts

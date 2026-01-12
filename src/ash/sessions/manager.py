@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -134,6 +135,7 @@ class SessionManager:
         content: str,
         token_count: int | None = None,
         metadata: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> str:
         """Add a user message to the session.
 
@@ -141,6 +143,7 @@ class SessionManager:
             content: Message content.
             token_count: Optional pre-computed token count.
             metadata: Optional metadata (e.g., external_id for deduplication).
+            user_id: Override user ID (for group chats where session is shared).
 
         Returns:
             Message ID.
@@ -151,7 +154,7 @@ class SessionManager:
             role="user",
             content=content,
             token_count=token_count,
-            user_id=self.user_id,
+            user_id=user_id or self.user_id,
             metadata=metadata,
         )
         await self._writer.write_message(entry)
@@ -350,6 +353,18 @@ class SessionManager:
             List of matching MessageEntry.
         """
         return await self._reader.search_messages(query, limit)
+
+    async def get_last_message_time(self) -> datetime | None:
+        """Get the timestamp of the last message in the session.
+
+        Returns:
+            Datetime of last message, or None if no messages.
+        """
+        entries = await self._reader.load_entries()
+        msg_entries = [e for e in entries if isinstance(e, MessageEntry)]
+        if not msg_entries:
+            return None
+        return msg_entries[-1].created_at
 
     @classmethod
     async def list_sessions(

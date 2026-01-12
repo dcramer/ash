@@ -31,7 +31,11 @@ class TruncationResult:
     full_output_path: str | None = None
 
     def to_metadata(self) -> dict:
-        """Convert to metadata dict for ToolResult."""
+        """Convert to metadata dict for ToolResult.
+
+        Note: full_output_path is intentionally excluded from agent-facing
+        metadata since it's a host path the agent cannot access.
+        """
         meta = {
             "truncated": self.truncated,
             "total_lines": self.total_lines,
@@ -41,8 +45,7 @@ class TruncationResult:
             meta["truncation_type"] = self.truncation_type
             meta["output_lines"] = self.output_lines
             meta["output_bytes"] = self.output_bytes
-            if self.full_output_path:
-                meta["full_output_path"] = self.full_output_path
+            # full_output_path excluded - host path not accessible to agent
         return meta
 
 
@@ -133,18 +136,14 @@ def _truncate_output(
     if save_full:
         full_path = _save_to_temp(output, prefix)
 
-    # Add truncation notice
+    # Add truncation notice (don't expose host temp path to agent)
     if keep_start:
-        notice = f"\n\n... [truncated: {total_lines} total lines, {total_bytes:,} bytes"
-        if full_path:
-            notice += f" - full output: {full_path}"
-        notice += "]"
+        notice = (
+            f"\n\n... [truncated: {total_lines} total lines, {total_bytes:,} bytes]"
+        )
         truncated_content += notice
     else:
-        notice = f"[truncated: showing last {len(kept_lines)} of {total_lines} lines, {total_bytes:,} total bytes"
-        if full_path:
-            notice += f" - full output: {full_path}"
-        notice += "]\n\n"
+        notice = f"[truncated: showing last {len(kept_lines)} of {total_lines} lines, {total_bytes:,} total bytes]\n\n"
         truncated_content = notice + truncated_content
 
     return TruncationResult(

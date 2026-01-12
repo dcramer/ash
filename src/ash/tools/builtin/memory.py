@@ -12,25 +12,17 @@ logger = logging.getLogger(__name__)
 
 
 class RememberTool(Tool):
-    """Store facts about the user in long-term memory.
+    """Store facts when explicitly asked by the user.
 
-    Memory is for facts ABOUT THE USER, not logs of what you did.
+    This tool is for EXPLICIT user requests only, such as:
+    - "Remember that I'm allergic to peanuts"
+    - "Save this: my wife's name is Sarah"
+    - "Don't forget my anniversary is June 15"
 
-    REMEMBER:
-    - User preferences: "User prefers dark mode", "User's timezone is PST"
-    - People: "Sarah is user's wife", "Sarah likes Italian food"
-    - Important dates: "User's anniversary is June 15"
-    - Explicit requests: "Remember that I'm allergic to peanuts"
-
-    NEVER REMEMBER:
-    - Actions you took: "Created skill X", "Saved file Y", "Ran command Z"
-    - System state: Skill existence, file contents, command outputs
-    - Credentials: Passwords, API keys, tokens
-    - Speech patterns: "User says 'bud'", "User uses emojis"
-    - Verbatim code or long text blocks
-
-    Principle: Use filesystem as source of truth for operational state.
-    If something can be verified from disk, don't store it in memory.
+    Memory extraction happens automatically in the background - you do NOT
+    need to decide what's worth remembering. Only use this tool when:
+    1. User explicitly asks you to remember something
+    2. User says "remember", "save", "don't forget", etc.
 
     Use 'facts' array to batch multiple facts in one call.
     """
@@ -50,12 +42,10 @@ class RememberTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Store facts about the user or people in their life. "
-            "ONLY for: preferences, relationships, important dates, explicit requests. "
-            "NEVER for: actions you took, skills created, files saved, commands run, "
-            "system state, credentials, speech patterns. "
-            "Good: 'User prefers Python', 'Sarah's birthday is March 15'. "
-            "Bad: 'Created skill X', 'Ran command Y', 'User says bud'."
+            "Store facts when user explicitly asks you to remember something. "
+            "Memory extraction is automatic - only use this for explicit requests "
+            "like 'remember that...', 'save this...', 'don't forget...'. "
+            "Example: User says 'remember my wife is Sarah' -> use this tool."
         )
 
     @property

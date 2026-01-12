@@ -10,40 +10,19 @@ from typing import TYPE_CHECKING, Any
 from ash.config.models import ConversationConfig
 from ash.core import Agent, SessionState
 from ash.core.agent import CompactionInfo
+from ash.core.prompt import format_gap_duration
 from ash.core.tokens import estimate_tokens
 from ash.db import Database
+from ash.llm.types import Message, Role
 from ash.memory import MemoryStore
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.sessions import MessageEntry, SessionManager
+from ash.sessions.types import session_key
 
 if TYPE_CHECKING:
     from ash.providers.telegram.provider import TelegramProvider
 
 logger = logging.getLogger(__name__)
-
-
-def format_gap_duration(minutes: float) -> str:
-    """Format a time gap in human-readable form.
-
-    Args:
-        minutes: Gap duration in minutes.
-
-    Returns:
-        Human-readable duration string.
-    """
-    if minutes < 60:
-        return f"{int(minutes)} minutes"
-
-    hours = minutes / 60
-    if hours < 2:
-        return "about an hour"
-    if hours < 24:
-        return f"{int(hours)} hours"
-
-    days = hours / 24
-    if days < 2:
-        return "about a day"
-    return f"{int(days)} days"
 
 
 def format_tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
@@ -146,15 +125,14 @@ class TelegramMessageHandler:
         Returns:
             SessionManager instance.
         """
-        manager = SessionManager(
-            provider=self._provider.name,
-            chat_id=chat_id,
-            user_id=user_id,
-        )
-        session_key = manager.session_key
-        if session_key not in self._session_managers:
-            self._session_managers[session_key] = manager
-        return self._session_managers[session_key]
+        key = session_key(self._provider.name, chat_id, user_id)
+        if key not in self._session_managers:
+            self._session_managers[key] = SessionManager(
+                provider=self._provider.name,
+                chat_id=chat_id,
+                user_id=user_id,
+            )
+        return self._session_managers[key]
 
     async def _load_reply_context(
         self,
@@ -204,14 +182,22 @@ class TelegramMessageHandler:
                     )
                     return
 
-            # Handle image messages
-            if message.has_images:
-                await self._handle_image_message(message)
-                return
-
             # Check for duplicate message (already processed)
             if await self._is_duplicate_message(message):
                 logger.info(f"Skipping duplicate message {message.id}")
+                return
+
+            # For group replies without explicit mention, verify the reply target
+            # is part of an existing conversation with the bot
+            if await self._should_skip_reply(message):
+                logger.debug(
+                    f"Skipping reply {message.id} - target not in conversation"
+                )
+                return
+
+            # Handle image messages
+            if message.has_images:
+                await self._handle_image_message(message)
                 return
 
             # Acquire per-chat lock to serialize message handling
@@ -306,6 +292,7 @@ class TelegramMessageHandler:
                     session,
                     user_id=message.user_id,
                     on_tool_start=on_tool_start,
+                    session_path=session.metadata.get("session_path"),
                 ):
                     response_content += chunk
 
@@ -335,6 +322,7 @@ class TelegramMessageHandler:
                     session,
                     user_id=message.user_id,
                     on_tool_start=on_tool_start,
+                    session_path=session.metadata.get("session_path"),
                 )
 
                 if thinking_msg_id:
@@ -383,6 +371,41 @@ class TelegramMessageHandler:
         session_manager = self._get_session_manager(message.chat_id, message.user_id)
         return await session_manager.has_message_with_external_id(message.id)
 
+    async def _should_skip_reply(self, message: IncomingMessage) -> bool:
+        """Check if a reply message should be skipped.
+
+        For group messages that are replies without explicit @-mention,
+        we only process them if the reply target is part of an existing
+        conversation with the bot.
+
+        Args:
+            message: Incoming message to check.
+
+        Returns:
+            True if message should be skipped.
+        """
+        # Only applies to group messages
+        chat_type = message.metadata.get("chat_type", "")
+        if chat_type not in ("group", "supergroup"):
+            return False
+
+        # Only applies to replies
+        if not message.reply_to_message_id:
+            return False
+
+        # If explicitly mentioned, don't skip
+        if message.metadata.get("was_mentioned", False):
+            return False
+
+        # Check if reply target is in our conversation history
+        session_manager = self._get_session_manager(message.chat_id, message.user_id)
+        target = await session_manager.get_message_by_external_id(
+            message.reply_to_message_id
+        )
+
+        # Skip if reply target is not in our conversation
+        return target is None
+
     async def _get_or_create_session(
         self,
         message: IncomingMessage,
@@ -417,12 +440,9 @@ class TelegramMessageHandler:
         # Calculate gap since last message
         gap_minutes: float | None = None
         if messages:
-            # Get timestamp from last message
-            entries = await session_manager._reader.load_entries()
-            msg_entries = [e for e in entries if isinstance(e, MessageEntry)]
-            if msg_entries:
-                last_message_time = msg_entries[-1].created_at.replace(tzinfo=UTC)
-                gap = datetime.now(UTC) - last_message_time
+            last_message_time = await session_manager.get_last_message_time()
+            if last_message_time:
+                gap = datetime.now(UTC) - last_message_time.replace(tzinfo=UTC)
                 gap_minutes = gap.total_seconds() / 60
 
         # Load reply context if this is a reply
@@ -448,6 +468,11 @@ class TelegramMessageHandler:
         if message.display_name:
             session.metadata["display_name"] = message.display_name
 
+        # Store session path for agent self-inspection
+        session.metadata["session_path"] = str(
+            session_manager.session_dir / "context.jsonl"
+        )
+
         # Store gap in session metadata for prompt builder
         if gap_minutes is not None:
             session.metadata["conversation_gap_minutes"] = gap_minutes
@@ -468,9 +493,6 @@ class TelegramMessageHandler:
             existing_ids = set(message_ids)
             for entry in reply_context:
                 if entry.id not in existing_ids:
-                    # Convert MessageEntry to Message
-                    from ash.llm.types import Message, Role
-
                     role = Role(entry.role)
                     content = (
                         entry.content
@@ -561,6 +583,7 @@ class TelegramMessageHandler:
             session,
             user_id=message.user_id,
             on_tool_start=on_tool_start,
+            session_path=session.metadata.get("session_path"),
         ):
             response_content += chunk
             elapsed = time.time() - start_time
@@ -671,6 +694,7 @@ class TelegramMessageHandler:
                 session,
                 user_id=message.user_id,
                 on_tool_start=on_tool_start,
+                session_path=session.metadata.get("session_path"),
             )
         finally:
             # Stop typing indicator
@@ -773,6 +797,7 @@ class TelegramMessageHandler:
             content=user_message,
             token_count=estimate_tokens(user_message),
             metadata=user_metadata if user_metadata else None,
+            user_id=user_id,
         )
 
         if assistant_message:

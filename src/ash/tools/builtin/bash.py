@@ -31,17 +31,24 @@ class BashTool(Tool):
 
     def __init__(
         self,
+        executor: SandboxExecutor | None = None,
         sandbox_config: "SandboxConfig | None" = None,
         workspace_path: Path | None = None,
     ):
         """Initialize bash tool.
 
         Args:
-            sandbox_config: Sandbox configuration (pydantic model from config).
+            executor: Shared sandbox executor (preferred).
+            sandbox_config: Sandbox configuration (used if executor not provided).
             workspace_path: Path to workspace to mount in sandbox.
         """
-        manager_config = build_sandbox_manager_config(sandbox_config, workspace_path)
-        self._executor = SandboxExecutor(config=manager_config)
+        if executor:
+            self._executor = executor
+        else:
+            manager_config = build_sandbox_manager_config(
+                sandbox_config, workspace_path
+            )
+            self._executor = SandboxExecutor(config=manager_config)
 
     @property
     def name(self) -> str:
@@ -131,16 +138,16 @@ class BashTool(Tool):
                 exit_code=result.exit_code,
                 **truncation.to_metadata(),
             )
-        else:
-            # Command failed but didn't error
-            return ToolResult(
-                content=f"Exit code {result.exit_code}:\n{truncation.content}",
-                is_error=False,  # Non-zero exit is not an error, just a result
-                metadata={
-                    "exit_code": result.exit_code,
-                    **truncation.to_metadata(),
-                },
-            )
+
+        # Command failed but didn't error - non-zero exit is a result, not an error
+        return ToolResult(
+            content=f"Exit code {result.exit_code}:\n{truncation.content}",
+            is_error=False,
+            metadata={
+                "exit_code": result.exit_code,
+                **truncation.to_metadata(),
+            },
+        )
 
     async def cleanup(self) -> None:
         """Clean up sandbox resources."""

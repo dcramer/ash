@@ -294,6 +294,9 @@ def validate_tool_pairs(
                 result_msgs.append(Message(role=msg.role, content=valid_content))
                 result_ids.append(msg_id)
         else:
+            # Skip messages with empty content (would be rejected by API)
+            if not msg.content:
+                continue
             result_msgs.append(msg)
             result_ids.append(msg_id)
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import platform
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -39,11 +38,12 @@ def format_gap_duration(minutes: float) -> str:
 
 @dataclass
 class RuntimeInfo:
-    """Runtime information for system prompt."""
+    """Runtime information for system prompt.
 
-    os: str | None = None
-    arch: str | None = None
-    python: str | None = None
+    Note: Host system details (os, arch, python) are intentionally excluded
+    to prevent the agent from being host-system aware.
+    """
+
     model: str | None = None
     provider: str | None = None
     timezone: str | None = None
@@ -69,9 +69,6 @@ class RuntimeInfo:
         from datetime import UTC
 
         return cls(
-            os=platform.system(),
-            arch=platform.machine(),
-            python=platform.python_version(),
             model=model,
             provider=provider,
             timezone=timezone or "UTC",
@@ -90,6 +87,8 @@ class PromptContext:
     # Conversation context
     conversation_gap_minutes: float | None = None
     has_reply_context: bool = False
+    # Session info
+    session_path: str | None = None
 
 
 class SystemPromptBuilder:
@@ -190,6 +189,11 @@ class SystemPromptBuilder:
         if conversation_section:
             parts.append(f"\n\n{conversation_section}")
 
+        # 11. Session info
+        session_section = self._build_session_section(context)
+        if session_section:
+            parts.append(f"\n\n{session_section}")
+
         return "".join(parts)
 
     def _build_tools_section(self) -> str:
@@ -278,7 +282,7 @@ class SystemPromptBuilder:
         lines = [
             "## Workspace",
             "",
-            f"Working directory: {self._config.workspace}",
+            "Working directory: /workspace",
             "",
             "### Scheduling",
             "",
@@ -299,19 +303,17 @@ class SystemPromptBuilder:
         """
         sandbox = self._config.sandbox
 
+        # Only expose what the agent needs to know, not implementation details
         lines = [
             "## Sandbox",
             "",
-            "Commands execute in a Docker sandbox with security restrictions.",
-            f"- Workspace access: {sandbox.workspace_access}",
-            f"- Memory limit: {sandbox.memory_limit}",
-            f"- Timeout: {sandbox.timeout}s",
+            "Commands execute in a sandboxed environment.",
         ]
 
         if sandbox.network_mode == "none":
-            lines.append("- Network: isolated (no external access)")
+            lines.append("Network access is disabled.")
         else:
-            lines.append("- Network: bridge (has external access)")
+            lines.append("Network access is enabled.")
 
         return "\n".join(lines)
 
@@ -324,12 +326,8 @@ class SystemPromptBuilder:
         Returns:
             Runtime section string.
         """
+        # Only expose model/provider info, not host system details (os, arch, python)
         info_parts = []
-        if runtime.os:
-            arch_suffix = f" ({runtime.arch})" if runtime.arch else ""
-            info_parts.append(f"os={runtime.os}{arch_suffix}")
-        if runtime.python:
-            info_parts.append(f"python={runtime.python}")
         if runtime.model:
             info_parts.append(f"model={runtime.model}")
         if runtime.provider:
@@ -341,7 +339,7 @@ class SystemPromptBuilder:
             lines.append(f"Runtime: {' | '.join(info_parts)}")
 
         if runtime.timezone or runtime.time:
-            tz = runtime.timezone or "system"
+            tz = runtime.timezone or "UTC"
             time = runtime.time or "unknown"
             lines.append(f"Timezone: {tz}, Current time: {time}")
 
@@ -388,8 +386,23 @@ class SystemPromptBuilder:
         Returns:
             Memory section string or empty if no context.
         """
-        context_items: list[str] = []
+        parts: list[str] = []
 
+        # Always include memory system guidance
+        guidance = (
+            "## Memory\n\n"
+            "Your memory works automatically. Facts about users, their preferences, "
+            "and people in their lives are extracted and stored in the background "
+            "after each exchange. You don't need to decide what to remember.\n\n"
+            "When a user explicitly asks you to remember something (e.g., "
+            '"remember that I prefer dark mode"), use the remember tool to '
+            "guarantee it's stored, then confirm to them. For everything else, "
+            "trust the automatic extraction."
+        )
+        parts.append(guidance)
+
+        # Add retrieved memories if any
+        context_items: list[str] = []
         for item in memory.memories:
             subject_attr = ""
             if item.metadata and item.metadata.get("subject_name"):
@@ -397,14 +410,14 @@ class SystemPromptBuilder:
             context_items.append(f"- [Memory{subject_attr}] {item.content}")
 
         if context_items:
-            header = (
-                "## Relevant Context from Memory\n\n"
-                "The following information has been automatically retrieved. "
+            retrieved_header = (
+                "\n\n### Relevant Context from Memory\n\n"
+                "The following has been automatically retrieved. "
                 "Use it directly - no need to call the recall tool.\n\n"
             )
-            return header + "\n".join(context_items)
+            parts.append(retrieved_header + "\n".join(context_items))
 
-        return ""
+        return "".join(parts)
 
     def _build_conversation_context_section(self, context: PromptContext) -> str:
         """Build conversation context section with gap signaling.
@@ -434,4 +447,25 @@ class SystemPromptBuilder:
             "The user may be starting a new topic or continuing a previous discussion."
         )
 
+        return "\n".join(lines)
+
+    def _build_session_section(self, context: PromptContext) -> str:
+        """Build session information section.
+
+        Args:
+            context: Prompt context with session path.
+
+        Returns:
+            Session section string or empty if no path.
+        """
+        if not context.session_path:
+            return ""
+
+        lines = [
+            "## Session",
+            "",
+            f"Conversation history: {context.session_path}",
+            "",
+            "You can read this file with `read_file` to review past context.",
+        ]
         return "\n".join(lines)
