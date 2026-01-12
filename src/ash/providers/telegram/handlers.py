@@ -25,6 +25,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def escape_markdown(text: str) -> str:
+    """Escape markdown special characters for Telegram.
+
+    Args:
+        text: Text to escape.
+
+    Returns:
+        Text with underscores escaped.
+    """
+    return text.replace("_", "\\_")
+
+
 def format_tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
     """Format tool execution into a brief status message.
 
@@ -271,17 +283,19 @@ class TelegramMessageHandler:
                 if not brief:
                     return
 
+                # Escape underscores in brief to avoid breaking markdown italics
+                safe_brief = escape_markdown(brief)
                 if thinking_msg_id is None:
                     thinking_msg_id = await self._provider.send(
                         OutgoingMessage(
                             chat_id=message.chat_id,
-                            text=f"_Thinking... {brief}_",
+                            text=f"_Thinking... {safe_brief}_",
                             reply_to_message_id=message.id,
                         )
                     )
                 else:
                     await self._provider.edit(
-                        message.chat_id, thinking_msg_id, f"_Thinking... {brief}_"
+                        message.chat_id, thinking_msg_id, f"_Thinking... {safe_brief}_"
                     )
 
             if self._streaming:
@@ -458,6 +472,14 @@ class TelegramMessageHandler:
         if message.display_name:
             session.metadata["display_name"] = message.display_name
 
+        # Store chat context for group chat awareness
+        chat_type = message.metadata.get("chat_type")
+        if chat_type:
+            session.metadata["chat_type"] = chat_type
+        chat_title = message.metadata.get("chat_title")
+        if chat_title:
+            session.metadata["chat_title"] = chat_title
+
         # Store session path for agent self-inspection (sandbox-relative path)
         # Sessions are mounted at /sessions in the sandbox
         session.metadata["session_path"] = (
@@ -584,19 +606,21 @@ class TelegramMessageHandler:
             if not brief:
                 return
 
+            # Escape underscores in brief to avoid breaking markdown italics
+            safe_brief = escape_markdown(brief)
             if thinking_msg_id is None:
                 # First tool - create thinking message
                 thinking_msg_id = await self._provider.send(
                     OutgoingMessage(
                         chat_id=message.chat_id,
-                        text=f"_Thinking... {brief}_",
+                        text=f"_Thinking... {safe_brief}_",
                         reply_to_message_id=message.id,
                     )
                 )
             else:
                 # Subsequent tools - update existing thinking message
                 await self._provider.edit(
-                    message.chat_id, thinking_msg_id, f"_Thinking... {brief}_"
+                    message.chat_id, thinking_msg_id, f"_Thinking... {safe_brief}_"
                 )
 
         # Stream response while accumulating content
@@ -693,19 +717,21 @@ class TelegramMessageHandler:
             if not brief:
                 return
 
+            # Escape underscores in brief to avoid breaking markdown italics
+            safe_brief = escape_markdown(brief)
             if thinking_msg_id is None:
                 # First tool - create thinking message
                 thinking_msg_id = await self._provider.send(
                     OutgoingMessage(
                         chat_id=message.chat_id,
-                        text=f"_Thinking... {brief}_",
+                        text=f"_Thinking... {safe_brief}_",
                         reply_to_message_id=message.id,
                     )
                 )
             else:
                 # Subsequent tools - update existing thinking message
                 await self._provider.edit(
-                    message.chat_id, thinking_msg_id, f"_Thinking... {brief}_"
+                    message.chat_id, thinking_msg_id, f"_Thinking... {safe_brief}_"
                 )
 
         # Start typing indicator loop (Telegram typing only lasts 5 seconds)

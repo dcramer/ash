@@ -17,11 +17,11 @@ def register(app: typer.Typer) -> None:
             typer.Argument(help="Action: list, stats, cancel, clear"),
         ],
         entry_id: Annotated[
-            int | None,
+            str | None,
             typer.Option(
                 "--id",
                 "-i",
-                help="Entry ID (line number) for cancel",
+                help="Entry ID (8-char hex) for cancel",
             ),
         ] = None,
         force: Annotated[
@@ -40,7 +40,7 @@ def register(app: typer.Typer) -> None:
         Examples:
             ash schedule list              # List all scheduled tasks
             ash schedule stats             # Show schedule statistics
-            ash schedule cancel --id 0     # Cancel task at line 0
+            ash schedule cancel --id a1b2c3d4  # Cancel task by ID
             ash schedule clear             # Clear all scheduled tasks
         """
         from ash.config import load_config
@@ -106,7 +106,7 @@ def _schedule_list(schedule_file) -> None:
             schedule = "?"
 
         table.add_row(
-            str(entry.line_number),
+            entry.id or "[dim]?[/dim]",
             entry_type,
             message,
             schedule,
@@ -132,7 +132,7 @@ def _schedule_stats(schedule_file) -> None:
     console.print(f"  Due now: {stats['due']}")
 
 
-def _schedule_cancel(schedule_file, entry_id: int) -> None:
+def _schedule_cancel(schedule_file, entry_id: str) -> None:
     """Cancel a scheduled task by ID."""
     from ash.events.schedule import ScheduleWatcher
 
@@ -140,7 +140,7 @@ def _schedule_cancel(schedule_file, entry_id: int) -> None:
     entries = watcher.get_entries()
 
     # Find the entry to show what we're removing
-    entry = next((e for e in entries if e.line_number == entry_id), None)
+    entry = next((e for e in entries if e.id == entry_id), None)
     if not entry:
         error(f"No task found with ID {entry_id}")
         raise typer.Exit(1)

@@ -1,9 +1,9 @@
 """File-based schedule system for Ash.
 
 Filesystem-first scheduling:
-- Agent uses `schedule_task` tool to add entries
-- Watcher triggers when `trigger_at` time passes
-- Entry is deleted from file after execution
+- Agent uses `ash schedule` CLI commands to manage entries
+- Watcher triggers when `trigger_at` time passes or cron is due
+- One-shot entries deleted after execution, periodic entries updated
 
 Format:
     {"trigger_at": "2026-01-12T09:00:00Z", "message": "...", "chat_id": "...", "provider": "telegram"}

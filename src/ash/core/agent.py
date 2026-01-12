@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -39,6 +40,23 @@ logger = logging.getLogger(__name__)
 OnToolStartCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 MAX_TOOL_ITERATIONS = 25
+
+
+def _build_routing_env(
+    session: SessionState, effective_user_id: str | None
+) -> dict[str, str]:
+    """Build environment variables for routing context in sandbox.
+
+    These env vars allow sandboxed CLI commands (like `ash schedule`) to
+    access routing context for operations that need to send responses back.
+    """
+    return {
+        "ASH_SESSION_ID": session.session_id or "",
+        "ASH_USER_ID": effective_user_id or "",
+        "ASH_CHAT_ID": session.chat_id or "",
+        "ASH_PROVIDER": session.provider or "",
+        "ASH_USERNAME": session.metadata.get("username", ""),
+    }
 
 
 @dataclass
@@ -158,6 +176,10 @@ class Agent:
         has_reply_context: bool = False,
         session_path: str | None = None,
         session_mode: str | None = None,
+        sender_username: str | None = None,
+        sender_display_name: str | None = None,
+        chat_title: str | None = None,
+        chat_type: str | None = None,
     ) -> str:
         """Build system prompt with optional memory context.
 
@@ -168,6 +190,10 @@ class Agent:
             has_reply_context: Whether this message is a reply with context.
             session_path: Path to the session file for self-inspection.
             session_mode: Session mode ("persistent" or "fresh").
+            sender_username: Username of the current message sender.
+            sender_display_name: Display name of the current message sender.
+            chat_title: Title of the chat (for group chats).
+            chat_type: Type of chat ("group", "supergroup", "private").
 
         Returns:
             Complete system prompt.
@@ -187,6 +213,10 @@ class Agent:
             has_reply_context=has_reply_context,
             session_path=session_path,
             session_mode=session_mode,
+            sender_username=sender_username,
+            sender_display_name=sender_display_name,
+            chat_title=chat_title,
+            chat_type=chat_type,
         )
         return self._prompt_builder.build(prompt_context)
 
@@ -241,7 +271,8 @@ class Agent:
             "running compaction"
         )
 
-        # Run compaction
+        # Run compaction with timing
+        start_time = time.monotonic()
         new_messages, new_token_counts, result = await compact_messages(
             messages=session.messages,
             token_counts=token_counts,
@@ -249,6 +280,7 @@ class Agent:
             settings=settings,
             model=self._config.model,
         )
+        duration_ms = int((time.monotonic() - start_time) * 1000)
 
         if result is None:
             logger.debug("Compaction skipped - not enough messages to summarize")
@@ -260,7 +292,7 @@ class Agent:
 
         logger.info(
             f"Compaction complete: {result.tokens_before} -> {result.tokens_after} tokens "
-            f"({result.messages_removed} messages summarized)"
+            f"({result.messages_removed} messages summarized) | {duration_ms}ms"
         )
 
         return CompactionInfo(
@@ -299,11 +331,17 @@ class Agent:
 
         if self._memory:
             try:
+                start_time = time.monotonic()
                 memory_context = await self._memory.get_context_for_message(
                     user_id=effective_user_id,
                     user_message=user_message,
                     chat_id=session.chat_id,
                 )
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                if memory_context and memory_context.memories:
+                    logger.debug(
+                        f"Memory retrieval: {len(memory_context.memories)} memories | {duration_ms}ms"
+                    )
             except Exception:
                 logger.warning("Failed to retrieve memory context", exc_info=True)
 
@@ -323,6 +361,10 @@ class Agent:
             has_reply_context=session.metadata.get("has_reply_context", False),
             session_path=session_path,
             session_mode=session.metadata.get("session_mode"),
+            sender_username=session.metadata.get("username"),
+            sender_display_name=session.metadata.get("display_name"),
+            chat_title=session.metadata.get("chat_title"),
+            chat_type=session.metadata.get("chat_type"),
         )
 
         # Calculate message token budget
@@ -591,6 +633,7 @@ class Agent:
                 chat_id=session.chat_id,
                 provider=session.provider,
                 metadata=dict(session.metadata),
+                env=_build_routing_env(session, setup.effective_user_id),
             )
 
             for tool_use in pending_tools:
@@ -774,6 +817,7 @@ class Agent:
                 chat_id=session.chat_id,
                 provider=session.provider,
                 metadata=dict(session.metadata),
+                env=_build_routing_env(session, setup.effective_user_id),
             )
 
             for tool_use in pending_tools:
@@ -858,7 +902,6 @@ async def create_agent(
     from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
     from ash.tools.builtin.files import ReadFileTool, WriteFileTool
     from ash.tools.builtin.memory import RecallTool, RememberTool
-    from ash.tools.builtin.schedule import ScheduleTaskTool
     from ash.tools.builtin.search_cache import SearchCache
     from ash.tools.builtin.skills import UseSkillTool, WriteSkillTool
 
@@ -890,10 +933,6 @@ async def create_agent(
     # Register file tools (use shared executor)
     tool_registry.register(ReadFileTool(executor=shared_executor))
     tool_registry.register(WriteFileTool(executor=shared_executor))
-
-    # Register schedule tool (always available)
-    schedule_file = config.workspace / "schedule.jsonl"
-    tool_registry.register(ScheduleTaskTool(schedule_file))
 
     # Register web tools if brave search is configured
     if config.brave_search and config.brave_search.api_key:
@@ -1012,11 +1051,14 @@ async def create_agent(
     # Create skill executor and register skill tools
     skill_executor = SkillExecutor(skill_registry, tool_executor, config)
     tool_registry.register(UseSkillTool(skill_registry, skill_executor))
-    tool_registry.register(WriteSkillTool(skill_executor))
+    tool_registry.register(
+        WriteSkillTool(skill_executor, skill_registry, config.workspace)
+    )
     logger.debug("Skill tools registered")
 
     # Recreate tool executor with all tools registered
     tool_executor = ToolExecutor(tool_registry)
+    logger.info(f"Registered {len(tool_registry)} tools")
 
     # Create runtime info
     runtime = RuntimeInfo.from_environment(

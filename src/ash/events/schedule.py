@@ -2,7 +2,8 @@
 
 Filesystem-first scheduling:
 - Single JSONL file: workspace/schedule.jsonl
-- Agent uses schedule_task tool to create entries (auto-injects context)
+- Agent uses `ash schedule` CLI commands to create/list/cancel entries
+- Context (chat_id, provider, etc.) injected via environment variables
 - All state lives in the file
 
 Two entry types:
@@ -35,6 +36,7 @@ class ScheduleEntry:
     """A schedule entry from the JSONL file."""
 
     message: str
+    id: str | None = None  # Stable identifier (8-char hex)
     trigger_at: datetime | None = None  # One-shot
     cron: str | None = None  # Periodic
     last_run: datetime | None = None  # For periodic
@@ -44,7 +46,7 @@ class ScheduleEntry:
     username: str | None = None  # For @mentions in response
     provider: str | None = None
     created_at: datetime | None = None
-    # Internal tracking
+    # Internal tracking (kept for backwards compatibility during migration)
     line_number: int = 0
     _extra: dict[str, Any] = field(default_factory=dict)  # Preserve unknown fields
 
@@ -84,6 +86,9 @@ class ScheduleEntry:
         # Start with any extra fields we want to preserve
         data: dict[str, Any] = dict(self._extra)
         data["message"] = self.message
+
+        if self.id:
+            data["id"] = self.id
 
         if self.trigger_at:
             data["trigger_at"] = self.trigger_at.isoformat()
@@ -134,6 +139,7 @@ class ScheduleEntry:
 
             # Collect extra fields we don't explicitly handle
             known_fields = {
+                "id",
                 "message",
                 "trigger_at",
                 "cron",
@@ -148,6 +154,7 @@ class ScheduleEntry:
 
             return cls(
                 message=message,
+                id=data.get("id"),
                 trigger_at=trigger_at,
                 cron=cron,
                 last_run=last_run,
@@ -311,11 +318,11 @@ class ScheduleWatcher:
             "due": due_count,
         }
 
-    def remove_entry(self, line_number: int) -> bool:
-        """Remove an entry by line number.
+    def remove_entry(self, entry_id: str) -> bool:
+        """Remove an entry by ID.
 
         Args:
-            line_number: 0-based line number of entry to remove.
+            entry_id: The stable ID of the entry to remove.
 
         Returns:
             True if entry was removed, False if not found.
@@ -324,11 +331,20 @@ class ScheduleWatcher:
             return False
 
         lines = self._schedule_file.read_text().splitlines()
-        if line_number < 0 or line_number >= len(lines):
+        new_lines = []
+        found = False
+
+        for line in lines:
+            entry = ScheduleEntry.from_line(line)
+            if entry and entry.id == entry_id:
+                found = True
+                continue  # Skip this entry (remove it)
+            new_lines.append(line)
+
+        if not found:
             return False
 
-        del lines[line_number]
-        self._write_lines(lines)
+        self._write_lines(new_lines)
         return True
 
     def clear_all(self) -> int:

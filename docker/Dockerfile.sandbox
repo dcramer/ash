@@ -17,6 +17,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+# Install Python dependencies for sandboxed CLI
+RUN pip install --no-cache-dir typer croniter
+
+# Copy sandboxed CLI
+COPY src/ash/sandbox/cli /opt/ash-cli/ash/sandbox/cli
+
+# Create entry point script for the CLI
+RUN printf '#!/bin/bash\nPYTHONPATH=/opt/ash-cli python -m ash.sandbox.cli "$@"\n' > /usr/local/bin/ash \
+    && chmod +x /usr/local/bin/ash
+
 # Create non-root user for sandbox execution
 RUN useradd -m -s /bin/bash -u 1000 sandbox
 

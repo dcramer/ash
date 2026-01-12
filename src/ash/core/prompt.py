@@ -90,6 +90,11 @@ class PromptContext:
     # Session info
     session_path: str | None = None
     session_mode: str | None = None  # "persistent" or "fresh"
+    # Sender context (for group chats)
+    sender_username: str | None = None
+    sender_display_name: str | None = None
+    chat_title: str | None = None
+    chat_type: str | None = None  # "group", "supergroup", "private"
 
 
 class SystemPromptBuilder:
@@ -173,24 +178,29 @@ class SystemPromptBuilder:
             if runtime_section:
                 parts.append(f"\n\n{runtime_section}")
 
-        # 8. Known people context
+        # 8. Sender context (for group chats)
+        sender_section = self._build_sender_section(context)
+        if sender_section:
+            parts.append(f"\n\n{sender_section}")
+
+        # 9. Known people context
         if context.known_people:
             people_section = self._build_people_section(context.known_people)
             if people_section:
                 parts.append(f"\n\n{people_section}")
 
-        # 9. Memory context
+        # 10. Memory context
         if context.memory:
             memory_section = self._build_memory_section(context.memory)
             if memory_section:
                 parts.append(f"\n\n{memory_section}")
 
-        # 10. Conversation context (gap signal)
+        # 11. Conversation context (gap signal)
         conversation_section = self._build_conversation_context_section(context)
         if conversation_section:
             parts.append(f"\n\n{conversation_section}")
 
-        # 11. Session info
+        # 12. Session info
         session_section = self._build_session_section(context)
         if session_section:
             parts.append(f"\n\n{session_section}")
@@ -306,15 +316,6 @@ class SystemPromptBuilder:
             "## Workspace",
             "",
             "Working directory: /workspace",
-            "",
-            "### Scheduling",
-            "",
-            "Use `schedule_task` to schedule future tasks. Examples:",
-            "",
-            "- One-time: `schedule_task(message='Check the build', trigger_at='2026-01-12T09:00:00Z')`",
-            "- Recurring: `schedule_task(message='Daily summary', cron='0 8 * * *')`",
-            "",
-            "View scheduled tasks: `read_file('schedule.jsonl')`",
         ]
         return "\n".join(lines)
 
@@ -326,7 +327,6 @@ class SystemPromptBuilder:
         """
         sandbox = self._config.sandbox
 
-        # Only expose what the agent needs to know, not implementation details
         lines = [
             "## Sandbox",
             "",
@@ -337,6 +337,25 @@ class SystemPromptBuilder:
             lines.append("Network access is disabled.")
         else:
             lines.append("Network access is enabled.")
+
+        # Add ash CLI documentation
+        lines.extend(
+            [
+                "",
+                "### ash CLI",
+                "",
+                "The `ash` command is available in the sandbox for self-service operations:",
+                "",
+                "**Scheduling:**",
+                "- `ash schedule create 'message' --at 2026-01-12T09:00:00Z` - One-time task",
+                "- `ash schedule create 'message' --cron '0 8 * * *'` - Recurring task",
+                "- `ash schedule list` - List scheduled tasks (shows IDs)",
+                "- `ash schedule cancel --id <ID>` - Cancel a task by ID",
+                "- `ash schedule clear` - Clear all tasks",
+                "",
+                "Run `ash --help` for all available commands.",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -468,6 +487,50 @@ class SystemPromptBuilder:
         lines.append(f"Note: The last message in this conversation was {gap_str} ago.")
         lines.append(
             "The user may be starting a new topic or continuing a previous discussion."
+        )
+
+        return "\n".join(lines)
+
+    def _build_sender_section(self, context: PromptContext) -> str:
+        """Build sender context section for group chats.
+
+        Tells the agent who sent the current message, helping with
+        pronoun resolution and context understanding.
+
+        Args:
+            context: Prompt context with sender info.
+
+        Returns:
+            Sender section string or empty if not applicable.
+        """
+        # Only for group chats
+        if context.chat_type not in ("group", "supergroup"):
+            return ""
+
+        # Need at least username or display name
+        if not context.sender_username and not context.sender_display_name:
+            return ""
+
+        lines = ["## Current Message", ""]
+
+        # Format sender identity
+        if context.sender_username and context.sender_display_name:
+            sender = f"**@{context.sender_username}** ({context.sender_display_name})"
+        elif context.sender_username:
+            sender = f"**@{context.sender_username}**"
+        else:
+            sender = f"**{context.sender_display_name}**"
+
+        # Include chat title if available
+        if context.chat_title:
+            lines.append(f'From: {sender} in the group "{context.chat_title}"')
+        else:
+            lines.append(f"From: {sender}")
+
+        lines.append("")
+        lines.append(
+            'When this user uses pronouns like "he", "she", "they", '
+            "they are referring to someone else - not themselves."
         )
 
         return "\n".join(lines)

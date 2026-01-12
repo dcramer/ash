@@ -1,12 +1,13 @@
 """Server command for running the Ash service."""
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 
-from ash.cli.console import console
+logger = logging.getLogger(__name__)
 
 
 def register(app: typer.Typer) -> None:
@@ -50,7 +51,8 @@ def register(app: typer.Typer) -> None:
         try:
             asyncio.run(_run_server(config, webhook, host, port))
         except KeyboardInterrupt:
-            console.print("\n[bold yellow]Server stopped[/bold yellow]")
+            # Use print here since logging may not be configured yet
+            print("\nServer stopped")
 
 
 async def _run_server(
@@ -60,7 +62,6 @@ async def _run_server(
     port: int = 8080,
 ) -> None:
     """Run the server asynchronously."""
-    import logging
     import signal as signal_module
 
     import uvicorn
@@ -69,8 +70,6 @@ async def _run_server(
 
     # Configure logging with Rich for colorful server output
     configure_logging(use_rich=True)
-
-    logger = logging.getLogger(__name__)
 
     from ash.config import WorkspaceLoader, load_config
     from ash.config.paths import get_pid_path
@@ -85,7 +84,7 @@ async def _run_server(
     write_pid_file(pid_path)
 
     # Load configuration
-    console.print("[bold]Loading configuration...[/bold]")
+    logger.info("Loading configuration")
     ash_config = load_config(config_path)
 
     # Initialize Sentry for server mode
@@ -93,15 +92,15 @@ async def _run_server(
         from ash.observability import init_sentry
 
         if init_sentry(ash_config.sentry, server_mode=True):
-            console.print("[dim]Sentry initialized[/dim]")
+            logger.info("Sentry initialized")
 
     # Initialize database
-    console.print("[bold]Initializing database...[/bold]")
+    logger.info("Initializing database")
     database = init_database(database_path=ash_config.memory.database_path)
     await database.connect()
 
     # Load workspace
-    console.print("[bold]Loading workspace...[/bold]")
+    logger.info("Loading workspace")
     workspace_loader = WorkspaceLoader(ash_config.workspace)
     workspace_loader.ensure_workspace()
     workspace = workspace_loader.load()
@@ -110,7 +109,7 @@ async def _run_server(
     # Create a persistent session for memory tools (remember, recall)
     # This session lives for the duration of the server
     # Use the factory directly to avoid the auto-commit context manager
-    console.print("[bold]Setting up agent...[/bold]")
+    logger.info("Setting up agent")
     memory_session = database.session_factory()
     components = await create_agent(
         config=ash_config,
@@ -122,21 +121,21 @@ async def _run_server(
 
     # Run memory garbage collection on startup if enabled
     if ash_config.memory.auto_gc and components.memory_manager:
-        console.print("[dim]Running memory garbage collection...[/dim]")
+        logger.debug("Running memory garbage collection")
         expired, superseded = await components.memory_manager.gc()
         if expired or superseded:
-            console.print(
-                f"[dim]Cleaned up {expired} expired, {superseded} superseded memories[/dim]"
+            logger.info(
+                f"Cleaned up {expired} expired, {superseded} superseded memories"
             )
 
-    console.print(f"[dim]Tools: {', '.join(components.tool_registry.names)}[/dim]")
+    logger.debug(f"Tools: {', '.join(components.tool_registry.names)}")
     if components.skill_registry:
-        console.print(f"[dim]Skills: {len(components.skill_registry)} discovered[/dim]")
+        logger.debug(f"Skills: {len(components.skill_registry)} discovered")
 
     # Set up Telegram if configured
     telegram_provider = None
     if ash_config.telegram and ash_config.telegram.bot_token:
-        console.print("[bold]Setting up Telegram provider...[/bold]")
+        logger.info("Setting up Telegram provider")
         webhook_url = ash_config.telegram.webhook_url if webhook else None
         telegram_provider = TelegramProvider(
             bot_token=ash_config.telegram.bot_token.get_secret_value(),
@@ -161,12 +160,12 @@ async def _run_server(
     if senders:
         schedule_handler = ScheduledTaskHandler(agent, senders)
         schedule_watcher.add_handler(schedule_handler.handle)
-        console.print(f"[dim]Schedule watcher: {schedule_file}[/dim]")
+        logger.debug(f"Schedule watcher: {schedule_file}")
     else:
-        console.print("[dim]Schedule watcher disabled (no providers)[/dim]")
+        logger.debug("Schedule watcher disabled (no providers)")
 
     # Create FastAPI app
-    console.print("[bold]Creating server...[/bold]")
+    logger.info("Creating server")
     fastapi_app = create_app(
         database=database,
         agent=agent,
@@ -174,7 +173,7 @@ async def _run_server(
     )
 
     # Start server
-    console.print(f"[bold green]Server starting on http://{host}:{port}[/bold green]")
+    logger.info(f"Server starting on http://{host}:{port}")
 
     try:
         uvicorn_config = uvicorn.Config(
@@ -209,7 +208,7 @@ async def _run_server(
 
         if telegram_provider and not webhook:
             # Run both uvicorn and telegram polling
-            console.print("[bold]Starting Telegram polling...[/bold]")
+            logger.info("Starting Telegram polling")
 
             async def start_telegram():
                 # Wait for server to be ready and handler to be created
@@ -226,9 +225,7 @@ async def _run_server(
                     except asyncio.CancelledError:
                         logger.info("Telegram polling cancelled")
                 else:
-                    console.print(
-                        "[red]Failed to get Telegram handler after timeout[/red]"
-                    )
+                    logger.error("Failed to get Telegram handler after timeout")
 
             telegram_task = asyncio.create_task(start_telegram())
             try:

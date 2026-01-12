@@ -341,7 +341,7 @@ class TestScheduleCommand:
         workspace.mkdir()
         schedule_file = workspace / "schedule.jsonl"
         schedule_file.write_text(
-            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task to cancel"}\n'
+            '{"id": "abc12345", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task to cancel"}\n'
         )
         monkeypatch.setattr(
             "ash.config.load_config",
@@ -355,7 +355,7 @@ class TestScheduleCommand:
             ),
         )
 
-        result = cli_runner.invoke(app, ["schedule", "cancel", "--id", "0"])
+        result = cli_runner.invoke(app, ["schedule", "cancel", "--id", "abc12345"])
         assert result.exit_code == 0
         assert "Cancelled" in result.stdout
 

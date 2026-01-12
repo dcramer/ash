@@ -123,7 +123,7 @@ class SandboxExecutor:
             )
 
         except Exception as e:
-            logger.error(f"Execution failed: {e}")
+            logger.error(f"Execution failed: {e}", exc_info=True)
             return ExecutionResult(
                 exit_code=-1,
                 stdout="",

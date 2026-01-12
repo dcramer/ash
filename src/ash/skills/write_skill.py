@@ -319,23 +319,20 @@ Skills can use these tools in their instructions:
     # Execution mode guidance
     parts.append(EXECUTION_MODE_GUIDANCE)
 
-    # Workspace info
-    if workspace_path:
-        parts.append(f"""
+    # Workspace info - always use /workspace (sandbox mount point)
+    # The host workspace path is mounted at /workspace inside the sandbox
+    parts.append("""
 ## Workspace
 
-Skills directory: `{workspace_path}/skills/`
+Skills directory: `/workspace/skills/`
 
-Create skills in: `{workspace_path}/skills/<skill-name>/SKILL.md`""")
+Create skills in: `/workspace/skills/<skill-name>/SKILL.md`""")
 
     # The task
     task_parts = ["\n## Your Task"]
     if skill_name:
         task_parts.append(f"\n**Skill name:** `{skill_name}`")
-        if workspace_path:
-            task_parts.append(
-                f"\n**Path:** `{workspace_path}/skills/{skill_name}/SKILL.md`"
-            )
+        task_parts.append(f"\n**Path:** `/workspace/skills/{skill_name}/SKILL.md`")
     task_parts.append(f"\n**Goal:** {goal}")
     task_parts.append("""
 

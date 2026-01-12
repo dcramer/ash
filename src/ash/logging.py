@@ -19,6 +19,26 @@ Guidelines:
 import logging
 import os
 
+
+class ComponentFormatter(logging.Formatter):
+    """Formatter that extracts component name from logger path.
+
+    Converts full module paths to short component names:
+    - ash.providers.telegram.handlers -> providers
+    - ash.tools.executor -> tools
+    - ash.core.agent -> core
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        # Extract component from logger name
+        parts = record.name.split(".")
+        if len(parts) >= 2 and parts[0] == "ash":
+            record.component = parts[1]  # providers, tools, core, etc.
+        else:
+            record.component = parts[0]
+        return super().format(record)
+
+
 # Third-party loggers that are too noisy at INFO level
 NOISY_LOGGERS = [
     "httpx",  # HTTP client used by Anthropic/OpenAI
@@ -61,7 +81,7 @@ def configure_logging(
             show_path=False,
             show_time=True,
         )
-        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.setFormatter(ComponentFormatter("%(component)s | %(message)s"))
     else:
         handler = logging.StreamHandler()
         handler.setFormatter(

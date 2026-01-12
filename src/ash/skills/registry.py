@@ -521,6 +521,24 @@ class SkillRegistry:
             for skill in skills
         ]
 
+    def reload_workspace(self, workspace_path: Path) -> int:
+        """Reload skills from workspace directory.
+
+        This allows discovering newly created skills without restarting.
+        Only loads from workspace, doesn't reload bundled/dynamic skills.
+
+        Args:
+            workspace_path: Path to workspace directory.
+
+        Returns:
+            Number of new skills loaded.
+        """
+        count_before = len(self._skills)
+        skills_dir = workspace_path / "skills"
+        if skills_dir.exists():
+            self._load_from_directory(skills_dir, source="workspace")
+        return len(self._skills) - count_before
+
     def __len__(self) -> int:
         """Get number of registered skills."""
         return len(self._skills)

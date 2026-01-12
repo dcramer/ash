@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -36,14 +36,14 @@ def register(app: typer.Typer) -> None:
     def sessions(
         action: Annotated[
             str,
-            typer.Argument(help="Action: list, search, export, clear"),
+            typer.Argument(help="Action: list, view, search, export, clear"),
         ],
         query: Annotated[
             str | None,
             typer.Option(
                 "--query",
                 "-q",
-                help="Search query for messages",
+                help="Search query or session key for view",
             ),
         ] = None,
         output: Annotated[
@@ -70,20 +70,36 @@ def register(app: typer.Typer) -> None:
                 help="Force action without confirmation",
             ),
         ] = False,
+        verbose: Annotated[
+            bool,
+            typer.Option(
+                "--verbose",
+                "-v",
+                help="Show full tool outputs (for view)",
+            ),
+        ] = False,
     ) -> None:
         """Manage conversation sessions and messages.
 
         Sessions are stored as JSONL files in ~/.ash/sessions/.
 
         Examples:
-            ash sessions list                  # List recent sessions
-            ash sessions search -q "hello"     # Search messages
-            ash sessions export -o backup.json # Export all sessions
-            ash sessions clear                 # Clear all history
+            ash sessions list                        # List recent sessions
+            ash sessions view -q telegram_-542      # View session (fuzzy match)
+            ash sessions view -q telegram_-542 -v   # View with full tool outputs
+            ash sessions search -q "hello"           # Search messages
+            ash sessions export -o backup.json       # Export all sessions
+            ash sessions clear                       # Clear all history
         """
         try:
             if action == "list":
                 asyncio.run(_sessions_list(limit))
+
+            elif action == "view":
+                if not query:
+                    error("--query is required for view (session key or partial match)")
+                    raise typer.Exit(1)
+                asyncio.run(_sessions_view(query, verbose))
 
             elif action == "search":
                 if not query:
@@ -99,7 +115,7 @@ def register(app: typer.Typer) -> None:
 
             else:
                 error(f"Unknown action: {action}")
-                console.print("Valid actions: list, search, export, clear")
+                console.print("Valid actions: list, view, search, export, clear")
                 raise typer.Exit(1)
 
         except KeyboardInterrupt:
@@ -154,6 +170,281 @@ async def _sessions_list(limit: int) -> None:
 
     console.print(table)
     dim(f"\nShowing {len(sessions)} sessions")
+
+
+async def _sessions_view(query: str, verbose: bool) -> None:
+    """View a session with full conversation and tool calls."""
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+
+    from ash.config.paths import get_sessions_path
+    from ash.sessions import SessionReader
+    from ash.sessions.types import (
+        CompactionEntry,
+        MessageEntry,
+        SessionHeader,
+        ToolResultEntry,
+        ToolUseEntry,
+    )
+
+    sessions_path = get_sessions_path()
+    if not sessions_path.exists():
+        warning("No sessions found")
+        return
+
+    # Find matching session (fuzzy match on key)
+    matching_dirs = [
+        d for d in sessions_path.iterdir() if d.is_dir() and query in d.name
+    ]
+
+    if not matching_dirs:
+        error(f"No session found matching '{query}'")
+        dim("Use 'ash sessions list' to see available sessions")
+        return
+
+    if len(matching_dirs) > 1:
+        warning(f"Multiple sessions match '{query}':")
+        for d in matching_dirs[:5]:
+            console.print(f"  - {d.name}")
+        if len(matching_dirs) > 5:
+            console.print(f"  ... and {len(matching_dirs) - 5} more")
+        dim("Please be more specific")
+        return
+
+    session_dir = matching_dirs[0]
+    reader = SessionReader(session_dir)
+    entries = await reader.load_entries()
+
+    if not entries:
+        warning(f"Session '{session_dir.name}' is empty")
+        return
+
+    # Build lookup for tool uses and results
+    tool_uses: dict[str, ToolUseEntry] = {}
+    tool_results: dict[str, ToolResultEntry] = {}
+
+    for entry in entries:
+        if isinstance(entry, ToolUseEntry):
+            tool_uses[entry.id] = entry
+        elif isinstance(entry, ToolResultEntry):
+            tool_results[entry.tool_use_id] = entry
+
+    # Also extract tool_use blocks from message content
+    for entry in entries:
+        if isinstance(entry, MessageEntry) and isinstance(entry.content, list):
+            for block in entry.content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    # Create a synthetic ToolUseEntry for display
+                    tool_id = block["id"]
+                    if tool_id not in tool_uses:
+                        tool_uses[tool_id] = ToolUseEntry(
+                            id=tool_id,
+                            message_id=entry.id,
+                            name=block["name"],
+                            input=block["input"],
+                        )
+
+    console.print()
+    console.print(
+        Panel(f"[bold]Session: {session_dir.name}[/bold]", style="blue", expand=False)
+    )
+    console.print()
+
+    for entry in entries:
+        if isinstance(entry, SessionHeader):
+            dim(
+                f"[Session created {entry.created_at.strftime('%Y-%m-%d %H:%M:%S')} | "
+                f"Provider: {entry.provider}]"
+            )
+            console.print()
+
+        elif isinstance(entry, MessageEntry):
+            role = entry.role.upper()
+            timestamp = entry.created_at.strftime("%H:%M:%S")
+
+            # Role-based styling
+            if entry.role == "user":
+                role_style = "bold green"
+            elif entry.role == "assistant":
+                role_style = "bold cyan"
+            else:
+                role_style = "bold yellow"
+
+            # Build header
+            header_parts = [f"[{role_style}]{role}[/{role_style}]"]
+            if entry.username:
+                header_parts.append(f"(@{entry.username})")
+            header_parts.append(f"[dim]{timestamp}[/dim]")
+            header = " ".join(header_parts)
+
+            # Extract content
+            if isinstance(entry.content, str):
+                content_text = entry.content
+                tool_use_blocks = []
+            else:
+                # Extract text and tool_use blocks
+                text_parts = []
+                tool_use_blocks = []
+                for block in entry.content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif block.get("type") == "tool_use":
+                            tool_use_blocks.append(block)
+                content_text = "\n".join(text_parts)
+
+            console.print(header)
+            if content_text.strip():
+                # Truncate very long content
+                if len(content_text) > 2000 and not verbose:
+                    content_text = content_text[:2000] + "\n... [truncated]"
+                console.print(Markdown(content_text))
+
+            # Show tool calls for this message
+            for tool_block in tool_use_blocks:
+                tool_id = tool_block["id"]
+                tool_name = tool_block["name"]
+                tool_input = tool_block["input"]
+                result = tool_results.get(tool_id)
+
+                _print_tool_call(tool_name, tool_input, result, verbose)
+
+            console.print()
+
+        elif isinstance(entry, ToolResultEntry):
+            # Show orphaned tool results (when tool_use wasn't persisted in message)
+            if entry.tool_use_id not in tool_uses:
+                status = "[green]✓[/green]" if entry.success else "[red]✗ failed[/red]"
+                console.print(f"  [bold magenta]🔧 tool call[/bold magenta] {status}")
+                output_lines = entry.output.strip().split("\n")
+                if verbose or len(output_lines) <= 5:
+                    for line in output_lines[:50]:
+                        if len(line) > 200:
+                            line = line[:200] + "..."
+                        console.print(f"     [dim]│[/dim] {line}")
+                    if len(output_lines) > 50:
+                        console.print(
+                            f"     [dim]│ ... ({len(output_lines) - 50} more lines)[/dim]"
+                        )
+                else:
+                    for line in output_lines[:3]:
+                        if len(line) > 200:
+                            line = line[:200] + "..."
+                        console.print(f"     [dim]│[/dim] {line}")
+                    if len(output_lines) > 3:
+                        console.print(
+                            f"     [dim]│ ... ({len(output_lines) - 3} more lines, "
+                            f"use -v for full)[/dim]"
+                        )
+                console.print()
+
+        elif isinstance(entry, CompactionEntry):
+            console.print(
+                f"[dim italic]--- Context compacted: "
+                f"{entry.tokens_before} → {entry.tokens_after} tokens ---[/dim italic]"
+            )
+            console.print()
+
+    dim(f"\nTotal entries: {len(entries)}")
+
+
+def _print_tool_call(
+    name: str,
+    input_data: dict[str, Any],
+    result: Any | None,
+    verbose: bool,
+) -> None:
+    """Print a tool call with its result."""
+
+    # Format tool input summary
+    input_summary = _format_tool_input(name, input_data, verbose)
+
+    # Determine result status
+    if result is None:
+        status = "[yellow]⏳ pending[/yellow]"
+        output_text = None
+    elif result.success:
+        status = "[green]✓[/green]"
+        output_text = result.output
+    else:
+        status = "[red]✗ failed[/red]"
+        output_text = result.output
+
+    # Build tool header
+    tool_header = f"  [bold magenta]🔧 {name}[/bold magenta] {status}"
+    console.print(tool_header)
+
+    # Show input
+    if input_summary:
+        console.print(f"     [dim]{input_summary}[/dim]")
+
+    # Show output
+    if output_text:
+        output_lines = output_text.strip().split("\n")
+        if verbose or len(output_lines) <= 5:
+            # Show full output
+            for line in output_lines[:50]:  # Cap at 50 lines even in verbose
+                if len(line) > 200:
+                    line = line[:200] + "..."
+                console.print(f"     [dim]│[/dim] {line}")
+            if len(output_lines) > 50:
+                console.print(
+                    f"     [dim]│ ... ({len(output_lines) - 50} more lines)[/dim]"
+                )
+        else:
+            # Show truncated output
+            for line in output_lines[:3]:
+                if len(line) > 200:
+                    line = line[:200] + "..."
+                console.print(f"     [dim]│[/dim] {line}")
+            if len(output_lines) > 3:
+                console.print(
+                    f"     [dim]│ ... ({len(output_lines) - 3} more lines, use -v for full)[/dim]"
+                )
+
+
+def _format_tool_input(name: str, input_data: dict[str, Any], verbose: bool) -> str:
+    """Format tool input for display."""
+    match name:
+        case "bash" | "bash_tool":
+            cmd = input_data.get("command", "")
+            if not verbose and len(cmd) > 100:
+                cmd = cmd[:100] + "..."
+            return f"$ {cmd}"
+        case "read_file":
+            return input_data.get("path", "")
+        case "write_file":
+            path = input_data.get("path", "")
+            content = input_data.get("content", "")
+            lines = len(content.split("\n"))
+            return f"{path} ({lines} lines)"
+        case "web_search":
+            return f"query: {input_data.get('query', '')}"
+        case "web_fetch":
+            return input_data.get("url", "")
+        case "recall":
+            return f"query: {input_data.get('query', '')}"
+        case "remember":
+            facts = input_data.get("facts", [])
+            if facts:
+                return f"{len(facts)} facts"
+            content = input_data.get("content", "")
+            if len(content) > 50:
+                content = content[:50] + "..."
+            return content
+        case "use_skill":
+            return input_data.get("skill_name", "")
+        case "write_skill":
+            return f"name={input_data.get('name', '')}, goal={input_data.get('goal', '')[:50]}..."
+        case _:
+            if verbose:
+                return json.dumps(input_data, indent=2)[:500]
+            # Show first key-value pair
+            if input_data:
+                key = next(iter(input_data))
+                val = str(input_data[key])[:50]
+                return f"{key}: {val}"
+            return ""
 
 
 async def _sessions_search(query: str, limit: int) -> None:

@@ -1,5 +1,6 @@
 """Tools for invoking skills."""
 
+from pathlib import Path
 from typing import Any
 
 from ash.skills import SkillContext, SkillExecutor, SkillRegistry
@@ -100,13 +101,22 @@ class UseSkillTool(Tool):
 class WriteSkillTool(Tool):
     """Create new skills with quality guidance."""
 
-    def __init__(self, executor: SkillExecutor) -> None:
+    def __init__(
+        self,
+        executor: SkillExecutor,
+        registry: SkillRegistry,
+        workspace_path: Path | None = None,
+    ) -> None:
         """Initialize tool.
 
         Args:
             executor: Skill executor.
+            registry: Skill registry (for reloading after skill creation).
+            workspace_path: Workspace path (for reloading skills).
         """
         self._executor = executor
+        self._registry = registry
+        self._workspace_path = workspace_path
 
     @property
     def name(self) -> str:
@@ -169,6 +179,16 @@ class WriteSkillTool(Tool):
 
         if result.is_error:
             return ToolResult.error(result.content)
+
+        # Reload workspace skills to pick up the newly created skill
+        if self._workspace_path:
+            new_count = self._registry.reload_workspace(self._workspace_path)
+            if new_count > 0:
+                reload_msg = f"\n\n[Loaded {new_count} new skill(s) - available immediately via use_skill]"
+                return ToolResult.success(
+                    result.content + reload_msg,
+                    iterations=result.iterations,
+                )
 
         return ToolResult.success(
             result.content,

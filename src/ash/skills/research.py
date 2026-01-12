@@ -526,7 +526,7 @@ async def execute_research(
             query_response.message.get_text() or "", config.queries
         )
     except Exception as e:
-        logger.error(f"Failed to generate queries: {e}")
+        logger.error(f"Failed to generate queries: {e}", exc_info=True)
         queries = [topic]  # Fallback to just the topic
 
     if not queries:
@@ -607,7 +607,7 @@ async def execute_research(
         )
         report = synthesis_response.message.get_text() or ""
     except Exception as e:
-        logger.error(f"Synthesis failed: {e}")
+        logger.error(f"Synthesis failed: {e}", exc_info=True)
         # Fallback: return raw source summaries
         report = _build_fallback_report(topic, sources_to_fetch)
 
