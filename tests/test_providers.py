@@ -131,7 +131,7 @@ class TestTelegramMessageHandler:
             streaming=True,
         )
         # Store tmp_path for tests to use
-        handler._test_sessions_path = tmp_path
+        handler._test_sessions_path = tmp_path  # type: ignore[attr-defined]
         return handler
 
     @pytest.fixture

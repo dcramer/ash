@@ -101,7 +101,7 @@ def get_process_info(pid: int) -> dict[str, float] | None:
         Dict with memory_mb and cpu_percent, or None if unavailable.
     """
     try:
-        import psutil
+        import psutil  # type: ignore[import-not-found]
 
         proc = psutil.Process(pid)
         mem_info = proc.memory_info()

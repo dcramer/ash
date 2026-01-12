@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ash.config.models import AshConfig, LLMConfig
 from ash.db.engine import Database
 from ash.db.models import Base
+from ash.llm.base import LLMProvider
 from ash.llm.types import (
     CompletionResponse,
     ContentBlock,
@@ -121,7 +122,7 @@ async def memory_store(db_session: AsyncSession) -> MemoryStore:
 # =============================================================================
 
 
-class MockLLMProvider:
+class MockLLMProvider(LLMProvider):
     """Mock LLM provider for testing."""
 
     def __init__(
@@ -139,6 +140,10 @@ class MockLLMProvider:
     def name(self) -> str:
         return "mock"
 
+    @property
+    def default_model(self) -> str:
+        return "mock-model"
+
     async def complete(
         self,
         messages: list[Message],
@@ -147,7 +152,8 @@ class MockLLMProvider:
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
+        temperature: float | None = None,
+        thinking: Any = None,
     ) -> CompletionResponse:
         self.complete_calls.append(
             {
@@ -181,8 +187,9 @@ class MockLLMProvider:
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
-    ):
+        temperature: float | None = None,
+        thinking: Any = None,
+    ) -> AsyncGenerator[StreamChunk, None]:
         self.stream_calls.append(
             {
                 "messages": messages,

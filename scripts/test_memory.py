@@ -90,13 +90,15 @@ async def main():
         memory = MemoryManager(store, retriever, session)
 
         print("-" * 60)
-        print("Test 1: Store knowledge")
+        print("Test 1: Store memory")
         print("-" * 60)
 
         test_content = "User's favorite color is purple"
-        knowledge = await memory.add_knowledge(test_content, source="test_script")
+        memory_entry = await memory.add_memory(
+            test_content, source="test_script", owner_user_id="test-user"
+        )
         print(f"[OK] Stored: '{test_content}'")
-        print(f"    ID: {knowledge.id}")
+        print(f"    ID: {memory_entry.id}")
 
         # Commit explicitly
         await session.commit()
@@ -129,40 +131,36 @@ async def main():
         print("-" * 60)
 
         context = await memory.get_context_for_message(
-            session_id="test-session",
             user_id="test-user",
             user_message="What's my favorite color?",
         )
 
-        print(f"Retrieved messages: {len(context.messages)}")
-        print(f"Retrieved knowledge: {len(context.knowledge)}")
+        print(f"Retrieved memories: {len(context.memories)}")
 
-        for k in context.knowledge:
-            print(f"  - {k.content[:50]}... (sim: {k.similarity:.3f})")
+        for m in context.memories:
+            print(f"  - {m.content[:50]}... (sim: {m.similarity:.3f})")
 
-        if context.knowledge:
+        if context.memories:
             print("[OK] Context retrieval working!")
         else:
             print(
-                "[WARNING] No knowledge in context (may be below 0.3 similarity threshold)"
+                "[WARNING] No memories in context (may be below similarity threshold)"
             )
 
         print("-" * 60)
         print("Test 4: Check database directly")
         print("-" * 60)
 
-        # Check knowledge table
+        # Check memories table
         from sqlalchemy import text
 
-        result = await session.execute(text("SELECT COUNT(*) FROM knowledge"))
+        result = await session.execute(text("SELECT COUNT(*) FROM memories"))
         count = result.scalar()
-        print(f"Knowledge entries: {count}")
+        print(f"Memory entries: {count}")
 
-        result = await session.execute(
-            text("SELECT COUNT(*) FROM knowledge_embeddings")
-        )
+        result = await session.execute(text("SELECT COUNT(*) FROM memory_embeddings"))
         count = result.scalar()
-        print(f"Knowledge embeddings: {count}")
+        print(f"Memory embeddings: {count}")
 
     await database.disconnect()
     print("-" * 60)

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ash.core.compaction import CompactionSettings, compact_messages, should_compact
@@ -14,6 +15,7 @@ from ash.core.tokens import estimate_tokens
 from ash.llm import LLMProvider, ToolDefinition
 from ash.llm.thinking import ThinkingConfig, resolve_thinking
 from ash.llm.types import (
+    ContentBlock,
     StreamEventType,
     TextContent,
     ToolUse,
@@ -129,7 +131,13 @@ class Agent:
     @property
     def system_prompt(self) -> str:
         """Get the base system prompt (without memory context)."""
-        return self._prompt_builder.build(PromptContext(runtime=self._runtime))
+        # Refresh runtime time to avoid stale timestamps
+        runtime = self._runtime
+        if runtime:
+            runtime = replace(
+                runtime, time=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+            )
+        return self._prompt_builder.build(PromptContext(runtime=runtime))
 
     def _build_system_prompt(
         self,
@@ -149,8 +157,15 @@ class Agent:
         Returns:
             Complete system prompt.
         """
+        # Refresh runtime time to avoid stale timestamps
+        runtime = self._runtime
+        if runtime:
+            runtime = replace(
+                runtime, time=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+            )
+
         prompt_context = PromptContext(
-            runtime=self._runtime,
+            runtime=runtime,
             memory=context,
             known_people=known_people,
             conversation_gap_minutes=conversation_gap_minutes,
@@ -463,7 +478,7 @@ class Agent:
             iterations += 1
 
             # Stream LLM response
-            content_blocks: list[TextContent | ToolUse] = []
+            content_blocks: list[ContentBlock] = []
             current_text = ""
             current_tool_id: str | None = None
             current_tool_name: str | None = None
@@ -482,9 +497,10 @@ class Agent:
                 thinking=self._config.thinking,
             ):
                 if chunk.type == StreamEventType.TEXT_DELTA:
-                    current_text += chunk.content or ""
-                    accumulated_response += chunk.content or ""
-                    yield chunk.content or ""
+                    text = chunk.content if isinstance(chunk.content, str) else ""
+                    current_text += text
+                    accumulated_response += text
+                    yield text
 
                 elif chunk.type == StreamEventType.TOOL_USE_START:
                     current_tool_id = chunk.tool_use_id
@@ -492,7 +508,9 @@ class Agent:
                     current_tool_args = ""
 
                 elif chunk.type == StreamEventType.TOOL_USE_DELTA:
-                    current_tool_args += chunk.content or ""
+                    current_tool_args += (
+                        chunk.content if isinstance(chunk.content, str) else ""
+                    )
 
                 elif chunk.type == StreamEventType.TOOL_USE_END:
                     if current_tool_id and current_tool_name:

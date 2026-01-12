@@ -1,5 +1,6 @@
 """Tests for agent orchestration."""
 
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from ash.config.workspace import Workspace
 from ash.core.agent import Agent, AgentConfig, AgentResponse
 from ash.core.prompt import SystemPromptBuilder
 from ash.core.session import SessionState
+from ash.llm.base import LLMProvider
 from ash.llm.types import (
     CompletionResponse,
     Message,
@@ -28,7 +30,7 @@ from ash.tools.executor import ToolExecutor
 from ash.tools.registry import ToolRegistry
 
 
-class MockLLMProvider:
+class MockLLMProvider(LLMProvider):
     """Mock LLM provider for testing."""
 
     def __init__(
@@ -46,6 +48,10 @@ class MockLLMProvider:
     def name(self) -> str:
         return "mock"
 
+    @property
+    def default_model(self) -> str:
+        return "mock-model"
+
     async def complete(
         self,
         messages: list[Message],
@@ -54,7 +60,7 @@ class MockLLMProvider:
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         thinking: Any = None,
     ) -> CompletionResponse:
         self.complete_calls.append(
@@ -87,9 +93,9 @@ class MockLLMProvider:
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         thinking: Any = None,
-    ):
+    ) -> AsyncGenerator[StreamChunk, None]:
         self.stream_calls.append({"messages": messages})
 
         for chunk in self.stream_chunks:
@@ -99,6 +105,14 @@ class MockLLMProvider:
             yield StreamChunk(type=StreamEventType.MESSAGE_START)
             yield StreamChunk(type=StreamEventType.TEXT_DELTA, content="Mock response")
             yield StreamChunk(type=StreamEventType.MESSAGE_END)
+
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+    ) -> list[list[float]]:
+        return [[0.0] * 128 for _ in texts]
 
 
 class MockTool(Tool):

@@ -39,8 +39,9 @@ def register(app: typer.Typer) -> None:
             # Try relative to package
             import ash
 
-            package_dir = Path(ash.__file__).parent.parent.parent
-            dockerfile_path = package_dir / "docker" / "Dockerfile.sandbox"
+            if ash.__file__:
+                package_dir = Path(ash.__file__).parent.parent.parent
+                dockerfile_path = package_dir / "docker" / "Dockerfile.sandbox"
 
         if action == "build":
             _sandbox_build(dockerfile_path, force)

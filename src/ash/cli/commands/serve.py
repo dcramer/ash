@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -153,7 +153,7 @@ async def _run_server(
     schedule_watcher = ScheduleWatcher(schedule_file)
 
     # Build sender map from available providers
-    senders: dict[str, any] = {}
+    senders: dict[str, Any] = {}
     if telegram_provider:
         senders["telegram"] = telegram_provider.send_message
 

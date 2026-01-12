@@ -1,7 +1,7 @@
 """Abstract LLM provider interface."""
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 from ash.llm.types import (
@@ -69,7 +69,7 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
-    ) -> AsyncIterator[StreamChunk]:
+    ) -> AsyncGenerator[StreamChunk, None]:
         """Generate a streaming completion.
 
         Args:
@@ -84,7 +84,9 @@ class LLMProvider(ABC):
         Yields:
             Stream chunks as they arrive.
         """
-        ...
+        # Make this explicitly an async generator for type checkers
+        yield
+        raise NotImplementedError
 
     @abstractmethod
     async def embed(

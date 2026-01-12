@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
 import anthropic
@@ -244,7 +244,7 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
-    ) -> AsyncIterator[StreamChunk]:
+    ) -> AsyncGenerator[StreamChunk, None]:
         """Generate a streaming completion.
 
         Args:

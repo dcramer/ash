@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from ash.tools.truncation import _save_to_temp
 
 if TYPE_CHECKING:
+    from ash.config import AshConfig
     from ash.llm import LLMProvider
 
 logger = logging.getLogger(__name__)

@@ -420,6 +420,9 @@ class TelegramProvider(Provider):
             # Download the photo
             try:
                 file = await self._bot.get_file(photo.file_id)
+                if not file.file_path:
+                    logger.warning("Photo file has no file_path")
+                    return
                 file_data = await self._bot.download_file(file.file_path)
                 image_bytes = file_data.read() if file_data else None
             except Exception as e:

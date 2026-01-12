@@ -181,7 +181,7 @@ async def _run_chat(
             session_header = await session_manager.ensure_session()
 
             # Load previous context from JSONL if exists
-            messages, message_ids = session_manager.load_messages_for_llm()
+            messages, message_ids = await session_manager.load_messages_for_llm()
 
             # Create in-memory session state
             session = SessionState(

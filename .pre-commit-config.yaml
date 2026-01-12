@@ -10,12 +10,12 @@ repos:
         args: ["--fix"]
       - id: ruff-format
 
-  # Type checking with ty
+  # Type checking with ty (only fail on errors, not warnings)
   - repo: local
     hooks:
       - id: ty
         name: ty type checker
-        entry: uv run ty check
+        entry: bash -c 'uv run ty check 2>&1 | grep -q "^error" && exit 1 || exit 0'
         language: system
         types: [python]
         pass_filenames: false

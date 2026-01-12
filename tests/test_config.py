@@ -41,7 +41,7 @@ class TestLLMConfig:
 
     def test_invalid_provider(self):
         with pytest.raises(ValidationError):
-            LLMConfig(provider="invalid", model="test")
+            LLMConfig(provider="invalid", model="test")  # type: ignore[arg-type]
 
 
 class TestTelegramConfig:
@@ -227,7 +227,7 @@ class TestModelConfig:
 
     def test_invalid_provider(self):
         with pytest.raises(ValidationError):
-            ModelConfig(provider="invalid", model="test")
+            ModelConfig(provider="invalid", model="test")  # type: ignore[arg-type]
 
 
 class TestNamedModelConfigs:

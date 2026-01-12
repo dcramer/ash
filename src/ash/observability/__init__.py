@@ -9,9 +9,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 try:
-    import sentry_sdk
-    from sentry_sdk.integrations.asyncio import AsyncioIntegration
-    from sentry_sdk.integrations.logging import LoggingIntegration
+    import sentry_sdk  # type: ignore[import-not-found]
+    from sentry_sdk.integrations.asyncio import (  # type: ignore[import-not-found]
+        AsyncioIntegration,
+    )
+    from sentry_sdk.integrations.logging import (  # type: ignore[import-not-found]
+        LoggingIntegration,
+    )
 
     SENTRY_AVAILABLE = True
 except ImportError:
@@ -41,7 +45,9 @@ def init_sentry(config: "SentryConfig", server_mode: bool = False) -> bool:
     ]
 
     if server_mode:
-        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.fastapi import (  # type: ignore[import-not-found]
+            FastApiIntegration,
+        )
 
         integrations.append(FastApiIntegration())
 

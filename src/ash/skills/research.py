@@ -17,8 +17,10 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
+    from ash.llm import LLMProvider
     from ash.skills.base import SubagentConfig
     from ash.skills.registry import SkillRegistry
+    from ash.tools import ToolContext, ToolExecutor
 
 logger = logging.getLogger(__name__)
 

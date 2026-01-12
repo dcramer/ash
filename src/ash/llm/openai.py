@@ -1,7 +1,7 @@
 """OpenAI LLM provider."""
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
 import openai
@@ -247,7 +247,7 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
-    ) -> AsyncIterator[StreamChunk]:
+    ) -> AsyncGenerator[StreamChunk, None]:
         """Generate a streaming completion.
 
         Args:

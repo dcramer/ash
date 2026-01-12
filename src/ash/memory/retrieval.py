@@ -199,6 +199,8 @@ class SemanticRetriever:
         for row in rows:
             subject_ids = json.loads(row[3]) if row[3] else None
             base_metadata = json.loads(row[2]) if row[2] else {}
+            if base_metadata is None:
+                base_metadata = {}
 
             # Build subject_name from resolved person IDs
             subject_name = None
