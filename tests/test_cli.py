@@ -131,17 +131,15 @@ class TestMemoryCommand:
 class TestSessionsCommand:
     """Tests for 'ash sessions' command."""
 
-    def test_sessions_search_requires_query(self, cli_runner, config_file):
-        result = cli_runner.invoke(
-            app, ["sessions", "search", "--config", str(config_file)]
-        )
+    def test_sessions_search_requires_query(self, cli_runner):
+        # Sessions command reads from JSONL files, no config needed
+        result = cli_runner.invoke(app, ["sessions", "search"])
         assert result.exit_code == 1
         assert "--query" in result.stdout or "required" in result.stdout.lower()
 
-    def test_sessions_unknown_action(self, cli_runner, config_file):
-        result = cli_runner.invoke(
-            app, ["sessions", "unknown", "--config", str(config_file)]
-        )
+    def test_sessions_unknown_action(self, cli_runner):
+        # Sessions command reads from JSONL files, no config needed
+        result = cli_runner.invoke(app, ["sessions", "unknown"])
         assert result.exit_code == 1
 
     def test_sessions_help(self, cli_runner):

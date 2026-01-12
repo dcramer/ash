@@ -14,6 +14,55 @@ logger = logging.getLogger(__name__)
 ExecutionCallback = Callable[[str, dict[str, Any], ToolResult, int], None]
 
 
+def _summarize_input(tool_name: str, input_data: dict[str, Any]) -> str:
+    """Create a concise summary of tool input for logging.
+
+    Args:
+        tool_name: Name of the tool.
+        input_data: Tool input data.
+
+    Returns:
+        Short summary string suitable for log output.
+    """
+    # Tool-specific summaries for common tools
+    if tool_name == "write_file":
+        path = input_data.get("file_path", "?")
+        content = input_data.get("content", "")
+        lines = content.count("\n") + 1 if content else 0
+        return f"{path}, {lines} lines"
+
+    if tool_name == "read_file":
+        return input_data.get("file_path", "?")
+
+    if tool_name == "bash":
+        cmd = input_data.get("command", "")
+        return cmd[:50] + "..." if len(cmd) > 50 else cmd
+
+    if tool_name == "remember":
+        content = input_data.get("content", "")
+        return content[:40] + "..." if len(content) > 40 else content
+
+    if tool_name == "recall":
+        query = input_data.get("query", "")
+        return query[:40] + "..." if len(query) > 40 else query
+
+    if tool_name == "use_skill":
+        return input_data.get("skill_name", "?")
+
+    if tool_name == "web_search":
+        return input_data.get("query", "?")[:40]
+
+    if tool_name == "web_fetch":
+        return input_data.get("url", "?")[:50]
+
+    # Generic fallback: list keys
+    if input_data:
+        keys = list(input_data.keys())[:3]
+        return ", ".join(keys)
+
+    return ""
+
+
 class ToolExecutor:
     """Execute tools with logging, timing, and error handling."""
 
@@ -66,12 +115,16 @@ class ToolExecutor:
 
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
-        # Log execution
-        log_level = logging.ERROR if result.is_error else logging.DEBUG
-        logger.log(
-            log_level,
-            f"Tool {tool_name} executed in {duration_ms}ms (error={result.is_error})",
-        )
+        # Log execution - single source of truth for tool logging
+        input_summary = _summarize_input(tool_name, input_data)
+        if result.is_error:
+            logger.error(
+                f"Tool: {tool_name} | {input_summary} | failed: {result.content[:200]}"
+            )
+        else:
+            # Call + timing at INFO, result at DEBUG
+            logger.info(f"Tool: {tool_name} | {input_summary} | {duration_ms}ms")
+            logger.debug(f"Tool {tool_name} result: {result.content[:200]}")
 
         # Callback
         if self._on_execution:

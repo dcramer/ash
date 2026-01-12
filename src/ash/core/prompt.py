@@ -66,14 +66,16 @@ class RuntimeInfo:
         Returns:
             RuntimeInfo with environment details.
         """
+        from datetime import UTC
+
         return cls(
             os=platform.system(),
             arch=platform.machine(),
             python=platform.python_version(),
             model=model,
             provider=provider,
-            timezone=timezone,
-            time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            timezone=timezone or "UTC",
+            time=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
         )
 
 
@@ -210,9 +212,6 @@ class SystemPromptBuilder:
         for tool_def in tool_defs:
             name = tool_def["name"]
             desc = tool_def["description"]
-            # Truncate long descriptions for prompt efficiency
-            if len(desc) > 150:
-                desc = desc[:147] + "..."
             lines.append(f"- **{name}**: {desc}")
 
         return "\n".join(lines)
@@ -226,20 +225,32 @@ class SystemPromptBuilder:
         lines = [
             "## Skills",
             "",
-            "Skills are reusable behaviors that combine instructions with tools. "
-            "Invoke them with `use_skill`. To create new skills, use the `manage-skill` skill.",
+            "Skills are reusable behaviors. Invoke with `use_skill`.",
+            "",
+            "**Execution Modes:**",
+            "- `inline`: Instructions returned for you to follow directly",
+            "- `subagent`: Runs in isolated sub-agent loop",
             "",
         ]
 
-        # List existing skills if any
+        # List available skills
+        lines.append("### Available Skills")
+        lines.append("")
+
+        # Note: write_skill is a dedicated tool now, not listed here
+
+        # List registered skills
         available_skills = list(self._skills)
-        if available_skills:
-            lines.append("### Available Skills")
-            lines.append("")
-            for skill in available_skills:
+        for skill in available_skills:
+            badge = "[subagent]" if skill.subagent else ""
+            if badge:
+                lines.append(f"- **{skill.name}** {badge}: {skill.description}")
+            else:
                 lines.append(f"- **{skill.name}**: {skill.description}")
-        else:
-            lines.append("*No skills available.*")
+
+        if not available_skills:
+            lines.append("")
+            lines.append("*No additional skills registered.*")
 
         return "\n".join(lines)
 
@@ -276,6 +287,15 @@ class SystemPromptBuilder:
             "## Workspace",
             "",
             f"Working directory: {self._config.workspace}",
+            "",
+            "### Scheduling",
+            "",
+            "Use `schedule_task` to schedule future tasks. Examples:",
+            "",
+            "- One-time: `schedule_task(message='Check the build', trigger_at='2026-01-12T09:00:00Z')`",
+            "- Recurring: `schedule_task(message='Daily summary', cron='0 8 * * *')`",
+            "",
+            "View scheduled tasks: `read_file('schedule.jsonl')`",
         ]
         return "\n".join(lines)
 
@@ -383,9 +403,6 @@ class SystemPromptBuilder:
             if item.metadata and item.metadata.get("subject_name"):
                 subject_attr = f" (about {item.metadata['subject_name']})"
             context_items.append(f"- [Memory{subject_attr}] {item.content}")
-
-        for item in memory.messages:
-            context_items.append(f"- [Past conversation] {item.content}")
 
         if context_items:
             header = (

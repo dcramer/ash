@@ -1,4 +1,8 @@
-"""Semantic search and retrieval using sqlite-vec."""
+"""Semantic search and retrieval using sqlite-vec.
+
+Note: Message search has been removed since sessions/messages are now stored
+in JSONL files. This module now only handles semantic search over memories.
+"""
 
 import json
 import struct
@@ -19,11 +23,11 @@ class SearchResult:
     content: str
     similarity: float
     metadata: dict[str, Any] | None = None
-    source_type: str = "message"  # 'message' or 'memory'
+    source_type: str = "memory"
 
 
 class SemanticRetriever:
-    """Semantic search over messages and memories using vector embeddings."""
+    """Semantic search over memories using vector embeddings."""
 
     def __init__(
         self,
@@ -46,16 +50,7 @@ class SemanticRetriever:
         """
         dimensions = self._embeddings.dimensions
 
-        # Create virtual tables for vector search
-        await self._session.execute(
-            text(f"""
-                CREATE VIRTUAL TABLE IF NOT EXISTS message_embeddings USING vec0(
-                    message_id TEXT PRIMARY KEY,
-                    embedding FLOAT[{dimensions}]
-                )
-            """)
-        )
-
+        # Create virtual table for memory embeddings
         await self._session.execute(
             text(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
@@ -66,30 +61,6 @@ class SemanticRetriever:
         )
 
         await self._session.commit()
-
-    async def index_message(self, message_id: str, content: str) -> None:
-        """Index a message for semantic search.
-
-        Args:
-            message_id: Message ID.
-            content: Message content to embed.
-        """
-        embedding = await self._embeddings.embed(content)
-        embedding_blob = self._serialize_embedding(embedding)
-
-        # Delete existing embedding if any
-        await self._session.execute(
-            text("DELETE FROM message_embeddings WHERE message_id = :id"),
-            {"id": message_id},
-        )
-
-        # Insert new embedding
-        await self._session.execute(
-            text(
-                "INSERT INTO message_embeddings (message_id, embedding) VALUES (:id, :embedding)"
-            ),
-            {"id": message_id, "embedding": embedding_blob},
-        )
 
     async def index_memory(self, memory_id: str, content: str) -> None:
         """Index a memory entry for semantic search.
@@ -115,71 +86,8 @@ class SemanticRetriever:
             {"id": memory_id, "embedding": embedding_blob},
         )
 
-    async def search_messages(
-        self,
-        query: str,
-        session_id: str | None = None,
-        limit: int = 10,
-    ) -> list[SearchResult]:
-        """Search messages by semantic similarity.
-
-        Args:
-            query: Search query.
-            session_id: Optional session filter.
-            limit: Maximum results.
-
-        Returns:
-            List of search results with similarity scores.
-        """
-        query_embedding = await self._embeddings.embed(query)
-        embedding_blob = self._serialize_embedding(query_embedding)
-
-        # Build query with optional session filter
-        if session_id:
-            sql = text("""
-                SELECT
-                    me.message_id,
-                    m.content,
-                    m.metadata,
-                    vec_distance_cosine(me.embedding, :query_embedding) as distance
-                FROM message_embeddings me
-                JOIN messages m ON me.message_id = m.id
-                WHERE m.session_id = :session_id
-                ORDER BY distance ASC
-                LIMIT :limit
-            """)
-            params = {
-                "query_embedding": embedding_blob,
-                "session_id": session_id,
-                "limit": limit,
-            }
-        else:
-            sql = text("""
-                SELECT
-                    me.message_id,
-                    m.content,
-                    m.metadata,
-                    vec_distance_cosine(me.embedding, :query_embedding) as distance
-                FROM message_embeddings me
-                JOIN messages m ON me.message_id = m.id
-                ORDER BY distance ASC
-                LIMIT :limit
-            """)
-            params = {"query_embedding": embedding_blob, "limit": limit}
-
-        result = await self._session.execute(sql, params)
-        rows = result.fetchall()
-
-        return [
-            SearchResult(
-                id=row[0],
-                content=row[1],
-                metadata=json.loads(row[2]) if row[2] else None,
-                similarity=1.0 - row[3],  # Convert distance to similarity
-                source_type="message",
-            )
-            for row in rows
-        ]
+        # Commit to persist the embedding
+        await self._session.commit()
 
     async def search_memories(
         self,
@@ -207,13 +115,13 @@ class SemanticRetriever:
             chat_id: Filter to include group memories for this chat.
 
         Returns:
-            List of search results with similarity scores.
+            List of search results with similarity scores and resolved subject_name.
         """
         query_embedding = await self._embeddings.embed(query)
         embedding_blob = self._serialize_embedding(query_embedding)
 
         # Build dynamic query with optional filters
-        where_clauses = []
+        where_clauses: list[str] = []
         params: dict[str, Any] = {
             "query_embedding": embedding_blob,
             "limit": limit,
@@ -237,7 +145,7 @@ class SemanticRetriever:
 
         # Memory visibility scoping
         if owner_user_id or chat_id:
-            visibility_conditions = []
+            visibility_conditions: list[str] = []
 
             if owner_user_id:
                 # User's personal memories
@@ -274,21 +182,74 @@ class SemanticRetriever:
         result = await self._session.execute(sql, params)
         rows = result.fetchall()
 
-        return [
-            SearchResult(
-                id=row[0],
-                content=row[1],
-                metadata={
-                    **((json.loads(row[2]) if row[2] else {}) or {}),
-                    "subject_person_ids": json.loads(row[3]) if row[3] else None,
-                },
-                similarity=1.0 - row[4],  # Convert distance to similarity
-                source_type="memory",
-            )
-            for row in rows
-        ]
+        # Collect all unique person IDs for name resolution
+        all_person_ids: set[str] = set()
+        for row in rows:
+            subject_ids = json.loads(row[3]) if row[3] else None
+            if subject_ids:
+                all_person_ids.update(subject_ids)
 
-    async def search_all(
+        # Resolve person IDs to names
+        person_names: dict[str, str] = {}
+        if all_person_ids:
+            person_names = await self._resolve_person_names(list(all_person_ids))
+
+        # Build results with resolved subject names
+        results: list[SearchResult] = []
+        for row in rows:
+            subject_ids = json.loads(row[3]) if row[3] else None
+
+            # Build subject_name from resolved person IDs
+            subject_name: str | None = None
+            if subject_ids:
+                names = [
+                    person_names.get(pid) for pid in subject_ids if pid in person_names
+                ]
+                if names:
+                    subject_name = ", ".join(n for n in names if n)
+
+            results.append(
+                SearchResult(
+                    id=row[0],
+                    content=row[1],
+                    metadata={
+                        **((json.loads(row[2]) if row[2] else {}) or {}),
+                        "subject_person_ids": subject_ids,
+                        "subject_name": subject_name,
+                    },
+                    similarity=1.0 - row[4],  # Convert distance to similarity
+                    source_type="memory",
+                )
+            )
+
+        return results
+
+    async def _resolve_person_names(self, person_ids: list[str]) -> dict[str, str]:
+        """Resolve person IDs to names.
+
+        Args:
+            person_ids: List of person UUIDs to resolve.
+
+        Returns:
+            Dict mapping person_id to name.
+        """
+        if not person_ids:
+            return {}
+
+        # Build parameterized query for batch lookup
+        placeholders = ", ".join(f":id{i}" for i in range(len(person_ids)))
+        params = {f"id{i}": pid for i, pid in enumerate(person_ids)}
+
+        sql = text(f"""
+            SELECT id, name FROM people WHERE id IN ({placeholders})
+        """)  # noqa: S608 - placeholders built from indices
+
+        result = await self._session.execute(sql, params)
+        rows = result.fetchall()
+
+        return {row[0]: row[1] for row in rows}
+
+    async def search(
         self,
         query: str,
         limit: int = 10,
@@ -296,43 +257,24 @@ class SemanticRetriever:
         owner_user_id: str | None = None,
         chat_id: str | None = None,
     ) -> list[SearchResult]:
-        """Search both messages and memories.
+        """Search memories (alias for search_memories).
 
         Args:
             query: Search query.
-            limit: Maximum results (combined).
+            limit: Maximum results.
             subject_person_id: Optional filter for memories about a specific person.
-            owner_user_id: Filter to user's personal memories.
-            chat_id: Filter to include group memories for this chat.
+            owner_user_id: Filter to user's personal data.
+            chat_id: Filter to include group data for this chat.
 
         Returns:
             List of search results sorted by similarity.
         """
-        # Search both sources with limit
-        messages = await self.search_messages(query, limit=limit)
-        memories = await self.search_memories(
+        return await self.search_memories(
             query,
             limit=limit,
             subject_person_id=subject_person_id,
             owner_user_id=owner_user_id,
             chat_id=chat_id,
-        )
-
-        # Combine and sort by similarity
-        combined = messages + memories
-        combined.sort(key=lambda x: x.similarity, reverse=True)
-
-        return combined[:limit]
-
-    async def delete_message_embedding(self, message_id: str) -> None:
-        """Delete a message embedding.
-
-        Args:
-            message_id: Message ID.
-        """
-        await self._session.execute(
-            text("DELETE FROM message_embeddings WHERE message_id = :id"),
-            {"id": message_id},
         )
 
     async def delete_memory_embedding(self, memory_id: str) -> None:
@@ -345,6 +287,7 @@ class SemanticRetriever:
             text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
             {"id": memory_id},
         )
+        await self._session.commit()
 
     def _serialize_embedding(self, embedding: list[float]) -> bytes:
         """Serialize embedding to bytes for sqlite-vec.

@@ -95,3 +95,82 @@ class UseSkillTool(Tool):
             result.content,
             iterations=result.iterations,
         )
+
+
+class WriteSkillTool(Tool):
+    """Create new skills with quality guidance."""
+
+    def __init__(self, executor: SkillExecutor) -> None:
+        """Initialize tool.
+
+        Args:
+            executor: Skill executor.
+        """
+        self._executor = executor
+
+    @property
+    def name(self) -> str:
+        return "write_skill"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Create a new skill. The skill will be saved to the workspace "
+            "and can be invoked with use_skill. If the skill needs an API, "
+            "it will use web_search to find the correct endpoint."
+        )
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "Name for the skill (lowercase, hyphens). "
+                        "Required if user specifies a name."
+                    ),
+                },
+                "goal": {
+                    "type": "string",
+                    "description": "What the skill should accomplish.",
+                },
+            },
+            "required": ["goal"],
+        }
+
+    async def execute(
+        self,
+        input_data: dict[str, Any],
+        context: ToolContext,
+    ) -> ToolResult:
+        """Create a skill.
+
+        Args:
+            input_data: Contains 'goal' and optional 'name'.
+            context: Execution context.
+
+        Returns:
+            Skill creation result.
+        """
+        skill_context = SkillContext(
+            session_id=context.session_id,
+            user_id=context.user_id,
+            chat_id=context.chat_id,
+            input_data=input_data,
+        )
+
+        result = await self._executor.execute(
+            "write-skill",
+            input_data,
+            skill_context,
+        )
+
+        if result.is_error:
+            return ToolResult.error(result.content)
+
+        return ToolResult.success(
+            result.content,
+            iterations=result.iterations,
+        )

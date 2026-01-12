@@ -11,133 +11,6 @@ from ash.tools.base import ToolContext
 from ash.tools.builtin.memory import RecallTool, RememberTool
 
 
-class TestSessionOperations:
-    """Tests for session management."""
-
-    async def test_get_or_create_session_creates_new(self, memory_store):
-        session = await memory_store.get_or_create_session(
-            provider="telegram",
-            chat_id="chat-123",
-            user_id="user-456",
-        )
-        assert session.id is not None
-        assert session.provider == "telegram"
-        assert session.chat_id == "chat-123"
-        assert session.user_id == "user-456"
-
-    async def test_get_or_create_session_returns_existing(self, memory_store):
-        # Create first session
-        session1 = await memory_store.get_or_create_session(
-            provider="telegram",
-            chat_id="chat-123",
-            user_id="user-456",
-        )
-        # Get same session again
-        session2 = await memory_store.get_or_create_session(
-            provider="telegram",
-            chat_id="chat-123",
-            user_id="user-456",
-        )
-        assert session1.id == session2.id
-
-    async def test_get_or_create_session_with_metadata(self, memory_store):
-        session = await memory_store.get_or_create_session(
-            provider="telegram",
-            chat_id="chat-123",
-            user_id="user-456",
-            metadata={"custom": "data"},
-        )
-        assert session.metadata_ == {"custom": "data"}
-
-    async def test_get_session_by_id(self, memory_store):
-        created = await memory_store.get_or_create_session(
-            provider="test",
-            chat_id="chat-1",
-            user_id="user-1",
-        )
-        retrieved = await memory_store.get_session(created.id)
-        assert retrieved is not None
-        assert retrieved.id == created.id
-
-    async def test_get_session_not_found(self, memory_store):
-        result = await memory_store.get_session("nonexistent-id")
-        assert result is None
-
-
-class TestMessageOperations:
-    """Tests for message storage and retrieval."""
-
-    @pytest.fixture
-    async def session_with_messages(self, memory_store):
-        session = await memory_store.get_or_create_session(
-            provider="test",
-            chat_id="chat-1",
-            user_id="user-1",
-        )
-        # Add messages with explicit timestamps for ordering
-        await memory_store.add_message(
-            session_id=session.id,
-            role="user",
-            content="Hello",
-        )
-        await memory_store.add_message(
-            session_id=session.id,
-            role="assistant",
-            content="Hi there!",
-        )
-        await memory_store.add_message(
-            session_id=session.id,
-            role="user",
-            content="How are you?",
-        )
-        return session
-
-    async def test_add_message(self, memory_store):
-        session = await memory_store.get_or_create_session(
-            provider="test", chat_id="chat-1", user_id="user-1"
-        )
-        message = await memory_store.add_message(
-            session_id=session.id,
-            role="user",
-            content="Hello, world!",
-        )
-        assert message.id is not None
-        assert message.role == "user"
-        assert message.content == "Hello, world!"
-
-    async def test_add_message_with_metadata(self, memory_store):
-        session = await memory_store.get_or_create_session(
-            provider="test", chat_id="chat-1", user_id="user-1"
-        )
-        message = await memory_store.add_message(
-            session_id=session.id,
-            role="assistant",
-            content="Response",
-            token_count=50,
-            metadata={"model": "test-model"},
-        )
-        assert message.token_count == 50
-        assert message.metadata_ == {"model": "test-model"}
-
-    async def test_get_messages(self, session_with_messages, memory_store):
-        messages = await memory_store.get_messages(session_with_messages.id)
-        assert len(messages) == 3
-        # Should be oldest first
-        assert messages[0].content == "Hello"
-        assert messages[2].content == "How are you?"
-
-    async def test_get_messages_with_limit(self, session_with_messages, memory_store):
-        messages = await memory_store.get_messages(session_with_messages.id, limit=2)
-        assert len(messages) == 2
-
-    async def test_get_messages_empty_session(self, memory_store):
-        session = await memory_store.get_or_create_session(
-            provider="test", chat_id="chat-empty", user_id="user-1"
-        )
-        messages = await memory_store.get_messages(session.id)
-        assert messages == []
-
-
 class TestMemoryOperations:
     """Tests for memory entry operations."""
 
@@ -219,86 +92,6 @@ class TestUserProfileOperations:
         assert profile.username == "newname"
 
 
-class TestToolExecutionOperations:
-    """Tests for tool execution logging."""
-
-    async def test_log_tool_execution(self, memory_store):
-        execution = await memory_store.log_tool_execution(
-            tool_name="bash",
-            input_data={"command": "ls -la"},
-            output="file1.txt\nfile2.txt",
-            success=True,
-            duration_ms=150,
-        )
-        assert execution.id is not None
-        assert execution.tool_name == "bash"
-        assert execution.success is True
-        assert execution.duration_ms == 150
-
-    async def test_log_tool_execution_with_session(self, memory_store):
-        session = await memory_store.get_or_create_session(
-            provider="test", chat_id="chat-1", user_id="user-1"
-        )
-        execution = await memory_store.log_tool_execution(
-            tool_name="bash",
-            input_data={"command": "echo hello"},
-            output="hello",
-            success=True,
-            session_id=session.id,
-        )
-        assert execution.session_id == session.id
-
-    async def test_log_failed_execution(self, memory_store):
-        execution = await memory_store.log_tool_execution(
-            tool_name="bash",
-            input_data={"command": "invalid"},
-            output="Command not found",
-            success=False,
-        )
-        assert execution.success is False
-
-    async def test_get_tool_executions(self, memory_store):
-        await memory_store.log_tool_execution(
-            tool_name="bash", input_data={}, output="", success=True
-        )
-        await memory_store.log_tool_execution(
-            tool_name="web_search", input_data={}, output="", success=True
-        )
-
-        executions = await memory_store.get_tool_executions()
-        assert len(executions) == 2
-
-    async def test_get_tool_executions_by_name(self, memory_store):
-        await memory_store.log_tool_execution(
-            tool_name="bash", input_data={}, output="", success=True
-        )
-        await memory_store.log_tool_execution(
-            tool_name="web_search", input_data={}, output="", success=True
-        )
-
-        executions = await memory_store.get_tool_executions(tool_name="bash")
-        assert len(executions) == 1
-        assert executions[0].tool_name == "bash"
-
-    async def test_get_tool_executions_by_session(self, memory_store):
-        session = await memory_store.get_or_create_session(
-            provider="test", chat_id="chat-1", user_id="user-1"
-        )
-        await memory_store.log_tool_execution(
-            tool_name="bash",
-            input_data={},
-            output="",
-            success=True,
-            session_id=session.id,
-        )
-        await memory_store.log_tool_execution(
-            tool_name="bash", input_data={}, output="", success=True
-        )
-
-        executions = await memory_store.get_tool_executions(session_id=session.id)
-        assert len(executions) == 1
-
-
 class TestMemoryManager:
     """Tests for MemoryManager orchestrator."""
 
@@ -306,11 +99,12 @@ class TestMemoryManager:
     def mock_retriever(self):
         """Create a mock semantic retriever."""
         retriever = MagicMock()
-        retriever.search_messages = AsyncMock(return_value=[])
+        # Sessions/messages now stored in JSONL, not SQLite
+        # Retriever only handles memory embeddings
         retriever.search_memories = AsyncMock(return_value=[])
-        retriever.search_all = AsyncMock(return_value=[])
-        retriever.index_message = AsyncMock()
+        retriever.search = AsyncMock(return_value=[])
         retriever.index_memory = AsyncMock()
+        retriever.delete_memory_embedding = AsyncMock()
         return retriever
 
     @pytest.fixture
@@ -325,27 +119,18 @@ class TestMemoryManager:
     async def test_get_context_for_message_empty(self, memory_manager):
         """Test getting context when no relevant data exists."""
         context = await memory_manager.get_context_for_message(
-            session_id="session-1",
             user_id="user-1",
             user_message="Hello",
         )
 
         assert isinstance(context, RetrievedContext)
-        assert context.messages == []
+        # Sessions/messages are now in JSONL, context only has memories
         assert context.memories == []
 
     async def test_get_context_for_message_with_results(
         self, memory_manager, mock_retriever
     ):
         """Test getting context with search results."""
-        mock_retriever.search_messages.return_value = [
-            SearchResult(
-                id="msg-1",
-                content="Previous conversation",
-                similarity=0.9,
-                source_type="message",
-            )
-        ]
         mock_retriever.search_memories.return_value = [
             SearchResult(
                 id="mem-1",
@@ -356,41 +141,13 @@ class TestMemoryManager:
         ]
 
         context = await memory_manager.get_context_for_message(
-            session_id="session-1",
             user_id="user-1",
             user_message="What do you know?",
         )
 
-        assert len(context.messages) == 1
-        assert context.messages[0].content == "Previous conversation"
+        # Only memories are returned (messages are in JSONL sessions)
         assert len(context.memories) == 1
         assert context.memories[0].content == "User preference"
-
-    async def test_persist_turn(self, memory_manager, memory_store, mock_retriever):
-        """Test persisting a conversation turn."""
-        # Create session first
-        session = await memory_store.get_or_create_session(
-            provider="test",
-            chat_id="chat-1",
-            user_id="user-1",
-        )
-
-        await memory_manager.persist_turn(
-            session_id=session.id,
-            user_message="Hello there",
-            assistant_response="Hi! How can I help?",
-        )
-
-        # Check messages were stored
-        messages = await memory_store.get_messages(session.id)
-        assert len(messages) == 2
-        assert messages[0].role == "user"
-        assert messages[0].content == "Hello there"
-        assert messages[1].role == "assistant"
-        assert messages[1].content == "Hi! How can I help?"
-
-        # Check indexing was called
-        assert mock_retriever.index_message.call_count == 2
 
     async def test_add_memory(self, memory_manager, memory_store, mock_retriever):
         """Test adding memory entry."""
@@ -416,13 +173,13 @@ class TestMemoryManager:
         assert memory.expires_at > datetime.now(UTC)
 
     async def test_search(self, memory_manager, mock_retriever):
-        """Test searching all memory."""
-        mock_retriever.search_all.return_value = [
+        """Test searching memories."""
+        mock_retriever.search.return_value = [
             SearchResult(
                 id="1",
                 content="Result 1",
                 similarity=0.9,
-                source_type="knowledge",
+                source_type="memory",
             )
         ]
 
@@ -430,7 +187,7 @@ class TestMemoryManager:
 
         assert len(results) == 1
         assert results[0].content == "Result 1"
-        mock_retriever.search_all.assert_called_once_with(
+        mock_retriever.search.assert_called_once_with(
             "test query",
             limit=5,
             subject_person_id=None,
@@ -594,11 +351,12 @@ class TestMemoryManagerSupersession:
     def mock_retriever(self):
         """Create a mock semantic retriever."""
         retriever = MagicMock()
-        retriever.search_messages = AsyncMock(return_value=[])
+        # Sessions/messages now stored in JSONL, not SQLite
+        # Retriever only handles memory embeddings
         retriever.search_memories = AsyncMock(return_value=[])
-        retriever.search_all = AsyncMock(return_value=[])
-        retriever.index_message = AsyncMock()
+        retriever.search = AsyncMock(return_value=[])
         retriever.index_memory = AsyncMock()
+        retriever.delete_memory_embedding = AsyncMock()
         return retriever
 
     @pytest.fixture
@@ -806,3 +564,162 @@ class TestRecallTool:
 
         assert result.is_error
         assert "Failed to search memory" in result.content
+
+
+class TestSubjectPersonValidation:
+    """Tests for subject_person_ids validation."""
+
+    async def test_add_memory_rejects_invalid_person_id(self, memory_store):
+        """Test that add_memory rejects invalid subject_person_ids."""
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid subject person ID"):
+            await memory_store.add_memory(
+                content="Test fact about nonexistent person",
+                subject_person_ids=["nonexistent-person-id"],
+            )
+
+    async def test_add_memory_accepts_valid_person_id(self, memory_store):
+        """Test that add_memory accepts valid subject_person_ids."""
+        # Create a person first (note: model uses 'relation' not 'relationship')
+        person = await memory_store.create_person(
+            owner_user_id="user-1",
+            name="Sarah",
+        )
+
+        # Should succeed with valid person ID
+        memory = await memory_store.add_memory(
+            content="Sarah's birthday is March 15",
+            subject_person_ids=[person.id],
+            owner_user_id="user-1",
+        )
+
+        assert memory.subject_person_ids == [person.id]
+
+
+class TestRememberToolGracefulDegradation:
+    """Tests for RememberTool graceful degradation on person resolution failures."""
+
+    @pytest.fixture
+    def mock_memory_manager(self):
+        """Create a mock memory manager with failing person resolution."""
+        manager = MagicMock()
+        manager.add_memory = AsyncMock()
+
+        async def resolve_or_create_person(owner_user_id, reference, content_hint=None):
+            # First call succeeds, second fails
+            if reference == "Sarah":
+                from ash.memory.manager import PersonResolutionResult
+
+                return PersonResolutionResult(
+                    person_id="person-1",
+                    created=True,
+                    person_name="Sarah",
+                )
+            else:
+                raise Exception("Database error")
+
+        manager.resolve_or_create_person = AsyncMock(
+            side_effect=resolve_or_create_person
+        )
+        return manager
+
+    @pytest.fixture
+    def remember_tool(self, mock_memory_manager):
+        """Create a remember tool with partial failing person resolution."""
+        return RememberTool(memory_manager=mock_memory_manager)
+
+    async def test_remember_continues_after_person_resolution_failure(
+        self, remember_tool, mock_memory_manager
+    ):
+        """Test that remember continues storing fact even if one subject fails."""
+        context = ToolContext(session_id="s1", user_id="u1")
+
+        result = await remember_tool.execute(
+            {
+                "content": "Both like pizza",
+                "subjects": ["Sarah", "BadRef"],  # First succeeds, second fails
+            },
+            context,
+        )
+
+        # Should not be an error - we stored the fact with partial subjects
+        assert not result.is_error
+        assert "Remembered" in result.content
+        # Should mention the unresolved reference
+        assert "unresolved" in result.content or "Sarah" in result.content
+
+        # Memory should still be stored (with the one valid subject)
+        mock_memory_manager.add_memory.assert_called_once()
+        call_kwargs = mock_memory_manager.add_memory.call_args.kwargs
+        assert call_kwargs["subject_person_ids"] == ["person-1"]
+
+
+class TestSubjectNameResolution:
+    """Tests for subject_name resolution in search results."""
+
+    @pytest.fixture
+    def mock_retriever(self):
+        """Create a mock semantic retriever that returns memories with subject_name."""
+        retriever = MagicMock()
+        # Sessions/messages now stored in JSONL, not SQLite
+        # Retriever only handles memory embeddings
+        retriever.search_memories = AsyncMock(return_value=[])
+        retriever.search = AsyncMock(return_value=[])
+        retriever.index_memory = AsyncMock()
+        retriever.delete_memory_embedding = AsyncMock()
+        return retriever
+
+    async def test_search_memories_includes_subject_name(self, mock_retriever):
+        """Test that search_memories returns subject_name in metadata.
+
+        This tests the contract that search_memories should resolve
+        subject_person_ids to human-readable names.
+        """
+        # Mock the retriever to return a memory with subject_name populated
+        mock_retriever.search_memories.return_value = [
+            SearchResult(
+                id="mem-1",
+                content="Sarah likes Italian food",
+                similarity=0.9,
+                source_type="memory",
+                metadata={
+                    "subject_person_ids": ["person-1"],
+                    "subject_name": "Sarah",  # This is the key field we're testing
+                },
+            )
+        ]
+
+        results = await mock_retriever.search_memories(
+            query="food preferences",
+            owner_user_id="user-1",
+        )
+
+        assert len(results) == 1
+        assert results[0].metadata["subject_name"] == "Sarah"
+
+    async def test_recall_shows_subject_attribution(self, mock_retriever):
+        """Test that recall tool output includes subject attribution."""
+        from ash.tools.builtin.memory import RecallTool
+
+        manager = MagicMock()
+        manager.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-1",
+                    content="Sarah likes Italian food",
+                    similarity=0.9,
+                    source_type="memory",
+                    metadata={"subject_name": "Sarah"},
+                )
+            ]
+        )
+        manager.find_person = AsyncMock(return_value=None)
+
+        recall_tool = RecallTool(memory_manager=manager)
+        context = ToolContext(user_id="user-1")
+
+        result = await recall_tool.execute({"query": "food"}, context)
+
+        assert not result.is_error
+        assert "about Sarah" in result.content

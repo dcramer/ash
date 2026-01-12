@@ -1,4 +1,12 @@
-"""Memory store for conversation history and memories."""
+"""Memory store for memories, people, and user profiles.
+
+Note: Session and message storage has been moved to ash.sessions module.
+This module now only handles SQLite-based storage for:
+- Memories (with embeddings for semantic search)
+- People (relationship tracking)
+- User profiles
+- Skill state
+"""
 
 import uuid
 from datetime import UTC, datetime
@@ -9,17 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ash.db.models import (
     Memory,
-    Message,
     Person,
-    Session,
     SkillState,
-    ToolExecution,
     UserProfile,
 )
 
 
 class MemoryStore:
-    """Store and retrieve conversation history and memories."""
+    """Store and retrieve memories, people, and user profiles."""
 
     def __init__(self, session: AsyncSession):
         """Initialize memory store.
@@ -28,248 +33,6 @@ class MemoryStore:
             session: Database session.
         """
         self._session = session
-
-    # Session operations
-
-    async def get_or_create_session(
-        self,
-        provider: str,
-        chat_id: str,
-        user_id: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> Session:
-        """Get existing session or create a new one.
-
-        Args:
-            provider: Provider name (e.g., 'telegram').
-            chat_id: Chat identifier from provider.
-            user_id: User identifier from provider.
-            metadata: Optional session metadata.
-
-        Returns:
-            Session instance.
-        """
-        stmt = select(Session).where(
-            Session.provider == provider,
-            Session.chat_id == chat_id,
-        )
-        result = await self._session.execute(stmt)
-        session = result.scalar_one_or_none()
-
-        if session is None:
-            session = Session(
-                id=str(uuid.uuid4()),
-                provider=provider,
-                chat_id=chat_id,
-                user_id=user_id,
-                metadata_=metadata,
-            )
-            self._session.add(session)
-            await self._session.flush()
-
-        return session
-
-    async def get_session(self, session_id: str) -> Session | None:
-        """Get session by ID.
-
-        Args:
-            session_id: Session ID.
-
-        Returns:
-            Session or None if not found.
-        """
-        stmt = select(Session).where(Session.id == session_id)
-        result = await self._session.execute(stmt)
-        return result.scalar_one_or_none()
-
-    # Message operations
-
-    async def add_message(
-        self,
-        session_id: str,
-        role: str,
-        content: str,
-        token_count: int | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> Message:
-        """Add a message to session history.
-
-        Args:
-            session_id: Session ID.
-            role: Message role (user, assistant, system).
-            content: Message content.
-            token_count: Optional token count.
-            metadata: Optional message metadata.
-
-        Returns:
-            Created message.
-        """
-        message = Message(
-            id=str(uuid.uuid4()),
-            session_id=session_id,
-            role=role,
-            content=content,
-            token_count=token_count,
-            metadata_=metadata,
-        )
-        self._session.add(message)
-        await self._session.flush()
-        return message
-
-    async def get_messages(
-        self,
-        session_id: str,
-        limit: int = 50,
-        before: datetime | None = None,
-    ) -> list[Message]:
-        """Get messages for a session.
-
-        Args:
-            session_id: Session ID.
-            limit: Maximum number of messages.
-            before: Only get messages before this time.
-
-        Returns:
-            List of messages, oldest first.
-        """
-        stmt = (
-            select(Message)
-            .where(Message.session_id == session_id)
-            .order_by(Message.created_at.desc())
-            .limit(limit)
-        )
-
-        if before:
-            stmt = stmt.where(Message.created_at < before)
-
-        result = await self._session.execute(stmt)
-        messages = list(result.scalars().all())
-        messages.reverse()  # Return oldest first
-        return messages
-
-    async def has_message_with_external_id(
-        self,
-        session_id: str,
-        external_id: str,
-    ) -> bool:
-        """Check if a message with given external ID exists.
-
-        Used to avoid processing duplicate messages (e.g., from Telegram).
-
-        Args:
-            session_id: Session ID.
-            external_id: External message ID (e.g., Telegram message ID).
-
-        Returns:
-            True if message exists, False otherwise.
-        """
-        from sqlalchemy import func
-
-        # Check if any message in this session has this external_id in metadata
-        stmt = select(Message).where(
-            Message.session_id == session_id,
-            Message.role == "user",
-            func.json_extract(Message.metadata_, "$.external_id") == external_id,
-        )
-        result = await self._session.execute(stmt)
-        return result.scalar_one_or_none() is not None
-
-    async def get_message_by_external_id(
-        self,
-        session_id: str,
-        external_id: str,
-    ) -> Message | None:
-        """Find message by external ID (e.g., Telegram message ID).
-
-        Searches both user messages (external_id) and assistant messages
-        (bot_response_id) to support reply-to functionality.
-
-        Args:
-            session_id: Session ID.
-            external_id: External message ID.
-
-        Returns:
-            Message if found, None otherwise.
-        """
-        from sqlalchemy import func, or_
-
-        # Check for external_id in user messages or bot_response_id in metadata
-        stmt = select(Message).where(
-            Message.session_id == session_id,
-            or_(
-                func.json_extract(Message.metadata_, "$.external_id") == external_id,
-                func.json_extract(Message.metadata_, "$.bot_response_id")
-                == external_id,
-            ),
-        )
-        result = await self._session.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def get_messages_around(
-        self,
-        session_id: str,
-        message_id: str,
-        window: int = 3,
-    ) -> list[Message]:
-        """Get messages around a specific message.
-
-        Returns the target message plus N messages before and after it,
-        sorted chronologically.
-
-        Args:
-            session_id: Session ID.
-            message_id: Target message ID.
-            window: Number of messages before and after (default 3).
-
-        Returns:
-            List of messages sorted by created_at.
-        """
-        # Get the target message to find its timestamp
-        target_stmt = select(Message).where(Message.id == message_id)
-        target_result = await self._session.execute(target_stmt)
-        target = target_result.scalar_one_or_none()
-
-        if not target:
-            return []
-
-        # Get messages before (including target)
-        before_stmt = (
-            select(Message)
-            .where(
-                Message.session_id == session_id,
-                Message.created_at <= target.created_at,
-            )
-            .order_by(Message.created_at.desc())
-            .limit(window + 1)  # +1 for the target itself
-        )
-        before_result = await self._session.execute(before_stmt)
-        before_messages = list(before_result.scalars().all())
-
-        # Get messages after
-        after_stmt = (
-            select(Message)
-            .where(
-                Message.session_id == session_id,
-                Message.created_at > target.created_at,
-            )
-            .order_by(Message.created_at.asc())
-            .limit(window)
-        )
-        after_result = await self._session.execute(after_stmt)
-        after_messages = list(after_result.scalars().all())
-
-        # Combine and deduplicate
-        all_messages = before_messages + after_messages
-        seen_ids = set()
-        unique_messages = []
-        for msg in all_messages:
-            if msg.id not in seen_ids:
-                seen_ids.add(msg.id)
-                unique_messages.append(msg)
-
-        # Sort chronologically
-        unique_messages.sort(key=lambda m: m.created_at)
-        return unique_messages
 
     # Person operations
 
@@ -297,7 +60,7 @@ class MemoryStore:
             id=str(uuid.uuid4()),
             owner_user_id=owner_user_id,
             name=name,
-            relationship=relationship,
+            relation=relationship,
             aliases=aliases or [],
             metadata_=metadata,
         )
@@ -458,7 +221,17 @@ class MemoryStore:
 
         Returns:
             Created memory entry.
+
+        Raises:
+            ValueError: If any subject_person_ids don't exist in the database.
         """
+        # Validate subject_person_ids exist
+        if subject_person_ids:
+            for person_id in subject_person_ids:
+                person = await self.get_person(person_id)
+                if not person:
+                    raise ValueError(f"Invalid subject person ID: {person_id}")
+
         memory = Memory(
             id=str(uuid.uuid4()),
             content=content,
@@ -626,71 +399,6 @@ class MemoryStore:
             await self._session.flush()
 
         return profile
-
-    # Tool execution operations
-
-    async def log_tool_execution(
-        self,
-        tool_name: str,
-        input_data: dict[str, Any],
-        output: str | None,
-        success: bool,
-        duration_ms: int | None = None,
-        session_id: str | None = None,
-    ) -> ToolExecution:
-        """Log a tool execution.
-
-        Args:
-            tool_name: Name of the tool.
-            input_data: Tool input.
-            output: Tool output.
-            success: Whether execution succeeded.
-            duration_ms: Execution duration in milliseconds.
-            session_id: Optional associated session.
-
-        Returns:
-            Created tool execution record.
-        """
-        execution = ToolExecution(
-            id=str(uuid.uuid4()),
-            session_id=session_id,
-            tool_name=tool_name,
-            input=input_data,
-            output=output,
-            success=success,
-            duration_ms=duration_ms,
-        )
-        self._session.add(execution)
-        await self._session.flush()
-        return execution
-
-    async def get_tool_executions(
-        self,
-        session_id: str | None = None,
-        tool_name: str | None = None,
-        limit: int = 50,
-    ) -> list[ToolExecution]:
-        """Get tool execution history.
-
-        Args:
-            session_id: Filter by session.
-            tool_name: Filter by tool name.
-            limit: Maximum number of records.
-
-        Returns:
-            List of tool executions.
-        """
-        stmt = (
-            select(ToolExecution).order_by(ToolExecution.created_at.desc()).limit(limit)
-        )
-
-        if session_id:
-            stmt = stmt.where(ToolExecution.session_id == session_id)
-        if tool_name:
-            stmt = stmt.where(ToolExecution.tool_name == tool_name)
-
-        result = await self._session.execute(stmt)
-        return list(result.scalars().all())
 
     # Skill state operations
 

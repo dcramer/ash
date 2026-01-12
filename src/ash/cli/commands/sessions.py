@@ -8,7 +8,6 @@ from typing import Annotated
 import typer
 
 from ash.cli.console import console, dim, error, success, warning
-from ash.cli.context import get_config, get_database
 
 
 def register(app: typer.Typer) -> None:
@@ -44,14 +43,6 @@ def register(app: typer.Typer) -> None:
                 help="Maximum entries to show",
             ),
         ] = 20,
-        config_path: Annotated[
-            Path | None,
-            typer.Option(
-                "--config",
-                "-c",
-                help="Path to configuration file",
-            ),
-        ] = None,
         force: Annotated[
             bool,
             typer.Option(
@@ -63,6 +54,8 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Manage conversation sessions and messages.
 
+        Sessions are stored as JSONL files in ~/.ash/sessions/.
+
         Examples:
             ash sessions list                  # List recent sessions
             ash sessions search -q "hello"     # Search messages
@@ -70,135 +63,138 @@ def register(app: typer.Typer) -> None:
             ash sessions clear                 # Clear all history
         """
         try:
-            asyncio.run(
-                _run_sessions_action(
-                    action=action,
-                    query=query,
-                    output=output,
-                    limit=limit,
-                    config_path=config_path,
-                    force=force,
-                )
-            )
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled[/dim]")
-
-
-async def _run_sessions_action(
-    action: str,
-    query: str | None,
-    output: Path | None,
-    limit: int,
-    config_path: Path | None,
-    force: bool,
-) -> None:
-    """Run sessions action asynchronously."""
-    config = get_config(config_path)
-    database = await get_database(config)
-
-    try:
-        async with database.session() as session:
             if action == "list":
-                await _sessions_list(session, limit)
+                asyncio.run(_sessions_list(limit))
 
             elif action == "search":
                 if not query:
                     error("--query is required for search")
                     raise typer.Exit(1)
-                await _sessions_search(session, query, limit)
+                asyncio.run(_sessions_search(query, limit))
 
             elif action == "export":
-                await _sessions_export(session, output)
+                asyncio.run(_sessions_export(output))
 
             elif action == "clear":
-                await _sessions_clear(session, force)
+                _sessions_clear(force)
 
             else:
                 error(f"Unknown action: {action}")
                 console.print("Valid actions: list, search, export, clear")
                 raise typer.Exit(1)
 
-    finally:
-        await database.disconnect()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled[/dim]")
 
 
-async def _sessions_list(session, limit: int) -> None:
+async def _sessions_list(limit: int) -> None:
     """List conversation sessions."""
     from rich.table import Table
-    from sqlalchemy import func, select
 
-    from ash.db.models import Message
-    from ash.db.models import Session as DbSession
+    from ash.sessions import SessionManager, SessionReader
 
-    # Get sessions with message counts
-    stmt = (
-        select(
-            DbSession,
-            func.count(Message.id).label("message_count"),
-        )
-        .outerjoin(Message)
-        .group_by(DbSession.id)
-        .order_by(DbSession.updated_at.desc())
-        .limit(limit)
-    )
-    result = await session.execute(stmt)
-    rows = result.all()
+    sessions = await SessionManager.list_sessions()
 
-    if not rows:
+    if not sessions:
         warning("No sessions found")
         return
 
+    # Sort by created_at descending and limit
+    sessions.sort(key=lambda s: s["created_at"], reverse=True)
+    sessions = sessions[:limit]
+
     table = Table(title="Conversation Sessions")
-    table.add_column("ID", style="dim", max_width=8)
+    table.add_column("Key", style="dim", max_width=20)
     table.add_column("Provider", style="cyan")
     table.add_column("Chat ID", style="dim", max_width=15)
     table.add_column("Messages", style="green", justify="right")
-    table.add_column("Last Updated", style="dim")
+    table.add_column("Created", style="dim")
 
-    for sess, msg_count in rows:
+    for sess in sessions:
+        # Count messages in this session
+        from ash.config.paths import get_sessions_path
+
+        session_dir = get_sessions_path() / sess["key"]
+        reader = SessionReader(session_dir)
+        entries = await reader.load_entries()
+        from ash.sessions.types import MessageEntry
+
+        message_count = sum(1 for e in entries if isinstance(e, MessageEntry))
+
+        chat_id = sess.get("chat_id") or ""
+        if len(chat_id) > 15:
+            chat_id = chat_id[:15]
+
         table.add_row(
-            sess.id[:8],
-            sess.provider,
-            sess.chat_id[:15] if len(sess.chat_id) > 15 else sess.chat_id,
-            str(msg_count),
-            sess.updated_at.strftime("%Y-%m-%d %H:%M"),
+            sess["key"][:20],
+            sess["provider"],
+            chat_id,
+            str(message_count),
+            sess["created_at"].strftime("%Y-%m-%d %H:%M"),
         )
 
     console.print(table)
-    dim(f"\nShowing {len(rows)} sessions")
+    dim(f"\nShowing {len(sessions)} sessions")
 
 
-async def _sessions_search(session, query: str, limit: int) -> None:
-    """Search messages."""
+async def _sessions_search(query: str, limit: int) -> None:
+    """Search messages across all sessions."""
     from rich.table import Table
-    from sqlalchemy import select
 
-    from ash.db.models import Message
-    from ash.db.models import Session as DbSession
+    from ash.config.paths import get_sessions_path
+    from ash.sessions import SessionReader
+    from ash.sessions.types import MessageEntry
 
-    stmt = (
-        select(Message)
-        .join(DbSession)
-        .where(Message.content.ilike(f"%{query}%"))
-        .order_by(Message.created_at.desc())
-        .limit(limit)
-    )
-    result = await session.execute(stmt)
-    messages = result.scalars().all()
+    sessions_path = get_sessions_path()
+    if not sessions_path.exists():
+        warning("No sessions found")
+        return
 
-    if not messages:
+    results: list[tuple[str, MessageEntry]] = []
+
+    # Search across all sessions
+    for session_dir in sessions_path.iterdir():
+        if not session_dir.is_dir():
+            continue
+
+        reader = SessionReader(session_dir)
+        matches = await reader.search_messages(query, limit=limit)
+        for msg in matches:
+            results.append((session_dir.name, msg))
+            if len(results) >= limit:
+                break
+
+        if len(results) >= limit:
+            break
+
+    if not results:
         warning(f"No messages found matching '{query}'")
         return
 
+    # Sort by created_at descending
+    results.sort(key=lambda x: x[1].created_at, reverse=True)
+    results = results[:limit]
+
     table = Table(title=f"Message Search: '{query}'")
+    table.add_column("Session", style="dim", max_width=15)
     table.add_column("Time", style="dim")
     table.add_column("Role", style="cyan")
     table.add_column("Content", style="white", max_width=60)
 
-    for msg in messages:
-        content = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
+    for session_key, msg in results:
+        content = msg.content if isinstance(msg.content, str) else ""
+        if not isinstance(msg.content, str):
+            # Extract text from content blocks
+            for block in msg.content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    content += block.get("text", "")
+
+        if len(content) > 100:
+            content = content[:100] + "..."
         content = content.replace("\n", " ")
+
         table.add_row(
+            session_key[:15],
             msg.created_at.strftime("%Y-%m-%d %H:%M"),
             msg.role,
             content,
@@ -207,46 +203,60 @@ async def _sessions_search(session, query: str, limit: int) -> None:
     console.print(table)
 
 
-async def _sessions_export(session, output: Path | None) -> None:
-    """Export all sessions and messages."""
-    from sqlalchemy import select
+async def _sessions_export(output: Path | None) -> None:
+    """Export all sessions to JSON."""
+    from ash.config.paths import get_sessions_path
+    from ash.sessions import SessionReader
+    from ash.sessions.types import MessageEntry, SessionHeader
 
-    from ash.db.models import Message
-    from ash.db.models import Session as DbSession
-
-    sessions_result = await session.execute(
-        select(DbSession).order_by(DbSession.created_at)
-    )
-    db_sessions = sessions_result.scalars().all()
+    sessions_path = get_sessions_path()
+    if not sessions_path.exists():
+        warning("No sessions found")
+        return
 
     export_data = []
-    for sess in db_sessions:
-        messages_result = await session.execute(
-            select(Message)
-            .where(Message.session_id == sess.id)
-            .order_by(Message.created_at)
-        )
-        messages = messages_result.scalars().all()
 
-        export_data.append(
-            {
-                "session_id": sess.id,
-                "provider": sess.provider,
-                "chat_id": sess.chat_id,
-                "user_id": sess.user_id,
-                "created_at": sess.created_at.isoformat(),
-                "updated_at": sess.updated_at.isoformat(),
-                "messages": [
+    for session_dir in sorted(sessions_path.iterdir()):
+        if not session_dir.is_dir():
+            continue
+
+        reader = SessionReader(session_dir)
+        entries = await reader.load_entries()
+
+        header = None
+        messages = []
+
+        for entry in entries:
+            if isinstance(entry, SessionHeader):
+                header = entry
+            elif isinstance(entry, MessageEntry):
+                content = entry.content if isinstance(entry.content, str) else ""
+                if not isinstance(entry.content, str):
+                    for block in entry.content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            content += block.get("text", "")
+
+                messages.append(
                     {
-                        "id": msg.id,
-                        "role": msg.role,
-                        "content": msg.content,
-                        "created_at": msg.created_at.isoformat(),
+                        "id": entry.id,
+                        "role": entry.role,
+                        "content": content,
+                        "created_at": entry.created_at.isoformat(),
                     }
-                    for msg in messages
-                ],
-            }
-        )
+                )
+
+        if header:
+            export_data.append(
+                {
+                    "session_key": session_dir.name,
+                    "session_id": header.id,
+                    "provider": header.provider,
+                    "chat_id": header.chat_id,
+                    "user_id": header.user_id,
+                    "created_at": header.created_at.isoformat(),
+                    "messages": messages,
+                }
+            )
 
     json_output = json.dumps(export_data, indent=2)
 
@@ -257,30 +267,36 @@ async def _sessions_export(session, output: Path | None) -> None:
         console.print(json_output)
 
 
-async def _sessions_clear(session, force: bool) -> None:
+def _sessions_clear(force: bool) -> None:
     """Clear all conversation history."""
-    from sqlalchemy import delete, text
+    import shutil
 
-    from ash.db.models import Message, ToolExecution
-    from ash.db.models import Session as DbSession
+    from ash.config.paths import get_sessions_path
+
+    sessions_path = get_sessions_path()
+    if not sessions_path.exists():
+        warning("No sessions found")
+        return
+
+    # Count sessions
+    session_count = sum(1 for d in sessions_path.iterdir() if d.is_dir())
+
+    if session_count == 0:
+        warning("No sessions found")
+        return
 
     if not force:
-        warning("This will delete ALL conversation history.")
+        warning(
+            f"This will delete {session_count} session(s) and all conversation history."
+        )
         confirm = typer.confirm("Are you sure?")
         if not confirm:
             dim("Cancelled")
             return
 
-    # Clear message embeddings first (table may not exist)
-    try:
-        await session.execute(text("DELETE FROM message_embeddings"))
-    except Exception:  # noqa: S110
-        pass
+    # Delete all session directories
+    for session_dir in sessions_path.iterdir():
+        if session_dir.is_dir():
+            shutil.rmtree(session_dir)
 
-    # Delete in order due to foreign keys
-    await session.execute(delete(ToolExecution))
-    await session.execute(delete(Message))
-    await session.execute(delete(DbSession))
-    await session.commit()
-
-    success("All conversation history cleared")
+    success(f"Cleared {session_count} session(s)")

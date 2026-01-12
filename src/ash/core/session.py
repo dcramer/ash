@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ash.llm.types import ContentBlock, Message, Role, TextContent, ToolResult, ToolUse
+from ash.sessions.utils import content_block_to_dict, validate_tool_pairs
 
 
 @dataclass
@@ -101,11 +102,14 @@ class SessionState:
 
         if recency_tokens >= token_budget:
             # Even recency window exceeds budget - return what fits
-            return self._fit_to_budget(
+            pruned = self._fit_to_budget(
                 self.messages[recency_start:],
                 token_counts[recency_start:],
                 token_budget,
             )
+            # Validate tool_use/tool_result pairs after pruning
+            validated, _ = validate_tool_pairs(pruned)
+            return validated
 
         # Budget remaining for older messages
         remaining_budget = token_budget - recency_tokens
@@ -124,7 +128,11 @@ class SessionState:
             else:
                 break  # No more room
 
-        return included_older + self.messages[recency_start:]
+        combined = included_older + self.messages[recency_start:]
+
+        # Validate tool_use/tool_result pairs - pruning may have orphaned some
+        validated, _ = validate_tool_pairs(combined)
+        return validated
 
     def _get_token_counts(self) -> list[int]:
         """Get token counts for all messages, estimating if not cached."""
@@ -144,7 +152,7 @@ class SessionState:
                     counts.append(estimate_message_tokens(msg.role.value, content))
                 else:
                     # Convert content blocks to dict format for estimation
-                    blocks = [self._content_block_to_dict(b) for b in content]
+                    blocks = [content_block_to_dict(b) for b in content]
                     counts.append(estimate_message_tokens(msg.role.value, blocks))
 
         return counts
@@ -169,17 +177,6 @@ class SessionState:
                 break
 
         return result
-
-    @staticmethod
-    def _content_block_to_dict(block: ContentBlock) -> dict[str, Any]:
-        """Convert content block to dict for token estimation."""
-        if isinstance(block, TextContent):
-            return {"type": "text", "text": block.text}
-        elif isinstance(block, ToolUse):
-            return {"type": "tool_use", "name": block.name, "input": block.input}
-        elif isinstance(block, ToolResult):
-            return {"type": "tool_result", "content": block.content}
-        return {}
 
     def set_token_counts(self, counts: list[int]) -> None:
         """Set cached token counts from DB.

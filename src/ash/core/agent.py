@@ -7,10 +7,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ash.core.compaction import CompactionSettings, compact_messages, should_compact
 from ash.core.prompt import PromptContext, SystemPromptBuilder
 from ash.core.session import SessionState
 from ash.core.tokens import estimate_tokens
 from ash.llm import LLMProvider, ToolDefinition
+from ash.llm.thinking import ThinkingConfig, resolve_thinking
 from ash.llm.types import (
     StreamEventType,
     TextContent,
@@ -41,16 +43,35 @@ class AgentConfig:
 
     Temperature is optional - if None, the provider's default is used.
     Omit temperature for reasoning models that don't support it.
+
+    Thinking is optional - enables extended thinking for complex reasoning.
+    Only supported by Anthropic Claude models.
     """
 
     model: str | None = None
     max_tokens: int = 4096
     temperature: float | None = None  # None = use provider default
+    thinking: ThinkingConfig | None = None  # Extended thinking config
     max_tool_iterations: int = MAX_TOOL_ITERATIONS
     # Smart pruning configuration
     context_token_budget: int = 100000  # Target context window size
     recency_window: int = 10  # Always keep last N messages
     system_prompt_buffer: int = 8000  # Reserve for system prompt
+    # Compaction configuration (summarizes old messages instead of dropping)
+    compaction_enabled: bool = True
+    compaction_reserve_tokens: int = 16384  # Buffer to trigger compaction
+    compaction_keep_recent_tokens: int = 20000  # Always keep recent context
+    compaction_summary_max_tokens: int = 2000  # Max tokens for summary
+
+
+@dataclass
+class CompactionInfo:
+    """Information about a compaction that occurred."""
+
+    summary: str
+    tokens_before: int
+    tokens_after: int
+    messages_removed: int
 
 
 @dataclass
@@ -60,6 +81,7 @@ class AgentResponse:
     text: str
     tool_calls: list[dict[str, Any]]
     iterations: int
+    compaction: CompactionInfo | None = None
 
 
 class Agent:
@@ -144,6 +166,71 @@ class Agent:
             )
         return definitions
 
+    async def _maybe_compact(self, session: SessionState) -> CompactionInfo | None:
+        """Check if compaction is needed and run it if so.
+
+        Compaction summarizes old messages when context gets too large,
+        preserving important information while staying within token limits.
+
+        Args:
+            session: Session state to potentially compact.
+
+        Returns:
+            CompactionInfo if compaction was performed, None otherwise.
+        """
+        if not self._config.compaction_enabled:
+            return None
+
+        # Estimate current context tokens
+        token_counts = session._get_token_counts()
+        total_tokens = sum(token_counts)
+
+        settings = CompactionSettings(
+            enabled=self._config.compaction_enabled,
+            reserve_tokens=self._config.compaction_reserve_tokens,
+            keep_recent_tokens=self._config.compaction_keep_recent_tokens,
+            summary_max_tokens=self._config.compaction_summary_max_tokens,
+        )
+
+        if not should_compact(
+            total_tokens, self._config.context_token_budget, settings
+        ):
+            return None
+
+        logger.info(
+            f"Context near limit ({total_tokens}/{self._config.context_token_budget} tokens), "
+            "running compaction"
+        )
+
+        # Run compaction
+        new_messages, new_token_counts, result = await compact_messages(
+            messages=session.messages,
+            token_counts=token_counts,
+            llm=self._llm,
+            settings=settings,
+            model=self._config.model,
+        )
+
+        if result is None:
+            logger.debug("Compaction skipped - not enough messages to summarize")
+            return None
+
+        # Update session state
+        session.messages = new_messages
+        session._token_counts = new_token_counts
+
+        logger.info(
+            f"Compaction complete: {result.tokens_before} -> {result.tokens_after} tokens "
+            f"({result.messages_removed} messages summarized)"
+        )
+
+        return CompactionInfo(
+            summary=result.summary,
+            tokens_before=result.tokens_before,
+            tokens_after=result.tokens_after,
+            messages_removed=result.messages_removed,
+        )
+
     async def process_message(
         self,
         user_message: str,
@@ -171,20 +258,15 @@ class Agent:
         # Use provided user_id or fall back to session user_id
         effective_user_id = user_id or session.user_id
 
-        # Get message IDs in recency window for deduplication
-        recent_message_ids = session.get_recent_message_ids(self._config.recency_window)
-
         # Retrieve memory context and known people before processing
         memory_context: RetrievedContext | None = None
         known_people: list[Person] | None = None
         if self._memory:
             try:
                 memory_context = await self._memory.get_context_for_message(
-                    session_id=session.session_id,
                     user_id=effective_user_id,
                     user_message=user_message,
                     chat_id=session.chat_id,
-                    exclude_message_ids=recent_message_ids,
                 )
             except Exception:
                 logger.warning("Failed to retrieve memory context", exc_info=True)
@@ -217,6 +299,9 @@ class Agent:
         # Add user message to session
         session.add_user_message(user_message)
 
+        # Check if compaction is needed (summarize old messages)
+        compaction_info = await self._maybe_compact(session)
+
         tool_calls: list[dict[str, Any]] = []
         iterations = 0
         final_text = ""
@@ -235,6 +320,7 @@ class Agent:
                 system=system_prompt,
                 max_tokens=self._config.max_tokens,
                 temperature=self._config.temperature,
+                thinking=self._config.thinking,
             )
 
             # Add assistant response to session
@@ -246,23 +332,11 @@ class Agent:
                 # No tool calls, return text response
                 final_text = response.message.get_text() or ""
 
-                # Persist turn to memory
-                if self._memory:
-                    try:
-                        await self._memory.persist_turn(
-                            session_id=session.session_id,
-                            user_message=user_message,
-                            assistant_response=final_text,
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Failed to persist turn to memory", exc_info=True
-                        )
-
                 return AgentResponse(
                     text=final_text,
                     tool_calls=tool_calls,
                     iterations=iterations,
+                    compaction=compaction_info,
                 )
 
             # Execute tools with effective user_id (supports group chats)
@@ -271,15 +345,10 @@ class Agent:
                 user_id=effective_user_id,
                 chat_id=session.chat_id,
                 provider=session.provider,
+                metadata=dict(session.metadata),
             )
 
             for tool_use in pending_tools:
-                # Log tool call with input (truncated)
-                input_str = str(tool_use.input)
-                if len(input_str) > 200:
-                    input_str = input_str[:200] + "..."
-                logger.info(f"Tool call: {tool_use.name} | input: {input_str}")
-
                 # Notify callback before execution
                 if on_tool_start:
                     await on_tool_start(tool_use.name, tool_use.input)
@@ -289,13 +358,6 @@ class Agent:
                     tool_use.input,
                     tool_context,
                 )
-
-                # Log tool result (truncated)
-                result_str = result.content
-                if len(result_str) > 500:
-                    result_str = result_str[:500] + "..."
-                status = "error" if result.is_error else "ok"
-                logger.info(f"Tool result: {tool_use.name} | {status} | {result_str}")
 
                 tool_calls.append(
                     {
@@ -320,21 +382,11 @@ class Agent:
         )
         final_text = "I've reached the maximum number of tool calls. Please try again with a simpler request."
 
-        # Persist turn even on max iterations
-        if self._memory:
-            try:
-                await self._memory.persist_turn(
-                    session_id=session.session_id,
-                    user_message=user_message,
-                    assistant_response=final_text,
-                )
-            except Exception:
-                logger.warning("Failed to persist turn to memory", exc_info=True)
-
         return AgentResponse(
             text=final_text,
             tool_calls=tool_calls,
             iterations=iterations,
+            compaction=compaction_info,
         )
 
     async def process_message_streaming(
@@ -364,20 +416,15 @@ class Agent:
         # Use provided user_id or fall back to session user_id
         effective_user_id = user_id or session.user_id
 
-        # Get message IDs in recency window for deduplication
-        recent_message_ids = session.get_recent_message_ids(self._config.recency_window)
-
         # Retrieve memory context and known people before processing
         memory_context: RetrievedContext | None = None
         known_people: list[Person] | None = None
         if self._memory:
             try:
                 memory_context = await self._memory.get_context_for_message(
-                    session_id=session.session_id,
                     user_id=effective_user_id,
                     user_message=user_message,
                     chat_id=session.chat_id,
-                    exclude_message_ids=recent_message_ids,
                 )
             except Exception:
                 logger.warning("Failed to retrieve memory context", exc_info=True)
@@ -410,6 +457,9 @@ class Agent:
         # Add user message to session
         session.add_user_message(user_message)
 
+        # Check if compaction is needed (summarize old messages)
+        await self._maybe_compact(session)
+
         iterations = 0
         accumulated_response = ""
 
@@ -433,6 +483,7 @@ class Agent:
                 system=system_prompt,
                 max_tokens=self._config.max_tokens,
                 temperature=self._config.temperature,
+                thinking=self._config.thinking,
             ):
                 if chunk.type == StreamEventType.TEXT_DELTA:
                     current_text += chunk.content or ""
@@ -479,35 +530,13 @@ class Agent:
             if content_blocks:
                 session.add_assistant_message(content_blocks)
             else:
-                # Empty response - persist what we have
-                if self._memory and accumulated_response:
-                    try:
-                        await self._memory.persist_turn(
-                            session_id=session.session_id,
-                            user_message=user_message,
-                            assistant_response=accumulated_response,
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Failed to persist turn to memory", exc_info=True
-                        )
+                # Empty response
                 return
 
             # Get tool uses from what we just added
             pending_tools = [b for b in content_blocks if isinstance(b, ToolUse)]
             if not pending_tools:
-                # No tool calls, we're done - persist turn
-                if self._memory and accumulated_response:
-                    try:
-                        await self._memory.persist_turn(
-                            session_id=session.session_id,
-                            user_message=user_message,
-                            assistant_response=accumulated_response,
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Failed to persist turn to memory", exc_info=True
-                        )
+                # No tool calls, we're done
                 return
 
             # Execute tools (non-streaming) with effective user_id (supports group chats)
@@ -516,15 +545,10 @@ class Agent:
                 user_id=effective_user_id,
                 chat_id=session.chat_id,
                 provider=session.provider,
+                metadata=dict(session.metadata),
             )
 
             for tool_use in pending_tools:
-                # Log tool call with input (truncated)
-                input_str = str(tool_use.input)
-                if len(input_str) > 200:
-                    input_str = input_str[:200] + "..."
-                logger.info(f"Tool call: {tool_use.name} | input: {input_str}")
-
                 # Notify callback before execution
                 if on_tool_start:
                     await on_tool_start(tool_use.name, tool_use.input)
@@ -535,13 +559,6 @@ class Agent:
                     tool_context,
                 )
 
-                # Log tool result (truncated)
-                result_str = result.content
-                if len(result_str) > 500:
-                    result_str = result_str[:500] + "..."
-                status = "error" if result.is_error else "ok"
-                logger.info(f"Tool result: {tool_use.name} | {status} | {result_str}")
-
                 # Add tool result to session
                 session.add_tool_result(
                     tool_use_id=tool_use.id,
@@ -549,17 +566,7 @@ class Agent:
                     is_error=result.is_error,
                 )
 
-        # Max iterations - persist turn
-        if self._memory and accumulated_response:
-            try:
-                await self._memory.persist_turn(
-                    session_id=session.session_id,
-                    user_message=user_message,
-                    assistant_response=accumulated_response,
-                )
-            except Exception:
-                logger.warning("Failed to persist turn to memory", exc_info=True)
-
+        # Max iterations reached
         yield "\n\n[Max tool iterations reached]"
 
 
@@ -615,9 +622,12 @@ async def create_agent(
         SemanticRetriever,
     )
     from ash.skills import SkillExecutor, SkillRegistry
-    from ash.tools.builtin import BashTool, WebSearchTool
+    from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
+    from ash.tools.builtin.files import FileAccessTracker, ReadFileTool, WriteFileTool
     from ash.tools.builtin.memory import RecallTool, RememberTool
-    from ash.tools.builtin.skills import UseSkillTool
+    from ash.tools.builtin.schedule import ScheduleTaskTool
+    from ash.tools.builtin.search_cache import SearchCache
+    from ash.tools.builtin.skills import UseSkillTool, WriteSkillTool
 
     # Resolve model configuration
     model_config = config.get_model(model_alias)
@@ -640,13 +650,38 @@ async def create_agent(
         )
     )
 
-    # Register web search if configured
+    # Register file tools (always available)
+    file_tracker = FileAccessTracker()
+    tool_registry.register(
+        ReadFileTool(workspace_path=config.workspace, tracker=file_tracker)
+    )
+    tool_registry.register(
+        WriteFileTool(workspace_path=config.workspace, tracker=file_tracker)
+    )
+
+    # Register schedule tool (always available)
+    schedule_file = config.workspace / "schedule.jsonl"
+    tool_registry.register(ScheduleTaskTool(schedule_file))
+
+    # Register web tools if brave search is configured
     if config.brave_search and config.brave_search.api_key:
+        # Create shared caches
+        search_cache = SearchCache(maxsize=100, ttl=900)  # 15 min for searches
+        fetch_cache = SearchCache(maxsize=50, ttl=1800)  # 30 min for pages
+
         tool_registry.register(
             WebSearchTool(
                 api_key=config.brave_search.api_key.get_secret_value(),
                 sandbox_config=config.sandbox,
                 workspace_path=config.workspace,
+                cache=search_cache,
+            )
+        )
+        tool_registry.register(
+            WebFetchTool(
+                sandbox_config=config.sandbox,
+                workspace_path=config.workspace,
+                cache=fetch_cache,
             )
         )
 
@@ -711,11 +746,12 @@ async def create_agent(
     skill_registry.discover(config.workspace)
     logger.info(f"Discovered {len(skill_registry)} skills from workspace")
 
-    # Create skill executor and register skill tool
+    # Create skill executor and register skill tools
     skill_executor: SkillExecutor | None = None
     skill_executor = SkillExecutor(skill_registry, tool_executor, config)
     tool_registry.register(UseSkillTool(skill_registry, skill_executor))
-    logger.debug("Skill tool registered")
+    tool_registry.register(WriteSkillTool(skill_executor))
+    logger.debug("Skill tools registered")
 
     # Recreate tool executor with all tools registered
     tool_executor = ToolExecutor(tool_registry)
@@ -734,6 +770,11 @@ async def create_agent(
         config=config,
     )
 
+    # Resolve thinking configuration from model config
+    thinking_config = None
+    if model_config.thinking:
+        thinking_config = resolve_thinking(model_config.thinking)
+
     # Create agent
     agent = Agent(
         llm=llm,
@@ -745,9 +786,14 @@ async def create_agent(
             model=model_config.model,
             max_tokens=model_config.max_tokens,
             temperature=model_config.temperature,
+            thinking=thinking_config,
             context_token_budget=config.memory.context_token_budget,
             recency_window=config.memory.recency_window,
             system_prompt_buffer=config.memory.system_prompt_buffer,
+            compaction_enabled=config.memory.compaction_enabled,
+            compaction_reserve_tokens=config.memory.compaction_reserve_tokens,
+            compaction_keep_recent_tokens=config.memory.compaction_keep_recent_tokens,
+            compaction_summary_max_tokens=config.memory.compaction_summary_max_tokens,
         ),
     )
 

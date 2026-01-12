@@ -1,5 +1,7 @@
 """Web search tool using Brave Search API, executed in sandbox."""
 
+import json
+import logging
 import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -7,27 +9,35 @@ from typing import TYPE_CHECKING, Any
 from ash.sandbox import SandboxExecutor
 from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
 from ash.tools.base import Tool, ToolContext, ToolResult
+from ash.tools.builtin.search_cache import SearchCache
+from ash.tools.builtin.search_types import SearchResponse
+from ash.tools.retry import RetryConfig, with_retry
 
 if TYPE_CHECKING:
     from ash.config.models import SandboxConfig
 
+logger = logging.getLogger(__name__)
+
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 
 # Python script to execute inside sandbox
-# This is more robust than curl+jq for URL encoding and JSON parsing
-SEARCH_SCRIPT = """
-import json, os, sys, urllib.request, urllib.parse
+# Outputs JSON for reliable parsing and accurate result counting
+SEARCH_SCRIPT = '''
+import json, os, sys, urllib.request, urllib.parse, time
+from urllib.parse import urlparse
 
 query = sys.argv[1]
 count = int(sys.argv[2]) if len(sys.argv) > 2 else 5
 
 api_key = os.environ.get("BRAVE_API_KEY", "")
 if not api_key:
-    print("ERROR: BRAVE_API_KEY not set", file=sys.stderr)
+    print(json.dumps({"error": "BRAVE_API_KEY not set", "code": 500}))
     sys.exit(1)
 
 q = urllib.parse.quote(query)
 url = f"https://api.search.brave.com/res/v1/web/search?q={q}&count={count}"
+
+start_time = time.time()
 
 try:
     req = urllib.request.Request(
@@ -39,41 +49,77 @@ try:
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         if resp.status != 200:
-            print(f"ERROR: HTTP {resp.status}", file=sys.stderr)
+            print(json.dumps({"error": f"HTTP {resp.status}", "code": resp.status}))
             sys.exit(1)
         data = json.load(resp)
 except urllib.error.HTTPError as e:
-    if e.code == 401:
-        print("ERROR: Invalid API key", file=sys.stderr)
-    elif e.code == 429:
-        print("ERROR: Rate limit exceeded", file=sys.stderr)
-    else:
-        print(f"ERROR: HTTP {e.code}", file=sys.stderr)
+    error_msg = {
+        401: "Invalid API key",
+        429: "Rate limit exceeded",
+    }.get(e.code, f"HTTP {e.code}")
+    print(json.dumps({"error": error_msg, "code": e.code}))
     sys.exit(1)
 except urllib.error.URLError as e:
-    print(f"ERROR: {e.reason}", file=sys.stderr)
+    print(json.dumps({"error": str(e.reason), "code": 0}))
     sys.exit(1)
 except Exception as e:
-    print(f"ERROR: {e}", file=sys.stderr)
+    print(json.dumps({"error": str(e), "code": 0}))
     sys.exit(1)
 
-results = data.get("web", {}).get("results", [])
-if not results:
-    print("No results found")
-    sys.exit(0)
+search_time_ms = int((time.time() - start_time) * 1000)
 
-for i, r in enumerate(results, 1):
+def truncate_at_word(text, max_len=300):
+    """Truncate at word boundary, not mid-word."""
+    if len(text) <= max_len:
+        return text
+    # Find last space before max_len
+    truncated = text[:max_len]
+    last_space = truncated.rfind(" ")
+    if last_space > max_len * 0.7:  # Only use if space is reasonably close
+        truncated = truncated[:last_space]
+    return truncated.rstrip() + "..."
+
+def extract_site_name(url_str):
+    """Extract readable site name from URL."""
+    try:
+        parsed = urlparse(url_str)
+        domain = parsed.netloc
+        # Remove www. prefix
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain
+    except Exception:
+        return None
+
+raw_results = data.get("web", {}).get("results", [])
+results = []
+
+for r in raw_results:
     title = r.get("title", "No title")
-    url = r.get("url", "")
+    result_url = r.get("url", "")
     desc = r.get("description", "")
-    # Truncate long descriptions
-    if len(desc) > 300:
-        desc = desc[:297] + "..."
-    print(f"{i}. {title}")
-    print(f"   URL: {url}")
-    print(f"   {desc}")
-    print()
-"""
+
+    # Truncate at word boundary
+    if desc:
+        desc = truncate_at_word(desc, 300)
+
+    results.append({
+        "title": title,
+        "url": result_url,
+        "description": desc,
+        "site_name": extract_site_name(result_url),
+        "published_date": r.get("page_age"),  # Brave API field
+    })
+
+output = {
+    "query": query,
+    "results": results,
+    "total_count": len(results),
+    "search_time_ms": search_time_ms,
+}
+
+print(json.dumps(output))
+'''
 
 
 class WebSearchTool(Tool):
@@ -81,6 +127,11 @@ class WebSearchTool(Tool):
 
     All requests execute inside the Docker sandbox for network control.
     Requires network_mode: bridge in sandbox configuration.
+
+    Features:
+    - Structured JSON output with citation metadata
+    - In-memory caching with 15-min TTL
+    - Retry support for transient errors (via retry.py)
     """
 
     def __init__(
@@ -88,6 +139,8 @@ class WebSearchTool(Tool):
         api_key: str,
         sandbox_config: "SandboxConfig | None" = None,
         workspace_path: Path | None = None,
+        cache: SearchCache | None = None,
+        retry_config: RetryConfig | None = None,
         max_results: int = 10,
     ):
         """Initialize web search tool.
@@ -96,11 +149,15 @@ class WebSearchTool(Tool):
             api_key: Brave Search API key.
             sandbox_config: Sandbox configuration (pydantic model from config).
             workspace_path: Path to workspace (for sandbox config).
+            cache: Optional search cache for result caching.
+            retry_config: Optional retry configuration for transient errors.
             max_results: Maximum results to return per search.
         """
         self._api_key = api_key
         self._max_results = max_results
         self._sandbox_config = sandbox_config
+        self._cache = cache
+        self._retry_config = retry_config or RetryConfig()
 
         # Check network mode
         network_mode = sandbox_config.network_mode if sandbox_config else "bridge"
@@ -151,7 +208,8 @@ class WebSearchTool(Tool):
         return (
             "Search the web for current information. "
             "Use this to find recent news, documentation, articles, or any "
-            "information that may not be in your training data."
+            "information that may not be in your training data. "
+            "Returns structured results with titles, URLs, and descriptions."
         )
 
     @property
@@ -192,50 +250,89 @@ class WebSearchTool(Tool):
 
         count = min(input_data.get("count", 5), self._max_results)
 
-        try:
-            # Build command to execute Python search script
-            # Query is passed as argument, properly escaped
-            escaped_query = shlex.quote(query)
-            command = f"python3 -c {shlex.quote(SEARCH_SCRIPT)} {escaped_query} {count}"
-
-            result = await self._executor.execute(
-                command,
-                timeout=30,
-                reuse_container=True,
-            )
-
-            if result.timed_out:
-                return ToolResult.error("Search request timed out")
-
-            # Check for errors in stderr
-            if result.stderr:
-                stderr = result.stderr.strip()
-                if stderr.startswith("ERROR:"):
-                    error_msg = stderr.replace("ERROR:", "").strip()
-                    return ToolResult.error(f"Search failed: {error_msg}")
-
-            # Return results
-            output = result.stdout.strip() if result.stdout else ""
-            if not output or output == "No results found":
+        # Check cache first
+        if self._cache:
+            cached = self._cache.get(query)
+            if cached is not None and isinstance(cached, SearchResponse):
+                logger.debug(f"Cache hit for query: {query}")
                 return ToolResult.success(
-                    f"No results found for: {query}",
-                    result_count=0,
+                    cached.to_formatted_text(),
+                    result_count=len(cached.results),
+                    cached=True,
+                    search_time_ms=cached.search_time_ms,
                 )
 
-            # Count results (each result starts with a number followed by dot)
-            result_count = sum(
-                1
-                for line in output.split("\n")
-                if line and line[0].isdigit() and ". " in line
+        try:
+            # Use retry wrapper for transient errors
+            response = await with_retry(
+                lambda: self._execute_search(query, count),
+                config=self._retry_config,
+                on_retry=lambda attempt, err, delay: logger.warning(
+                    f"Search retry {attempt}/{self._retry_config.max_attempts}: "
+                    f"{err}, waiting {delay:.1f}s"
+                ),
             )
 
+            # Cache the response
+            if self._cache and not response.cached:
+                self._cache.set(query, response)
+
             return ToolResult.success(
-                output,
-                result_count=result_count,
+                response.to_formatted_text(),
+                result_count=len(response.results),
+                cached=response.cached,
+                search_time_ms=response.search_time_ms,
             )
 
         except Exception as e:
+            logger.exception(f"Search error for query: {query}")
             return ToolResult.error(f"Search error: {e}")
+
+    async def _execute_search(self, query: str, count: int) -> SearchResponse:
+        """Execute search in sandbox and parse response.
+
+        Args:
+            query: Search query.
+            count: Number of results.
+
+        Returns:
+            Parsed SearchResponse.
+
+        Raises:
+            Exception: On search failure.
+        """
+        # Build command to execute Python search script
+        # Query is passed as argument, properly escaped
+        escaped_query = shlex.quote(query)
+        command = f"python3 -c {shlex.quote(SEARCH_SCRIPT)} {escaped_query} {count}"
+
+        result = await self._executor.execute(
+            command,
+            timeout=30,
+            reuse_container=True,
+        )
+
+        if result.timed_out:
+            raise TimeoutError("Search request timed out")
+
+        # Parse JSON output
+        output = result.stdout.strip() if result.stdout else ""
+        if not output:
+            raise ValueError("Empty response from search")
+
+        try:
+            data = json.loads(output)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON response: {e}") from e
+
+        # Check for error response
+        if "error" in data:
+            error_code = data.get("code", 0)
+            error_msg = data["error"]
+            raise Exception(f"{error_msg} (code: {error_code})")
+
+        # Parse into SearchResponse
+        return SearchResponse.from_json(output)
 
     async def cleanup(self) -> None:
         """Clean up sandbox resources."""

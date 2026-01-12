@@ -2,17 +2,19 @@
 
 import asyncio
 import logging
+import time
 from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ash.config.models import ConversationConfig
 from ash.core import Agent, SessionState
+from ash.core.agent import CompactionInfo
 from ash.core.tokens import estimate_tokens
 from ash.db import Database
-from ash.db.models import Message
 from ash.memory import MemoryStore
 from ash.providers.base import IncomingMessage, OutgoingMessage
+from ash.sessions import MessageEntry, SessionManager
 
 if TYPE_CHECKING:
     from ash.providers.telegram.provider import TelegramProvider
@@ -114,6 +116,8 @@ class TelegramMessageHandler:
         self._conversation_config = conversation_config or ConversationConfig()
         # Use OrderedDict for LRU-style eviction of cached sessions
         self._sessions: OrderedDict[str, SessionState] = OrderedDict()
+        # Session managers keyed by session_key
+        self._session_managers: dict[str, SessionManager] = {}
         # Per-chat locks to serialize message handling
         self._chat_locks: dict[str, asyncio.Lock] = {}
 
@@ -130,31 +134,49 @@ class TelegramMessageHandler:
             self._chat_locks[chat_id] = asyncio.Lock()
         return self._chat_locks[chat_id]
 
+    def _get_session_manager(self, chat_id: str, user_id: str) -> SessionManager:
+        """Get or create a session manager for this chat.
+
+        Args:
+            chat_id: Chat ID.
+            user_id: User ID.
+
+        Returns:
+            SessionManager instance.
+        """
+        manager = SessionManager(
+            provider=self._provider.name,
+            chat_id=chat_id,
+            user_id=user_id,
+        )
+        session_key = manager.session_key
+        if session_key not in self._session_managers:
+            self._session_managers[session_key] = manager
+        return self._session_managers[session_key]
+
     async def _load_reply_context(
         self,
-        store: MemoryStore,
-        session_id: str,
+        session_manager: SessionManager,
         reply_to_id: str,
-    ) -> list[Message]:
+    ) -> list[MessageEntry]:
         """Load context around the replied-to message.
 
         Args:
-            store: Memory store instance.
-            session_id: Session ID.
+            session_manager: Session manager instance.
             reply_to_id: External ID of the message being replied to.
 
         Returns:
             List of messages around the reply target.
         """
-        target = await store.get_message_by_external_id(session_id, reply_to_id)
+        target = await session_manager.get_message_by_external_id(reply_to_id)
         if not target:
             logger.debug(
-                f"Reply target {reply_to_id} not found in session {session_id}"
+                f"Reply target {reply_to_id} not found in session {session_manager.session_key}"
             )
             return []
 
         window = self._conversation_config.reply_context_window
-        return await store.get_messages_around(session_id, target.id, window=window)
+        return await session_manager.get_messages_around(target.id, window=window)
 
     async def handle_message(self, message: IncomingMessage) -> None:
         """Handle an incoming Telegram message.
@@ -231,6 +253,8 @@ class TelegramMessageHandler:
     async def _handle_image_message(self, message: IncomingMessage) -> None:
         """Handle a message containing images.
 
+        Uses same thinking message pattern as other handlers.
+
         Args:
             message: Incoming message with images.
         """
@@ -252,24 +276,58 @@ class TelegramMessageHandler:
             # Send typing indicator
             await self._provider.send_typing(message.chat_id)
 
-            # Callback to send tool progress as separate messages
+            # Track thinking message (created on first tool call)
+            thinking_msg_id: str | None = None
+
             async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
+                nonlocal thinking_msg_id
                 brief = format_tool_brief(tool_name, tool_input)
-                await self._provider.send(
-                    OutgoingMessage(chat_id=message.chat_id, text=brief)
-                )
+                if not brief:
+                    return
+
+                if thinking_msg_id is None:
+                    thinking_msg_id = await self._provider.send(
+                        OutgoingMessage(
+                            chat_id=message.chat_id,
+                            text=f"_Thinking... {brief}_",
+                            reply_to_message_id=message.id,
+                        )
+                    )
+                else:
+                    await self._provider.edit(
+                        message.chat_id, thinking_msg_id, f"_Thinking... {brief}_"
+                    )
 
             if self._streaming:
-                response_stream = self._agent.process_message_streaming(
+                # Accumulate response for persistence
+                response_content = ""
+                async for chunk in self._agent.process_message_streaming(
                     image_context,
                     session,
                     user_id=message.user_id,
                     on_tool_start=on_tool_start,
+                ):
+                    response_content += chunk
+
+                # Delete thinking message and send response
+                if thinking_msg_id:
+                    await self._provider.delete(message.chat_id, thinking_msg_id)
+
+                sent_message_id = await self._provider.send(
+                    OutgoingMessage(
+                        chat_id=message.chat_id,
+                        text=response_content,
+                        reply_to_message_id=message.id,
+                    )
                 )
-                await self._provider.send_streaming(
-                    chat_id=message.chat_id,
-                    stream=response_stream,
-                    reply_to=message.id,
+
+                await self._persist_messages(
+                    message.chat_id,
+                    message.user_id,
+                    image_context,
+                    response_content,
+                    external_id=message.id,
+                    bot_response_id=sent_message_id,
                 )
             else:
                 response = await self._agent.process_message(
@@ -278,15 +336,30 @@ class TelegramMessageHandler:
                     user_id=message.user_id,
                     on_tool_start=on_tool_start,
                 )
-                await self._provider.send(
-                    OutgoingMessage(
-                        chat_id=message.chat_id,
-                        text=response.text,
-                        reply_to_message_id=message.id,
-                    )
-                )
 
-            await self._persist_messages(session, image_context, external_id=message.id)
+                if thinking_msg_id:
+                    await self._provider.edit(
+                        message.chat_id, thinking_msg_id, response.text
+                    )
+                    sent_message_id = thinking_msg_id
+                else:
+                    sent_message_id = await self._provider.send(
+                        OutgoingMessage(
+                            chat_id=message.chat_id,
+                            text=response.text,
+                            reply_to_message_id=message.id,
+                        )
+                    )
+
+                await self._persist_messages(
+                    message.chat_id,
+                    message.user_id,
+                    image_context,
+                    response.text,
+                    external_id=message.id,
+                    bot_response_id=sent_message_id,
+                    compaction=response.compaction,
+                )
         else:
             # No caption - just acknowledge the image
             await self._provider.send(
@@ -307,21 +380,8 @@ class TelegramMessageHandler:
         Returns:
             True if message was already processed.
         """
-        async with self._database.session() as db_session:
-            store = MemoryStore(db_session)
-
-            # Get session for this chat
-            db_session_record = await store.get_or_create_session(
-                provider="telegram",
-                chat_id=message.chat_id,
-                user_id=message.user_id,
-            )
-
-            # Check if we've already processed this message
-            return await store.has_message_with_external_id(
-                session_id=db_session_record.id,
-                external_id=message.id,
-            )
+        session_manager = self._get_session_manager(message.chat_id, message.user_id)
+        return await session_manager.has_message_with_external_id(message.id)
 
     async def _get_or_create_session(
         self,
@@ -340,111 +400,104 @@ class TelegramMessageHandler:
         Returns:
             Session state.
         """
-        session_key = f"{self._provider.name}:{message.chat_id}"
+        session_manager = self._get_session_manager(message.chat_id, message.user_id)
+        session_key = session_manager.session_key
 
         if session_key in self._sessions:
             # Move to end (most recently used)
             self._sessions.move_to_end(session_key)
             return self._sessions[session_key]
 
-        # Create new session from database
-        async with self._database.session() as db_session:
-            store = MemoryStore(db_session)
-            db_session_record = await store.get_or_create_session(
-                provider=self._provider.name,
-                chat_id=message.chat_id,
-                user_id=message.user_id,
-            )
+        # Ensure session exists in JSONL
+        await session_manager.ensure_session()
 
-            # Load recent messages based on recency window
-            recency_window = self._conversation_config.recency_window
-            recent_messages = await store.get_messages(
-                session_id=db_session_record.id,
-                limit=recency_window,
-            )
+        # Load messages from JSONL
+        messages, message_ids = await session_manager.load_messages_for_llm()
 
-            # Calculate gap since last message
-            gap_minutes: float | None = None
-            if recent_messages:
-                # recent_messages is oldest-first, so last element is most recent
-                last_message_time = recent_messages[-1].created_at.replace(tzinfo=UTC)
+        # Calculate gap since last message
+        gap_minutes: float | None = None
+        if messages:
+            # Get timestamp from last message
+            entries = await session_manager._reader.load_entries()
+            msg_entries = [e for e in entries if isinstance(e, MessageEntry)]
+            if msg_entries:
+                last_message_time = msg_entries[-1].created_at.replace(tzinfo=UTC)
                 gap = datetime.now(UTC) - last_message_time
                 gap_minutes = gap.total_seconds() / 60
 
-            # Load reply context if this is a reply
-            reply_context: list[Message] = []
-            if message.reply_to_message_id:
-                reply_context = await self._load_reply_context(
-                    store, db_session_record.id, message.reply_to_message_id
-                )
-                if reply_context:
-                    logger.debug(
-                        f"Loaded {len(reply_context)} messages for reply context"
+        # Load reply context if this is a reply
+        reply_context: list[MessageEntry] = []
+        if message.reply_to_message_id:
+            reply_context = await self._load_reply_context(
+                session_manager, message.reply_to_message_id
+            )
+            if reply_context:
+                logger.debug(f"Loaded {len(reply_context)} messages for reply context")
+
+        # Create session state
+        session = SessionState(
+            session_id=session_key,
+            provider=self._provider.name,
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+        )
+
+        # Store user info in session metadata for tools (e.g., scheduling)
+        if message.username:
+            session.metadata["username"] = message.username
+        if message.display_name:
+            session.metadata["display_name"] = message.display_name
+
+        # Store gap in session metadata for prompt builder
+        if gap_minutes is not None:
+            session.metadata["conversation_gap_minutes"] = gap_minutes
+        if message.reply_to_message_id and reply_context:
+            session.metadata["has_reply_context"] = True
+
+        # Restore messages from JSONL
+        # Note: messages are already in LLM format from load_messages_for_llm
+        for msg in messages:
+            session.messages.append(msg)
+
+        # Set message IDs for deduplication
+        session.set_message_ids(message_ids)
+
+        # Merge reply context if available
+        if reply_context:
+            # Convert reply context entries to messages if not already present
+            existing_ids = set(message_ids)
+            for entry in reply_context:
+                if entry.id not in existing_ids:
+                    # Convert MessageEntry to Message
+                    from ash.llm.types import Message, Role
+
+                    role = Role(entry.role)
+                    content = (
+                        entry.content
+                        if isinstance(entry.content, str)
+                        else _extract_text_content(entry.content)
                     )
+                    session.messages.append(Message(role=role, content=content))
 
-            # Merge recent messages with reply context (deduplicate)
-            all_message_ids = {m.id for m in recent_messages}
-            merged_messages = list(recent_messages)
-            for msg in reply_context:
-                if msg.id not in all_message_ids:
-                    merged_messages.append(msg)
-                    all_message_ids.add(msg.id)
+            # Re-sort by position (approximate - messages were already sorted)
+            # In practice, reply context is usually already in the recency window
 
-            # Sort chronologically
-            merged_messages.sort(key=lambda m: m.created_at)
-
-            # Create session state
-            session = SessionState(
-                session_id=db_session_record.id,
-                provider=self._provider.name,
-                chat_id=message.chat_id,
-                user_id=message.user_id,
+        if messages:
+            logger.debug(
+                f"Restored {len(messages)} messages for session {session_key}"
+                + (f" (gap: {format_gap_duration(gap_minutes)})" if gap_minutes else "")
             )
 
-            # Store gap in session metadata for prompt builder
-            if gap_minutes is not None:
-                session.metadata["conversation_gap_minutes"] = gap_minutes
-            if message.reply_to_message_id and reply_context:
-                session.metadata["has_reply_context"] = True
+        # Evict oldest sessions if cache is full
+        while len(self._sessions) >= MAX_CACHED_SESSIONS:
+            evicted_key, _ = self._sessions.popitem(last=False)
+            logger.debug(f"Evicted session from cache: {evicted_key}")
 
-            # Restore messages from database and collect metadata for pruning
-            message_ids: list[str] = []
-            token_counts: list[int] = []
+        self._sessions[session_key] = session
 
-            for db_msg in merged_messages:
-                if db_msg.role == "user":
-                    session.add_user_message(db_msg.content)
-                elif db_msg.role == "assistant":
-                    session.add_assistant_message(db_msg.content)
-                # Note: tool_use and tool_result are not restored since they
-                # are intermediate states that shouldn't persist across restarts
-
-                # Collect metadata for smart pruning
-                message_ids.append(db_msg.id)
-                token_counts.append(db_msg.token_count or 0)
-
-            # Set metadata for pruning and deduplication
-            session.set_message_ids(message_ids)
-            session.set_token_counts(token_counts)
-
-            if merged_messages:
-                logger.debug(
-                    f"Restored {len(merged_messages)} messages for session {session_key}"
-                    + (
-                        f" (gap: {format_gap_duration(gap_minutes)})"
-                        if gap_minutes
-                        else ""
-                    )
-                )
-
-            # Evict oldest sessions if cache is full
-            while len(self._sessions) >= MAX_CACHED_SESSIONS:
-                evicted_key, _ = self._sessions.popitem(last=False)
-                logger.debug(f"Evicted session from cache: {evicted_key}")
-
-            self._sessions[session_key] = session
-
-            # Update user profile
+        # Update user profile (still in SQLite)
+        async with self._database.session() as db_session:
+            store = MemoryStore(db_session)
             await store.get_or_create_user_profile(
                 user_id=message.user_id,
                 provider=self._provider.name,
@@ -461,6 +514,10 @@ class TelegramMessageHandler:
     ) -> None:
         """Handle message with streaming response.
 
+        Uses a "Thinking..." message for tool progress that gets replaced
+        with the final response. Hybrid streaming: accumulates for first
+        5 seconds, then starts showing partial content if still generating.
+
         Args:
             message: Incoming message.
             session: Session state.
@@ -468,37 +525,97 @@ class TelegramMessageHandler:
         # Send typing indicator
         await self._provider.send_typing(message.chat_id)
 
-        # Callback to send tool progress as separate messages
-        async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
-            brief = format_tool_brief(tool_name, tool_input)
-            await self._provider.send(
-                OutgoingMessage(chat_id=message.chat_id, text=brief)
-            )
-
-        # Stream response while capturing content
+        # Track thinking message (created on first tool call)
+        thinking_msg_id: str | None = None
+        response_msg_id: str | None = None
         response_content = ""
+        start_time = time.time()
+        last_edit_time = 0.0
+        STREAM_DELAY = 5.0  # Start showing partial response after this many seconds
+        MIN_EDIT_INTERVAL = 1.0  # Minimum time between edits
 
-        async def capturing_stream():
-            nonlocal response_content
-            async for chunk in self._agent.process_message_streaming(
-                message.text,
-                session,
-                user_id=message.user_id,
-                on_tool_start=on_tool_start,
+        async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
+            nonlocal thinking_msg_id
+            brief = format_tool_brief(tool_name, tool_input)
+            if not brief:
+                return
+
+            if thinking_msg_id is None:
+                # First tool - create thinking message
+                thinking_msg_id = await self._provider.send(
+                    OutgoingMessage(
+                        chat_id=message.chat_id,
+                        text=f"_Thinking... {brief}_",
+                        reply_to_message_id=message.id,
+                    )
+                )
+            else:
+                # Subsequent tools - update existing thinking message
+                await self._provider.edit(
+                    message.chat_id, thinking_msg_id, f"_Thinking... {brief}_"
+                )
+
+        # Stream response while accumulating content
+        async for chunk in self._agent.process_message_streaming(
+            message.text,
+            session,
+            user_id=message.user_id,
+            on_tool_start=on_tool_start,
+        ):
+            response_content += chunk
+            elapsed = time.time() - start_time
+            since_last_edit = time.time() - last_edit_time
+
+            # After STREAM_DELAY seconds, start showing partial response
+            if (
+                elapsed > STREAM_DELAY
+                and response_content.strip()
+                and since_last_edit >= MIN_EDIT_INTERVAL
             ):
-                response_content += chunk
-                yield chunk
+                # Delete thinking message on first partial update
+                if thinking_msg_id and response_msg_id is None:
+                    await self._provider.delete(message.chat_id, thinking_msg_id)
+                    thinking_msg_id = None
 
-        # Stream response and capture sent message ID
-        sent_message_id = await self._provider.send_streaming(
-            chat_id=message.chat_id,
-            stream=capturing_stream(),
-            reply_to=message.id,
-        )
+                if response_msg_id is None:
+                    response_msg_id = await self._provider.send(
+                        OutgoingMessage(
+                            chat_id=message.chat_id,
+                            text=response_content,
+                            reply_to_message_id=message.id,
+                        )
+                    )
+                    last_edit_time = time.time()
+                else:
+                    await self._provider.edit(
+                        message.chat_id, response_msg_id, response_content
+                    )
+                    last_edit_time = time.time()
+
+        # Final update - clean up thinking message and send/edit final response
+        if thinking_msg_id:
+            await self._provider.delete(message.chat_id, thinking_msg_id)
+
+        if response_msg_id:
+            # Edit existing response message with final content
+            await self._provider.edit(
+                message.chat_id, response_msg_id, response_content
+            )
+            sent_message_id = response_msg_id
+        else:
+            # No streaming happened - send as single message
+            sent_message_id = await self._provider.send(
+                OutgoingMessage(
+                    chat_id=message.chat_id,
+                    text=response_content,
+                    reply_to_message_id=message.id,
+                )
+            )
 
         # Persist both user message and assistant response with reply context
         await self._persist_messages(
-            session,
+            message.chat_id,
+            message.user_id,
             message.text,
             response_content,
             external_id=message.id,
@@ -513,17 +630,36 @@ class TelegramMessageHandler:
     ) -> None:
         """Handle message with synchronous response.
 
+        Uses a "Thinking..." message for tool progress that gets replaced
+        with the final response.
+
         Args:
             message: Incoming message.
             session: Session state.
         """
+        # Track thinking message (created on first tool call)
+        thinking_msg_id: str | None = None
 
-        # Callback to send tool progress as separate messages
         async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
+            nonlocal thinking_msg_id
             brief = format_tool_brief(tool_name, tool_input)
-            await self._provider.send(
-                OutgoingMessage(chat_id=message.chat_id, text=brief)
-            )
+            if not brief:
+                return
+
+            if thinking_msg_id is None:
+                # First tool - create thinking message
+                thinking_msg_id = await self._provider.send(
+                    OutgoingMessage(
+                        chat_id=message.chat_id,
+                        text=f"_Thinking... {brief}_",
+                        reply_to_message_id=message.id,
+                    )
+                )
+            else:
+                # Subsequent tools - update existing thinking message
+                await self._provider.edit(
+                    message.chat_id, thinking_msg_id, f"_Thinking... {brief}_"
+                )
 
         # Start typing indicator loop (Telegram typing only lasts 5 seconds)
         typing_task = asyncio.create_task(self._typing_loop(message.chat_id))
@@ -544,24 +680,41 @@ class TelegramMessageHandler:
             except asyncio.CancelledError:
                 pass
 
-        # Send response and capture the sent message ID
-        sent_message_id = await self._provider.send(
-            OutgoingMessage(
-                chat_id=message.chat_id,
-                text=response.text,
-                reply_to_message_id=message.id,
+        # Send or edit response
+        if thinking_msg_id:
+            # Edit thinking message with final response
+            await self._provider.edit(message.chat_id, thinking_msg_id, response.text)
+            sent_message_id = thinking_msg_id
+        else:
+            # No tools used - send new message
+            sent_message_id = await self._provider.send(
+                OutgoingMessage(
+                    chat_id=message.chat_id,
+                    text=response.text,
+                    reply_to_message_id=message.id,
+                )
             )
-        )
 
-        # Persist messages to database with reply context
+        # Persist messages to JSONL with reply context
         await self._persist_messages(
-            session,
+            message.chat_id,
+            message.user_id,
             message.text,
             response.text,
             external_id=message.id,
             reply_to_external_id=message.reply_to_message_id,
             bot_response_id=sent_message_id,
+            compaction=response.compaction,
         )
+
+        # Persist tool results to JSONL
+        session_manager = self._get_session_manager(message.chat_id, message.user_id)
+        for tool_call in response.tool_calls:
+            await session_manager.add_tool_result(
+                tool_use_id=tool_call["id"],
+                output=tool_call["result"],
+                success=not tool_call.get("is_error", False),
+            )
 
     async def _typing_loop(self, chat_id: str) -> None:
         """Send typing indicators in a loop.
@@ -584,56 +737,67 @@ class TelegramMessageHandler:
 
     async def _persist_messages(
         self,
-        session: SessionState,
+        chat_id: str,
+        user_id: str,
         user_message: str,
         assistant_message: str | None = None,
         external_id: str | None = None,
         reply_to_external_id: str | None = None,
         bot_response_id: str | None = None,
+        compaction: CompactionInfo | None = None,
     ) -> None:
-        """Persist messages to the database.
+        """Persist messages to JSONL session files.
 
         Args:
-            session: Session state.
+            chat_id: Chat ID.
+            user_id: User ID.
             user_message: User's message text.
             assistant_message: Assistant's response text.
             external_id: External message ID for deduplication.
             reply_to_external_id: External ID of the message being replied to.
             bot_response_id: External ID of the bot's response message.
+            compaction: Optional compaction info to persist.
         """
-        async with self._database.session() as db_session:
-            store = MemoryStore(db_session)
+        session_manager = self._get_session_manager(chat_id, user_id)
 
-            # Build user message metadata
-            user_metadata: dict[str, Any] = {}
-            if external_id:
-                user_metadata["external_id"] = external_id
-            if reply_to_external_id:
-                user_metadata["reply_to_external_id"] = reply_to_external_id
+        # Build user message metadata
+        user_metadata: dict[str, Any] = {}
+        if external_id:
+            user_metadata["external_id"] = external_id
+        if reply_to_external_id:
+            user_metadata["reply_to_external_id"] = reply_to_external_id
+        if bot_response_id:
+            user_metadata["bot_response_id"] = bot_response_id
+
+        await session_manager.add_user_message(
+            content=user_message,
+            token_count=estimate_tokens(user_message),
+            metadata=user_metadata if user_metadata else None,
+        )
+
+        if assistant_message:
+            # Store bot response ID in assistant message metadata too
+            assistant_metadata: dict[str, Any] | None = None
             if bot_response_id:
-                user_metadata["bot_response_id"] = bot_response_id
+                assistant_metadata = {"bot_response_id": bot_response_id}
 
-            await store.add_message(
-                session_id=session.session_id,
-                role="user",
-                content=user_message,
-                token_count=estimate_tokens(user_message),
-                metadata=user_metadata if user_metadata else None,
+            await session_manager.add_assistant_message(
+                content=assistant_message,
+                token_count=estimate_tokens(assistant_message),
+                metadata=assistant_metadata,
             )
 
-            if assistant_message:
-                # Store bot response ID in assistant message metadata too
-                assistant_metadata: dict[str, Any] | None = None
-                if bot_response_id:
-                    assistant_metadata = {"bot_response_id": bot_response_id}
-
-                await store.add_message(
-                    session_id=session.session_id,
-                    role="assistant",
-                    content=assistant_message,
-                    token_count=estimate_tokens(assistant_message),
-                    metadata=assistant_metadata,
-                )
+        # Persist compaction if it occurred
+        if compaction:
+            await session_manager.add_compaction(
+                summary=compaction.summary,
+                tokens_before=compaction.tokens_before,
+                tokens_after=compaction.tokens_after,
+                first_kept_entry_id="",  # Not tracked at this level
+            )
+            logger.info(
+                f"Recorded compaction: {compaction.tokens_before} -> {compaction.tokens_after} tokens"
+            )
 
     async def _send_error(self, chat_id: str) -> None:
         """Send an error message.
@@ -654,9 +818,27 @@ class TelegramMessageHandler:
         Args:
             chat_id: Chat ID to clear.
         """
-        session_key = f"{self._provider.name}:{chat_id}"
+        session_key = f"{self._provider.name}_{chat_id}"
         self._sessions.pop(session_key, None)
+        self._session_managers.pop(session_key, None)
 
     def clear_all_sessions(self) -> None:
         """Clear all sessions from memory."""
         self._sessions.clear()
+        self._session_managers.clear()
+
+
+def _extract_text_content(content: list[dict[str, Any]]) -> str:
+    """Extract text content from content blocks.
+
+    Args:
+        content: List of content blocks.
+
+    Returns:
+        Extracted text.
+    """
+    texts = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            texts.append(block.get("text", ""))
+    return "\n".join(texts) if texts else ""

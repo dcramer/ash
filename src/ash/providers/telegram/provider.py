@@ -509,6 +509,24 @@ class TelegramProvider(Provider):
         )
         return str(sent.message_id)
 
+    async def send_message(self, chat_id: str, text: str) -> str:
+        """Send a simple text message to a chat.
+
+        Convenience method for scheduled tasks and other simple sends.
+
+        Args:
+            chat_id: Chat ID to send to.
+            text: Message text.
+
+        Returns:
+            Sent message ID.
+        """
+        sent = await self._send_with_fallback(
+            chat_id=int(chat_id),
+            text=text,
+        )
+        return str(sent.message_id)
+
     async def send_streaming(
         self,
         chat_id: str,

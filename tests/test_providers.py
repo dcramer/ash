@@ -108,7 +108,9 @@ class TestTelegramMessageHandler:
         """Create a mock agent."""
         agent = MagicMock()
         agent.process_message = AsyncMock(
-            return_value=MagicMock(text="Response from agent")
+            return_value=MagicMock(
+                text="Response from agent", compaction=None, tool_calls=[]
+            )
         )
 
         async def mock_stream():
@@ -120,14 +122,17 @@ class TestTelegramMessageHandler:
         return agent
 
     @pytest.fixture
-    async def handler(self, mock_provider, mock_agent, database):
-        """Create a message handler."""
-        return TelegramMessageHandler(
+    async def handler(self, mock_provider, mock_agent, database, tmp_path):
+        """Create a message handler with temp sessions path."""
+        handler = TelegramMessageHandler(
             provider=mock_provider,
             agent=mock_agent,
             database=database,
             streaming=True,
         )
+        # Store tmp_path for tests to use
+        handler._test_sessions_path = tmp_path
+        return handler
 
     @pytest.fixture
     def incoming_message(self):
@@ -142,34 +147,88 @@ class TestTelegramMessageHandler:
         )
 
     async def test_handle_message_sends_typing(
-        self, handler, mock_provider, incoming_message
+        self, handler, mock_provider, mock_agent, incoming_message
     ):
         """Test that handling a message sends typing indicator."""
+        from ash.sessions import SessionManager
+
+        # Set up session manager to use temp path
+        session_manager = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=handler._test_sessions_path,
+        )
+        handler._session_managers[session_manager.session_key] = session_manager
+
+        # Create fresh async generator for this test
+        async def mock_stream():
+            yield "Response"
+
+        mock_agent.process_message_streaming = MagicMock(return_value=mock_stream())
+
         await handler.handle_message(incoming_message)
 
         mock_provider.send_typing.assert_called_once_with("456")
 
     async def test_handle_message_streaming(
-        self, handler, mock_provider, incoming_message
+        self, handler, mock_provider, mock_agent, incoming_message
     ):
-        """Test handling message with streaming response."""
+        """Test handling message with streaming response.
+
+        New behavior: fast responses (<5s) are accumulated and sent as single
+        message, not streamed via send_streaming().
+        """
+        from ash.sessions import SessionManager
+
+        # Set up session manager to use temp path
+        session_manager = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=handler._test_sessions_path,
+        )
+        handler._session_managers[session_manager.session_key] = session_manager
+
+        # Create fresh async generator for this test
+        async def mock_stream():
+            yield "Response "
+            yield "from "
+            yield "agent"
+
+        mock_agent.process_message_streaming = MagicMock(return_value=mock_stream())
+
         await handler.handle_message(incoming_message)
 
-        mock_provider.send_streaming.assert_called_once()
-        call_kwargs = mock_provider.send_streaming.call_args.kwargs
-        assert call_kwargs["chat_id"] == "456"
-        assert call_kwargs["reply_to"] == "1"
+        # Fast responses are accumulated and sent as single message
+        mock_provider.send.assert_called()
+        # Get the last call (final response)
+        call_args = mock_provider.send.call_args
+        assert call_args[0][0].chat_id == "456"
+        assert call_args[0][0].text == "Response from agent"
+        assert call_args[0][0].reply_to_message_id == "1"
 
     async def test_handle_message_non_streaming(
-        self, mock_provider, mock_agent, database, incoming_message
+        self, mock_provider, mock_agent, database, incoming_message, tmp_path
     ):
         """Test handling message with non-streaming response."""
+        from ash.sessions import SessionManager
+
         handler = TelegramMessageHandler(
             provider=mock_provider,
             agent=mock_agent,
             database=database,
             streaming=False,
         )
+
+        # Set up session manager to use temp path
+        session_manager = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=tmp_path,
+        )
+        handler._session_managers[session_manager.session_key] = session_manager
 
         await handler.handle_message(incoming_message)
 
@@ -178,6 +237,17 @@ class TestTelegramMessageHandler:
 
     async def test_session_creation(self, handler, incoming_message):
         """Test session is created for new chat."""
+        from ash.sessions import SessionManager
+
+        # Set up session manager to use temp path
+        session_manager = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=handler._test_sessions_path,
+        )
+        handler._session_managers[session_manager.session_key] = session_manager
+
         session = await handler._get_or_create_session(incoming_message)
 
         assert session.chat_id == "456"
@@ -186,43 +256,67 @@ class TestTelegramMessageHandler:
 
     async def test_session_reuse(self, handler, incoming_message):
         """Test session is reused for same chat."""
+        from ash.sessions import SessionManager
+
+        # Set up session manager to use temp path
+        session_manager = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=handler._test_sessions_path,
+        )
+        handler._session_managers[session_manager.session_key] = session_manager
+
         session1 = await handler._get_or_create_session(incoming_message)
         session2 = await handler._get_or_create_session(incoming_message)
 
         assert session1 is session2
 
-    async def test_session_restoration(self, handler, database, incoming_message):
-        """Test messages are restored from database."""
-        from ash.memory.store import MemoryStore
+    async def test_session_restoration(self, handler, incoming_message, tmp_path):
+        """Test messages are restored from JSONL files."""
+        from ash.sessions import SessionManager
 
-        # Pre-populate database with messages
-        async with database.session() as db_session:
-            store = MemoryStore(db_session)
-            db_sess = await store.get_or_create_session(
-                provider="telegram",
-                chat_id="456",
-                user_id="789",
-            )
-            await store.add_message(
-                session_id=db_sess.id,
-                role="user",
-                content="Previous message",
-            )
-            await store.add_message(
-                session_id=db_sess.id,
-                role="assistant",
-                content="Previous response",
-            )
+        # Pre-populate JSONL session files
+        session_manager = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=tmp_path,
+        )
+        await session_manager.ensure_session()
+        await session_manager.add_user_message(
+            content="Previous message",
+            token_count=10,
+        )
+        await session_manager.add_assistant_message(
+            content="Previous response",
+            token_count=10,
+        )
 
-        # Get session - should restore messages
+        # Override the handler's session manager cache to use our temp path
+        handler._session_managers[session_manager.session_key] = session_manager
+
+        # Get session - should restore messages from JSONL
         session = await handler._get_or_create_session(incoming_message)
 
         assert len(session.messages) == 2
+        # Messages are in LLM format (Message objects)
         assert session.messages[0].content == "Previous message"
         assert session.messages[1].content == "Previous response"
 
     async def test_clear_session(self, handler, incoming_message):
         """Test clearing a session."""
+        from ash.sessions import SessionManager
+
+        # Set up session manager to use temp path
+        session_manager = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=handler._test_sessions_path,
+        )
+        handler._session_managers[session_manager.session_key] = session_manager
+
         await handler._get_or_create_session(incoming_message)
         assert len(handler._sessions) == 1
 
@@ -231,6 +325,17 @@ class TestTelegramMessageHandler:
 
     async def test_clear_all_sessions(self, handler, incoming_message):
         """Test clearing all sessions."""
+        from ash.sessions import SessionManager
+
+        # Set up session manager for first message
+        session_manager1 = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=handler._test_sessions_path,
+        )
+        handler._session_managers[session_manager1.session_key] = session_manager1
+
         await handler._get_or_create_session(incoming_message)
 
         # Create another session
@@ -240,29 +345,45 @@ class TestTelegramMessageHandler:
             user_id="888",
             text="Hi",
         )
+        session_manager2 = SessionManager(
+            provider="telegram",
+            chat_id="999",
+            user_id="888",
+            sessions_path=handler._test_sessions_path,
+        )
+        handler._session_managers[session_manager2.session_key] = session_manager2
+
         await handler._get_or_create_session(msg2)
         assert len(handler._sessions) == 2
 
         handler.clear_all_sessions()
         assert len(handler._sessions) == 0
 
-    async def test_message_persistence(self, handler, database, incoming_message):
-        """Test messages are persisted to database."""
+    async def test_message_persistence(self, handler, incoming_message, tmp_path):
+        """Test messages are persisted to JSONL files."""
+        from ash.sessions import SessionManager, SessionReader
+
+        # Set up handler to use temp path for sessions
+        session_manager = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=tmp_path,
+        )
+        handler._session_managers[session_manager.session_key] = session_manager
+
+        # Handle the message
         await handler.handle_message(incoming_message)
 
-        # Check database for stored message
-        from ash.memory.store import MemoryStore
+        # Check JSONL files for stored messages
+        reader = SessionReader(session_manager.session_dir)
+        entries = await reader.load_entries()
 
-        async with database.session() as db_session:
-            store = MemoryStore(db_session)
-            # Get the session we just used
-            session = await store.get_or_create_session(
-                provider="telegram",
-                chat_id="456",
-                user_id="789",
-            )
-            # Get messages for this session
-            messages = await store.get_messages(session.id)
-            # Should have at least the user message persisted
-            assert len(messages) >= 1
-            assert any(m.role == "user" and m.content == "Hello!" for m in messages)
+        # Filter to just messages
+        from ash.sessions.types import MessageEntry
+
+        messages = [e for e in entries if isinstance(e, MessageEntry)]
+
+        # Should have at least the user message persisted
+        assert len(messages) >= 1
+        assert any(m.role == "user" and m.content == "Hello!" for m in messages)

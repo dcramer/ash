@@ -27,6 +27,9 @@ Files: src/ash/providers/telegram/provider.py, src/ash/providers/telegram/handle
 - Support message editing
 - Support message deletion
 - Accept photo messages and pass to handler
+- Set reaction on message when processing starts (👀)
+- Clear reaction when processing completes or errors
+- Show "Thinking..." message during tool execution
 
 ### MAY
 
@@ -143,6 +146,41 @@ allowed_groups = []  # Group IDs (empty = allow all with authorized users)
 group_mode = "mention"  # "mention" (default) or "always"
 ```
 
+## Message UX
+
+### Reactions
+
+- Set 👀 reaction on user message immediately when processing starts
+- Clear reaction when response is sent (success or error)
+- Reactions are best-effort (may not work in all chats)
+
+### Thinking Message
+
+When the agent uses tools, show progress via a single "Thinking..." message:
+
+1. First tool call → Send "_Thinking... {tool_brief}_" as reply to user message
+2. Subsequent tool calls → Edit thinking message with new tool status
+3. Response ready → Delete/replace thinking message with final response
+
+Tool briefs format: `format_tool_brief()` returns human-readable status like:
+- `Running: \`{command}\`` for bash
+- `Searching memory for '{query}'...` for recall
+- `Searching the web for '{query}'...` for web_search
+
+**No tools used**: Skip thinking message, send response directly.
+
+### Hybrid Streaming
+
+For streaming mode, balance responsiveness with API efficiency:
+
+1. Accumulate response for first 5 seconds (STREAM_DELAY)
+2. If still generating after 5 seconds, start showing partial content
+3. Rate-limit edits to 1 second minimum (MIN_EDIT_INTERVAL)
+4. Final edit/send always includes complete response
+
+**Fast responses (<5s)**: Sent as single message, no streaming edits.
+**Slow responses (>5s)**: Start streaming after delay, rate-limited edits.
+
 ## Behaviors
 
 | Scenario | Behavior |
@@ -157,9 +195,11 @@ group_mode = "mention"  # "mention" (default) or "always"
 | Photo with caption | Process caption with image context |
 | Photo without caption | Acknowledge receipt, suggest adding caption |
 | New session | Restore up to 50 messages from database |
-| Before processing | Send typing indicator |
-| Streaming response | Send "...", edit with content, rate limited to 1/sec |
+| Before processing | Set 👀 reaction, send typing indicator |
+| Tool execution | Show "Thinking..." message, update per tool |
+| Streaming response | Accumulate 5s, then edit with content, rate limited to 1/sec |
 | Final streaming edit | Always edit with complete content |
+| Response complete | Clear 👀 reaction |
 | Parse mode specified | Use Telegram's markdown/HTML parsing |
 | Group message (mention mode) | Only respond when @botname mentioned |
 | Group message (always mode) | Respond to all messages from authorized users |
@@ -196,3 +236,8 @@ uv run pytest tests/test_providers.py -v
 - [ ] Group messages ignored without mention (mention mode)
 - [ ] Group messages responded to with mention
 - [ ] Bot mention stripped from message text
+- [ ] 👀 reaction set on message receipt, cleared after response
+- [ ] "Thinking..." message shown only during tool use
+- [ ] "Thinking..." message updates with each tool status
+- [ ] Fast responses (<5s) sent as single message
+- [ ] Slow responses (>5s) stream with rate-limited edits

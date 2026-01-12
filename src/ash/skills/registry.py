@@ -70,10 +70,27 @@ class SkillRegistry:
 
         self._load_from_directory(BUNDLED_SKILLS_DIR, source="bundled")
 
-    def discover(self, workspace_path: Path, *, include_bundled: bool = True) -> None:
-        """Load skills from bundled and workspace directories.
+    def load_dynamic_skills(self) -> None:
+        """Load built-in dynamic skills.
 
-        Loads bundled skills first, then workspace skills (which can override).
+        Dynamic skills are registered programmatically rather than from SKILL.md files.
+        They build their SubagentConfig at runtime with injected context.
+        """
+        # Import and register each dynamic skill module
+        from ash.skills import research, write_skill
+
+        research.register(self)
+        write_skill.register(self)
+
+        logger.debug("Loaded dynamic skills: research, write-skill")
+
+    def discover(self, workspace_path: Path, *, include_bundled: bool = True) -> None:
+        """Load skills from bundled, dynamic, and workspace directories.
+
+        Load order:
+        1. Bundled skills (from SKILL.md files)
+        2. Dynamic skills (programmatic, self-registering)
+        3. Workspace skills (can override any of the above)
 
         Supports:
         - Directory format: skills/<name>/SKILL.md (preferred)
@@ -87,6 +104,7 @@ class SkillRegistry:
         # Load bundled skills first
         if include_bundled:
             self.load_bundled()
+            self.load_dynamic_skills()
 
         # Then load workspace skills (can override bundled)
         skills_dir = workspace_path / "skills"
@@ -285,10 +303,16 @@ class SkillRegistry:
         # Resolve config values
         config_values = self._resolve_config_values(name, config_spec, skill_path)
 
+        # Parse subagent flag (supports both 'subagent' and legacy 'execution_mode')
+        subagent = data.get("subagent", False)
+        if not subagent and data.get("execution_mode") == "subagent":
+            subagent = True  # backward compat
+
         return SkillDefinition(
             name=name,
             description=description,
             instructions=instructions,
+            subagent=subagent,
             model=data.get("model") or data.get("preferred_model"),  # backward compat
             required_tools=data.get("required_tools", []),
             input_schema=data.get("input_schema", {}),
@@ -405,6 +429,38 @@ class SkillRegistry:
         """
         self._skills[skill.name] = skill
         logger.debug(f"Registered skill: {skill.name}")
+
+    def register_dynamic(
+        self,
+        name: str,
+        description: str,
+        build_config: Any,  # Callable that returns SubagentConfig
+        required_tools: list[str] | None = None,
+        input_schema: dict[str, Any] | None = None,
+    ) -> None:
+        """Register a dynamic skill that builds its config at runtime.
+
+        Dynamic skills use a build_config callable instead of static instructions.
+        They always execute as subagents.
+
+        Args:
+            name: Skill name.
+            description: One-line description.
+            build_config: Callable that takes (input_data, **kwargs) and returns SubagentConfig.
+            required_tools: Tools the skill needs (for availability checking).
+            input_schema: JSON Schema for skill inputs.
+        """
+        skill = SkillDefinition(
+            name=name,
+            description=description,
+            instructions="",  # Dynamic skills don't use static instructions
+            subagent=True,  # Dynamic skills are always subagents
+            required_tools=required_tools or [],
+            input_schema=input_schema or {},
+            build_config=build_config,
+        )
+        self._skills[skill.name] = skill
+        logger.debug(f"Registered dynamic skill: {skill.name}")
 
     def get(self, name: str) -> SkillDefinition:
         """Get skill by name.

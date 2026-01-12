@@ -17,12 +17,16 @@ class ModelConfig(BaseModel):
 
     Temperature is optional - if None, the provider's default is used.
     Omit temperature for reasoning models that don't support it.
+
+    Thinking is optional - levels: off, minimal, low, medium, high.
+    Only supported by Anthropic Claude models.
     """
 
     provider: Literal["anthropic", "openai"]
     model: str
     temperature: float | None = None  # None = use provider default
     max_tokens: int = 4096
+    thinking: Literal["off", "minimal", "low", "medium", "high"] | None = None
 
 
 class ProviderConfig(BaseModel):
@@ -110,6 +114,11 @@ class MemoryConfig(BaseModel):
     context_token_budget: int = 100000  # Target context window size in tokens
     recency_window: int = 10  # Always keep last N messages
     system_prompt_buffer: int = 8000  # Reserve tokens for system prompt
+    # Compaction configuration (summarizes old messages instead of dropping)
+    compaction_enabled: bool = True
+    compaction_reserve_tokens: int = 16384  # Buffer to trigger compaction
+    compaction_keep_recent_tokens: int = 20000  # Always keep recent context
+    compaction_summary_max_tokens: int = 2000  # Max tokens for summary
 
 
 class ConversationConfig(BaseModel):

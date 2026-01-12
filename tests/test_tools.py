@@ -289,9 +289,24 @@ class TestWebSearchTool:
 
     async def test_successful_search(self, mock_sandbox_config, mock_executor):
         """Test successful search execution."""
+        import json
+
         mock_executor.execute.return_value = ExecutionResult(
             exit_code=0,
-            stdout="1. Python Documentation\n   URL: https://python.org\n   Official docs\n\n",
+            stdout=json.dumps(
+                {
+                    "query": "python docs",
+                    "results": [
+                        {
+                            "title": "Python Documentation",
+                            "url": "https://python.org",
+                            "description": "Official docs",
+                            "site_name": "python.org",
+                        }
+                    ],
+                    "total_count": 1,
+                }
+            ),
             stderr="",
             timed_out=False,
         )
@@ -326,10 +341,12 @@ class TestWebSearchTool:
 
     async def test_invalid_api_key(self, mock_sandbox_config, mock_executor):
         """Test invalid API key error handling."""
+        import json
+
         mock_executor.execute.return_value = ExecutionResult(
             exit_code=1,
-            stdout="",
-            stderr="ERROR: Invalid API key",
+            stdout=json.dumps({"error": "Invalid API key", "code": 401}),
+            stderr="",
             timed_out=False,
         )
 
@@ -344,10 +361,12 @@ class TestWebSearchTool:
 
     async def test_rate_limit_error(self, mock_sandbox_config, mock_executor):
         """Test rate limit error handling."""
+        import json
+
         mock_executor.execute.return_value = ExecutionResult(
             exit_code=1,
-            stdout="",
-            stderr="ERROR: Rate limit exceeded",
+            stdout=json.dumps({"error": "Rate limit exceeded", "code": 429}),
+            stderr="",
             timed_out=False,
         )
 
@@ -362,9 +381,17 @@ class TestWebSearchTool:
 
     async def test_no_results(self, mock_sandbox_config, mock_executor):
         """Test handling of no results."""
+        import json
+
         mock_executor.execute.return_value = ExecutionResult(
             exit_code=0,
-            stdout="No results found",
+            stdout=json.dumps(
+                {
+                    "query": "xyzzy123nonexistent",
+                    "results": [],
+                    "total_count": 0,
+                }
+            ),
             stderr="",
             timed_out=False,
         )
@@ -380,9 +407,23 @@ class TestWebSearchTool:
 
     async def test_count_parameter_respected(self, mock_sandbox_config, mock_executor):
         """Test that count parameter is passed correctly."""
+        import json
+
         mock_executor.execute.return_value = ExecutionResult(
             exit_code=0,
-            stdout="1. Result\n   URL: http://example.com\n   Desc\n\n",
+            stdout=json.dumps(
+                {
+                    "query": "test",
+                    "results": [
+                        {
+                            "title": "Result",
+                            "url": "http://example.com",
+                            "description": "Desc",
+                        }
+                    ],
+                    "total_count": 1,
+                }
+            ),
             stderr="",
             timed_out=False,
         )
@@ -399,9 +440,23 @@ class TestWebSearchTool:
 
     async def test_count_capped_at_max(self, mock_sandbox_config, mock_executor):
         """Test that count is capped at max_results."""
+        import json
+
         mock_executor.execute.return_value = ExecutionResult(
             exit_code=0,
-            stdout="1. Result\n   URL: http://example.com\n   Desc\n\n",
+            stdout=json.dumps(
+                {
+                    "query": "test",
+                    "results": [
+                        {
+                            "title": "Result",
+                            "url": "http://example.com",
+                            "description": "Desc",
+                        }
+                    ],
+                    "total_count": 1,
+                }
+            ),
             stderr="",
             timed_out=False,
         )
@@ -421,9 +476,23 @@ class TestWebSearchTool:
         self, mock_sandbox_config, mock_executor
     ):
         """Test that special characters in query are handled safely."""
+        import json
+
         mock_executor.execute.return_value = ExecutionResult(
             exit_code=0,
-            stdout="1. Result\n   URL: http://example.com\n   Desc\n\n",
+            stdout=json.dumps(
+                {
+                    "query": "test; rm -rf /; echo 'hello'",
+                    "results": [
+                        {
+                            "title": "Result",
+                            "url": "http://example.com",
+                            "description": "Desc",
+                        }
+                    ],
+                    "total_count": 1,
+                }
+            ),
             stderr="",
             timed_out=False,
         )

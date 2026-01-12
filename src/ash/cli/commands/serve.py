@@ -65,22 +65,10 @@ async def _run_server(
 
     import uvicorn
 
-    # Configure logging for all modules with consistent format
-    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=log_format,
-        force=True,  # Override any existing configuration
-    )
+    from ash.logging import configure_logging
 
-    # Configure uvicorn/aiogram loggers to use same format
-    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "aiogram"):
-        lib_logger = logging.getLogger(logger_name)
-        lib_logger.handlers = []  # Remove default handlers
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter(log_format))
-        lib_logger.addHandler(handler)
-        lib_logger.propagate = False
+    # Configure logging with Rich for colorful server output
+    configure_logging(use_rich=True)
 
     logger = logging.getLogger(__name__)
 
@@ -121,8 +109,9 @@ async def _run_server(
     # Create agent with all dependencies
     # Create a persistent session for memory tools (remember, recall)
     # This session lives for the duration of the server
+    # Use the factory directly to avoid the auto-commit context manager
     console.print("[bold]Setting up agent...[/bold]")
-    memory_session = await database.session().__aenter__()
+    memory_session = database.session_factory()
     components = await create_agent(
         config=ash_config,
         workspace=workspace,
@@ -148,6 +137,25 @@ async def _run_server(
             group_mode=ash_config.telegram.group_mode,
         )
 
+    # Set up schedule watcher
+    from ash.events import ScheduledTaskHandler, ScheduleWatcher
+
+    schedule_file = ash_config.workspace / "schedule.jsonl"
+    schedule_watcher = ScheduleWatcher(schedule_file)
+
+    # Build sender map from available providers
+    senders: dict[str, any] = {}
+    if telegram_provider:
+        senders["telegram"] = telegram_provider.send_message
+
+    # Create and register handler if we have senders
+    if senders:
+        schedule_handler = ScheduledTaskHandler(agent, senders)
+        schedule_watcher.add_handler(schedule_handler.handle)
+        console.print(f"[dim]Schedule watcher: {schedule_file}[/dim]")
+    else:
+        console.print("[dim]Schedule watcher disabled (no providers)[/dim]")
+
     # Create FastAPI app
     console.print("[bold]Creating server...[/bold]")
     fastapi_app = create_app(
@@ -168,6 +176,10 @@ async def _run_server(
             log_config=None,  # Use our logging config, not uvicorn's
         )
         server = uvicorn.Server(uvicorn_config)
+
+        # Start schedule watcher
+        if senders:
+            await schedule_watcher.start()
 
         # Track tasks for cleanup
         telegram_task: asyncio.Task | None = None
@@ -217,12 +229,24 @@ async def _run_server(
         else:
             await server.serve()
     finally:
+        # Stop schedule watcher
+        try:
+            await schedule_watcher.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping schedule watcher: {e}")
+
         # Stop telegram provider gracefully
         if telegram_provider:
             try:
                 await telegram_provider.stop()
             except Exception as e:
                 logger.warning(f"Error stopping Telegram provider: {e}")
+
+        # Close the persistent memory session
+        try:
+            await memory_session.close()
+        except Exception as e:
+            logger.warning(f"Error closing memory session: {e}")
 
         # Clean up PID file on exit
         remove_pid_file(pid_path)

@@ -1,5 +1,6 @@
 """Memory tools for explicit memory operations."""
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from ash.tools.base import Tool, ToolContext, ToolResult
@@ -7,30 +8,31 @@ from ash.tools.base import Tool, ToolContext, ToolResult
 if TYPE_CHECKING:
     from ash.memory.manager import MemoryManager
 
+logger = logging.getLogger(__name__)
+
 
 class RememberTool(Tool):
-    """Store facts and preferences in long-term memory.
+    """Store facts about the user in long-term memory.
 
-    Use when:
-    - User explicitly asks to remember something
-    - User shares important preferences or facts about themselves or others
-    - Information will be relevant to future conversations
+    Memory is for facts ABOUT THE USER, not logs of what you did.
 
-    DO NOT use for:
-    - Speech patterns, verbal tics, or conversation style ("says bud", "uses emojis")
-    - Trivial acknowledgments or casual remarks
-    - Temporary emotional states or moods
-    - Information only relevant to the current conversation
-    - Observations about HOW the user communicates rather than WHAT they communicate
+    REMEMBER:
+    - User preferences: "User prefers dark mode", "User's timezone is PST"
+    - People: "Sarah is user's wife", "Sarah likes Italian food"
+    - Important dates: "User's anniversary is June 15"
+    - Explicit requests: "Remember that I'm allergic to peanuts"
 
-    Facts should be stored as complete, standalone statements that will
-    make sense when retrieved later without context.
+    NEVER REMEMBER:
+    - Actions you took: "Created skill X", "Saved file Y", "Ran command Z"
+    - System state: Skill existence, file contents, command outputs
+    - Credentials: Passwords, API keys, tokens
+    - Speech patterns: "User says 'bud'", "User uses emojis"
+    - Verbatim code or long text blocks
 
-    For facts about specific people, specify the subject to enable better
-    retrieval later (e.g., "my wife", "Sarah", "my boss").
+    Principle: Use filesystem as source of truth for operational state.
+    If something can be verified from disk, don't store it in memory.
 
-    IMPORTANT: When storing multiple facts, use the 'facts' array parameter
-    to batch them in a single call instead of calling remember multiple times.
+    Use 'facts' array to batch multiple facts in one call.
     """
 
     def __init__(self, memory_manager: "MemoryManager"):
@@ -48,14 +50,12 @@ class RememberTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Store facts or preferences in long-term memory. "
-            "Use 'facts' array to batch multiple memories in one call. "
-            "Only store facts that will be USEFUL in future conversations. "
-            "DO NOT store: speech patterns, verbal tics, conversation quirks, "
-            "temporary moods, or anything that won't matter later. "
-            "If the fact is about a specific person (not the user), specify the subject. "
-            "Good: 'Sarah's birthday is March 15th', 'User prefers dark mode'. "
-            "Bad: 'User says bud', 'User uses lowercase', 'User seems happy today'."
+            "Store facts about the user or people in their life. "
+            "ONLY for: preferences, relationships, important dates, explicit requests. "
+            "NEVER for: actions you took, skills created, files saved, commands run, "
+            "system state, credentials, speech patterns. "
+            "Good: 'User prefers Python', 'Sarah's birthday is March 15'. "
+            "Bad: 'Created skill X', 'Ran command Y', 'User says bud'."
         )
 
     @property
@@ -143,26 +143,35 @@ class RememberTool(Tool):
         context: ToolContext,
     ) -> str:
         """Store a single fact and return a status message."""
-        # Resolve subjects to person IDs
+        # Resolve subjects to person IDs (graceful degradation on errors)
         subject_person_ids: list[str] = []
         new_people: list[str] = []
         existing_people: list[str] = []
+        failed_refs: list[str] = []
 
         if subject_refs and context.user_id:
             # Runtime limit check (defense in depth)
             if len(subject_refs) > 10:
                 raise ValueError("Too many subjects: maximum 10 per fact")
             for ref in subject_refs:
-                result = await self._memory.resolve_or_create_person(
-                    owner_user_id=context.user_id,
-                    reference=ref,
-                    content_hint=content,
-                )
-                subject_person_ids.append(result.person_id)
-                if result.created:
-                    new_people.append(result.person_name)
-                else:
-                    existing_people.append(result.person_name)
+                try:
+                    result = await self._memory.resolve_or_create_person(
+                        owner_user_id=context.user_id,
+                        reference=ref,
+                        content_hint=content,
+                    )
+                    subject_person_ids.append(result.person_id)
+                    if result.created:
+                        new_people.append(result.person_name)
+                    else:
+                        existing_people.append(result.person_name)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to resolve person reference '{ref}': {e}",
+                        exc_info=True,
+                    )
+                    failed_refs.append(ref)
+                    # Continue with remaining subjects - don't fail entire fact
 
         # Memory scoping:
         # - Personal: owner_user_id set, chat_id NULL - only visible to user
@@ -192,6 +201,8 @@ class RememberTool(Tool):
             extras.append(f"new: {', '.join(new_people)}")
         if existing_people:
             extras.append(f"about: {', '.join(existing_people)}")
+        if failed_refs:
+            extras.append(f"unresolved: {', '.join(failed_refs)}")
 
         if extras:
             status += f" ({'; '.join(extras)})"

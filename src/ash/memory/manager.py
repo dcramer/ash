@@ -1,4 +1,8 @@
-"""Memory manager for orchestrating retrieval and persistence."""
+"""Memory manager for orchestrating retrieval and persistence.
+
+Note: Message/conversation persistence has been moved to ash.sessions module.
+This module now only handles memory operations (facts, relationships).
+"""
 
 import logging
 import re
@@ -62,7 +66,6 @@ class PersonResolutionResult:
 class RetrievedContext:
     """Context retrieved from memory for LLM prompt augmentation."""
 
-    messages: list[SearchResult]
     memories: list[SearchResult]
 
 
@@ -93,60 +96,27 @@ class MemoryManager:
 
     async def get_context_for_message(
         self,
-        session_id: str,
         user_id: str,
         user_message: str,
         chat_id: str | None = None,
-        max_messages: int = 5,
         max_memories: int = 10,
-        min_message_similarity: float = 0.3,
-        exclude_message_ids: set[str] | None = None,
     ) -> RetrievedContext:
-        """Retrieve relevant context before LLM call.
+        """Retrieve relevant memory context before LLM call.
 
         Memory scoping:
         - Personal: user_id set - only that user's memories
         - Group: chat_id set - include group memories for that chat
 
         Args:
-            session_id: Current session ID.
             user_id: User ID for filtering personal memories.
             user_message: The user's message to find relevant context for.
             chat_id: Chat ID for filtering group memories.
-            max_messages: Maximum number of past messages to retrieve.
             max_memories: Maximum number of memory entries to retrieve.
-            min_message_similarity: Minimum similarity threshold for messages.
-                Memory entries are always included (ranked by relevance)
-                since a personal assistant typically has a small memory store
-                where all stored facts are potentially useful.
-            exclude_message_ids: Message IDs to exclude (e.g., already in context).
 
         Returns:
-            Retrieved context with messages and memories.
+            Retrieved context with relevant memories.
         """
-        messages: list[SearchResult] = []
         memories: list[SearchResult] = []
-
-        try:
-            # Search past messages (across all sessions for this retrieval)
-            # Request extra results to account for exclusions
-            extra = len(exclude_message_ids) if exclude_message_ids else 0
-            all_messages = await self._retriever.search_messages(
-                query=user_message,
-                limit=max_messages + extra,
-            )
-            # Filter by similarity threshold AND exclude duplicates
-            for m in all_messages:
-                if m.similarity >= min_message_similarity:
-                    if exclude_message_ids and m.id in exclude_message_ids:
-                        continue
-                    messages.append(m)
-                    if len(messages) >= max_messages:
-                        break
-        except Exception:
-            logger.warning(
-                "Failed to search messages, continuing without", exc_info=True
-            )
 
         try:
             # Search memory store - include top N
@@ -163,49 +133,7 @@ class MemoryManager:
                 "Failed to search memories, continuing without", exc_info=True
             )
 
-        return RetrievedContext(
-            messages=messages,
-            memories=memories,
-        )
-
-    async def persist_turn(
-        self,
-        session_id: str,
-        user_message: str,
-        assistant_response: str,
-    ) -> None:
-        """Store and index a conversation turn.
-
-        Args:
-            session_id: Session ID.
-            user_message: User's message.
-            assistant_response: Assistant's response.
-        """
-        from ash.core.tokens import estimate_tokens
-
-        # Store messages with token estimates
-        user_msg = await self._store.add_message(
-            session_id=session_id,
-            role="user",
-            content=user_message,
-            token_count=estimate_tokens(user_message),
-        )
-
-        assistant_msg = await self._store.add_message(
-            session_id=session_id,
-            role="assistant",
-            content=assistant_response,
-            token_count=estimate_tokens(assistant_response),
-        )
-
-        # Index for semantic search
-        try:
-            await self._retriever.index_message(user_msg.id, user_message)
-            await self._retriever.index_message(assistant_msg.id, assistant_response)
-        except Exception:
-            logger.warning(
-                "Failed to index messages, continuing without", exc_info=True
-            )
+        return RetrievedContext(memories=memories)
 
     async def add_memory(
         self,
@@ -347,6 +275,8 @@ class MemoryManager:
         """Find and mark conflicting memories as superseded.
 
         Called after a new memory is added to check for and handle conflicts.
+        Superseded memories have their embeddings deleted to prevent
+        storage bloat and potential visibility issues.
 
         Args:
             new_memory_id: ID of the newly added memory.
@@ -376,6 +306,16 @@ class MemoryManager:
                 superseded_by_id=new_memory_id,
             )
             if success:
+                # Clean up the embedding for the superseded memory
+                try:
+                    await self._retriever.delete_memory_embedding(memory_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to delete superseded memory embedding",
+                        extra={"memory_id": memory_id},
+                        exc_info=True,
+                    )
+
                 count += 1
                 logger.info(
                     "Superseded memory",
@@ -396,7 +336,7 @@ class MemoryManager:
         owner_user_id: str | None = None,
         chat_id: str | None = None,
     ) -> list[SearchResult]:
-        """Search all memory (used by recall tool).
+        """Search memory (used by recall tool).
 
         Args:
             query: Search query.
@@ -408,7 +348,7 @@ class MemoryManager:
         Returns:
             List of search results sorted by relevance.
         """
-        return await self._retriever.search_all(
+        return await self._retriever.search(
             query,
             limit=limit,
             subject_person_id=subject_person_id,

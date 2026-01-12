@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from ash.sandbox import SandboxExecutor
 from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
 from ash.tools.base import Tool, ToolContext, ToolResult
+from ash.tools.truncation import truncate_tail
 
 if TYPE_CHECKING:
     from ash.config.models import SandboxConfig
@@ -22,22 +23,24 @@ class BashTool(Tool):
     - Memory limits
     - Non-root user execution
     - Optional gVisor runtime for enhanced syscall isolation
+
+    Output handling:
+    - Large outputs are tail-truncated (last 4000 lines or 50KB)
+    - Full output saved to temp file when truncated
+    - Truncation metadata included in result
     """
 
     def __init__(
         self,
         sandbox_config: "SandboxConfig | None" = None,
         workspace_path: Path | None = None,
-        max_output_length: int = 10000,
     ):
         """Initialize bash tool.
 
         Args:
             sandbox_config: Sandbox configuration (pydantic model from config).
             workspace_path: Path to workspace to mount in sandbox.
-            max_output_length: Maximum output length to return.
         """
-        self._max_output_length = max_output_length
         manager_config = self._build_manager_config(sandbox_config, workspace_path)
         self._executor = SandboxExecutor(config=manager_config)
 
@@ -132,37 +135,33 @@ class BashTool(Tool):
             environment=environment,
         )
 
-        # Truncate output if too long
-        output = result.output
-        truncated = False
-        if len(output) > self._max_output_length:
-            output = output[: self._max_output_length]
-            truncated = True
+        # Apply tail truncation (keep last N lines/bytes, save full to temp)
+        truncation = truncate_tail(result.output, prefix="bash")
 
         if result.timed_out:
             return ToolResult.error(
                 f"Command timed out after {timeout} seconds.\n"
-                f"Partial output:\n{output}",
+                f"Partial output:\n{truncation.content}",
                 exit_code=-1,
                 timed_out=True,
-                truncated=truncated,
+                **truncation.to_metadata(),
             )
 
         if result.success:
-            content = output if output else "(no output)"
+            content = truncation.content if truncation.content else "(no output)"
             return ToolResult.success(
                 content,
                 exit_code=result.exit_code,
-                truncated=truncated,
+                **truncation.to_metadata(),
             )
         else:
             # Command failed but didn't error
             return ToolResult(
-                content=f"Exit code {result.exit_code}:\n{output}",
+                content=f"Exit code {result.exit_code}:\n{truncation.content}",
                 is_error=False,  # Non-zero exit is not an error, just a result
                 metadata={
                     "exit_code": result.exit_code,
-                    "truncated": truncated,
+                    **truncation.to_metadata(),
                 },
             )
 

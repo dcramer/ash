@@ -93,6 +93,7 @@ Specs MUST be updated when:
 | [config](specs/config.md) | Configuration loading and validation |
 | [conversation-context](specs/conversation-context.md) | Smart conversation context with reply chains and gap signals |
 | [llm](specs/llm.md) | LLM provider abstraction |
+| [logging](specs/logging.md) | Centralized logging configuration with consistent formatting |
 | [memory](specs/memory.md) | Persistent memory with context retrieval |
 | [models](specs/models.md) | Named model configurations with aliases |
 | [sandbox](specs/sandbox.md) | Docker sandbox for command execution |
@@ -100,5 +101,7 @@ Specs MUST be updated when:
 | [server](specs/server.md) | FastAPI server and webhooks |
 | [skills](specs/skills.md) | Workspace-defined behaviors with model preferences |
 | [telegram](specs/telegram.md) | Telegram bot integration |
-| [web_search](specs/web_search.md) | Web search via Brave API in sandbox |
+| [web_fetch](specs/web_fetch.md) | Fetch and extract content from URLs |
+| [web_search](specs/web_search.md) | Web search via Brave API with caching and retry |
+| [research](specs/research.md) | Deep research subagent with multi-query orchestration |
 | [workspace](specs/workspace.md) | Agent personality via SOUL.md with inheritance |

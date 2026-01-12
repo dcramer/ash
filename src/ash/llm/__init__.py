@@ -9,6 +9,13 @@ from ash.llm.registry import (
     create_llm_provider,
     create_registry,
 )
+from ash.llm.retry import RetryConfig, is_retryable_error, with_retry
+from ash.llm.thinking import (
+    THINKING_BUDGETS,
+    ThinkingConfig,
+    ThinkingLevel,
+    resolve_thinking,
+)
 from ash.llm.types import (
     CompletionResponse,
     ContentBlock,
@@ -34,6 +41,15 @@ __all__ = [
     "ProviderName",
     "create_llm_provider",
     "create_registry",
+    # Retry
+    "RetryConfig",
+    "is_retryable_error",
+    "with_retry",
+    # Thinking
+    "ThinkingConfig",
+    "ThinkingLevel",
+    "THINKING_BUDGETS",
+    "resolve_thinking",
     # Types
     "CompletionResponse",
     "ContentBlock",

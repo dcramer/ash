@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from ash.llm.types import (
     CompletionResponse,
@@ -9,6 +10,9 @@ from ash.llm.types import (
     StreamChunk,
     ToolDefinition,
 )
+
+if TYPE_CHECKING:
+    from ash.llm.thinking import ThinkingConfig
 
 
 class LLMProvider(ABC):
@@ -36,6 +40,7 @@ class LLMProvider(ABC):
         system: str | None = None,
         max_tokens: int = 4096,
         temperature: float | None = None,
+        thinking: "ThinkingConfig | None" = None,
     ) -> CompletionResponse:
         """Generate a completion (non-streaming).
 
@@ -46,6 +51,7 @@ class LLMProvider(ABC):
             system: System prompt.
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
+            thinking: Extended thinking configuration (Anthropic only).
 
         Returns:
             Complete response with message and metadata.
@@ -62,6 +68,7 @@ class LLMProvider(ABC):
         system: str | None = None,
         max_tokens: int = 4096,
         temperature: float | None = None,
+        thinking: "ThinkingConfig | None" = None,
     ) -> AsyncIterator[StreamChunk]:
         """Generate a streaming completion.
 
@@ -72,6 +79,7 @@ class LLMProvider(ABC):
             system: System prompt.
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
+            thinking: Extended thinking configuration (Anthropic only).
 
         Yields:
             Stream chunks as they arrive.

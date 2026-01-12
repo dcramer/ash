@@ -55,6 +55,7 @@ class MockLLMProvider:
         system: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        thinking: Any = None,
     ) -> CompletionResponse:
         self.complete_calls.append(
             {
@@ -87,6 +88,7 @@ class MockLLMProvider:
         system: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        thinking: Any = None,
     ):
         self.stream_calls.append({"messages": messages})
 

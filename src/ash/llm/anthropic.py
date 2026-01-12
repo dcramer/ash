@@ -3,11 +3,12 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anthropic
 
 from ash.llm.base import LLMProvider
+from ash.llm.retry import RetryConfig, with_retry
 from ash.llm.types import (
     CompletionResponse,
     ContentBlock,
@@ -21,6 +22,9 @@ from ash.llm.types import (
     ToolUse,
     Usage,
 )
+
+if TYPE_CHECKING:
+    from ash.llm.thinking import ThinkingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +154,7 @@ class AnthropicProvider(LLMProvider):
         system: str | None = None,
         max_tokens: int = 4096,
         temperature: float | None = None,
+        thinking: "ThinkingConfig | None" = None,
     ) -> CompletionResponse:
         """Generate a completion.
 
@@ -160,6 +165,7 @@ class AnthropicProvider(LLMProvider):
             system: System prompt.
             max_tokens: Maximum tokens.
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
+            thinking: Extended thinking configuration.
         """
         model_name = model or self.default_model
         kwargs: dict[str, Any] = {
@@ -179,15 +185,34 @@ class AnthropicProvider(LLMProvider):
         if converted_tools:
             kwargs["tools"] = converted_tools
 
+        # Add thinking configuration if enabled
+        if thinking and thinking.enabled:
+            thinking_params = thinking.to_api_params()
+            if thinking_params:
+                kwargs.update(thinking_params)
+                logger.debug(
+                    f"Extended thinking enabled with budget={thinking.effective_budget}"
+                )
+
         assert self._semaphore is not None
+        semaphore = self._semaphore  # Capture for closure
         logger.debug(f"Waiting for API slot (model={model_name})")
-        async with self._semaphore:
-            logger.debug(f"Acquired API slot, calling {model_name}")
-            response = await self._client.messages.create(**kwargs)
-            logger.debug(
-                f"API call complete: {response.usage.input_tokens}in/"
-                f"{response.usage.output_tokens}out tokens"
-            )
+
+        async def _make_request() -> anthropic.types.Message:
+            async with semaphore:
+                logger.debug(f"Acquired API slot, calling {model_name}")
+                response = await self._client.messages.create(**kwargs)
+                logger.debug(
+                    f"API call complete: {response.usage.input_tokens}in/"
+                    f"{response.usage.output_tokens}out tokens"
+                )
+                return response
+
+        response = await with_retry(
+            _make_request,
+            config=RetryConfig(enabled=True, max_retries=3),
+            operation_name=f"Anthropic {model_name}",
+        )
         return self._parse_response(response)
 
     async def stream(
@@ -199,6 +224,7 @@ class AnthropicProvider(LLMProvider):
         system: str | None = None,
         max_tokens: int = 4096,
         temperature: float | None = None,
+        thinking: "ThinkingConfig | None" = None,
     ) -> AsyncIterator[StreamChunk]:
         """Generate a streaming completion.
 
@@ -209,6 +235,7 @@ class AnthropicProvider(LLMProvider):
             system: System prompt.
             max_tokens: Maximum tokens.
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
+            thinking: Extended thinking configuration.
         """
         model_name = model or self.default_model
         kwargs: dict[str, Any] = {
@@ -227,6 +254,15 @@ class AnthropicProvider(LLMProvider):
         converted_tools = self._convert_tools(tools)
         if converted_tools:
             kwargs["tools"] = converted_tools
+
+        # Add thinking configuration if enabled
+        if thinking and thinking.enabled:
+            thinking_params = thinking.to_api_params()
+            if thinking_params:
+                kwargs.update(thinking_params)
+                logger.debug(
+                    f"Extended thinking enabled (stream) with budget={thinking.effective_budget}"
+                )
 
         current_tool_id: str | None = None
         current_tool_name: str | None = None

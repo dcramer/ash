@@ -2,41 +2,42 @@
 
 > Reusable behaviors that orchestrate tools with model preferences
 
-Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/executor.py, src/ash/skills/bundled/, src/ash/tools/builtin/skills.py
+Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/executor.py, src/ash/tools/builtin/skills.py
 
 ## Requirements
 
 ### MUST
 
-- Load bundled skills from `src/ash/skills/bundled/`
 - Load workspace skills from `workspace/skills/` (can override bundled)
 - Support directory format: `skills/<name>/SKILL.md` (preferred)
 - Support flat markdown: `skills/<name>.md` (convenience)
 - Support pure YAML: `skills/<name>.yaml` (backward compatibility)
-- Each skill defines: name, description, instructions, model, required_tools
+- Each skill defines: name, description, instructions, subagent, model, required_tools
+- Support two execution modes via `subagent` flag:
+  - `subagent: false` (default): Returns instructions for main agent to follow
+  - `subagent: true`: Runs isolated LLM loop with restricted tools
 - Support skill requirements: bins, env, os filtering
 - Support skill config: list of env var names with optional defaults
 - Load config values from layered sources (skill config.toml → central config → env vars → defaults)
 - Mark skill unavailable if required config missing
 - Pass resolved config to sandbox as `SKILL_*` environment variables
 - Filter unavailable skills from system prompt and iteration
-- SkillRegistry discovers and loads skills from bundled + workspace
-- SkillExecutor creates sub-agent loop with skill instructions as system prompt
+- SkillRegistry discovers and loads skills from workspace
+- SkillExecutor handles execution (inline or subagent)
 - Validate skill availability before execution
 - List skills in system prompt (via SystemPromptBuilder)
 - Expose `use_skill` tool for invoking skills
 - Skills can reference model aliases (e.g., "fast", "default")
-- Validate required_tools exist before skill execution
+- Validate required_tools exist before subagent execution
 - Pass skill results back to parent agent
 
 ### SHOULD
 
 - Support skill parameters via input_schema (JSON Schema)
-- Allow skills to specify max_iterations independently
+- Allow skills to specify max_iterations independently (subagent mode)
 - Log skill execution with duration and iteration count
 - Provide clear error when referenced model alias not found
 - Default skill name to filename stem if not specified
-- Bundle useful starter skills (manage-skill, research, code-review, debug)
 
 ### MAY
 
@@ -63,10 +64,11 @@ workspace/skills/
 <!-- workspace/skills/summarize/SKILL.md -->
 ---
 description: Summarize text or documents concisely
-model: fast
+subagent: true               # Run isolated LLM loop (false = inline)
+model: fast                  # Model alias
 required_tools:
   - bash
-max_iterations: 3
+max_iterations: 3            # Only used when subagent: true
 requires:
   bins:
     - pandoc
@@ -96,6 +98,20 @@ You are a summarization assistant. Create clear, concise summaries.
 Extract key points only. Maintain factual accuracy.
 Use the requested format for output.
 ```
+
+### Execution Modes
+
+**Inline mode (`subagent: false`, default):**
+- Skill instructions returned to main agent
+- Main agent follows instructions using its tools
+- Faster, maintains conversation context
+- Best for: simple documentation, formatting, explanations
+
+**Subagent mode (`subagent: true`):**
+- Isolated LLM loop with skill instructions as system prompt
+- Restricted to `required_tools` (or all tools if empty)
+- Own conversation context, max_iterations limit
+- Best for: multi-step tasks, complex workflows, isolated execution
 
 Note: `name` defaults to the directory name (e.g., `skills/summarize/` → `summarize`).
 
@@ -181,6 +197,7 @@ class SkillDefinition:
     name: str
     description: str
     instructions: str
+    subagent: bool = False  # True = isolated LLM loop, False = inline
     model: str | None = None
     required_tools: list[str] = field(default_factory=list)
     input_schema: dict[str, Any] = field(default_factory=dict)
@@ -206,6 +223,19 @@ class SkillDefinition:
             if "=" not in item and name not in self.config_values:
                 return False, f"Missing required config: {name}"
         return True, None
+
+@dataclass
+class SubagentConfig:
+    """Configuration for running a subagent.
+
+    Used by skills with subagent=True and dynamic skills (write-skill, research).
+    """
+    system_prompt: str
+    allowed_tools: list[str] = field(default_factory=list)  # Empty = all tools
+    max_iterations: int = 10
+    model: str | None = None  # Model alias (None = default)
+    env: dict[str, str] = field(default_factory=dict)  # SKILL_* env vars
+    initial_message: str = "Execute according to the instructions provided."
 
 @dataclass
 class SkillContext:
@@ -277,15 +307,33 @@ class SkillExecutor:
         config: AshConfig,
     ) -> None: ...
 
+    def has_skill(self, skill_name: str) -> bool:
+        """Check if skill exists (including dynamic skills)."""
+        ...
+
     async def execute(
         self,
         skill_name: str,
         input_data: dict[str, Any],
         context: SkillContext,
     ) -> SkillResult:
-        """Execute skill with sub-agent loop."""
+        """Execute skill - routes to inline, subagent, or dynamic execution."""
+        ...
+
+    async def _run_subagent(
+        self,
+        config: SubagentConfig,
+        context: SkillContext,
+        name: str = "subagent",
+    ) -> SkillResult:
+        """Run isolated subagent loop - shared by all subagent execution paths."""
         ...
 ```
+
+**Execution routing:**
+1. Dynamic skills (`write-skill`, `research`) → call module's `build_subagent_config()` → `_run_subagent()`
+2. Registered skills with `subagent: true` → build config → `_run_subagent()`
+3. Registered skills with `subagent: false` → return instructions for main agent
 
 ### LLM Tool
 
@@ -307,12 +355,25 @@ class UseSkillTool(Tool):
 
 Skills shipped with Ash in `src/ash/skills/bundled/`:
 
-| Skill | Description |
-|-------|-------------|
-| manage-skill | Create, edit, or view skills in the workspace |
-| research | Research a topic using web search and memory |
-| code-review | Review code for bugs, security issues, and improvements |
-| debug | Systematically debug issues in code or systems |
+| Skill | Mode | Description |
+|-------|------|-------------|
+| code-review | subagent | Review code for bugs, security issues, and improvements |
+| debug | subagent | Systematically debug issues in code or systems |
+| research | inline | Research a topic (documentation for main agent) |
+
+### Dynamic Skills
+
+Skills constructed at runtime with injected context (not defined in SKILL.md):
+
+| Skill | Module | Description |
+|-------|--------|-------------|
+| write-skill | `skills/write_skill.py` | Create high-quality SKILL.md files with examples and validation |
+| research | `skills/research.py` | Research a topic using web search (subagent with dynamic prompt) |
+
+Dynamic skills build their `SubagentConfig` at invocation time, allowing them to inject:
+- Current available tools from registry
+- Example skills from bundled
+- Validation rules and anti-patterns
 
 ## Behaviors
 

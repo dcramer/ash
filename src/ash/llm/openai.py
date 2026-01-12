@@ -2,11 +2,14 @@
 
 import json
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import openai
 
 from ash.llm.base import LLMProvider
+
+if TYPE_CHECKING:
+    from ash.llm.thinking import ThinkingConfig
 from ash.llm.types import (
     CompletionResponse,
     ContentBlock,
@@ -186,6 +189,7 @@ class OpenAIProvider(LLMProvider):
         system: str | None = None,
         max_tokens: int = 4096,
         temperature: float | None = None,
+        thinking: "ThinkingConfig | None" = None,
     ) -> CompletionResponse:
         """Generate a completion.
 
@@ -196,7 +200,9 @@ class OpenAIProvider(LLMProvider):
             system: System prompt.
             max_tokens: Maximum tokens.
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
+            thinking: Extended thinking configuration (ignored for OpenAI).
         """
+        # Note: thinking parameter is ignored for OpenAI (Anthropic-specific feature)
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": self._convert_messages(messages, system),
@@ -223,6 +229,7 @@ class OpenAIProvider(LLMProvider):
         system: str | None = None,
         max_tokens: int = 4096,
         temperature: float | None = None,
+        thinking: "ThinkingConfig | None" = None,
     ) -> AsyncIterator[StreamChunk]:
         """Generate a streaming completion.
 
@@ -233,7 +240,9 @@ class OpenAIProvider(LLMProvider):
             system: System prompt.
             max_tokens: Maximum tokens.
             temperature: Sampling temperature. None = use API default (omit for reasoning models).
+            thinking: Extended thinking configuration (ignored for OpenAI).
         """
+        # Note: thinking parameter is ignored for OpenAI (Anthropic-specific feature)
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": self._convert_messages(messages, system),

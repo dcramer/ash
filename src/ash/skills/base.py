@@ -54,13 +54,19 @@ class SkillRequirements:
         return True, None
 
 
+# Type alias for dynamic skill config builder
+# Signature: (input_data: dict, **kwargs) -> SubagentConfig
+ConfigBuilder = Any  # Callable[[dict[str, Any], ...], "SubagentConfig"]
+
+
 @dataclass
 class SkillDefinition:
-    """Skill loaded from YAML."""
+    """Skill definition - can be loaded from SKILL.md or registered dynamically."""
 
     name: str
     description: str
-    instructions: str
+    instructions: str = ""  # Empty for dynamic skills
+    subagent: bool = False  # True = isolated LLM loop, False = inline instructions
     model: str | None = None  # Model alias (e.g., "default", "sonnet")
     required_tools: list[str] = field(default_factory=list)
     input_schema: dict[str, Any] = field(default_factory=dict)
@@ -76,6 +82,15 @@ class SkillDefinition:
 
     # Path to skill directory (for loading config.toml)
     skill_path: Path | None = None
+
+    # For dynamic skills: callable that builds SubagentConfig from input
+    # If set, this skill is dynamic and uses subagent execution
+    build_config: ConfigBuilder | None = None
+
+    @property
+    def is_dynamic(self) -> bool:
+        """Check if this is a dynamic skill (has build_config)."""
+        return self.build_config is not None
 
     @staticmethod
     def parse_config_spec(spec: str) -> tuple[str, str | None]:
@@ -170,3 +185,32 @@ class SkillResult:
     def error(cls, message: str) -> "SkillResult":
         """Create an error result."""
         return cls(content=message, is_error=True, iterations=0)
+
+
+@dataclass
+class SubagentConfig:
+    """Configuration for running a subagent.
+
+    Subagents are isolated LLM loops with their own context and tool access.
+    Used by:
+    - Skills with subagent=True
+    - Tools that spawn subagents (e.g., write_skill)
+    """
+
+    # System prompt for the subagent
+    system_prompt: str
+
+    # Tools the subagent can use (empty = all available)
+    allowed_tools: list[str] = field(default_factory=list)
+
+    # Maximum LLM iterations before stopping
+    max_iterations: int = 10
+
+    # Model alias to use (None = use default)
+    model: str | None = None
+
+    # Environment variables to pass to tool execution
+    env: dict[str, str] = field(default_factory=dict)
+
+    # Initial user message to start the conversation
+    initial_message: str = "Execute according to the instructions provided."

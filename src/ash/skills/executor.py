@@ -6,11 +6,11 @@ import time
 from typing import Any
 
 from ash.config.models import AshConfig, ConfigError
-from ash.llm import LLMProvider, ToolDefinition
+from ash.llm import ToolDefinition
 from ash.llm.registry import create_llm_provider
 from ash.llm.types import ContentBlock, Message, Role
 from ash.llm.types import ToolResult as LLMToolResult
-from ash.skills.base import SkillContext, SkillDefinition, SkillResult
+from ash.skills.base import SkillContext, SkillDefinition, SkillResult, SubagentConfig
 from ash.skills.registry import SkillRegistry
 from ash.tools.base import ToolContext
 from ash.tools.executor import ToolExecutor
@@ -37,47 +37,6 @@ class SkillExecutor:
         self._registry = registry
         self._tool_executor = tool_executor
         self._config = config
-
-    def _resolve_model(
-        self, skill: SkillDefinition
-    ) -> tuple[LLMProvider, str, float | None, int]:
-        """Resolve model alias to provider and model config.
-
-        Resolution order:
-        1. Per-skill config override: [skills.<name>] model = "<alias>"
-        2. Skill's preferred_model from SKILL.md
-        3. "default" fallback
-
-        Args:
-            skill: Skill definition with preferred_model.
-
-        Returns:
-            Tuple of (provider, model, temperature, max_tokens).
-        """
-        # Check per-skill config override first
-        skill_config = self._config.skills.get(skill.name, {})
-        alias = skill_config.get("model") or skill.model or "default"
-
-        try:
-            model_config = self._config.get_model(alias)
-        except ConfigError:
-            logger.warning(f"Model alias '{alias}' not found, using default model")
-            model_config = self._config.default_model
-
-        api_key = self._config.resolve_api_key(
-            alias if alias in self._config.models else "default"
-        )
-        provider = create_llm_provider(
-            model_config.provider,
-            api_key=api_key.get_secret_value() if api_key else None,
-        )
-
-        return (
-            provider,
-            model_config.model,
-            model_config.temperature,
-            model_config.max_tokens,
-        )
 
     def _validate_tools(self, skill: SkillDefinition) -> str | None:
         """Validate that all required tools are available.
@@ -117,33 +76,6 @@ class SkillExecutor:
 
         return None
 
-    def _get_tool_definitions(self, skill: SkillDefinition) -> list[ToolDefinition]:
-        """Get tool definitions for the skill.
-
-        If skill has required_tools, only include those.
-        Otherwise, include all available tools.
-
-        Args:
-            skill: Skill definition.
-
-        Returns:
-            List of tool definitions.
-        """
-        definitions = []
-        tool_defs = self._tool_executor.get_definitions()
-
-        for tool_def in tool_defs:
-            if not skill.required_tools or tool_def["name"] in skill.required_tools:
-                definitions.append(
-                    ToolDefinition(
-                        name=tool_def["name"],
-                        description=tool_def["description"],
-                        input_schema=tool_def["input_schema"],
-                    )
-                )
-
-        return definitions
-
     def _build_system_prompt(
         self, skill: SkillDefinition, input_data: dict[str, Any]
     ) -> str:
@@ -163,83 +95,95 @@ class SkillExecutor:
 
         return prompt
 
-    async def execute(
+    async def _run_subagent(
         self,
-        skill_name: str,
-        input_data: dict[str, Any],
+        config: SubagentConfig,
         context: SkillContext,
+        name: str = "subagent",
     ) -> SkillResult:
-        """Execute skill with sub-agent loop.
+        """Run a subagent with the given configuration.
+
+        This is the core subagent loop used by skills and tools that spawn
+        isolated LLM conversations with restricted tool access.
 
         Args:
-            skill_name: Name of skill to execute.
-            input_data: Input data for skill.
+            config: Subagent configuration.
             context: Skill execution context.
+            name: Name for logging (e.g., skill name or "write-skill").
 
         Returns:
-            Skill execution result.
+            Skill result with subagent output.
         """
         start_time = time.monotonic()
 
-        # Get skill
-        try:
-            skill = self._registry.get(skill_name)
-        except KeyError:
-            return SkillResult.error(f"Skill '{skill_name}' not found")
-
-        # Check availability
-        is_available, reason = skill.is_available()
-        if not is_available:
-            return SkillResult.error(f"Skill '{skill_name}' not available: {reason}")
-
-        # Validate tools
-        error = self._validate_tools(skill)
-        if error:
-            return SkillResult.error(error)
-
-        # Validate input
-        error = self._validate_input(skill, input_data)
-        if error:
-            return SkillResult.error(f"Invalid input: {error}")
-
         # Resolve model
-        provider, model, temperature, max_tokens = self._resolve_model(skill)
+        model_alias = config.model or "default"
+        try:
+            model_config = self._config.get_model(model_alias)
+        except ConfigError:
+            logger.warning(f"Model alias '{model_alias}' not found, using default")
+            model_config = self._config.default_model
 
-        # Build prompts
-        system_prompt = self._build_system_prompt(skill, input_data)
-        tool_definitions = self._get_tool_definitions(skill)
+        api_key = self._config.resolve_api_key(
+            model_alias if model_alias in self._config.models else "default"
+        )
+        provider = create_llm_provider(
+            model_config.provider,
+            api_key=api_key.get_secret_value() if api_key else None,
+        )
+
+        # Build tool definitions - filter to allowed tools if specified
+        all_tool_defs = self._tool_executor.get_definitions()
+        if config.allowed_tools:
+            allowed_set = set(config.allowed_tools)
+            tool_definitions = [
+                ToolDefinition(
+                    name=td["name"],
+                    description=td["description"],
+                    input_schema=td["input_schema"],
+                )
+                for td in all_tool_defs
+                if td["name"] in allowed_set
+            ]
+        else:
+            tool_definitions = [
+                ToolDefinition(
+                    name=td["name"],
+                    description=td["description"],
+                    input_schema=td["input_schema"],
+                )
+                for td in all_tool_defs
+            ]
 
         # Initialize conversation
         messages: list[Message] = [
-            Message(
-                role=Role.USER,
-                content="Execute the skill according to the instructions and input provided.",
-            )
+            Message(role=Role.USER, content=config.initial_message)
         ]
 
         iterations = 0
         result_text = ""
 
-        logger.info(f"Starting skill '{skill_name}' (model={model})")
+        logger.info(
+            f"Starting {name} (model={model_config.model}, "
+            f"max_iterations={config.max_iterations})"
+        )
 
-        # Sub-agent loop
-        while iterations < skill.max_iterations:
+        # Subagent loop
+        while iterations < config.max_iterations:
             iterations += 1
-            logger.debug(
-                f"Skill '{skill_name}' iteration {iterations}/{skill.max_iterations}"
-            )
+            logger.debug(f"{name} iteration {iterations}/{config.max_iterations}")
 
             try:
                 response = await provider.complete(
                     messages=messages,
-                    model=model,
+                    model=model_config.model,
                     tools=tool_definitions if tool_definitions else None,
-                    system=system_prompt,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
+                    system=config.system_prompt,
+                    max_tokens=model_config.max_tokens,
+                    temperature=model_config.temperature,
                 )
             except Exception as e:
-                logger.exception(f"Skill '{skill_name}' LLM call failed")
+                logger.exception(f"{name} LLM call failed")
                 return SkillResult.error(f"LLM call failed: {e}")
 
             # Add assistant message to conversation
@@ -252,23 +196,17 @@ class SkillExecutor:
                 result_text = response.message.get_text() or ""
                 break
 
-            # Build SKILL_* env vars from skill config
-            skill_env = {
-                f"SKILL_{name.upper()}": value
-                for name, value in skill.config_values.items()
-            }
-
             # Execute tools
             tool_context = ToolContext(
                 session_id=context.session_id,
                 user_id=context.user_id,
                 chat_id=context.chat_id,
-                env=skill_env,
+                env=config.env,
             )
 
             tool_results: list[ContentBlock] = []
             for tool_use in tool_uses:
-                logger.debug(f"Skill '{skill_name}' executing tool: {tool_use.name}")
+                logger.debug(f"{name} executing tool: {tool_use.name}")
 
                 result = await self._tool_executor.execute(
                     tool_use.name,
@@ -285,25 +223,17 @@ class SkillExecutor:
                 )
 
             # Add tool results to conversation
-            messages.append(
-                Message(
-                    role=Role.USER,
-                    content=tool_results,
-                )
-            )
+            messages.append(Message(role=Role.USER, content=tool_results))
 
         # Log execution
         duration_ms = int((time.monotonic() - start_time) * 1000)
-        logger.info(
-            f"Skill '{skill_name}' completed in {duration_ms}ms "
-            f"({iterations} iterations)"
-        )
+        logger.info(f"{name} completed in {duration_ms}ms ({iterations} iterations)")
 
         # Check if we hit max iterations
-        if iterations >= skill.max_iterations and not result_text:
+        if iterations >= config.max_iterations and not result_text:
             result_text = (
-                f"Skill execution reached maximum iterations ({skill.max_iterations}). "
-                "Partial result may be incomplete."
+                f"Reached maximum iterations ({config.max_iterations}). "
+                "Result may be incomplete."
             )
             return SkillResult(
                 content=result_text,
@@ -312,3 +242,176 @@ class SkillExecutor:
             )
 
         return SkillResult.success(result_text, iterations=iterations)
+
+    def has_skill(self, skill_name: str) -> bool:
+        """Check if a skill exists.
+
+        Args:
+            skill_name: Name of the skill.
+
+        Returns:
+            True if skill exists.
+        """
+        return self._registry.has(skill_name)
+
+    async def execute(
+        self,
+        skill_name: str,
+        input_data: dict[str, Any],
+        context: SkillContext,
+    ) -> SkillResult:
+        """Execute a skill.
+
+        Routes to inline, subagent, or dynamic execution based on skill type.
+
+        Args:
+            skill_name: Name of skill to execute.
+            input_data: Input data for skill.
+            context: Skill execution context.
+
+        Returns:
+            Skill execution result.
+        """
+        # Get skill from registry
+        try:
+            skill = self._registry.get(skill_name)
+        except KeyError:
+            return SkillResult.error(f"Skill '{skill_name}' not found")
+
+        # Check availability
+        is_available, reason = skill.is_available()
+        if not is_available:
+            return SkillResult.error(f"Skill '{skill_name}' not available: {reason}")
+
+        # Validate required tools are available
+        error = self._validate_tools(skill)
+        if error:
+            return SkillResult.error(error)
+
+        # Validate input
+        error = self._validate_input(skill, input_data)
+        if error:
+            return SkillResult.error(f"Invalid input: {error}")
+
+        # Route based on skill type
+        if skill.is_dynamic:
+            return await self._execute_dynamic(skill, input_data, context)
+        elif skill.subagent:
+            return await self._execute_subagent(skill, input_data, context)
+        else:
+            return await self._execute_inline(skill, input_data, context)
+
+    async def _execute_inline(
+        self,
+        skill: SkillDefinition,
+        input_data: dict[str, Any],
+        context: SkillContext,
+    ) -> SkillResult:
+        """Execute skill in inline mode.
+
+        Returns skill instructions for the main agent to follow using its tools.
+        No sub-agent loop is created.
+
+        Args:
+            skill: Skill definition.
+            input_data: Input data for skill.
+            context: Skill execution context.
+
+        Returns:
+            Skill result containing instructions for main agent.
+        """
+        logger.info(f"Executing skill '{skill.name}' in inline mode")
+
+        # Build instructions with {baseDir} substitution
+        instructions = skill.instructions
+        if skill.skill_path:
+            instructions = instructions.replace("{baseDir}", str(skill.skill_path))
+
+        # Append input data if provided
+        if input_data:
+            instructions += (
+                f"\n\n## Input\n```json\n{json.dumps(input_data, indent=2)}\n```"
+            )
+
+        # Return instructions for main agent to follow
+        return SkillResult.success(
+            f"## Skill: {skill.name}\n\n{instructions}",
+            iterations=0,
+        )
+
+    async def _execute_subagent(
+        self,
+        skill: SkillDefinition,
+        input_data: dict[str, Any],
+        context: SkillContext,
+    ) -> SkillResult:
+        """Execute skill in subagent mode with isolated sub-agent loop.
+
+        Args:
+            skill: Skill definition.
+            input_data: Input data for skill.
+            context: Skill execution context.
+
+        Returns:
+            Skill execution result.
+        """
+        # Build system prompt with input data
+        system_prompt = self._build_system_prompt(skill, input_data)
+
+        # Build SKILL_* env vars from skill config
+        skill_env = {
+            f"SKILL_{name.upper()}": value
+            for name, value in skill.config_values.items()
+        }
+
+        # Resolve model alias (per-skill config > skill.model > default)
+        skill_config = self._config.skills.get(skill.name, {})
+        model_alias = skill_config.get("model") or skill.model
+
+        # Build subagent config
+        config = SubagentConfig(
+            system_prompt=system_prompt,
+            allowed_tools=skill.required_tools,
+            max_iterations=skill.max_iterations,
+            model=model_alias,
+            env=skill_env,
+        )
+
+        return await self._run_subagent(config, context, name=f"skill:{skill.name}")
+
+    async def _execute_dynamic(
+        self,
+        skill: SkillDefinition,
+        input_data: dict[str, Any],
+        context: SkillContext,
+    ) -> SkillResult:
+        """Execute a dynamic skill that builds its config at runtime.
+
+        Dynamic skills use a build_config callable to create their SubagentConfig,
+        allowing them to inject runtime context like available tools.
+
+        Args:
+            skill: Dynamic skill definition (must have build_config set).
+            input_data: Input data for skill.
+            context: Skill execution context.
+
+        Returns:
+            Skill execution result.
+        """
+        if not skill.build_config:
+            return SkillResult.error(
+                f"Skill '{skill.name}' is marked as dynamic but has no build_config"
+            )
+
+        # Build config with standard context kwargs
+        try:
+            config = skill.build_config(
+                input_data,
+                tool_definitions=self._tool_executor.get_definitions(),
+                workspace_path=self._config.workspace,
+            )
+        except Exception as e:
+            logger.exception(f"Failed to build config for dynamic skill '{skill.name}'")
+            return SkillResult.error(f"Failed to build skill config: {e}")
+
+        return await self._run_subagent(config, context, name=skill.name)

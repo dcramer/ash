@@ -48,7 +48,7 @@ class TestSkillRequirements:
         req = SkillRequirements(os=[other_os])
         is_met, reason = req.check()
         assert is_met is False
-        assert "Requires OS" in reason
+        assert reason is not None and "Requires OS" in reason
 
     def test_bin_requirement_existing_binary_passes(self):
         # python should always be available
@@ -61,7 +61,7 @@ class TestSkillRequirements:
         req = SkillRequirements(bins=["nonexistent-binary-xyz123"])
         is_met, reason = req.check()
         assert is_met is False
-        assert "Requires binary" in reason
+        assert reason is not None and "Requires binary" in reason
 
     def test_env_requirement_existing_var_passes(self):
         with patch.dict("os.environ", {"TEST_VAR_123": "value"}):
@@ -74,7 +74,7 @@ class TestSkillRequirements:
         req = SkillRequirements(env=["NONEXISTENT_VAR_XYZ123"])
         is_met, reason = req.check()
         assert is_met is False
-        assert "Requires environment variable" in reason
+        assert reason is not None and "Requires environment variable" in reason
 
     def test_multiple_requirements_all_pass(self):
         with patch.dict("os.environ", {"TEST_VAR": "value"}):
@@ -95,7 +95,7 @@ class TestSkillRequirements:
         )
         is_met, reason = req.check()
         assert is_met is False
-        assert "nonexistent-xyz" in reason
+        assert reason is not None and "nonexistent-xyz" in reason
 
 
 # =============================================================================
@@ -522,6 +522,7 @@ class TestSkillExecutor:
                 name="test_skill",
                 description="Test skill",
                 instructions="Do something",
+                subagent=True,
             )
         )
         return registry
@@ -577,6 +578,7 @@ class TestSkillExecutor:
                 name="needs_tool",
                 description="Needs tool",
                 instructions="Use the tool",
+                subagent=True,  # Only subagent validates tools
                 required_tools=["nonexistent_tool"],
             )
         )
@@ -697,6 +699,7 @@ class TestSkillExecutor:
                 name="limited",
                 description="Limited iterations",
                 instructions="Do something",
+                subagent=True,
                 max_iterations=2,
             )
         )
@@ -737,6 +740,7 @@ class TestSkillExecutor:
                 name="fast_skill",
                 description="Uses fast model",
                 instructions="Do something quickly",
+                subagent=True,
                 model="fast",
             )
         )
@@ -772,6 +776,7 @@ class TestSkillExecutor:
                 name="unknown_model_skill",
                 description="Uses unknown model",
                 instructions="Do something",
+                subagent=True,
                 model="nonexistent",
             )
         )
@@ -812,6 +817,7 @@ class TestUseSkillTool:
                 name="test_skill",
                 description="Test skill",
                 instructions="Do test",
+                subagent=True,
             )
         )
         return registry
@@ -1139,7 +1145,7 @@ Needs the key.
         skill = registry.get("test")
         is_available, reason = skill.is_available()
         assert is_available is False
-        assert "REQUIRED_KEY" in reason
+        assert reason is not None and "REQUIRED_KEY" in reason
 
 
 # =============================================================================
