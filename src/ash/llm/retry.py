@@ -5,11 +5,8 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TypeVar
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 # Pattern to match retryable errors
 RETRYABLE_PATTERN = re.compile(
@@ -68,7 +65,7 @@ def is_retryable_error(error: Exception) -> bool:
     return False
 
 
-async def with_retry(
+async def with_retry[T](
     func: Callable[[], Awaitable[T]],
     config: RetryConfig | None = None,
     operation_name: str = "API call",

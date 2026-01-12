@@ -50,7 +50,7 @@ class TestTruncationResult:
         assert meta["total_bytes"] == 100000
         assert meta["output_lines"] == 4000
         assert meta["output_bytes"] == 40000
-        assert meta["full_output_path"] == "/tmp/ash-tool-output/test.txt"
+        assert meta["full_output_path"] == "/tmp/ash-tool-output/test.txt"  # noqa: S108
 
 
 class TestTruncateHead:

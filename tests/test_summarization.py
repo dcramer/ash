@@ -41,7 +41,7 @@ class TestSummarizationResult:
         assert meta["summarized"] is True
         assert meta["original_bytes"] == 10000
         assert meta["summary_bytes"] == 500
-        assert meta["full_output_path"] == "/tmp/ash-tool-output/test.txt"
+        assert meta["full_output_path"] == "/tmp/ash-tool-output/test.txt"  # noqa: S108
 
     def test_to_metadata_with_error(self):
         """Test metadata when summarization failed."""

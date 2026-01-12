@@ -5,11 +5,8 @@ import logging
 import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TypeVar
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 # HTTP status codes that indicate transient errors worth retrying
@@ -117,7 +114,7 @@ def calculate_delay(attempt: int, config: RetryConfig) -> float:
     return max(0, delay)
 
 
-async def with_retry(
+async def with_retry[T](
     func: Callable[[], Awaitable[T]],
     config: RetryConfig | None = None,
     on_retry: Callable[[int, Exception, float], None] | None = None,
