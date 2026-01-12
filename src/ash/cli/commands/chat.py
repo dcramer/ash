@@ -136,6 +136,7 @@ async def _run_chat(
     database = init_database(database_path=ash_config.memory.database_path)
     await database.connect()
 
+    components = None
     try:
         async with database.session() as db_session:
             # Create agent with all dependencies
@@ -322,4 +323,10 @@ async def _run_chat(
                     console.print("\n[dim]Cancelled[/dim]\n")
                     continue
     finally:
+        # Clean up sandbox container
+        if components and components.sandbox_executor:
+            try:
+                await components.sandbox_executor.cleanup()
+            except Exception as e:
+                logger.warning(f"Error cleaning up sandbox: {e}")
         await database.disconnect()

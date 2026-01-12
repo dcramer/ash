@@ -52,13 +52,13 @@ def _sanitize(s: str) -> str:
         s: Input string.
 
     Returns:
-        Sanitized string (alphanumeric + underscore, max 64 chars).
+        Sanitized string (alphanumeric, hyphen, underscore, max 64 chars).
     """
-    # Replace non-alphanumeric with underscore
-    cleaned = re.sub(r"[^a-zA-Z0-9]", "_", s)
+    # Replace unsafe chars with underscore (preserve hyphen - it's filesystem-safe)
+    cleaned = re.sub(r"[^a-zA-Z0-9\-]", "_", s)
     # Collapse multiple underscores
     cleaned = re.sub(r"_+", "_", cleaned)
-    # Strip leading/trailing underscores
+    # Strip leading/trailing underscores (but not hyphens - they're meaningful like in -542863895)
     cleaned = cleaned.strip("_")
     # Limit length
     return cleaned[:64] if cleaned else "default"
@@ -130,6 +130,8 @@ class MessageEntry:
     created_at: datetime
     token_count: int | None = None
     user_id: str | None = None
+    username: str | None = None
+    display_name: str | None = None
     metadata: dict[str, Any] | None = None  # For external_id, reply tracking, etc.
     type: Literal["message"] = "message"
 
@@ -160,6 +162,10 @@ class MessageEntry:
         }
         if self.user_id:
             result["user_id"] = self.user_id
+        if self.username:
+            result["username"] = self.username
+        if self.display_name:
+            result["display_name"] = self.display_name
         return result
 
     def _extract_text_content(self) -> str:
@@ -189,6 +195,8 @@ class MessageEntry:
             created_at=created_at,
             token_count=data.get("token_count"),
             user_id=data.get("user_id"),
+            username=data.get("username"),
+            display_name=data.get("display_name"),
             metadata=data.get("metadata"),
         )
 
@@ -199,6 +207,8 @@ class MessageEntry:
         content: str | list[dict[str, Any]],
         token_count: int | None = None,
         user_id: str | None = None,
+        username: str | None = None,
+        display_name: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> MessageEntry:
         """Create a new message entry."""
@@ -209,6 +219,8 @@ class MessageEntry:
             created_at=now_utc(),
             token_count=token_count,
             user_id=user_id,
+            username=username,
+            display_name=display_name,
             metadata=metadata,
         )
 

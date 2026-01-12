@@ -138,6 +138,44 @@ class MemoryManager:
 
         return RetrievedContext(memories=memories)
 
+    async def get_recent_memories(
+        self,
+        user_id: str | None = None,
+        chat_id: str | None = None,
+        limit: int = 20,
+    ) -> list[str]:
+        """Get recent memories without semantic search.
+
+        Used when we need to know what memories exist without a specific query,
+        e.g., for memory extraction to avoid duplicates.
+
+        Args:
+            user_id: Filter to user's personal memories.
+            chat_id: Filter to include group memories for this chat.
+            limit: Maximum number of memories to return.
+
+        Returns:
+            List of memory content strings.
+        """
+        try:
+            memories = await self._store.get_memories(
+                limit=limit,
+                include_expired=False,
+                include_superseded=False,
+                owner_user_id=user_id,
+                chat_id=chat_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to get recent memories (user_id=%s, chat_id=%s)",
+                user_id,
+                chat_id,
+                exc_info=True,
+            )
+            return []
+
+        return [m.content for m in memories]
+
     async def add_memory(
         self,
         content: str,
@@ -196,12 +234,10 @@ class MemoryManager:
                 subject_person_ids=subject_person_ids,
             )
             if superseded_count > 0:
-                logger.info(
-                    "Memory superseded older entries",
-                    extra={
-                        "new_memory_id": memory.id,
-                        "superseded_count": superseded_count,
-                    },
+                logger.debug(
+                    "Memory superseded %d older entries",
+                    superseded_count,
+                    extra={"new_memory_id": memory.id},
                 )
         except Exception:
             logger.warning("Failed to check for conflicting memories", exc_info=True)
@@ -311,7 +347,7 @@ class MemoryManager:
         )
 
         count = 0
-        for memory_id, similarity in conflicts:
+        for memory_id, _similarity in conflicts:
             # Don't supersede the new memory itself
             if memory_id == new_memory_id:
                 continue
@@ -332,14 +368,6 @@ class MemoryManager:
                     )
 
                 count += 1
-                logger.info(
-                    "Superseded memory",
-                    extra={
-                        "memory_id": memory_id,
-                        "superseded_by": new_memory_id,
-                        "similarity": similarity,
-                    },
-                )
 
         return count
 
@@ -457,6 +485,10 @@ class MemoryManager:
         """
         ref_lower = reference.lower().strip()
 
+        # Strip @ prefix for usernames (e.g., "@notzeeg" -> "notzeeg")
+        if ref_lower.startswith("@"):
+            ref_lower = ref_lower[1:]
+
         # Remove "my " prefix if present
         relationship = ref_lower[3:] if ref_lower.startswith("my ") else None
 
@@ -471,7 +503,7 @@ class MemoryManager:
             return relationship.title(), relationship
 
         # Reference is likely a name
-        return reference.title(), relationship
+        return ref_lower.title(), relationship
 
     def _extract_name_from_content(
         self,

@@ -136,6 +136,8 @@ class SessionManager:
         token_count: int | None = None,
         metadata: dict[str, Any] | None = None,
         user_id: str | None = None,
+        username: str | None = None,
+        display_name: str | None = None,
     ) -> str:
         """Add a user message to the session.
 
@@ -144,6 +146,8 @@ class SessionManager:
             token_count: Optional pre-computed token count.
             metadata: Optional metadata (e.g., external_id for deduplication).
             user_id: Override user ID (for group chats where session is shared).
+            username: Username of the message sender (for history search).
+            display_name: Display name of the message sender (for history search).
 
         Returns:
             Message ID.
@@ -155,6 +159,8 @@ class SessionManager:
             content=content,
             token_count=token_count,
             user_id=user_id or self.user_id,
+            username=username,
+            display_name=display_name,
             metadata=metadata,
         )
         await self._writer.write_message(entry)

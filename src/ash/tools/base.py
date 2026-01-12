@@ -117,11 +117,16 @@ def build_sandbox_manager_config(
         SandboxManagerConfig dataclass for the sandbox executor.
     """
     from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
+    from ash.sessions.manager import get_sessions_path
+
+    # Get sessions path for mounting chat history in sandbox
+    sessions_path = get_sessions_path()
 
     if config is None:
         return SandboxManagerConfig(
             workspace_path=workspace_path,
             network_mode=default_network_mode,
+            sessions_path=sessions_path,
         )
 
     return SandboxManagerConfig(
@@ -135,4 +140,6 @@ def build_sandbox_manager_config(
         http_proxy=config.http_proxy,
         workspace_path=workspace_path,
         workspace_access=config.workspace_access,
+        sessions_path=sessions_path,
+        sessions_access=config.sessions_access,
     )

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ash.db.models import Person
     from ash.memory.extractor import MemoryExtractor
     from ash.memory.manager import MemoryManager, RetrievedContext
+    from ash.sandbox import SandboxExecutor
     from ash.skills import SkillExecutor, SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,7 @@ class Agent:
         conversation_gap_minutes: float | None = None,
         has_reply_context: bool = False,
         session_path: str | None = None,
+        session_mode: str | None = None,
     ) -> str:
         """Build system prompt with optional memory context.
 
@@ -165,6 +167,7 @@ class Agent:
             conversation_gap_minutes: Time since last message in conversation.
             has_reply_context: Whether this message is a reply with context.
             session_path: Path to the session file for self-inspection.
+            session_mode: Session mode ("persistent" or "fresh").
 
         Returns:
             Complete system prompt.
@@ -183,6 +186,7 @@ class Agent:
             conversation_gap_minutes=conversation_gap_minutes,
             has_reply_context=has_reply_context,
             session_path=session_path,
+            session_mode=session_mode,
         )
         return self._prompt_builder.build(prompt_context)
 
@@ -318,6 +322,7 @@ class Agent:
             conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
             has_reply_context=session.metadata.get("has_reply_context", False),
             session_path=session_path,
+            session_mode=session.metadata.get("session_mode"),
         )
 
         # Calculate message token budget
@@ -397,16 +402,16 @@ class Agent:
             existing_memories: list[str] = []
             if self._memory:
                 try:
-                    # Get recent context to show what's already known
-                    context = await self._memory.get_context_for_message(
+                    # Get recent memories without semantic search
+                    existing_memories = await self._memory.get_recent_memories(
                         user_id=user_id,
-                        user_message="",  # Empty query gets recent memories
                         chat_id=chat_id,
-                        max_memories=20,
+                        limit=20,
                     )
-                    existing_memories = [m.content for m in context.memories]
                 except Exception:
-                    logger.debug("Failed to get existing memories for extraction")
+                    logger.debug(
+                        "Failed to get existing memories for extraction", exc_info=True
+                    )
 
             # Convert session messages to LLM Message format
             llm_messages: list[LLMMessage] = []
@@ -813,6 +818,7 @@ class AgentComponents:
     skill_registry: SkillRegistry
     skill_executor: SkillExecutor | None
     memory_manager: MemoryManager | None
+    sandbox_executor: SandboxExecutor | None = None
 
 
 async def create_agent(
@@ -898,15 +904,13 @@ async def create_agent(
         tool_registry.register(
             WebSearchTool(
                 api_key=config.brave_search.api_key.get_secret_value(),
-                sandbox_config=config.sandbox,
-                workspace_path=config.workspace,
+                executor=shared_executor,
                 cache=search_cache,
             )
         )
         tool_registry.register(
             WebFetchTool(
-                sandbox_config=config.sandbox,
-                workspace_path=config.workspace,
+                executor=shared_executor,
                 cache=fetch_cache,
             )
         )
@@ -1069,4 +1073,5 @@ async def create_agent(
         skill_registry=skill_registry,
         skill_executor=skill_executor,
         memory_manager=memory_manager,
+        sandbox_executor=shared_executor,
     )

@@ -55,10 +55,18 @@ class EmbeddingGenerator:
             texts: Texts to embed.
 
         Returns:
-            List of embedding vectors.
+            List of embedding vectors (1:1 correspondence with input).
+
+        Raises:
+            ValueError: If any text is empty or whitespace-only.
         """
         if not texts:
             return []
+
+        # Validate no empty strings - OpenAI API rejects them
+        for i, t in enumerate(texts):
+            if not t or not t.strip():
+                raise ValueError(f"Empty or whitespace-only text at index {i}")
 
         return await self._provider.embed(texts, model=self._model)
 

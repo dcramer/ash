@@ -98,7 +98,7 @@ class MemoryStore:
         reference_lower = reference.lower().strip()
 
         # Remove common prefixes
-        for prefix in ["my ", "the "]:
+        for prefix in ["my ", "the ", "@"]:
             if reference_lower.startswith(prefix):
                 reference_lower = reference_lower[len(prefix) :]
 
@@ -251,6 +251,8 @@ class MemoryStore:
         limit: int = 100,
         include_expired: bool = False,
         include_superseded: bool = False,
+        owner_user_id: str | None = None,
+        chat_id: str | None = None,
     ) -> list[Memory]:
         """Get memory entries.
 
@@ -258,10 +260,14 @@ class MemoryStore:
             limit: Maximum number of entries.
             include_expired: Include expired entries.
             include_superseded: Include superseded entries.
+            owner_user_id: Filter to user's personal memories.
+            chat_id: Filter to group memories for this chat.
 
         Returns:
             List of memory entries.
         """
+        from sqlalchemy import or_
+
         stmt = select(Memory).order_by(Memory.created_at.desc()).limit(limit)
 
         if not include_expired:
@@ -270,6 +276,19 @@ class MemoryStore:
 
         if not include_superseded:
             stmt = stmt.where(Memory.superseded_at.is_(None))
+
+        # Apply scope filtering at database level
+        if owner_user_id or chat_id:
+            conditions = []
+            if owner_user_id:
+                # Personal memories for this user
+                conditions.append(Memory.owner_user_id == owner_user_id)
+            if chat_id:
+                # Group memories for this chat (no owner)
+                conditions.append(
+                    (Memory.chat_id == chat_id) & (Memory.owner_user_id.is_(None))
+                )
+            stmt = stmt.where(or_(*conditions))
 
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

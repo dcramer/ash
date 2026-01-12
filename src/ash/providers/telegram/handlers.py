@@ -315,6 +315,8 @@ class TelegramMessageHandler:
                     response_content,
                     external_id=message.id,
                     bot_response_id=sent_message_id,
+                    username=message.username,
+                    display_name=message.display_name,
                 )
             else:
                 response = await self._agent.process_message(
@@ -347,6 +349,8 @@ class TelegramMessageHandler:
                     external_id=message.id,
                     bot_response_id=sent_message_id,
                     compaction=response.compaction,
+                    username=message.username,
+                    display_name=message.display_name,
                 )
         else:
             # No caption - just acknowledge the image
@@ -417,6 +421,10 @@ class TelegramMessageHandler:
         - Recency window for recent messages
         - Gap detection to signal conversation boundaries
 
+        In "fresh" session mode, creates a new empty session for each message
+        without loading conversation history (but the agent can still read
+        the session file if it needs context).
+
         Args:
             message: Incoming message.
 
@@ -425,34 +433,16 @@ class TelegramMessageHandler:
         """
         session_manager = self._get_session_manager(message.chat_id, message.user_id)
         session_key = session_manager.session_key
+        is_fresh_mode = self._conversation_config.session_mode == "fresh"
 
-        if session_key in self._sessions:
+        # In persistent mode, check cache first
+        if not is_fresh_mode and session_key in self._sessions:
             # Move to end (most recently used)
             self._sessions.move_to_end(session_key)
             return self._sessions[session_key]
 
         # Ensure session exists in JSONL
         await session_manager.ensure_session()
-
-        # Load messages from JSONL
-        messages, message_ids = await session_manager.load_messages_for_llm()
-
-        # Calculate gap since last message
-        gap_minutes: float | None = None
-        if messages:
-            last_message_time = await session_manager.get_last_message_time()
-            if last_message_time:
-                gap = datetime.now(UTC) - last_message_time.replace(tzinfo=UTC)
-                gap_minutes = gap.total_seconds() / 60
-
-        # Load reply context if this is a reply
-        reply_context: list[MessageEntry] = []
-        if message.reply_to_message_id:
-            reply_context = await self._load_reply_context(
-                session_manager, message.reply_to_message_id
-            )
-            if reply_context:
-                logger.debug(f"Loaded {len(reply_context)} messages for reply context")
 
         # Create session state
         session = SessionState(
@@ -468,54 +458,86 @@ class TelegramMessageHandler:
         if message.display_name:
             session.metadata["display_name"] = message.display_name
 
-        # Store session path for agent self-inspection
-        session.metadata["session_path"] = str(
-            session_manager.session_dir / "context.jsonl"
+        # Store session path for agent self-inspection (sandbox-relative path)
+        # Sessions are mounted at /sessions in the sandbox
+        session.metadata["session_path"] = (
+            f"/sessions/{session_manager.session_key}/context.jsonl"
         )
 
-        # Store gap in session metadata for prompt builder
-        if gap_minutes is not None:
-            session.metadata["conversation_gap_minutes"] = gap_minutes
-        if message.reply_to_message_id and reply_context:
-            session.metadata["has_reply_context"] = True
+        # Store session mode in metadata for prompt builder
+        session.metadata["session_mode"] = self._conversation_config.session_mode
 
-        # Restore messages from JSONL
-        # Note: messages are already in LLM format from load_messages_for_llm
-        for msg in messages:
-            session.messages.append(msg)
+        if is_fresh_mode:
+            # Fresh mode: don't load history, agent can read session file if needed
+            logger.debug(f"Fresh session for {session_key}")
+        else:
+            # Persistent mode: load messages from JSONL
+            messages, message_ids = await session_manager.load_messages_for_llm()
 
-        # Set message IDs for deduplication
-        session.set_message_ids(message_ids)
+            # Calculate gap since last message
+            gap_minutes: float | None = None
+            if messages:
+                last_message_time = await session_manager.get_last_message_time()
+                if last_message_time:
+                    gap = datetime.now(UTC) - last_message_time.replace(tzinfo=UTC)
+                    gap_minutes = gap.total_seconds() / 60
 
-        # Merge reply context if available
-        if reply_context:
-            # Convert reply context entries to messages if not already present
-            existing_ids = set(message_ids)
-            for entry in reply_context:
-                if entry.id not in existing_ids:
-                    role = Role(entry.role)
-                    content = (
-                        entry.content
-                        if isinstance(entry.content, str)
-                        else _extract_text_content(entry.content)
+            # Load reply context if this is a reply
+            reply_context: list[MessageEntry] = []
+            if message.reply_to_message_id:
+                reply_context = await self._load_reply_context(
+                    session_manager, message.reply_to_message_id
+                )
+                if reply_context:
+                    logger.debug(
+                        f"Loaded {len(reply_context)} messages for reply context"
                     )
-                    session.messages.append(Message(role=role, content=content))
 
-            # Re-sort by position (approximate - messages were already sorted)
-            # In practice, reply context is usually already in the recency window
+            # Store gap in session metadata for prompt builder
+            if gap_minutes is not None:
+                session.metadata["conversation_gap_minutes"] = gap_minutes
+            if message.reply_to_message_id and reply_context:
+                session.metadata["has_reply_context"] = True
 
-        if messages:
-            logger.debug(
-                f"Restored {len(messages)} messages for session {session_key}"
-                + (f" (gap: {format_gap_duration(gap_minutes)})" if gap_minutes else "")
-            )
+            # Restore messages from JSONL
+            # Note: messages are already in LLM format from load_messages_for_llm
+            for msg in messages:
+                session.messages.append(msg)
 
-        # Evict oldest sessions if cache is full
-        while len(self._sessions) >= MAX_CACHED_SESSIONS:
-            evicted_key, _ = self._sessions.popitem(last=False)
-            logger.debug(f"Evicted session from cache: {evicted_key}")
+            # Set message IDs for deduplication
+            session.set_message_ids(message_ids)
 
-        self._sessions[session_key] = session
+            # Merge reply context if available
+            if reply_context:
+                # Convert reply context entries to messages if not already present
+                existing_ids = set(message_ids)
+                for entry in reply_context:
+                    if entry.id not in existing_ids:
+                        role = Role(entry.role)
+                        content = (
+                            entry.content
+                            if isinstance(entry.content, str)
+                            else _extract_text_content(entry.content)
+                        )
+                        session.messages.append(Message(role=role, content=content))
+
+            if messages:
+                logger.debug(
+                    f"Restored {len(messages)} messages for session {session_key}"
+                    + (
+                        f" (gap: {format_gap_duration(gap_minutes)})"
+                        if gap_minutes
+                        else ""
+                    )
+                )
+
+            # Cache session in persistent mode only
+            # Evict oldest sessions if cache is full
+            while len(self._sessions) >= MAX_CACHED_SESSIONS:
+                evicted_key, _ = self._sessions.popitem(last=False)
+                logger.debug(f"Evicted session from cache: {evicted_key}")
+
+            self._sessions[session_key] = session
 
         # Update user profile (still in SQLite)
         async with self._database.session() as db_session:
@@ -644,6 +666,8 @@ class TelegramMessageHandler:
             external_id=message.id,
             reply_to_external_id=message.reply_to_message_id,
             bot_response_id=sent_message_id,
+            username=message.username,
+            display_name=message.display_name,
         )
 
     async def _handle_sync(
@@ -729,6 +753,8 @@ class TelegramMessageHandler:
             reply_to_external_id=message.reply_to_message_id,
             bot_response_id=sent_message_id,
             compaction=response.compaction,
+            username=message.username,
+            display_name=message.display_name,
         )
 
         # Persist tool results to JSONL
@@ -769,6 +795,8 @@ class TelegramMessageHandler:
         reply_to_external_id: str | None = None,
         bot_response_id: str | None = None,
         compaction: CompactionInfo | None = None,
+        username: str | None = None,
+        display_name: str | None = None,
     ) -> None:
         """Persist messages to JSONL session files.
 
@@ -777,6 +805,8 @@ class TelegramMessageHandler:
             user_id: User ID.
             user_message: User's message text.
             assistant_message: Assistant's response text.
+            username: Username of the message sender (for history search).
+            display_name: Display name of the message sender (for history search).
             external_id: External message ID for deduplication.
             reply_to_external_id: External ID of the message being replied to.
             bot_response_id: External ID of the bot's response message.
@@ -798,6 +828,8 @@ class TelegramMessageHandler:
             token_count=estimate_tokens(user_message),
             metadata=user_metadata if user_metadata else None,
             user_id=user_id,
+            username=username,
+            display_name=display_name,
         )
 
         if assistant_message:

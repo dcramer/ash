@@ -235,7 +235,11 @@ class TelegramProvider(Provider):
             )
             return True
         except TelegramBadRequest as e:
-            if "can't parse" in str(e).lower() and parse_mode is not None:
+            error_msg = str(e).lower()
+            if "message is not modified" in error_msg:
+                # Content unchanged - not an error, just a no-op
+                return True
+            if "can't parse" in error_msg and parse_mode is not None:
                 logger.debug(f"Markdown parsing failed, editing as plain text: {e}")
                 try:
                     await self._bot.edit_message_text(
@@ -495,11 +499,6 @@ class TelegramProvider(Provider):
                 return
             user_id, username = access
 
-            logger.info(
-                f"Received text message from @{username} ({user_id}): "
-                f"{message.text[:50]}"
-            )
-
             # Strip bot mention from text if in group
             is_group = message.chat.type in ("group", "supergroup")
             was_mentioned = is_group and self._is_mentioned(message)
@@ -537,6 +536,11 @@ class TelegramProvider(Provider):
             else None,
             parse_mode=parse_mode,
         )
+        logger.info(
+            "Sent message to chat %s: %s",
+            message.chat_id,
+            message.text[:50] + "..." if len(message.text) > 50 else message.text,
+        )
         return str(sent.message_id)
 
     async def send_message(self, chat_id: str, text: str) -> str:
@@ -554,6 +558,11 @@ class TelegramProvider(Provider):
         sent = await self._send_with_fallback(
             chat_id=int(chat_id),
             text=text,
+        )
+        logger.info(
+            "Sent message to chat %s: %s",
+            chat_id,
+            text[:50] + "..." if len(text) > 50 else text,
         )
         return str(sent.message_id)
 

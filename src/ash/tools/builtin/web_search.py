@@ -136,6 +136,7 @@ class WebSearchTool(Tool):
     def __init__(
         self,
         api_key: str,
+        executor: SandboxExecutor | None = None,
         sandbox_config: "SandboxConfig | None" = None,
         workspace_path: Path | None = None,
         cache: SearchCache | None = None,
@@ -146,7 +147,8 @@ class WebSearchTool(Tool):
 
         Args:
             api_key: Brave Search API key.
-            sandbox_config: Sandbox configuration (pydantic model from config).
+            executor: Shared sandbox executor (preferred).
+            sandbox_config: Sandbox configuration (used if executor not provided).
             workspace_path: Path to workspace (for sandbox config).
             cache: Optional search cache for result caching.
             retry_config: Optional retry configuration for transient errors.
@@ -157,21 +159,24 @@ class WebSearchTool(Tool):
         self._cache = cache
         self._retry_config = retry_config or RetryConfig()
 
-        # Check network mode
-        network_mode = sandbox_config.network_mode if sandbox_config else "bridge"
-        if network_mode == "none":
-            raise ValueError(
-                "Web search requires network_mode: bridge in sandbox configuration"
-            )
+        if executor:
+            self._executor = executor
+        else:
+            # Check network mode
+            network_mode = sandbox_config.network_mode if sandbox_config else "bridge"
+            if network_mode == "none":
+                raise ValueError(
+                    "Web search requires network_mode: bridge in sandbox configuration"
+                )
 
-        # Build sandbox config with API key in environment
-        manager_config = build_sandbox_manager_config(
-            sandbox_config, workspace_path, default_network_mode="bridge"
-        )
-        self._executor = SandboxExecutor(
-            config=manager_config,
-            environment={"BRAVE_API_KEY": api_key},
-        )
+            # Build sandbox config with API key in environment
+            manager_config = build_sandbox_manager_config(
+                sandbox_config, workspace_path, default_network_mode="bridge"
+            )
+            self._executor = SandboxExecutor(
+                config=manager_config,
+                environment={"BRAVE_API_KEY": api_key},
+            )
 
     @property
     def name(self) -> str:
@@ -284,6 +289,7 @@ class WebSearchTool(Tool):
             command,
             timeout=30,
             reuse_container=True,
+            environment={"BRAVE_API_KEY": self._api_key},
         )
 
         if result.timed_out:

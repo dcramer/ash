@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -89,6 +89,7 @@ class PromptContext:
     has_reply_context: bool = False
     # Session info
     session_path: str | None = None
+    session_mode: str | None = None  # "persistent" or "fresh"
 
 
 class SystemPromptBuilder:
@@ -217,6 +218,28 @@ class SystemPromptBuilder:
             name = tool_def["name"]
             desc = tool_def["description"]
             lines.append(f"- **{name}**: {desc}")
+
+        # Add guidance on tool usage and presenting results
+        lines.extend(
+            [
+                "",
+                "### Tool Usage",
+                "",
+                "**IMPORTANT**: When asked to check, search, find, or look up something:",
+                "- ALWAYS use the appropriate tool - never assume or guess the answer",
+                "- Do not claim to have checked something without actually running a command",
+                "- If you need to read a file or search for content, use bash/read_file",
+                "- Never say 'I checked and found X' unless you actually ran a tool",
+                "",
+                "### Presenting Results",
+                "",
+                "When tools return results (especially searches, file reads, or queries):",
+                "- Include relevant excerpts or data in your response",
+                "- Don't just say 'I found X' - show the actual content",
+                "- Format output clearly (quotes, code blocks, lists as appropriate)",
+                "- Summarize large outputs but include key details the user asked for",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -461,11 +484,45 @@ class SystemPromptBuilder:
         if not context.session_path:
             return ""
 
-        lines = [
-            "## Session",
-            "",
-            f"Conversation history: {context.session_path}",
-            "",
-            "You can read this file with `read_file` to review past context.",
-        ]
+        lines = ["## Session", ""]
+
+        # Fresh mode: emphasize that this is a new conversation
+        if context.session_mode == "fresh":
+            lines.extend(
+                [
+                    "This is a **fresh conversation** without prior context loaded.",
+                    "Each message is independent - you don't have access to previous",
+                    "messages in your conversation context.",
+                    "",
+                    f"Chat history file: {context.session_path}",
+                    "",
+                    "**IMPORTANT**: When asked about previous messages or chat history,",
+                    "you MUST read the file using bash (e.g., `cat` or `grep`).",
+                    "Do NOT assume the file is empty - always check it.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    f"Conversation history file: {context.session_path}",
+                    "",
+                    "You HAVE ACCESS to search past messages using bash/grep on this file.",
+                ]
+            )
+
+        lines.extend(
+            [
+                "",
+                "This JSONL file contains messages with fields:",
+                "- id, role, content, created_at (ISO timestamp)",
+                "- user_id, username, display_name (for user messages)",
+                "",
+                "**How to search (USE THESE COMMANDS):**",
+                f"- Search by name: `grep -i 'evan' {context.session_path}`",
+                f"- Search by date: `grep '{date.today().isoformat()}' {context.session_path}`",
+                f"- Recent messages: `tail -20 {context.session_path}`",
+                "- Or use `read_file` to review the file directly",
+            ]
+        )
+
         return "\n".join(lines)

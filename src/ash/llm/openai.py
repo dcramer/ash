@@ -1,15 +1,13 @@
 """OpenAI LLM provider."""
 
 import json
+import logging
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
 import openai
 
 from ash.llm.base import LLMProvider
-
-if TYPE_CHECKING:
-    from ash.llm.thinking import ThinkingConfig
 from ash.llm.types import (
     CompletionResponse,
     ContentBlock,
@@ -23,6 +21,11 @@ from ash.llm.types import (
     ToolUse,
     Usage,
 )
+
+if TYPE_CHECKING:
+    from ash.llm.thinking import ThinkingConfig
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gpt-4o"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -333,9 +336,31 @@ class OpenAIProvider(LLMProvider):
         *,
         model: str | None = None,
     ) -> list[list[float]]:
-        """Generate embeddings for texts."""
+        """Generate embeddings for texts.
+
+        Args:
+            texts: List of strings to embed. Must be non-empty and contain valid strings.
+            model: Optional model override.
+
+        Returns:
+            List of embedding vectors.
+
+        Raises:
+            ValueError: If texts is empty or contains invalid values.
+        """
+        if not texts:
+            raise ValueError("Cannot embed empty list of texts")
+
+        for i, t in enumerate(texts):
+            if t is None:
+                raise ValueError(f"Cannot embed None at index {i}")
+            if not isinstance(t, str):
+                raise ValueError(f"Expected str at index {i}, got {type(t).__name__}")
+
+        embed_model = model or DEFAULT_EMBEDDING_MODEL
+        logger.debug("Embedding %d texts with model %s", len(texts), embed_model)
         response = await self._client.embeddings.create(
-            model=model or DEFAULT_EMBEDDING_MODEL,
+            model=embed_model,
             input=texts,
         )
         return [item.embedding for item in response.data]

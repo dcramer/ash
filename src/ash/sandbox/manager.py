@@ -1,17 +1,54 @@
 """Docker container management for sandboxed execution."""
 
 import asyncio
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+import docker
 from docker.errors import ImageNotFound, NotFound
 from docker.models.containers import Container
 
-import docker
-
 logger = logging.getLogger(__name__)
+
+
+async def _get_docker_host_async() -> str | None:
+    """Get the Docker host URL, respecting the current Docker context.
+
+    The Docker CLI uses contexts to manage multiple Docker endpoints.
+    The Python SDK doesn't respect these by default, so we detect
+    the active context and return its endpoint.
+
+    Returns:
+        Docker host URL (e.g., unix:///path/to/docker.sock) or None to use default.
+    """
+    # First check if DOCKER_HOST is explicitly set
+    if os.environ.get("DOCKER_HOST"):
+        return None  # Let docker.from_env() handle it
+
+    # Try to get the current context's endpoint
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "context",
+            "inspect",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        if proc.returncode == 0:
+            context = json.loads(stdout.decode())
+            endpoint = context[0].get("Endpoints", {}).get("docker", {}).get("Host")
+            if endpoint:
+                return endpoint
+    except (TimeoutError, json.JSONDecodeError, FileNotFoundError, OSError):
+        pass
+
+    return None
+
 
 DEFAULT_IMAGE = "ash-sandbox:latest"
 DEFAULT_TIMEOUT = 60
@@ -48,6 +85,10 @@ class SandboxConfig:
     workspace_path: Path | None = None  # Host path to mount
     workspace_access: WorkspaceAccess = "rw"  # none, ro, or rw
 
+    # Sessions mounting (for agent to read chat history)
+    sessions_path: Path | None = None  # Host path to sessions directory
+    sessions_access: Literal["none", "ro"] = "ro"  # none or ro (never rw)
+
 
 class SandboxManager:
     """Manage Docker containers for sandboxed code execution.
@@ -75,9 +116,27 @@ class SandboxManager:
 
     @property
     def client(self) -> docker.DockerClient:
-        """Get Docker client, initializing if needed."""
+        """Get Docker client.
+
+        Note: Call _ensure_client() from async context before accessing.
+        """
         if self._client is None:
-            self._client = docker.from_env()
+            raise RuntimeError(
+                "Docker client not initialized. Call _ensure_client() first."
+            )
+        return self._client
+
+    async def _ensure_client(self) -> docker.DockerClient:
+        """Ensure Docker client is initialized (async-safe).
+
+        Respects the current Docker context (e.g., colima, Docker Desktop).
+        """
+        if self._client is None:
+            docker_host = await _get_docker_host_async()
+            if docker_host:
+                self._client = docker.DockerClient(base_url=docker_host)
+            else:
+                self._client = docker.from_env()
         return self._client
 
     async def ensure_image(self, dockerfile_path: Path | None = None) -> bool:
@@ -89,8 +148,9 @@ class SandboxManager:
         Returns:
             True if image is available.
         """
+        client = await self._ensure_client()
         try:
-            self.client.images.get(self._config.image)
+            client.images.get(self._config.image)
             logger.debug(f"Image {self._config.image} found")
             return True
         except ImageNotFound:
@@ -109,8 +169,9 @@ class SandboxManager:
         Args:
             dockerfile_path: Path to Dockerfile.
         """
+        client = await self._ensure_client()
         await asyncio.to_thread(
-            self.client.images.build,
+            client.images.build,
             path=str(dockerfile_path.parent),
             dockerfile=dockerfile_path.name,
             tag=self._config.image,
@@ -156,6 +217,17 @@ class SandboxManager:
             volumes[str(self._config.workspace_path)] = {
                 "bind": self._config.work_dir,
                 "mode": mode,
+            }
+
+        # Mount sessions directory (read-only for agent to read chat history)
+        if (
+            self._config.sessions_path
+            and self._config.sessions_access != "none"
+            and self._config.sessions_path.exists()
+        ):
+            volumes[str(self._config.sessions_path)] = {
+                "bind": "/sessions",
+                "mode": "ro",  # Always read-only for security
             }
 
         # Security-hardened container configuration
@@ -206,8 +278,9 @@ class SandboxManager:
         if volumes:
             container_config["volumes"] = volumes
 
+        client = await self._ensure_client()
         container = await asyncio.to_thread(
-            self.client.containers.create, **container_config
+            client.containers.create, **container_config
         )
 
         self._containers[container.id] = container
@@ -220,6 +293,7 @@ class SandboxManager:
         Args:
             container_id: Container ID.
         """
+        await self._ensure_client()
         container = self._get_container(container_id)
         await asyncio.to_thread(container.start)
         logger.debug(f"Started container {container_id[:12]}")
@@ -231,6 +305,7 @@ class SandboxManager:
             container_id: Container ID.
             timeout: Stop timeout in seconds.
         """
+        await self._ensure_client()
         container = self._get_container(container_id)
         await asyncio.to_thread(container.stop, timeout=timeout)
         logger.debug(f"Stopped container {container_id[:12]}")
@@ -242,6 +317,7 @@ class SandboxManager:
             container_id: Container ID.
             force: Force removal even if running.
         """
+        await self._ensure_client()
         container = self._get_container(container_id)
         await asyncio.to_thread(container.remove, force=force)
         self._containers.pop(container_id, None)
@@ -269,6 +345,7 @@ class SandboxManager:
         Returns:
             Tuple of (exit_code, stdout, stderr).
         """
+        await self._ensure_client()
         container = self._get_container(container_id)
         timeout = timeout or self._config.timeout
 

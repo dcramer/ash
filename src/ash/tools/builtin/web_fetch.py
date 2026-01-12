@@ -282,6 +282,7 @@ class WebFetchTool(Tool):
 
     def __init__(
         self,
+        executor: SandboxExecutor | None = None,
         sandbox_config: "SandboxConfig | None" = None,
         workspace_path: Path | None = None,
         cache: SearchCache | None = None,
@@ -291,7 +292,8 @@ class WebFetchTool(Tool):
         """Initialize web fetch tool.
 
         Args:
-            sandbox_config: Sandbox configuration (pydantic model from config).
+            executor: Shared sandbox executor (preferred).
+            sandbox_config: Sandbox configuration (used if executor not provided).
             workspace_path: Path to workspace (for sandbox config).
             cache: Optional cache for fetched content.
             max_length: Maximum content length to return.
@@ -301,18 +303,21 @@ class WebFetchTool(Tool):
         self._max_length = max_length
         self._timeout = timeout
 
-        # Check network mode
-        network_mode = sandbox_config.network_mode if sandbox_config else "bridge"
-        if network_mode == "none":
-            raise ValueError(
-                "Web fetch requires network_mode: bridge in sandbox configuration"
-            )
+        if executor:
+            self._executor = executor
+        else:
+            # Check network mode
+            network_mode = sandbox_config.network_mode if sandbox_config else "bridge"
+            if network_mode == "none":
+                raise ValueError(
+                    "Web fetch requires network_mode: bridge in sandbox configuration"
+                )
 
-        # Build sandbox config
-        manager_config = build_sandbox_manager_config(
-            sandbox_config, workspace_path, default_network_mode="bridge"
-        )
-        self._executor = SandboxExecutor(config=manager_config)
+            # Build sandbox config
+            manager_config = build_sandbox_manager_config(
+                sandbox_config, workspace_path, default_network_mode="bridge"
+            )
+            self._executor = SandboxExecutor(config=manager_config)
 
     @property
     def name(self) -> str:

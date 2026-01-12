@@ -85,6 +85,10 @@ class SandboxConfig(BaseModel):
     # Access: "none" = not mounted, "ro" = read-only, "rw" = read-write
     workspace_access: Literal["none", "ro", "rw"] = "rw"
 
+    # Sessions mounting into sandbox (for agent to read chat history)
+    # Mounted at /sessions in the container
+    sessions_access: Literal["none", "ro"] = "ro"
+
 
 class ServerConfig(BaseModel):
     """Configuration for HTTP server."""
@@ -135,6 +139,7 @@ class MemoryConfig(BaseModel):
 class ConversationConfig(BaseModel):
     """Configuration for conversation context management."""
 
+    session_mode: Literal["persistent", "fresh"] = "persistent"
     recency_window: int = 10  # Always include last N messages
     gap_threshold_minutes: int = 15  # Signal gap if longer than this
     reply_context_window: int = 3  # Messages before/after reply target

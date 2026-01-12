@@ -251,6 +251,13 @@ async def _run_server(
             except Exception as e:
                 logger.warning(f"Error stopping Telegram provider: {e}")
 
+        # Clean up sandbox container
+        if components.sandbox_executor:
+            try:
+                await components.sandbox_executor.cleanup()
+            except Exception as e:
+                logger.warning(f"Error cleaning up sandbox: {e}")
+
         # Close the persistent memory session
         try:
             await memory_session.close()

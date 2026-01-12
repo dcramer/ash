@@ -119,6 +119,12 @@ class BashTool(Tool):
             environment=environment,
         )
 
+        # Check for sandbox initialization failure
+        if result.exit_code == -1 and "not initialized" in result.stderr.lower():
+            return ToolResult.error(
+                "Sandbox not available. Run 'ash sandbox build' to create the sandbox image."
+            )
+
         # Apply tail truncation (keep last N lines/bytes, save full to temp)
         truncation = truncate_tail(result.output, prefix="bash")
 
