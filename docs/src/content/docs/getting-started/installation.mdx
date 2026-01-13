@@ -2,7 +2,7 @@
 title: Installation
 description: Detailed installation methods for Ash
 sidebar:
-  order: 2
+  order: 1
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
@@ -25,7 +25,7 @@ Ash requires two API keys for the full experience:
 | **OpenAI** | Memory embeddings (semantic search) | [platform.openai.com](https://platform.openai.com/) |
 
 <Aside type="tip">
-  The setup wizard (`ash setup`) will prompt you for these keys and store them in your config file. No need to export environment variables.
+  Store these keys in your `~/.ash/config.toml` file. You can also export them as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` environment variables.
 </Aside>
 
 ## Install from Source
@@ -55,22 +55,13 @@ Ash requires two API keys for the full experience:
 
 ## Configuration
 
-Run the setup wizard:
+Create your configuration file:
 
 ```bash
-uv run ash setup
+uv run ash init
 ```
 
-This interactive wizard configures:
-- API keys (Anthropic, OpenAI)
-- Model preferences (Haiku for fast tasks, Sonnet for complex ones)
-- Optional integrations (Telegram, Brave Search)
-
-Configuration is saved to `~/.ash/config.toml`.
-
-### Manual Configuration
-
-You can also create the config file manually:
+This creates `~/.ash/config.toml` with a template configuration. Edit it to add your API keys:
 
 ```toml
 [anthropic]
@@ -128,7 +119,7 @@ Ash uses a workspace directory for personality:
 └── USER.md    # User profile (optional)
 ```
 
-The setup wizard creates these. Edit `SOUL.md` to customize how Ash behaves.
+These are created automatically on first run. Edit `SOUL.md` to customize how Ash behaves.
 
 ## Upgrading
 

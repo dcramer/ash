@@ -207,9 +207,6 @@ class AshConfig(BaseModel):
     # Environment variables from [env] section
     # Loaded into session environment for skills and bash commands
     env: dict[str, str] = Field(default_factory=dict)
-    # Skill-specific configuration: [skills.<name>] sections (deprecated)
-    # Maps skill name to config key-value pairs
-    skills: dict[str, dict[str, str]] = Field(default_factory=dict)
     # Agent-specific configuration: [agents.<name>] sections
     # Allows overriding model, max_iterations per agent
     agents: dict[str, AgentOverrideConfig] = Field(default_factory=dict)
@@ -337,17 +334,6 @@ class AshConfig(BaseModel):
         if self.embeddings is None:
             return None
         return self._resolve_provider_api_key(self.embeddings.provider)
-
-    def get_skill_config(self, skill_name: str) -> dict[str, str]:
-        """Get config values for a skill from [skills.<name>] section.
-
-        Args:
-            skill_name: The skill name to look up.
-
-        Returns:
-            Dict of config key-value pairs, empty if no config found.
-        """
-        return self.skills.get(skill_name, {})
 
     def get_resolved_env(self) -> dict[str, str]:
         """Get env vars from [env] section with $VAR references resolved.

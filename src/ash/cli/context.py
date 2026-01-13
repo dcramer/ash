@@ -91,20 +91,6 @@ model = "{sonnet_model}"
 max_tokens = 8192
 
 # =============================================================================
-# Per-Skill Model Overrides
-# =============================================================================
-# Skills that need more reasoning power use Sonnet
-
-[skills.debug]
-model = "sonnet"
-
-[skills.code-review]
-model = "sonnet"
-
-[skills.research]
-model = "sonnet"
-
-# =============================================================================
 # Optional: Telegram Integration
 # =============================================================================
 # Get bot token from @BotFather, user ID from @userinfobot

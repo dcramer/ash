@@ -17,7 +17,7 @@ Ash looks for configuration in this order:
 2. `~/.ash/config.toml` (user home)
 3. `/etc/ash/config.toml` (system-wide)
 
-Run `ash setup` to create your configuration interactively.
+Run `ash init` to create your configuration file.
 
 ## Full Example Configuration
 
@@ -43,13 +43,6 @@ max_tokens = 4096
 provider = "anthropic"
 model = "claude-sonnet-4-5-20250929"
 max_tokens = 8192
-
-# Override model for specific skills that need more reasoning power
-[skills.debug]
-model = "sonnet"
-
-[skills.code-review]
-model = "sonnet"
 
 # Telegram bot integration
 [telegram]
@@ -103,11 +96,6 @@ api_key = "..."  # Or use BRAVE_SEARCH_API_KEY env var
 dsn = "https://..."  # Or use SENTRY_DSN env var
 environment = "production"
 traces_sample_rate = 0.1
-
-# Per-skill configuration
-[skills.weather]
-api_key = "your-weather-api-key"
-units = "metric"
 ```
 
 ## Environment Variables
@@ -154,6 +142,12 @@ model = "claude-sonnet-4-5-20250929"
 
 ## Configuration Commands
 
+Create configuration file:
+
+```bash
+uv run ash init
+```
+
 View current configuration:
 
 ```bash
@@ -164,18 +158,6 @@ Validate configuration:
 
 ```bash
 uv run ash config validate
-```
-
-Run interactive setup:
-
-```bash
-uv run ash setup
-```
-
-Reconfigure a specific section:
-
-```bash
-uv run ash setup --section models
 ```
 
 ## Configuration Sections
@@ -190,8 +172,9 @@ uv run ash setup --section models
 | `[embeddings]` | Semantic search | [Embeddings](/configuration/embeddings/) |
 | `[brave_search]` | Web search | [Brave Search](/configuration/brave-search/) |
 | `[sentry]` | Error tracking | [Sentry](/configuration/sentry/) |
-| `[skills.*]` | Per-skill config | [Skills](/configuration/skills/) |
+| `[agents.*]` | Agent overrides | [Agents](/architecture/agents/) |
 
 <Aside type="tip">
-  Use `ash setup` to configure each section interactively with validation.
+  Use `ash init` to create a configuration file, then edit it manually.
+  Use `ash config validate` to check your configuration is correct.
 </Aside>

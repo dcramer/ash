@@ -2,12 +2,12 @@
 title: Workspace
 description: Configure personality and user profiles
 sidebar:
-  order: 11
+  order: 3
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-The workspace directory contains files that define your assistant's personality and knowledge about you.
+The workspace directory contains files that define your assistant's personality.
 
 ## Configuration
 
@@ -20,7 +20,6 @@ workspace = "~/.ash/workspace"
 ```
 ~/.ash/workspace/
 ├── SOUL.md      # Assistant personality
-├── USER.md      # User profile (optional)
 └── skills/      # Custom skills
 ```
 
@@ -86,13 +85,7 @@ workspace = "/path/to/your/workspace"
 
 ## Creating the Workspace
 
-The setup wizard creates the workspace:
-
-```bash
-uv run ash setup
-```
-
-Or create manually:
+The workspace is created automatically when you first run Ash. You can also create it manually:
 
 ```bash
 mkdir -p ~/.ash/workspace
@@ -102,12 +95,14 @@ Then create `SOUL.md` with your assistant's personality.
 
 ## Skills Directory
 
-Place custom YAML skill definitions in `~/.ash/workspace/skills/`:
+Place custom skill definitions in `~/.ash/workspace/skills/`:
 
 ```
 ~/.ash/workspace/skills/
-├── weather.yaml
-└── deploy.yaml
+├── weather/
+│   └── SKILL.md
+└── deploy/
+    └── SKILL.md
 ```
 
 See [Architecture: Skills](/architecture/skills/) for skill format.

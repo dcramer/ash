@@ -2,7 +2,7 @@
 title: Quick Start
 description: Get Ash running in 5 minutes
 sidebar:
-  order: 1
+  order: 2
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
@@ -35,13 +35,13 @@ Get Ash up and running with these steps.
    uv sync --all-groups
    ```
 
-2. **Run setup**
+2. **Configure**
 
    ```bash
-   uv run ash setup
+   uv run ash init
    ```
 
-   The wizard walks you through configuration—API keys, model preferences, everything. It creates `~/.ash/config.toml` for you.
+   This creates `~/.ash/config.toml` with a template. Edit it to add your API keys.
 
 3. **Build the sandbox**
 

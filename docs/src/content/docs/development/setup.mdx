@@ -41,13 +41,13 @@ Set up a development environment for contributing to Ash.
    uv run pre-commit install
    ```
 
-4. **Run setup wizard**
+4. **Create config file**
 
    ```bash
-   uv run ash setup
+   uv run ash init
    ```
 
-   This configures your API keys (Anthropic + OpenAI) and preferences.
+   This creates `~/.ash/config.toml`. Edit it to add your API keys (Anthropic + OpenAI).
 
 5. **Run database migrations**
 

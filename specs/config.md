@@ -52,8 +52,6 @@ def get_default_config() -> AshConfig
 
 ```bash
 ash init [--path PATH]             # Generate config template
-ash setup [--section SECTION]      # Interactive wizard (creates template first)
-ash config init [--path PATH]      # Alias for ash init
 ash config show [--path PATH]      # Display current config
 ash config validate [--path PATH]  # Validate config file
 ```
