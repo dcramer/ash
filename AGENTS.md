@@ -46,6 +46,26 @@ New features get a spec first. The spec lives in `specs/`, documents the design 
 
 Tests exist to catch regressions and document behavior, not to hit coverage metrics. Focus on testing the contracts between components, edge cases that are easy to break, and integration points.
 
+**What to test:**
+- Core business logic (supersession, scoping, conflict detection)
+- Error handling and graceful degradation
+- Input validation at API boundaries
+- Edge cases that are easy to break
+- Integration between components
+
+**What NOT to test:**
+- Trivial CRUD operations (if SQLAlchemy breaks, we have bigger problems)
+- Mock verification (testing that mocks return what you configured proves nothing)
+- Dataclass constructors (Python works)
+- Private methods (couples tests to implementation)
+- Language features (list operations, dict access)
+
+**Signs of bad tests:**
+- Test name describes implementation, not behavior
+- Test only verifies mock was called with expected args
+- Test duplicates another test through a different interface
+- Test would pass even if the feature was broken
+
 ## Package Manager
 
 Use **uv**: `uv sync --all-groups`
