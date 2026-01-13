@@ -8,9 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-import docker
 from docker.errors import ImageNotFound, NotFound
 from docker.models.containers import Container
+
+import docker
 
 logger = logging.getLogger(__name__)
 

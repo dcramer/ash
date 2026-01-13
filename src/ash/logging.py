@@ -42,7 +42,7 @@ class JSONLHandler(logging.Handler):
     def _get_log_file(self) -> TextIO:
         """Get the current log file, rotating daily."""
         today = datetime.now(UTC).strftime("%Y-%m-%d")
-        if self._current_date != today:
+        if self._current_date != today or self._file is None:
             if self._file:
                 self._file.close()
             self._current_date = today
