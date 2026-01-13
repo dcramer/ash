@@ -84,6 +84,7 @@ async def _run_chat(
     from rich.panel import Panel
 
     from ash.config import ConfigError, WorkspaceLoader, load_config
+    from ash.config.paths import get_rpc_socket_path
     from ash.logging import configure_logging
 
     # Configure logging - suppress to WARNING for chat TUI
@@ -91,6 +92,7 @@ async def _run_chat(
     from ash.core import create_agent
     from ash.core.session import SessionState
     from ash.db import init_database
+    from ash.rpc import RPCServer, register_memory_methods
     from ash.sessions import SessionManager
 
     # Load configuration
@@ -137,6 +139,7 @@ async def _run_chat(
     await database.connect()
 
     components = None
+    rpc_server: RPCServer | None = None
     try:
         async with database.session() as db_session:
             # Create agent with all dependencies
@@ -147,6 +150,12 @@ async def _run_chat(
                 model_alias=resolved_alias,
             )
             agent = components.agent
+
+            # Start RPC server for sandbox memory access
+            if components.memory_manager:
+                rpc_server = RPCServer(get_rpc_socket_path())
+                register_memory_methods(rpc_server, components.memory_manager)
+                await rpc_server.start()
 
             # Dump prompt mode: print system prompt and exit
             if dump_prompt:
@@ -323,6 +332,13 @@ async def _run_chat(
                     console.print("\n[dim]Cancelled[/dim]\n")
                     continue
     finally:
+        # Stop RPC server
+        if rpc_server:
+            try:
+                await rpc_server.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping RPC server: {e}")
+
         # Clean up sandbox container
         if components and components.sandbox_executor:
             try:

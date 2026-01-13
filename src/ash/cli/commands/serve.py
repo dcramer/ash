@@ -72,10 +72,11 @@ async def _run_server(
     configure_logging(use_rich=True)
 
     from ash.config import WorkspaceLoader, load_config
-    from ash.config.paths import get_pid_path
+    from ash.config.paths import get_pid_path, get_rpc_socket_path
     from ash.core import create_agent
     from ash.db import init_database
     from ash.providers.telegram import TelegramProvider
+    from ash.rpc import RPCServer, register_memory_methods
     from ash.server.app import create_app
     from ash.service.pid import remove_pid_file, write_pid_file
 
@@ -127,6 +128,15 @@ async def _run_server(
             logger.info(
                 f"Cleaned up {expired} expired, {superseded} superseded memories"
             )
+
+    # Start RPC server for sandbox communication
+    rpc_server: RPCServer | None = None
+    if components.memory_manager:
+        rpc_socket_path = get_rpc_socket_path()
+        rpc_server = RPCServer(rpc_socket_path)
+        register_memory_methods(rpc_server, components.memory_manager)
+        await rpc_server.start()
+        logger.info(f"RPC server started at {rpc_socket_path}")
 
     logger.debug(f"Tools: {', '.join(components.tool_registry.names)}")
     if components.skill_registry:
@@ -247,6 +257,13 @@ async def _run_server(
                 await telegram_provider.stop()
             except Exception as e:
                 logger.warning(f"Error stopping Telegram provider: {e}")
+
+        # Stop RPC server
+        if rpc_server:
+            try:
+                await rpc_server.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping RPC server: {e}")
 
         # Clean up sandbox container
         if components.sandbox_executor:

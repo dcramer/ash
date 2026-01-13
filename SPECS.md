@@ -89,12 +89,13 @@ Specs MUST be updated when:
 
 | Spec | Description |
 |------|-------------|
+| [subsystems](specs/subsystems.md) | Modular components with clear boundaries and interfaces |
 | [agent](specs/agent.md) | Agent orchestrator with agentic loop |
 | [config](specs/config.md) | Configuration loading and validation |
 | [conversation-context](specs/conversation-context.md) | Smart conversation context with reply chains and gap signals |
 | [llm](specs/llm.md) | LLM provider abstraction |
 | [logging](specs/logging.md) | Centralized logging configuration with consistent formatting |
-| [memory](specs/memory.md) | Persistent memory with context retrieval |
+| [memory](specs/memory.md) | Long-term knowledge persistence across conversations |
 | [models](specs/models.md) | Named model configurations with aliases |
 | [sandbox](specs/sandbox.md) | Docker sandbox for command execution |
 | [sentry](specs/sentry.md) | Optional error tracking and observability |

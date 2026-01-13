@@ -6,10 +6,10 @@ running asynchronously after each exchange.
 
 import json
 import logging
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ash.llm.types import Message, Role
+from ash.memory.types import ExtractedFact
 
 if TYPE_CHECKING:
     from ash.llm import LLMProvider
@@ -60,16 +60,6 @@ Return ONLY valid JSON, no other text. Example:
 ]
 
 If there are no facts worth extracting, return an empty array: []"""
-
-
-@dataclass
-class ExtractedFact:
-    """A fact extracted from conversation."""
-
-    content: str
-    subjects: list[str]
-    shared: bool
-    confidence: float
 
 
 class MemoryExtractor:

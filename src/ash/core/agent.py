@@ -29,8 +29,7 @@ if TYPE_CHECKING:
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
     from ash.db.models import Person
-    from ash.memory.extractor import MemoryExtractor
-    from ash.memory.manager import MemoryManager, RetrievedContext
+    from ash.memory import MemoryExtractor, MemoryManager, RetrievedContext
     from ash.sandbox import SandboxExecutor
     from ash.skills import SkillExecutor, SkillRegistry
 
@@ -892,16 +891,11 @@ async def create_agent(
     # Import here to avoid circular imports
     from ash.core.prompt import RuntimeInfo
     from ash.llm import create_llm_provider
-    from ash.memory import (
-        EmbeddingGenerator,
-        MemoryManager,
-        MemoryStore,
-        SemanticRetriever,
-    )
+    from ash.memory import create_memory_manager
     from ash.skills import SkillExecutor, SkillRegistry
     from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
     from ash.tools.builtin.files import ReadFileTool, WriteFileTool
-    from ash.tools.builtin.memory import RecallTool, RememberTool
+    from ash.tools.builtin.memory import RememberTool
     from ash.tools.builtin.search_cache import SearchCache
     from ash.tools.builtin.skills import UseSkillTool, WriteSkillTool
 
@@ -982,25 +976,18 @@ async def create_agent(
                 else None,
             )
 
-            # Create embedding generator
-            embedding_generator = EmbeddingGenerator(
-                registry=llm_registry,
-                model=config.embeddings.model,
-                provider=config.embeddings.provider,
-            )
-
-            # Create memory store and retriever
-            store = MemoryStore(db_session)
-            retriever = SemanticRetriever(db_session, embedding_generator)
-            await retriever.initialize_vector_tables()
-
-            memory_manager = MemoryManager(
-                store, retriever, db_session, max_entries=config.memory.max_entries
+            # Create memory manager using factory (handles internal wiring)
+            memory_manager = await create_memory_manager(
+                db_session=db_session,
+                llm_registry=llm_registry,
+                embedding_model=config.embeddings.model,
+                embedding_provider=config.embeddings.provider,
+                max_entries=config.memory.max_entries,
             )
 
             # Register memory tools
+            # Note: recall functionality is available via 'ash memory search' in sandbox
             tool_registry.register(RememberTool(memory_manager))
-            tool_registry.register(RecallTool(memory_manager))
 
             logger.debug("Memory tools registered")
         except ValueError as e:
@@ -1010,7 +997,7 @@ async def create_agent(
             logger.warning("Failed to initialize memory", exc_info=True)
 
     # Create memory extractor for background extraction (if memory and extraction enabled)
-    from ash.memory.extractor import MemoryExtractor
+    from ash.memory import MemoryExtractor
 
     memory_extractor: MemoryExtractor | None = None
     if memory_manager and config.memory.extraction_enabled:

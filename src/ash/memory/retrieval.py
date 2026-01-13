@@ -6,24 +6,13 @@ in JSONL files. This module now only handles semantic search over memories.
 
 import json
 import struct
-from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ash.memory.embeddings import EmbeddingGenerator
-
-
-@dataclass
-class SearchResult:
-    """Search result with similarity score."""
-
-    id: str
-    content: str
-    similarity: float
-    metadata: dict[str, Any] | None = None
-    source_type: str = "memory"
+from ash.memory.types import SearchResult
 
 
 class SemanticRetriever:

@@ -69,6 +69,11 @@ def get_pid_path() -> Path:
     return get_run_path() / "ash.pid"
 
 
+def get_rpc_socket_path() -> Path:
+    """Get the RPC Unix socket path."""
+    return get_run_path() / "rpc.sock"
+
+
 def get_service_log_path() -> Path:
     """Get the service log file path."""
     return get_logs_path() / "service.log"

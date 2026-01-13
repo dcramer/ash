@@ -89,6 +89,9 @@ class SandboxConfig:
     sessions_path: Path | None = None  # Host path to sessions directory
     sessions_access: Literal["none", "ro"] = "ro"  # none or ro (never rw)
 
+    # RPC socket mounting (for sandbox to communicate with host)
+    rpc_socket_path: Path | None = None  # Host path to RPC socket
+
 
 class SandboxManager:
     """Manage Docker containers for sandboxed code execution.
@@ -229,6 +232,16 @@ class SandboxManager:
                 "bind": "/sessions",
                 "mode": "ro",  # Always read-only for security
             }
+
+        # Mount RPC socket for sandbox-to-host communication
+        if self._config.rpc_socket_path and self._config.rpc_socket_path.exists():
+            # Mount the socket file directly at /run/ash/rpc.sock
+            volumes[str(self._config.rpc_socket_path)] = {
+                "bind": "/run/ash/rpc.sock",
+                "mode": "rw",  # Needs write to connect
+            }
+            # Set environment variable for the client
+            env["ASH_RPC_SOCKET"] = "/run/ash/rpc.sock"
 
         # Security-hardened container configuration
         container_config: dict[str, Any] = {

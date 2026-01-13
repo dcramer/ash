@@ -5,10 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.memory.manager import MemoryManager, RetrievedContext
-from ash.memory.retrieval import SearchResult
+from ash.memory import MemoryManager, RetrievedContext, SearchResult
 from ash.tools.base import ToolContext
-from ash.tools.builtin.memory import RecallTool, RememberTool
+from ash.tools.builtin.memory import RememberTool
 
 
 class TestMemoryOperations:
@@ -499,73 +498,6 @@ class TestMemoryManagerSupersession:
         assert conflicts[0][0] == "mem-2"
 
 
-class TestRecallTool:
-    """Tests for the recall tool."""
-
-    @pytest.fixture
-    def mock_memory_manager(self):
-        """Create a mock memory manager."""
-        manager = MagicMock()
-        manager.search = AsyncMock(return_value=[])
-        return manager
-
-    @pytest.fixture
-    def recall_tool(self, mock_memory_manager):
-        """Create a recall tool with mocked manager."""
-        return RecallTool(memory_manager=mock_memory_manager)
-
-    async def test_recall_searches_memory(self, recall_tool, mock_memory_manager):
-        """Test that recall tool searches memory."""
-        mock_memory_manager.search.return_value = [
-            SearchResult(
-                id="1",
-                content="User likes Python",
-                similarity=0.9,
-                source_type="memory",
-            ),
-            SearchResult(
-                id="2",
-                content="Previous discussion about coding",
-                similarity=0.8,
-                source_type="message",
-            ),
-        ]
-        context = ToolContext()
-        result = await recall_tool.execute({"query": "python"}, context)
-
-        assert not result.is_error
-        assert "Found relevant memories" in result.content
-        assert "User likes Python" in result.content
-        assert "[memory]" in result.content
-        assert "[message]" in result.content
-
-    async def test_recall_no_results(self, recall_tool, mock_memory_manager):
-        """Test recall when no memories found."""
-        context = ToolContext()
-        result = await recall_tool.execute({"query": "unknown"}, context)
-
-        assert not result.is_error
-        assert "No relevant memories found" in result.content
-
-    async def test_recall_missing_query(self, recall_tool):
-        """Test error when query is missing."""
-        context = ToolContext()
-        result = await recall_tool.execute({}, context)
-
-        assert result.is_error
-        assert "Missing required parameter" in result.content
-
-    async def test_recall_handles_error(self, recall_tool, mock_memory_manager):
-        """Test error handling when search fails."""
-        mock_memory_manager.search.side_effect = Exception("Search error")
-        context = ToolContext()
-
-        result = await recall_tool.execute({"query": "test"}, context)
-
-        assert result.is_error
-        assert "Failed to search memory" in result.content
-
-
 class TestSubjectPersonValidation:
     """Tests for subject_person_ids validation."""
 
@@ -697,29 +629,3 @@ class TestSubjectNameResolution:
 
         assert len(results) == 1
         assert results[0].metadata["subject_name"] == "Sarah"
-
-    async def test_recall_shows_subject_attribution(self, mock_retriever):
-        """Test that recall tool output includes subject attribution."""
-        from ash.tools.builtin.memory import RecallTool
-
-        manager = MagicMock()
-        manager.search = AsyncMock(
-            return_value=[
-                SearchResult(
-                    id="mem-1",
-                    content="Sarah likes Italian food",
-                    similarity=0.9,
-                    source_type="memory",
-                    metadata={"subject_name": "Sarah"},
-                )
-            ]
-        )
-        manager.find_person = AsyncMock(return_value=None)
-
-        recall_tool = RecallTool(memory_manager=manager)
-        context = ToolContext(user_id="user-1")
-
-        result = await recall_tool.execute({"query": "food"}, context)
-
-        assert not result.is_error
-        assert "about Sarah" in result.content

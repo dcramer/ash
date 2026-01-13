@@ -1,338 +1,129 @@
 # Memory
 
-> Hybrid memory system with automatic context retrieval, explicit memory tools, and person-aware memories
+> Long-term knowledge persistence so the agent remembers facts across conversations
 
-Files: `src/ash/memory/manager.py`, `src/ash/memory/store.py`, `src/ash/memory/retrieval.py`, `src/ash/memory/embeddings.py`, `src/ash/tools/builtin/memory.py`, `src/ash/core/agent.py`, `src/ash/db/models.py`
+## Intent
 
-## Requirements
+The memory subsystem solves a fundamental problem: conversations are ephemeral, but users expect the agent to remember important facts about them. Memory provides:
 
-### MUST
+1. **Automatic context** - Relevant facts surface before each response without user intervention
+2. **Explicit storage** - Users can tell the agent to remember specific things
+3. **Person awareness** - Facts can be attributed to people in the user's life
+4. **Knowledge evolution** - New information supersedes outdated facts
 
-- Retrieve relevant context via semantic search before each LLM call
-- Apply similarity threshold (default 0.3) to filter irrelevant messages
-- Include top N memory entries regardless of similarity (personal assistant has small memory store)
-- Include retrieved context (messages, memories) in system prompt
-- Store conversation messages to database after each turn
-- Index messages for semantic search via embeddings
-- Link sessions to provider/chat_id/user_id
-- Persist data across restarts
-- Provide `remember` tool to store facts in memory
-- Provide `recall` tool for explicit memory search
-- Index memory entries for semantic search
-- Support optional expiration on memory entries
-- Track memory ownership (which user added it)
-- Track memory subjects (which people the fact is about via JSON array)
-- Support Person entities with name, relationship, and aliases
-- Support batch storage of multiple facts in single remember tool call
-- Include known people in system prompt for context
-- Degrade gracefully if embedding service unavailable
-- Mark conflicting memories as superseded when new memory is added (similarity >= 0.75)
-- Filter out superseded memories from default retrieval
-- Preserve superseded memories for history/audit
+Memory is NOT for:
+- Conversation history (that's sessions)
+- Temporary task state (that's session context)
+- Credentials or secrets (security risk)
 
-### SHOULD
+## Outcomes
 
-- Limit retrieved context by token count
-- Prioritize recent messages at equal relevance
-- Include source attribution in retrieved context
-- Include subject attribution (about X) in retrieved context
-- Auto-extract person names from content when creating Person entities
+### The agent recalls relevant context
 
-### MAY
+When a user asks about something they've told the agent before, the agent should know it without being reminded.
 
-- Auto-extract facts from conversations to user profile
-- Cache embeddings to avoid recomputation
-- Add identity anchoring via external_id/external_provider on Person (for stable IDs across username changes)
+| User says | Agent should |
+|-----------|--------------|
+| "Remember I'm allergic to peanuts" | Store this fact |
+| (later) "What should I avoid eating?" | Mention peanut allergy |
+| "My wife's name is Sarah" | Store fact, create Person entity |
+| (later) "What's my wife's name?" | Answer "Sarah" |
 
-## Data Models
+### Users can explicitly store facts
 
-### Person
+The `remember` tool stores facts when users explicitly request it:
+- "Remember that..." / "Don't forget..." / "Save this..."
+- Supports batch storage (multiple facts at once)
+- Supports expiration ("remember for 2 weeks")
+- Supports person attribution ("remember Sarah likes...")
 
-```python
-class Person(Base):
-    id: str                    # UUID
-    owner_user_id: str         # Which user owns this relationship
-    name: str                  # "Sarah"
-    relation: str | None   # "wife", "boss", "friend"
-    aliases: list[str] | None  # ["my wife", "Sarah"]
-    metadata_: dict | None
-    created_at: datetime
-    updated_at: datetime
+### The agent can search memory
+
+The `recall` tool searches stored facts:
+- Semantic search (meaning, not just keywords)
+- Filter by person ("what do I know about Sarah?")
+- Returns relevant facts ranked by similarity
+
+### Facts about people are tracked
+
+When facts relate to people in the user's life:
+- Person entities are created/resolved automatically
+- References like "my wife", "Sarah", "my boss" resolve to the same person
+- System prompt includes known people for context
+- Memory results show who facts are about
+
+### Old information gets superseded
+
+When new information conflicts with old:
+- "Favorite color is red" then "favorite color is blue" → only blue is retrieved
+- Superseded facts preserved for audit but excluded from search
+- Subject-specific facts don't conflict with general facts
+
+### Memory doesn't grow unbounded
+
+- Optional `max_entries` cap with smart eviction
+- Expired memories cleaned up automatically
+- Garbage collection removes superseded/expired entries
+
+## Scoping
+
+Memories have visibility scope:
+
+| Scope | Visible to | Use case |
+|-------|------------|----------|
+| Personal | Only the user who created it | Default - "I like coffee" |
+| Group | Everyone in a chat | Team facts - "Our standup is at 9am" |
+
+## Background Extraction
+
+Optionally, facts are extracted automatically from conversations:
+- Runs after each exchange (debounced)
+- Extracts preferences, facts about people, important dates
+- Skips assistant actions, temporary context, credentials
+- Confidence threshold filters low-quality extractions
+
+## Configuration
+
+```toml
+[memory]
+auto_gc = true              # Clean up on startup
+max_entries = 1000          # Cap on active memories (optional)
+extraction_enabled = true   # Background extraction
+extraction_confidence_threshold = 0.7
 ```
-
-### Memory
-
-```python
-class Memory(Base):
-    id: str
-    content: str
-    source: str | None
-    created_at: datetime
-    expires_at: datetime | None
-    metadata_: dict | None
-    owner_user_id: str | None          # Who added this fact
-    chat_id: str | None                # Which chat (NULL for personal)
-    subject_person_ids: list[str] | None  # JSON array of Person IDs (who it's about)
-    superseded_at: datetime | None     # When this memory was superseded
-    superseded_by_id: str | None       # FK to Memory (newer version)
-```
-
-## Interface
-
-### MemoryManager
-
-```python
-class MemoryManager:
-    def __init__(self, store: MemoryStore, retriever: SemanticRetriever): ...
-
-    async def get_context_for_message(
-        self,
-        session_id: str,
-        user_id: str,
-        user_message: str,
-        max_messages: int = 5,
-        max_memories: int = 10,
-        min_message_similarity: float = 0.3,
-    ) -> RetrievedContext: ...
-
-    async def persist_turn(
-        self,
-        session_id: str,
-        user_message: str,
-        assistant_response: str,
-    ) -> None: ...
-
-    async def add_memory(
-        self,
-        content: str,
-        source: str = "user",
-        expires_at: datetime | None = None,
-        expires_in_days: int | None = None,
-        owner_user_id: str | None = None,
-        chat_id: str | None = None,
-        subject_person_ids: list[str] | None = None,
-    ) -> Memory: ...
-
-    async def search(
-        self,
-        query: str,
-        limit: int = 5,
-        subject_person_id: str | None = None,
-        owner_user_id: str | None = None,
-        chat_id: str | None = None,
-    ) -> list[SearchResult]: ...
-
-    async def get_known_people(self, owner_user_id: str) -> list[Person]: ...
-
-    async def find_person(self, owner_user_id: str, reference: str) -> Person | None: ...
-
-    async def resolve_or_create_person(
-        self,
-        owner_user_id: str,
-        reference: str,
-        content_hint: str | None = None,
-    ) -> PersonResolutionResult: ...
-```
-
-### RetrievedContext
-
-```python
-@dataclass
-class RetrievedContext:
-    messages: list[SearchResult]
-    memories: list[SearchResult]  # Includes subject_name in metadata
-```
-
-### PersonResolutionResult
-
-```python
-@dataclass
-class PersonResolutionResult:
-    person_id: str
-    created: bool
-    person_name: str
-```
-
-### Tools
-
-```python
-# remember tool
-{
-    "name": "remember",
-    "description": "Store a fact or preference in long-term memory",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "content": {"type": "string", "description": "A single fact to remember"},
-            "facts": {
-                "type": "array",
-                "description": "Batch multiple facts in one call (preferred)",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "content": {"type": "string"},
-                        "subjects": {"type": "array", "items": {"type": "string"}},
-                        "expires_in_days": {"type": "integer"},
-                        "shared": {"type": "boolean"}
-                    },
-                    "required": ["content"]
-                }
-            },
-            "subjects": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Who this fact is about (e.g., ['Sarah'], ['my wife', 'John'])"
-            },
-            "expires_in_days": {"type": "integer", "description": "Days until expiration"},
-            "shared": {"type": "boolean", "description": "True for group/team facts"}
-        }
-    }
-}
-
-# recall tool
-{
-    "name": "recall",
-    "description": "Search memory for relevant information",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "What to search for"},
-            "about": {"type": "string", "description": "Filter to person (e.g., 'my wife', 'Sarah')"}
-        },
-        "required": ["query"]
-    }
-}
-```
-
-## Behaviors
-
-| Scenario | Behavior |
-|----------|----------|
-| Every message | Auto-retrieve relevant context (semantic search on user's message) |
-| Auto-retrieval (messages) | Returns up to 5 messages above 0.3 similarity |
-| Auto-retrieval (memories) | Returns up to 10 memory entries ranked by relevance with subject attribution |
-| User says "remember my wife's name is Sarah" | Agent uses `remember` with subjects=["my wife"], creates Person entity |
-| Subsequent "she likes Italian food" | Agent uses `remember` with subjects=["my wife"], links to existing Person |
-| User says "remember Sarah and John are getting married" | Agent uses `remember` with subjects=["Sarah", "John"], links to both |
-| Multiple facts at once | Agent uses `remember` with facts=[...] array for batch storage |
-| User asks "what does my wife like?" | Agent may use `recall` with about="my wife" for targeted search |
-| Low similarity messages | Filtered out (below 0.3 threshold) |
-| Embedding service down | Log warning, continue without semantic search |
-| No relevant context found | Proceed with empty context |
-
-### Person Resolution
-
-| Reference | Resolution |
-|-----------|------------|
-| "my wife" | Strip "my ", search by relationship="wife" |
-| "Sarah" | Search by name |
-| "my wife Sarah" | Extract name from content, create with name="Sarah", relationship="wife" |
-| First mention | Create new Person entity |
-| Subsequent mention | Find existing Person by name/relationship/alias |
-
-### System Prompt Enhancement
-
-When known people exist for a user, the system prompt includes:
-
-```
-## Known People
-
-The user has told you about these people:
-
-- **Sarah** (wife)
-- **Michael** (boss)
-
-Use these when interpreting references like 'my wife' or 'Sarah'.
-```
-
-Memory context includes subject attribution:
-
-```
-## Relevant Context from Memory
-
-- [Memory (about Sarah)] Sarah likes Italian food
-- [Memory] User prefers concise responses
-```
-
-### Memory Supersession
-
-When a new memory conflicts with an existing memory (high semantic similarity in the same scope), the old memory is marked as superseded.
-
-| Scenario | Behavior |
-|----------|----------|
-| New memory added | Check for conflicting memories (similarity >= 0.75) |
-| Conflict detected | Mark old memory with `superseded_at` and `superseded_by_id` |
-| Default retrieval | Exclude superseded memories |
-| History access | Query superseded memories with `include_superseded=True` |
-| Different subjects | Not considered conflicts (even if similar content) |
-
-Example:
-1. Store "User's favorite color is red"
-2. Later store "User's favorite color is blue"
-3. "...is red" gets `superseded_by_id` = "...is blue"
-4. Only "...is blue" appears in retrieval
-
-## Retention
-
-### Configuration
-
-```python
-class MemoryConfig(BaseModel):
-    # ... existing fields ...
-    auto_gc: bool = True           # Run gc on server startup
-    max_entries: int | None = None # Cap on active memories (None = unlimited)
-```
-
-### Behaviors
-
-| Scenario | Behavior |
-|----------|----------|
-| Server starts with auto_gc=True | Run gc to remove expired + superseded |
-| Memory added, max_entries exceeded | Evict oldest superseded first, then oldest active |
-| Memory has expires_at in past | Excluded from retrieval, removed on gc |
-| Memory marked superseded | Excluded from retrieval, removed on gc |
-| gc runs | Delete expired + superseded memories and embeddings |
-
-### Eviction Priority
-
-When max_entries is exceeded:
-1. Superseded memories (oldest first)
-2. Expired memories (oldest first)
-3. Active memories (oldest first, excluding those added in last 7 days)
-
-## Errors
-
-| Condition | Response |
-|-----------|----------|
-| Embedding service unavailable | Log warning, skip retrieval, continue |
-| Database unavailable | Fail request |
-| No relevant context | Proceed with empty context |
-| Remember tool fails | Return error to LLM |
-| Person not found for filter | Return unfiltered results |
-| max_entries exceeded, all recent | Log warning, skip eviction |
 
 ## Verification
 
 ```bash
-uv run pytest tests/test_memory.py -v
-uv run ash chat "Remember my wife's name is Sarah"
-uv run ash chat "Remember she likes Italian food"
+# Unit tests
+uv run pytest tests/test_memory.py tests/test_memory_extractor.py -v
+
+# Integration test
+uv run ash chat "Remember my favorite color is blue"
+uv run ash chat "What's my favorite color?"
+# Should answer "blue"
+
+uv run ash chat "Remember my wife Sarah likes Italian food"
 uv run ash chat "What does my wife like?"
+# Should mention Italian food and attribute to Sarah
+
+# CLI inspection
+uv run ash memory list
+uv run ash memory search "favorite"
+uv run ash memory gc
 ```
 
-- [ ] Person model exists in `src/ash/db/models.py`
-- [ ] Memory model has owner_user_id, chat_id, subject_person_ids (JSON array), superseded_at, superseded_by_id
-- [ ] Migration 002 adds chat_id, migration 003 adds supersession columns, migration 004 converts subject_person_id to subject_person_ids
-- [ ] MemoryManager has person resolution methods
-- [ ] MemoryManager.add_memory() checks for conflicts and supersedes old memories
-- [ ] `remember` tool accepts subjects array and facts batch parameter
-- [ ] `recall` tool accepts about filter
+### Checklist
+
+- [ ] Agent answers questions using previously stored facts
+- [ ] `remember` tool stores facts when user explicitly requests
+- [ ] `recall` tool searches memory with semantic similarity
+- [ ] Person entities created for "my wife", "Sarah", etc.
 - [ ] Known people appear in system prompt
-- [ ] Memories show subject attribution in context
-- [ ] Agent calls `get_known_people()` before LLM call
-- [ ] Superseded memories excluded from search_memories by default
-- [ ] Superseded memories can be retrieved with include_superseded=True
-- [ ] MemoryConfig has auto_gc (default True) and max_entries (default None)
-- [ ] Server runs gc on startup when auto_gc=True
-- [ ] MemoryManager.add_memory() enforces max_entries with eviction
-- [ ] `ash memory gc` removes expired + superseded entries
+- [ ] Memory results show subject attribution ("about Sarah")
+- [ ] Conflicting facts supersede old versions
+- [ ] Superseded facts excluded from default retrieval
+- [ ] `max_entries` evicts oldest when exceeded
+- [ ] `ash memory gc` removes expired/superseded entries
+- [ ] Background extraction captures facts from conversations
+- [ ] Extraction skips low-confidence and duplicate facts

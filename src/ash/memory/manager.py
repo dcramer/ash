@@ -6,14 +6,18 @@ This module now only handles memory operations (facts, relationships).
 
 import logging
 import re
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ash.db.models import Memory, Person
-from ash.memory.retrieval import SearchResult, SemanticRetriever
+from ash.memory.retrieval import SemanticRetriever
 from ash.memory.store import MemoryStore
+from ash.memory.types import PersonResolutionResult, RetrievedContext, SearchResult
+
+if TYPE_CHECKING:
+    from ash.llm import LLMRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -51,22 +55,6 @@ RELATIONSHIP_TERMS = {
     "therapist",
     "dentist",
 }
-
-
-@dataclass
-class PersonResolutionResult:
-    """Result of person resolution."""
-
-    person_id: str
-    created: bool
-    person_name: str
-
-
-@dataclass
-class RetrievedContext:
-    """Context retrieved from memory for LLM prompt augmentation."""
-
-    memories: list[SearchResult]
 
 
 class MemoryManager:
@@ -399,6 +387,32 @@ class MemoryManager:
             chat_id=chat_id,
         )
 
+    async def list_memories(
+        self,
+        limit: int = 20,
+        include_expired: bool = False,
+        owner_user_id: str | None = None,
+        chat_id: str | None = None,
+    ) -> list[Memory]:
+        """List recent memories without semantic search.
+
+        Args:
+            limit: Maximum results.
+            include_expired: Include expired entries.
+            owner_user_id: Filter to user's personal memories.
+            chat_id: Filter to include group memories for this chat.
+
+        Returns:
+            List of recent memories.
+        """
+        return await self._store.get_memories(
+            include_expired=include_expired,
+            include_superseded=False,
+            owner_user_id=owner_user_id,
+            chat_id=chat_id,
+            limit=limit,
+        )
+
     # Person operations
 
     async def find_person(
@@ -685,3 +699,49 @@ class MemoryManager:
             )
 
         return evicted
+
+
+async def create_memory_manager(
+    db_session: AsyncSession,
+    llm_registry: "LLMRegistry",
+    embedding_model: str | None = None,
+    embedding_provider: str = "openai",
+    max_entries: int | None = None,
+) -> MemoryManager:
+    """Create a fully-wired MemoryManager.
+
+    This factory handles the wiring of internal components:
+    - EmbeddingGenerator for vector embeddings
+    - SemanticRetriever for vector search
+    - MemoryStore for data access
+
+    Args:
+        db_session: Database session for persistence.
+        llm_registry: LLM registry for embedding provider.
+        embedding_model: Embedding model name (default: provider default).
+        embedding_provider: Embedding provider (default: "openai").
+        max_entries: Optional cap on active memories.
+
+    Returns:
+        Configured MemoryManager.
+    """
+    from ash.memory.embeddings import EmbeddingGenerator
+    from ash.memory.retrieval import SemanticRetriever
+    from ash.memory.store import MemoryStore
+
+    embedding_generator = EmbeddingGenerator(
+        registry=llm_registry,
+        model=embedding_model,
+        provider=embedding_provider,
+    )
+
+    store = MemoryStore(db_session)
+    retriever = SemanticRetriever(db_session, embedding_generator)
+    await retriever.initialize_vector_tables()
+
+    return MemoryManager(
+        store=store,
+        retriever=retriever,
+        db_session=db_session,
+        max_entries=max_entries,
+    )

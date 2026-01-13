@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ash.llm.types import CompletionResponse, Message, Role, TextContent, Usage
-from ash.memory.extractor import ExtractedFact, MemoryExtractor
+from ash.memory import ExtractedFact, MemoryExtractor
 
 
 class TestMemoryExtractor:

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ash.config import AshConfig, Workspace
     from ash.db.models import Person
-    from ash.memory.manager import RetrievedContext
+    from ash.memory import RetrievedContext
     from ash.skills import SkillRegistry
     from ash.tools import ToolRegistry
 
@@ -346,6 +346,11 @@ class SystemPromptBuilder:
                 "",
                 "The `ash` command is available in the sandbox for self-service operations:",
                 "",
+                "**Memory:**",
+                "- `ash memory search 'query'` - Search memories (semantic search)",
+                "- `ash memory list` - List recent memories",
+                "- `ash memory add 'content'` - Store a memory",
+                "",
                 "**Scheduling:**",
                 "- `ash schedule create 'message' --at 2026-01-12T09:00:00Z` - One-time task",
                 "- `ash schedule create 'message' --cron '0 8 * * *'` - Recurring task",
@@ -455,7 +460,7 @@ class SystemPromptBuilder:
             retrieved_header = (
                 "\n\n### Relevant Context from Memory\n\n"
                 "The following has been automatically retrieved. "
-                "Use it directly - no need to call the recall tool.\n\n"
+                "Use it directly. For additional searches, use `ash memory search`.\n\n"
             )
             parts.append(retrieved_header + "\n".join(context_items))
 
