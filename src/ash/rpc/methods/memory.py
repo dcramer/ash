@@ -57,12 +57,17 @@ def register_memory_methods(
     async def memory_add(params: dict[str, Any]) -> dict[str, Any]:
         """Add a memory entry.
 
+        Memory scoping:
+        - Personal: user_id set, chat_id not set (or shared=False)
+        - Group: chat_id set with shared=True (user_id becomes None)
+
         Params:
             content: Memory content (required)
             source: Source label (default "rpc")
             expires_days: Days until expiration (optional)
-            user_id: Owner user ID
-            chat_id: Chat ID for group memories
+            user_id: Owner user ID (for personal memories)
+            chat_id: Chat ID (for group memories when shared=True)
+            shared: If True and chat_id set, creates group memory (default False)
             subjects: List of subject person references
         """
         content = params.get("content")
@@ -73,7 +78,18 @@ def register_memory_methods(
         expires_days = params.get("expires_days")
         user_id = params.get("user_id")
         chat_id = params.get("chat_id")
+        shared = params.get("shared", False)
         subjects = params.get("subjects", [])
+
+        # Apply scoping rules:
+        # - Group memory: shared=True with chat_id → owner_user_id=None, chat_id=chat_id
+        # - Personal memory: everything else → owner_user_id=user_id, chat_id=None
+        if shared and chat_id:
+            owner_user_id = None
+            effective_chat_id = chat_id
+        else:
+            owner_user_id = user_id
+            effective_chat_id = None
 
         # Resolve subject person IDs if provided
         subject_person_ids: list[str] = []
@@ -93,8 +109,8 @@ def register_memory_methods(
             content=content,
             source=source,
             expires_in_days=expires_days,
-            owner_user_id=user_id,
-            chat_id=chat_id,
+            owner_user_id=owner_user_id,
+            chat_id=effective_chat_id,
             subject_person_ids=subject_person_ids if subject_person_ids else None,
         )
 
@@ -132,9 +148,23 @@ def register_memory_methods(
             for m in memories
         ]
 
+    async def memory_delete(params: dict[str, Any]) -> dict[str, Any]:
+        """Delete a memory entry.
+
+        Params:
+            memory_id: Memory ID to delete (required)
+        """
+        memory_id = params.get("memory_id")
+        if not memory_id:
+            raise ValueError("memory_id is required")
+
+        deleted = await memory_manager.delete_memory(memory_id)
+        return {"deleted": deleted}
+
     # Register handlers
     server.register("memory.search", memory_search)
     server.register("memory.add", memory_add)
     server.register("memory.list", memory_list)
+    server.register("memory.delete", memory_delete)
 
     logger.debug("Registered memory RPC methods")

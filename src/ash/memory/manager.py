@@ -413,6 +413,32 @@ class MemoryManager:
             limit=limit,
         )
 
+    async def delete_memory(self, memory_id: str) -> bool:
+        """Delete a memory and its embedding.
+
+        Args:
+            memory_id: ID of the memory to delete.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        # Delete from store
+        deleted = await self._store.delete_memory(memory_id)
+        if not deleted:
+            return False
+
+        # Delete the embedding
+        try:
+            await self._retriever.delete_memory_embedding(memory_id)
+        except Exception:
+            logger.warning(
+                "Failed to delete memory embedding",
+                extra={"memory_id": memory_id},
+                exc_info=True,
+            )
+
+        return True
+
     # Person operations
 
     async def find_person(

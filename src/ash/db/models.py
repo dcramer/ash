@@ -111,23 +111,3 @@ class UserProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, onupdate=utc_now, nullable=False
     )
-
-
-class SkillState(Base):
-    """Persistent state storage for skills.
-
-    Skills can store key-value pairs that persist across invocations.
-    State can be global (user_id=None) or per-user.
-    """
-
-    __tablename__ = "skill_state"
-
-    skill_name: Mapped[str] = mapped_column(String, primary_key=True)
-    key: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str | None] = mapped_column(
-        String, primary_key=True, nullable=False, default=""
-    )
-    value: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utc_now, onupdate=utc_now, nullable=False
-    )

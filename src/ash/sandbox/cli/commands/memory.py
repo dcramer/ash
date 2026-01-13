@@ -88,12 +88,20 @@ def add_memory(
     expires: Annotated[
         int | None, typer.Option("--expires", "-e", help="Days until expiration")
     ] = None,
+    shared: Annotated[
+        bool, typer.Option("--shared", help="Create as group memory (visible to chat)")
+    ] = False,
 ) -> None:
-    """Add a new memory."""
+    """Add a new memory.
+
+    By default creates a personal memory (only visible to you).
+    Use --shared to create a group memory visible to everyone in the chat.
+    """
     try:
         params = {
             "content": content,
             "source": source,
+            "shared": shared,
             **get_context_params(),
         }
         if expires is not None:
@@ -108,4 +116,26 @@ def add_memory(
         raise typer.Exit(1) from None
 
     memory_id = result.get("id", "unknown")
-    typer.echo(f"Memory added: {memory_id[:8]}")
+    scope = "shared" if shared else "personal"
+    typer.echo(f"Memory added ({scope}): {memory_id[:8]}")
+
+
+@app.command("delete")
+def delete_memory(
+    memory_id: Annotated[str, typer.Argument(help="Memory ID to delete")],
+) -> None:
+    """Delete a memory by ID."""
+    try:
+        result = rpc_call("memory.delete", {"memory_id": memory_id})
+    except ConnectionError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except RPCError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    if result.get("deleted"):
+        typer.echo(f"Memory deleted: {memory_id[:8]}")
+    else:
+        typer.echo(f"Memory not found: {memory_id[:8]}", err=True)
+        raise typer.Exit(1)

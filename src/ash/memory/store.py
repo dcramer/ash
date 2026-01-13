@@ -5,7 +5,6 @@ This module now only handles SQLite-based storage for:
 - Memories (with embeddings for semantic search)
 - People (relationship tracking)
 - User profiles
-- Skill state
 """
 
 import uuid
@@ -18,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ash.db.models import (
     Memory,
     Person,
-    SkillState,
     UserProfile,
 )
 
@@ -376,6 +374,26 @@ class MemoryStore:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def delete_memory(self, memory_id: str) -> bool:
+        """Delete a memory by ID.
+
+        Note: This only deletes the memory record. The caller is responsible
+        for deleting the associated embedding via SemanticRetriever.
+
+        Args:
+            memory_id: Memory ID.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        memory = await self.get_memory(memory_id)
+        if not memory:
+            return False
+
+        await self._session.delete(memory)
+        await self._session.flush()
+        return True
+
     # User profile operations
 
     async def get_or_create_user_profile(
@@ -418,124 +436,3 @@ class MemoryStore:
             await self._session.flush()
 
         return profile
-
-    # Skill state operations
-
-    async def get_skill_state(
-        self,
-        skill_name: str,
-        key: str,
-        user_id: str | None = None,
-    ) -> Any | None:
-        """Get a skill state value.
-
-        Args:
-            skill_name: Name of the skill.
-            key: State key.
-            user_id: User ID for user-scoped state (None for global).
-
-        Returns:
-            State value or None if not found.
-        """
-        stmt = select(SkillState).where(
-            SkillState.skill_name == skill_name,
-            SkillState.key == key,
-            SkillState.user_id == (user_id or ""),
-        )
-        result = await self._session.execute(stmt)
-        state = result.scalar_one_or_none()
-        return state.value if state else None
-
-    async def set_skill_state(
-        self,
-        skill_name: str,
-        key: str,
-        value: Any,
-        user_id: str | None = None,
-    ) -> SkillState:
-        """Set a skill state value.
-
-        Args:
-            skill_name: Name of the skill.
-            key: State key.
-            value: State value (will be serialized as JSON).
-            user_id: User ID for user-scoped state (None for global).
-
-        Returns:
-            Created or updated skill state.
-        """
-        user_id_val = user_id or ""
-
-        stmt = select(SkillState).where(
-            SkillState.skill_name == skill_name,
-            SkillState.key == key,
-            SkillState.user_id == user_id_val,
-        )
-        result = await self._session.execute(stmt)
-        state = result.scalar_one_or_none()
-
-        if state is None:
-            state = SkillState(
-                skill_name=skill_name,
-                key=key,
-                user_id=user_id_val,
-                value=value,
-            )
-            self._session.add(state)
-        else:
-            state.value = value
-
-        await self._session.flush()
-        return state
-
-    async def delete_skill_state(
-        self,
-        skill_name: str,
-        key: str,
-        user_id: str | None = None,
-    ) -> bool:
-        """Delete a skill state value.
-
-        Args:
-            skill_name: Name of the skill.
-            key: State key.
-            user_id: User ID for user-scoped state (None for global).
-
-        Returns:
-            True if deleted, False if not found.
-        """
-        stmt = select(SkillState).where(
-            SkillState.skill_name == skill_name,
-            SkillState.key == key,
-            SkillState.user_id == (user_id or ""),
-        )
-        result = await self._session.execute(stmt)
-        state = result.scalar_one_or_none()
-
-        if state:
-            await self._session.delete(state)
-            await self._session.flush()
-            return True
-        return False
-
-    async def get_all_skill_state(
-        self,
-        skill_name: str,
-        user_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Get all state values for a skill.
-
-        Args:
-            skill_name: Name of the skill.
-            user_id: User ID for user-scoped state (None for global).
-
-        Returns:
-            Dict mapping keys to values.
-        """
-        stmt = select(SkillState).where(
-            SkillState.skill_name == skill_name,
-            SkillState.user_id == (user_id or ""),
-        )
-        result = await self._session.execute(stmt)
-        states = result.scalars().all()
-        return {state.key: state.value for state in states}

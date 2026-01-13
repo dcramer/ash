@@ -18,12 +18,52 @@
 | Telegram | aiogram 3.x | Fully async, modern Python |
 | Config | TOML + Markdown | TOML for settings, MD for identity |
 | Database | SQLite + sqlite-vec | Embedded, vector search for memory |
+| Vector Search | sqlite-vec via SemanticRetriever | See decision below |
 | ORM | SQLAlchemy 2.0 | Async support, industry standard |
 | Migrations | Alembic | SQLAlchemy's migration tool, batch mode for SQLite |
 | LLM | anthropic + openai SDKs | Official async SDKs |
 | Sandbox | docker-py | Official Python SDK |
 | Web Search | Brave Search API | Good free tier, privacy-focused |
 | Testing | pytest + pytest-asyncio | Industry standard, async support |
+
+## Architectural Decisions
+
+### Vector Search: sqlite-vec
+
+We use sqlite-vec for vector embeddings rather than alternatives like LanceDB.
+
+**Why sqlite-vec:**
+- **Right-sized for our scale** - We have ~1000s of vectors (memories), not millions/billions
+- **Single file storage** - Everything in one inspectable `.db` file
+- **Standard SQL inserts** - Each memory addition is a single insert, not batch
+- **Immediate deletes** - Memory supersession creates frequent deletes; sqlite-vec handles this natively
+- **Mature foundation** - SQLite is decades old with proven reliability
+
+**Why not LanceDB:**
+- Designed for millions/billions of vectors with batch operations
+- Single inserts create fragmentation (needs batching 10-100k rows)
+- Soft deletes require manual compaction in OSS version
+- Storage is a directory with multiple `.lance` files
+- Young project (v1.0.0 Dec 2024) compared to SQLite
+
+**Abstraction Layer:**
+The `SemanticRetriever` class in `src/ash/memory/retrieval.py` abstracts vector operations:
+- `index_memory(memory_id, content)` - Store embedding
+- `search_memories(query, ...)` - Vector similarity search
+- `delete_memory_embedding(memory_id)` - Remove embedding
+- `initialize_vector_tables()` - Setup
+
+This abstraction allows future replacement of the vector backend if needed.
+
+### Skill State: File-Based Storage
+
+Skill state uses simple JSON files at `~/.ash/data/skills/<skill-name>.json` rather than SQLite.
+
+**Rationale:**
+- Simple key-value data doesn't need a database
+- Files are directly inspectable (`cat`, `jq`)
+- Aligns with "filesystem first" principle from CLAUDE.md
+- Currently unused infrastructure - no existing data to migrate
 
 ## Complete Toolchain
 

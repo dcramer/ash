@@ -8,6 +8,7 @@ from ash.skills.base import (
 )
 from ash.skills.executor import SkillExecutor
 from ash.skills.registry import SkillRegistry
+from ash.skills.state import SkillStateStore
 
 __all__ = [
     "SkillContext",
@@ -15,5 +16,6 @@ __all__ = [
     "SkillExecutor",
     "SkillRegistry",
     "SkillResult",
+    "SkillStateStore",
     "SubagentConfig",
 ]

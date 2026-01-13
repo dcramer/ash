@@ -5,7 +5,6 @@ from ash.db.models import (
     Base,
     Memory,
     Person,
-    SkillState,
     UserProfile,
 )
 
@@ -18,6 +17,5 @@ __all__ = [
     "Base",
     "Memory",
     "Person",
-    "SkillState",
     "UserProfile",
 ]

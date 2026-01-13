@@ -64,6 +64,11 @@ def get_sessions_path() -> Path:
     return get_ash_home() / "sessions"
 
 
+def get_skill_state_path() -> Path:
+    """Get the skill state directory path (per-skill JSON files)."""
+    return get_ash_home() / "data" / "skills"
+
+
 def get_pid_path() -> Path:
     """Get the service PID file path."""
     return get_run_path() / "ash.pid"
@@ -104,6 +109,7 @@ def get_all_paths() -> dict[str, Path]:
         "logs": get_logs_path(),
         "run": get_run_path(),
         "sessions": get_sessions_path(),
+        "skill_state": get_skill_state_path(),
         "pid": get_pid_path(),
         "service_log": get_service_log_path(),
     }

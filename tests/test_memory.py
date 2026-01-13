@@ -629,3 +629,437 @@ class TestSubjectNameResolution:
 
         assert len(results) == 1
         assert results[0].metadata["subject_name"] == "Sarah"
+
+
+class TestMemoryDeletion:
+    """Tests for memory deletion functionality."""
+
+    async def test_delete_memory_from_store(self, memory_store):
+        """Test deleting a memory from the store."""
+        memory = await memory_store.add_memory(
+            content="To be deleted",
+            source="test",
+        )
+
+        # Delete the memory
+        result = await memory_store.delete_memory(memory.id)
+        assert result is True
+
+        # Verify it's gone
+        deleted = await memory_store.get_memory(memory.id)
+        assert deleted is None
+
+    async def test_delete_memory_not_found(self, memory_store):
+        """Test deleting a nonexistent memory."""
+        result = await memory_store.delete_memory("nonexistent-id")
+        assert result is False
+
+    @pytest.fixture
+    def mock_retriever(self):
+        """Create a mock semantic retriever."""
+        retriever = MagicMock()
+        retriever.search_memories = AsyncMock(return_value=[])
+        retriever.search = AsyncMock(return_value=[])
+        retriever.index_memory = AsyncMock()
+        retriever.delete_memory_embedding = AsyncMock()
+        return retriever
+
+    @pytest.fixture
+    async def memory_manager(self, memory_store, mock_retriever, db_session):
+        """Create a memory manager with mocked retriever."""
+        return MemoryManager(
+            store=memory_store,
+            retriever=mock_retriever,
+            db_session=db_session,
+        )
+
+    async def test_delete_memory_from_manager(
+        self, memory_manager, memory_store, mock_retriever
+    ):
+        """Test deleting a memory through the manager (includes embedding cleanup)."""
+        # Add a memory directly to store to avoid indexing complications
+        memory = await memory_store.add_memory(
+            content="To be deleted via manager",
+            source="test",
+        )
+
+        # Delete through manager
+        result = await memory_manager.delete_memory(memory.id)
+        assert result is True
+
+        # Verify embedding deletion was called
+        mock_retriever.delete_memory_embedding.assert_called_once_with(memory.id)
+
+        # Verify memory is gone from store
+        deleted = await memory_store.get_memory(memory.id)
+        assert deleted is None
+
+    async def test_delete_memory_from_manager_not_found(
+        self, memory_manager, mock_retriever
+    ):
+        """Test deleting a nonexistent memory through the manager."""
+        result = await memory_manager.delete_memory("nonexistent-id")
+        assert result is False
+
+        # Embedding deletion should not be called for nonexistent memory
+        mock_retriever.delete_memory_embedding.assert_not_called()
+
+
+class TestGarbageCollection:
+    """Tests for memory garbage collection."""
+
+    @pytest.fixture
+    def mock_retriever(self):
+        """Create a mock semantic retriever."""
+        retriever = MagicMock()
+        retriever.search_memories = AsyncMock(return_value=[])
+        retriever.search = AsyncMock(return_value=[])
+        retriever.index_memory = AsyncMock()
+        retriever.delete_memory_embedding = AsyncMock()
+        return retriever
+
+    @pytest.fixture
+    async def memory_manager(self, memory_store, mock_retriever, db_session):
+        """Create a memory manager with mocked retriever."""
+        return MemoryManager(
+            store=memory_store,
+            retriever=mock_retriever,
+            db_session=db_session,
+        )
+
+    async def test_gc_removes_expired_memories(self, memory_manager, memory_store):
+        """Test that GC removes expired memories."""
+        # Add expired memory
+        past = datetime.now(UTC) - timedelta(days=1)
+        expired = await memory_store.add_memory(
+            content="Expired fact",
+            expires_at=past,
+        )
+
+        # Add valid memory
+        valid = await memory_store.add_memory(
+            content="Valid fact",
+        )
+
+        # Run GC
+        expired_count, superseded_count = await memory_manager.gc()
+
+        assert expired_count == 1
+        assert superseded_count == 0
+
+        # Expired memory should be gone
+        assert await memory_store.get_memory(expired.id) is None
+        # Valid memory should still exist
+        assert await memory_store.get_memory(valid.id) is not None
+
+    async def test_gc_removes_superseded_memories(self, memory_manager, memory_store):
+        """Test that GC removes superseded memories."""
+        # Create old memory
+        old = await memory_store.add_memory(
+            content="Old fact",
+        )
+        # Create new memory
+        new = await memory_store.add_memory(
+            content="New fact",
+        )
+        # Mark old as superseded
+        await memory_store.mark_memory_superseded(old.id, new.id)
+
+        # Run GC
+        expired_count, superseded_count = await memory_manager.gc()
+
+        assert expired_count == 0
+        assert superseded_count == 1
+
+        # Superseded memory should be gone
+        assert await memory_store.get_memory(old.id) is None
+        # New memory should still exist
+        assert await memory_store.get_memory(new.id) is not None
+
+    async def test_gc_removes_both_expired_and_superseded(
+        self, memory_manager, memory_store
+    ):
+        """Test that GC removes both expired and superseded memories."""
+        # Add expired memory
+        past = datetime.now(UTC) - timedelta(days=1)
+        expired = await memory_store.add_memory(
+            content="Expired",
+            expires_at=past,
+        )
+
+        # Add superseded memory
+        old = await memory_store.add_memory(content="Old")
+        new = await memory_store.add_memory(content="New")
+        await memory_store.mark_memory_superseded(old.id, new.id)
+
+        # Run GC
+        expired_count, superseded_count = await memory_manager.gc()
+
+        assert expired_count == 1
+        assert superseded_count == 1
+
+        # Both should be gone
+        assert await memory_store.get_memory(expired.id) is None
+        assert await memory_store.get_memory(old.id) is None
+        # Valid memory should still exist
+        assert await memory_store.get_memory(new.id) is not None
+
+    async def test_gc_returns_zero_when_nothing_to_clean(
+        self, memory_manager, memory_store
+    ):
+        """Test that GC returns (0, 0) when no cleanup needed."""
+        # Add only valid memories
+        await memory_store.add_memory(content="Valid 1")
+        await memory_store.add_memory(content="Valid 2")
+
+        expired_count, superseded_count = await memory_manager.gc()
+
+        assert expired_count == 0
+        assert superseded_count == 0
+
+
+class TestEnforceMaxEntries:
+    """Tests for max_entries enforcement."""
+
+    @pytest.fixture
+    def mock_retriever(self):
+        """Create a mock semantic retriever."""
+        retriever = MagicMock()
+        retriever.search_memories = AsyncMock(return_value=[])
+        retriever.search = AsyncMock(return_value=[])
+        retriever.index_memory = AsyncMock()
+        retriever.delete_memory_embedding = AsyncMock()
+        return retriever
+
+    @pytest.fixture
+    async def memory_manager(self, memory_store, mock_retriever, db_session):
+        """Create a memory manager with mocked retriever."""
+        return MemoryManager(
+            store=memory_store,
+            retriever=mock_retriever,
+            db_session=db_session,
+        )
+
+    async def test_enforce_max_entries_evicts_oldest(
+        self, memory_manager, memory_store
+    ):
+        """Test that enforce_max_entries evicts oldest memories when over limit."""
+        # Add 5 memories with explicit old timestamps
+        old_time = datetime.now(UTC) - timedelta(days=10)
+        for i in range(5):
+            m = await memory_store.add_memory(content=f"Fact {i}")
+            # Manually set created_at to the past to make them eligible for eviction
+            m.created_at = old_time + timedelta(hours=i)
+
+        # Commit the changes
+        await memory_store._session.commit()
+
+        # Enforce max of 3
+        evicted = await memory_manager.enforce_max_entries(3)
+
+        assert evicted == 2
+
+        # Should have 3 remaining
+        memories = await memory_store.get_memories()
+        assert len(memories) == 3
+
+    async def test_enforce_max_entries_no_eviction_when_under_limit(
+        self, memory_manager, memory_store
+    ):
+        """Test that enforce_max_entries does nothing when under limit."""
+        await memory_store.add_memory(content="Fact 1")
+        await memory_store.add_memory(content="Fact 2")
+
+        evicted = await memory_manager.enforce_max_entries(10)
+
+        assert evicted == 0
+
+        memories = await memory_store.get_memories()
+        assert len(memories) == 2
+
+    async def test_enforce_max_entries_prioritizes_superseded(
+        self, memory_manager, memory_store
+    ):
+        """Test that superseded memories are evicted before active ones."""
+        # Add old memories that are eligible for eviction
+        old_time = datetime.now(UTC) - timedelta(days=10)
+
+        # Add 3 valid old memories
+        valid1 = await memory_store.add_memory(content="Valid 1")
+        valid1.created_at = old_time
+        valid2 = await memory_store.add_memory(content="Valid 2")
+        valid2.created_at = old_time + timedelta(hours=1)
+        valid3 = await memory_store.add_memory(content="Valid 3")
+        valid3.created_at = old_time + timedelta(hours=2)
+
+        # Add a superseded memory (should be evicted first)
+        old = await memory_store.add_memory(content="Old superseded")
+        old.created_at = old_time + timedelta(hours=3)
+        new = await memory_store.add_memory(content="New fact")
+        new.created_at = old_time + timedelta(hours=4)
+        await memory_store.mark_memory_superseded(old.id, new.id)
+
+        await memory_store._session.commit()
+
+        # State: valid1, valid2, valid3, new are active (4 total)
+        #        old is superseded (doesn't count toward active)
+        # Limit 3 means we need to evict 1
+
+        evicted = await memory_manager.enforce_max_entries(3)
+
+        # At least 1 should be evicted
+        assert evicted >= 1
+
+        # Superseded should be gone (priority 1 - evicted first)
+        assert await memory_store.get_memory(old.id) is None
+
+        # New fact should remain (most recent)
+        assert await memory_store.get_memory(new.id) is not None
+
+
+class TestGroupMemoryScoping:
+    """Tests for group (chat-scoped) memory functionality."""
+
+    async def test_add_personal_memory(self, memory_store):
+        """Test adding a personal memory (owner_user_id set, chat_id null)."""
+        memory = await memory_store.add_memory(
+            content="My personal preference",
+            owner_user_id="user-1",
+            chat_id=None,
+        )
+
+        assert memory.owner_user_id == "user-1"
+        assert memory.chat_id is None
+
+    async def test_add_group_memory(self, memory_store):
+        """Test adding a group memory (owner_user_id null, chat_id set)."""
+        memory = await memory_store.add_memory(
+            content="Team standup is at 10am",
+            owner_user_id=None,
+            chat_id="chat-1",
+        )
+
+        assert memory.owner_user_id is None
+        assert memory.chat_id == "chat-1"
+
+    async def test_get_memories_filters_by_owner(self, memory_store):
+        """Test that get_memories filters by owner_user_id."""
+        # Add memories for different users
+        await memory_store.add_memory(
+            content="User 1 fact",
+            owner_user_id="user-1",
+        )
+        await memory_store.add_memory(
+            content="User 2 fact",
+            owner_user_id="user-2",
+        )
+
+        # Get only user-1's memories
+        memories = await memory_store.get_memories(owner_user_id="user-1")
+
+        assert len(memories) == 1
+        assert memories[0].content == "User 1 fact"
+
+    async def test_get_memories_filters_by_chat(self, memory_store):
+        """Test that get_memories filters by chat_id for group memories."""
+        # Add group memories for different chats
+        await memory_store.add_memory(
+            content="Chat 1 fact",
+            owner_user_id=None,
+            chat_id="chat-1",
+        )
+        await memory_store.add_memory(
+            content="Chat 2 fact",
+            owner_user_id=None,
+            chat_id="chat-2",
+        )
+
+        # Get only chat-1's group memories
+        memories = await memory_store.get_memories(chat_id="chat-1")
+
+        assert len(memories) == 1
+        assert memories[0].content == "Chat 1 fact"
+
+    async def test_get_memories_combines_personal_and_group(self, memory_store):
+        """Test that user gets both personal and group memories."""
+        # Add personal memory for user-1
+        await memory_store.add_memory(
+            content="My personal fact",
+            owner_user_id="user-1",
+            chat_id=None,
+        )
+        # Add group memory for chat-1
+        await memory_store.add_memory(
+            content="Group fact",
+            owner_user_id=None,
+            chat_id="chat-1",
+        )
+        # Add group memory for different chat
+        await memory_store.add_memory(
+            content="Other chat fact",
+            owner_user_id=None,
+            chat_id="chat-2",
+        )
+        # Add personal memory for different user
+        await memory_store.add_memory(
+            content="Other user fact",
+            owner_user_id="user-2",
+            chat_id=None,
+        )
+
+        # Get user-1's personal memories + chat-1's group memories
+        memories = await memory_store.get_memories(
+            owner_user_id="user-1",
+            chat_id="chat-1",
+        )
+
+        assert len(memories) == 2
+        contents = [m.content for m in memories]
+        assert "My personal fact" in contents
+        assert "Group fact" in contents
+
+    @pytest.fixture
+    def mock_retriever(self):
+        """Create a mock semantic retriever."""
+        retriever = MagicMock()
+        retriever.search_memories = AsyncMock(return_value=[])
+        retriever.search = AsyncMock(return_value=[])
+        retriever.index_memory = AsyncMock()
+        retriever.delete_memory_embedding = AsyncMock()
+        return retriever
+
+    @pytest.fixture
+    async def memory_manager(self, memory_store, mock_retriever, db_session):
+        """Create a memory manager with mocked retriever."""
+        return MemoryManager(
+            store=memory_store,
+            retriever=mock_retriever,
+            db_session=db_session,
+        )
+
+    async def test_manager_add_group_memory(self, memory_manager, memory_store):
+        """Test adding a group memory through the manager."""
+        memory = await memory_manager.add_memory(
+            content="Shared team fact",
+            owner_user_id=None,
+            chat_id="chat-1",
+        )
+
+        assert memory.owner_user_id is None
+        assert memory.chat_id == "chat-1"
+
+    async def test_manager_context_includes_both_scopes(
+        self, memory_manager, mock_retriever
+    ):
+        """Test that get_context_for_message passes both user_id and chat_id to retriever."""
+        await memory_manager.get_context_for_message(
+            user_id="user-1",
+            user_message="Hello",
+            chat_id="chat-1",
+        )
+
+        # Verify both scoping params were passed to retriever
+        mock_retriever.search_memories.assert_called_once()
+        call_kwargs = mock_retriever.search_memories.call_args.kwargs
+        assert call_kwargs["owner_user_id"] == "user-1"
+        assert call_kwargs["chat_id"] == "chat-1"

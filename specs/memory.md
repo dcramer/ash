@@ -39,7 +39,11 @@ The `remember` tool stores facts when users explicitly request it:
 
 ### The agent can search memory
 
-The `recall` tool searches stored facts:
+Memory search happens in two ways:
+1. **Automatic context injection** - Before each response, relevant memories are retrieved via semantic search and included in the system prompt
+2. **Explicit search** - In the sandbox, `ash memory search <query>` searches stored facts via RPC
+
+Search features:
 - Semantic search (meaning, not just keywords)
 - Filter by person ("what do I know about Sarah?")
 - Returns relevant facts ranked by similarity
@@ -67,12 +71,22 @@ When new information conflicts with old:
 
 ## Scoping
 
-Memories have visibility scope:
+Memories have visibility scope controlled by two fields:
 
-| Scope | Visible to | Use case |
-|-------|------------|----------|
-| Personal | Only the user who created it | Default - "I like coffee" |
-| Group | Everyone in a chat | Team facts - "Our standup is at 9am" |
+| Scope | `owner_user_id` | `chat_id` | Visible to |
+|-------|-----------------|-----------|------------|
+| Personal | Set | NULL | Only the user who created it |
+| Group | NULL | Set | Everyone in the chat |
+
+**Scoping rules:**
+- Personal memories: `owner_user_id` is set, `chat_id` is NULL
+- Group memories: `owner_user_id` is NULL, `chat_id` is set
+- When retrieving, a user sees their personal memories + any group memories for the current chat
+
+| Scope | Use case |
+|-------|----------|
+| Personal | Default - "I like coffee" |
+| Group | Team facts - "Our standup is at 9am" |
 
 ## Background Extraction
 
@@ -91,6 +105,19 @@ max_entries = 1000          # Cap on active memories (optional)
 extraction_enabled = true   # Background extraction
 extraction_confidence_threshold = 0.7
 ```
+
+## RPC Interface (Sandbox Access)
+
+Tools running in the sandbox can access memory via RPC:
+
+| Method | Purpose | Parameters |
+|--------|---------|------------|
+| `memory.search` | Semantic search | `query` (required), `limit`, `user_id`, `chat_id` |
+| `memory.add` | Add a memory | `content` (required), `source`, `expires_days`, `user_id`, `chat_id`, `subjects` |
+| `memory.list` | List recent memories | `limit`, `include_expired`, `user_id`, `chat_id` |
+| `memory.delete` | Delete a memory | `memory_id` (required) |
+
+The sandbox CLI (`ash memory`) wraps these RPC calls with environment-provided `user_id` and `chat_id`.
 
 ## Verification
 
@@ -117,7 +144,7 @@ uv run ash memory gc
 
 - [ ] Agent answers questions using previously stored facts
 - [ ] `remember` tool stores facts when user explicitly requests
-- [ ] `recall` tool searches memory with semantic similarity
+- [ ] Automatic context injection retrieves relevant memories before each response
 - [ ] Person entities created for "my wife", "Sarah", etc.
 - [ ] Known people appear in system prompt
 - [ ] Memory results show subject attribution ("about Sarah")
