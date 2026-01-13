@@ -4,7 +4,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Geist+Mono:wght@400;500;600&display=swap');
 
 /* ===== COLOR SYSTEM ===== */
-:root {
+/* Dark theme for both light and dark mode (single theme site) */
+:root,
+:root[data-theme='light'],
+:root[data-theme='dark'] {
   /* Primary - Vibrant Orange */
   --sl-color-accent-low: #2d1a00;
   --sl-color-accent: #f97316;
@@ -19,6 +22,16 @@
   --sl-color-gray-5: #27272a;
   --sl-color-gray-6: #18181b;
   --sl-color-black: #09090b;
+
+  /* Background colors - force dark */
+  --sl-color-bg: var(--sl-color-black);
+  --sl-color-bg-nav: var(--sl-color-black);
+  --sl-color-bg-sidebar: var(--sl-color-black);
+  --sl-color-bg-inline-code: var(--sl-color-gray-5);
+
+  /* Text colors */
+  --sl-color-text: var(--sl-color-gray-1);
+  --sl-color-text-accent: var(--sl-color-accent);
 
   /* Typography */
   --sl-font: 'Bricolage Grotesque', system-ui, sans-serif;

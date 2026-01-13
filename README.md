@@ -12,42 +12,9 @@ A personal assistant agent with customizable personality, memory, and sandboxed 
 - **Web Search**: Built-in Brave Search integration
 - **Extensible**: Easy to add new tools and providers
 
-## Installation
+## Documentation
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
-
-```bash
-git clone https://github.com/your-username/ash.git
-cd ash
-uv sync --all-groups
-```
-
-## Quick Start
-
-1. Copy the example config:
-   ```bash
-   cp config.example.toml ~/.ash/config.toml
-   ```
-
-2. Set your API keys:
-   ```bash
-   export ANTHROPIC_API_KEY=your-key
-   export TELEGRAM_BOT_TOKEN=your-token
-   ```
-
-3. Run setup (migrations + sandbox check):
-   ```bash
-   uv run ash upgrade
-   ```
-
-4. Start the assistant:
-   ```bash
-   uv run ash serve
-   ```
-
-## Configuration
-
-See `config.example.toml` for all available options.
+Full documentation at **https://dcramer.github.io/ash/**
 
 ## Development
 
