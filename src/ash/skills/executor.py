@@ -323,10 +323,17 @@ class SkillExecutor:
                 f"\n\n## Input\n```json\n{json.dumps(input_data, indent=2)}\n```"
             )
 
+        # Build SKILL_* env vars from skill config (for injection into bash calls)
+        skill_env = {
+            f"SKILL_{name.upper()}": value
+            for name, value in skill.config_values.items()
+        }
+
         # Return instructions for main agent to follow
         return SkillResult.success(
             f"## Skill: {skill.name}\n\n{instructions}",
             iterations=0,
+            skill_env=skill_env,
         )
 
     async def _execute_subagent(

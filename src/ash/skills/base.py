@@ -175,11 +175,23 @@ class SkillResult:
     content: str
     is_error: bool = False
     iterations: int = 0
+    # Environment variables to inject into bash (for inline skills with config)
+    skill_env: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def success(cls, content: str, iterations: int = 0) -> "SkillResult":
+    def success(
+        cls,
+        content: str,
+        iterations: int = 0,
+        skill_env: dict[str, str] | None = None,
+    ) -> "SkillResult":
         """Create a successful result."""
-        return cls(content=content, is_error=False, iterations=iterations)
+        return cls(
+            content=content,
+            is_error=False,
+            iterations=iterations,
+            skill_env=skill_env or {},
+        )
 
     @classmethod
     def error(cls, message: str) -> "SkillResult":

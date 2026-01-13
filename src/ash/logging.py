@@ -80,6 +80,7 @@ def configure_logging(
             rich_tracebacks=False,
             show_path=False,
             show_time=True,
+            markup=True,
         )
         handler.setFormatter(ComponentFormatter("%(component)s | %(message)s"))
     else:

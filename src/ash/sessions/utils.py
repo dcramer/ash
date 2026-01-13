@@ -286,8 +286,8 @@ def validate_tool_pairs(
                         tu for tu in pending_tool_uses if tu.id != block.tool_use_id
                     ]
                 else:
-                    logger.warning(
-                        "Removing orphaned tool_result: %s", block.tool_use_id
+                    logger.debug(
+                        "Filtering orphaned tool_result: %s", block.tool_use_id
                     )
 
             if valid_content:

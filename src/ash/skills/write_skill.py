@@ -50,10 +50,34 @@ Before finishing, read back the file and verify ALL of these:
 - [ ] Has `description:` field (required, under 80 chars)
 - [ ] API keys use `config: [API_KEY]` (not custom names like `MUNI_API_KEY`)
 - [ ] Bash commands use `$SKILL_API_KEY` (not `$MUNI_API_KEY` or other custom vars)
+- [ ] If `config:` is declared, `config.toml` exists with placeholder values
+- [ ] No instructions telling users to "set environment variables" for API keys
 - [ ] No emoji characters anywhere in the file
 - [ ] Any scripts are in `scripts/` subdirectory, not skill root
 
 If any check fails, fix the file before reporting success.
+""".strip()
+
+# Config setup guide
+CONFIG_SETUP = """
+## Config Setup (Required for skills with `config:`)
+
+If skill declares `config: [API_KEY]`, you MUST also create a config.toml:
+
+**Create `/workspace/skills/<name>/config.toml`:**
+```toml
+# Get your API key from <API provider URL>
+API_KEY = "your-api-key-here"
+```
+
+**In your final report, tell user:**
+- "Edit `~/.ash/workspace/skills/<name>/config.toml` with your API key"
+- Alternative: "Or add to `~/.ash/config.toml` under `[skills.<name>]`"
+
+**NEVER:**
+- Tell users to "set SKILL_API_KEY environment variable"
+- Tell users to "export API_KEY=..."
+- The SKILL_ prefix is added automatically by the system
 """.strip()
 
 # Directory structure guide
@@ -63,6 +87,7 @@ DIRECTORY_STRUCTURE = """
 ```
 /workspace/skills/<skill-name>/
 ├── SKILL.md           # Required: frontmatter + instructions
+├── config.toml        # Required if skill has config: - API keys go here
 ├── scripts/           # Optional: bash/python scripts
 │   └── check.sh
 ├── references/        # Optional: docs loaded via read_file
@@ -126,8 +151,9 @@ You create SKILL.md files. Every skill **must** follow this exact format:
 
 1. **Research** - Find API documentation (web_search, web_fetch)
 2. **Write** - Create SKILL.md with proper frontmatter at the correct path
-3. **Validate** - Read the file back and run through the checklist below
-4. **Report** - Tell user what was created and any setup needed (e.g., get API key)
+3. **Config** - If skill has `config:`, create config.toml with placeholder values
+4. **Validate** - Read the files back and run through the checklist below
+5. **Report** - Tell user what was created and how to configure (edit config.toml)
 
 ### When to Stop
 
@@ -141,15 +167,17 @@ Do NOT keep trying different approaches. Report what's blocking you.""")
     # 3. Validation checklist
     parts.append(VALIDATION_CHECKLIST)
 
-    # 4. Directory structure
+    # 4. Config setup (for skills with API keys)
+    parts.append(CONFIG_SETUP)
+
+    # 5. Directory structure
     parts.append(DIRECTORY_STRUCTURE)
 
-    # 5. Task
+    # 6. Task
     task_parts = ["## Your Task"]
 
     if existing_skill:
-        task_parts.append(f"""
-**Mode:** UPDATE existing skill
+        update_prompt = f"""**Mode:** UPDATE existing skill
 **Skill name:** `{skill_name}` (do not change)
 **Path:** `/workspace/skills/{skill_name}/SKILL.md`
 **Goal:** {goal}
@@ -164,8 +192,11 @@ Fix this skill to match the required format. Common issues:
 - Missing YAML frontmatter (`---` delimiters)
 - Custom config names instead of `API_KEY`
 - Custom env vars instead of `$SKILL_API_KEY`
+- Missing config.toml when skill has `config:`
+- Instructions telling users to set env vars instead of editing config.toml
 - Emoji characters
-- Scripts in wrong location""")
+- Scripts in wrong location"""
+        task_parts.append(update_prompt)
     else:
         if skill_name:
             task_parts.append(f"""

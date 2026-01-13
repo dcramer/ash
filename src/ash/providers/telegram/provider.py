@@ -49,6 +49,13 @@ def _get_parse_mode(mode: str | None) -> ParseMode:
         return ParseMode.MARKDOWN
 
 
+def _truncate(text: str, max_len: int = 40) -> str:
+    """Truncate text for logging."""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "..."
+
+
 class TelegramProvider(Provider):
     """Telegram provider using aiogram 3.x.
 
@@ -103,6 +110,11 @@ class TelegramProvider(Provider):
     def dispatcher(self) -> Dispatcher:
         """Get the aiogram Dispatcher instance."""
         return self._dp
+
+    @property
+    def bot_username(self) -> str | None:
+        """Get the bot's username."""
+        return self._bot_username
 
     def _is_user_allowed(self, user_id: int, username: str | None) -> bool:
         """Check if a user is allowed to interact with the bot.
@@ -567,10 +579,8 @@ class TelegramProvider(Provider):
             else None,
             parse_mode=parse_mode,
         )
-        logger.info(
-            "Sent message to chat %s: %s",
-            message.chat_id,
-            message.text[:50] + "..." if len(message.text) > 50 else message.text,
+        logger.debug(
+            "Sent message to chat %s: %s", message.chat_id, _truncate(message.text)
         )
         return str(sent.message_id)
 
@@ -590,11 +600,7 @@ class TelegramProvider(Provider):
             chat_id=int(chat_id),
             text=text,
         )
-        logger.info(
-            "Sent message to chat %s: %s",
-            chat_id,
-            text[:50] + "..." if len(text) > 50 else text,
-        )
+        logger.debug("Sent message to chat %s: %s", chat_id, _truncate(text))
         return str(sent.message_id)
 
     async def send_streaming(

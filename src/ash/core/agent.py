@@ -48,14 +48,18 @@ def _build_routing_env(
 
     These env vars allow sandboxed CLI commands (like `ash schedule`) to
     access routing context for operations that need to send responses back.
+    Also includes skill env vars set by inline skills.
     """
-    return {
+    env = {
         "ASH_SESSION_ID": session.session_id or "",
         "ASH_USER_ID": effective_user_id or "",
         "ASH_CHAT_ID": session.chat_id or "",
         "ASH_PROVIDER": session.provider or "",
         "ASH_USERNAME": session.metadata.get("username", ""),
     }
+    # Include active skill env vars (from inline skill execution)
+    env.update(session.skill_env)
+    return env
 
 
 @dataclass
@@ -646,6 +650,10 @@ class Agent:
                     tool_context,
                 )
 
+                # If skill returns env vars, update session for subsequent bash calls
+                if skill_env := result.metadata.get("skill_env"):
+                    session.skill_env.update(skill_env)
+
                 tool_calls.append(
                     {
                         "id": tool_use.id,
@@ -829,6 +837,10 @@ class Agent:
                     tool_use.input,
                     tool_context,
                 )
+
+                # If skill returns env vars, update session for subsequent bash calls
+                if skill_env := result.metadata.get("skill_env"):
+                    session.skill_env.update(skill_env)
 
                 # Add tool result to session
                 session.add_tool_result(

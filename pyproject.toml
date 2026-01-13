@@ -121,6 +121,7 @@ select = [
 ignore = [
     "E501",   # Line too long (ruff format handles this)
     "S101",   # Use of assert (fine in tests)
+    "S608",   # SQL injection false positive on f-strings (used for prompts, not SQL)
 ]
 fixable = ["ALL"]
 

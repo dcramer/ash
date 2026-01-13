@@ -574,7 +574,8 @@ class SystemPromptBuilder:
                 [
                     f"Conversation history file: {context.session_path}",
                     "",
-                    "You HAVE ACCESS to search past messages using bash/grep on this file.",
+                    "When asked about specific people, past messages, or events in the chat,",
+                    "SEARCH the file using bash/grep to verify rather than guessing.",
                 ]
             )
 

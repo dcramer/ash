@@ -16,6 +16,7 @@ from ash.db import Database
 from ash.llm.types import Message, Role
 from ash.memory import MemoryStore
 from ash.providers.base import IncomingMessage, OutgoingMessage
+from ash.providers.telegram.provider import _truncate
 from ash.sessions import MessageEntry, SessionManager
 from ash.sessions.types import session_key as make_session_key
 
@@ -237,12 +238,11 @@ class TelegramMessageHandler:
         Args:
             message: Incoming message.
         """
-        logger.info(
-            f"Received message from {message.username or message.user_id} "
-            f"in chat {message.chat_id}: {message.text[:50]}..."
-            if len(message.text) > 50
-            else f"Received message from {message.username or message.user_id} "
-            f"in chat {message.chat_id}: {message.text}"
+        logger.debug(
+            "Received message from %s in chat %s: %s",
+            message.username or message.user_id,
+            message.chat_id,
+            _truncate(message.text),
         )
 
         try:
@@ -250,14 +250,16 @@ class TelegramMessageHandler:
             if message.timestamp:
                 age = datetime.now(UTC) - message.timestamp.replace(tzinfo=UTC)
                 if age > timedelta(minutes=5):
-                    logger.info(
-                        f"Skipping old message {message.id} (age={age.total_seconds():.0f}s)"
+                    logger.debug(
+                        "Skipping old message %s (age=%ds)",
+                        message.id,
+                        age.total_seconds(),
                     )
                     return
 
             # Check for duplicate message (already processed)
             if await self._is_duplicate_message(message):
-                logger.info(f"Skipping duplicate message {message.id}")
+                logger.debug("Skipping duplicate message %s", message.id)
                 return
 
             # For group replies without explicit mention, verify the reply target
@@ -275,10 +277,7 @@ class TelegramMessageHandler:
 
             # Acquire per-chat lock to serialize message handling
             chat_lock = self._get_chat_lock(message.chat_id)
-            logger.debug(f"Waiting for chat lock (chat={message.chat_id})")
             async with chat_lock:
-                logger.debug(f"Acquired chat lock (chat={message.chat_id})")
-
                 # Set processing indicator (eyes reaction - "looking at it")
                 await self._provider.set_reaction(message.chat_id, message.id, "👀")
 
@@ -291,6 +290,13 @@ class TelegramMessageHandler:
                         f"Session {session.session_id} has incomplete tool use, repairing..."
                     )
                     session.repair_incomplete_tool_use()
+
+                # Log incoming message
+                logger.info(
+                    "[dim]%s:[/dim] %s",
+                    message.username or message.user_id,
+                    _truncate(message.text),
+                )
 
                 try:
                     if self._streaming:
@@ -317,6 +323,13 @@ class TelegramMessageHandler:
         Args:
             message: Incoming message with images.
         """
+        # Log incoming message
+        logger.info(
+            "[dim]%s:[/dim] %s",
+            message.username or message.user_id,
+            _truncate(message.text) if message.text else "[image]",
+        )
+
         # For now, acknowledge the image but note that vision isn't fully wired up
         # TODO: Wire up vision model support (Claude 3, GPT-4V)
 
@@ -420,6 +433,14 @@ class TelegramMessageHandler:
                     display_name=message.display_name,
                     thread_id=message.metadata.get("thread_id"),
                 )
+
+                # Log response
+                bot_name = self._provider.bot_username or "bot"
+                logger.info(
+                    "[cyan]%s:[/cyan] %s",
+                    bot_name,
+                    _truncate(response_content or "(no response)"),
+                )
             else:
                 response = await self._agent.process_message(
                     image_context,
@@ -467,16 +488,29 @@ class TelegramMessageHandler:
                     display_name=message.display_name,
                     thread_id=message.metadata.get("thread_id"),
                 )
+
+                # Log response
+                bot_name = self._provider.bot_username or "bot"
+                logger.info(
+                    "[cyan]%s:[/cyan] %s",
+                    bot_name,
+                    _truncate(response.text or "(no response)"),
+                )
         else:
             # No caption - just acknowledge the image
+            response_text = (
+                "I received your image! Image analysis isn't fully supported yet, "
+                "but you can add a caption to tell me what you'd like to know about it."
+            )
             await self._provider.send(
                 OutgoingMessage(
                     chat_id=message.chat_id,
-                    text="I received your image! Image analysis isn't fully supported yet, "
-                    "but you can add a caption to tell me what you'd like to know about it.",
+                    text=response_text,
                     reply_to_message_id=message.id,
                 )
             )
+            bot_name = self._provider.bot_username or "bot"
+            logger.info("[cyan]%s:[/cyan] %s", bot_name, _truncate(response_text))
 
     async def _is_duplicate_message(self, message: IncomingMessage) -> bool:
         """Check if message has already been processed.
@@ -851,6 +885,14 @@ class TelegramMessageHandler:
             thread_id=message.metadata.get("thread_id"),
         )
 
+        # Log response
+        bot_name = self._provider.bot_username or "bot"
+        logger.info(
+            "[cyan]%s:[/cyan] %s",
+            bot_name,
+            _truncate(response_content or "(no response)"),
+        )
+
     async def _handle_sync(
         self,
         message: IncomingMessage,
@@ -966,6 +1008,14 @@ class TelegramMessageHandler:
             username=message.username,
             display_name=message.display_name,
             thread_id=thread_id,
+        )
+
+        # Log response
+        bot_name = self._provider.bot_username or "bot"
+        logger.info(
+            "[cyan]%s:[/cyan] %s",
+            bot_name,
+            _truncate(response.text or "(no response)"),
         )
 
         # Persist tool uses and results to JSONL

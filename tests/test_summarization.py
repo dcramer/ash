@@ -28,8 +28,12 @@ class TestSummarizationResult:
         assert "summary_bytes" not in meta
         assert "full_output_path" not in meta
 
-    def test_to_metadata_summarized_with_path(self):
-        """Test metadata for summarized result with temp file."""
+    def test_to_metadata_summarized_excludes_path(self):
+        """Test metadata for summarized result excludes host path.
+
+        The full_output_path is intentionally excluded from agent-facing
+        metadata since it's a host path the agent cannot access.
+        """
         result = SummarizationResult(
             content="summary...",
             summarized=True,
@@ -41,7 +45,8 @@ class TestSummarizationResult:
         assert meta["summarized"] is True
         assert meta["original_bytes"] == 10000
         assert meta["summary_bytes"] == 500
-        assert meta["full_output_path"] == "/tmp/ash-tool-output/test.txt"  # noqa: S108
+        # Host path intentionally excluded from agent-facing metadata
+        assert "full_output_path" not in meta
 
     def test_to_metadata_with_error(self):
         """Test metadata when summarization failed."""
@@ -99,7 +104,11 @@ class TestToolResultSummarizer:
         mock_llm.complete.assert_called_once()
 
     async def test_saves_full_output_to_temp(self, summarizer, mock_llm):
-        """Test that full output is saved to temp file."""
+        """Test that full output is saved to temp file.
+
+        Note: The path is stored in result.full_output_path for internal use,
+        but is NOT exposed in result.content (host paths not accessible to agent).
+        """
         content = "x" * 200
 
         result = await summarizer.maybe_summarize(content, save_full=True)
@@ -107,8 +116,8 @@ class TestToolResultSummarizer:
         assert result.summarized is True
         assert result.full_output_path is not None
         assert "ash-tool-output" in result.full_output_path
-        # Path should be referenced in content
-        assert result.full_output_path in result.content
+        # Path is intentionally NOT in content (agent can't access host paths)
+        assert result.full_output_path not in result.content
 
     async def test_disabled_summarizer(self, mock_llm):
         """Test that disabled summarizer returns original content."""

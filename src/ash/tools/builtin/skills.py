@@ -98,6 +98,7 @@ class UseSkillTool(Tool):
         return ToolResult.success(
             result.content,
             iterations=result.iterations,
+            skill_env=result.skill_env,
         )
 
 
