@@ -25,16 +25,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger("telegram")
 
 
-def escape_markdown(text: str) -> str:
-    """Escape markdown special characters for Telegram.
+def escape_markdown_v2(text: str) -> str:
+    """Escape special characters for Telegram MarkdownV2.
 
     Args:
         text: Text to escape.
 
     Returns:
-        Text with underscores escaped.
+        Text with MarkdownV2 special characters escaped.
     """
-    return text.replace("_", "\\_")
+    # Characters that must be escaped in MarkdownV2
+    special_chars = r"_*[]()~`>#+-=|{}.!"
+    result = []
+    for char in text:
+        if char in special_chars:
+            result.append(f"\\{char}")
+        else:
+            result.append(char)
+    return "".join(result)
 
 
 def format_tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
@@ -50,17 +58,78 @@ def format_tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
     match tool_name:
         case "bash_tool":
             cmd = tool_input.get("command", "")
-            if len(cmd) > 60:
-                cmd = cmd[:60] + "..."
+            if len(cmd) > 50:
+                cmd = cmd[:50] + "..."
             return f"Running: `{cmd}`"
         case "web_search":
             query = tool_input.get("query", "")
-            return f"Searching the web for '{query}'..."
+            if len(query) > 40:
+                query = query[:40] + "..."
+            return f"Searching: {query}"
+        case "web_fetch":
+            url = tool_input.get("url", "")
+            # Extract domain from URL
+            if "://" in url:
+                domain = url.split("://", 1)[1].split("/")[0]
+            else:
+                domain = url.split("/")[0]
+            return f"Reading: {domain}"
         case "use_skill":
-            skill = tool_input.get("skill_name", "")
-            return f"Running skill: {skill}..."
+            skill = tool_input.get("skill", "unknown")
+            return f"Running: {skill}"
+        case "write_skill":
+            goal = tool_input.get("goal", "")
+            if len(goal) > 40:
+                goal = goal[:40] + "..."
+            return f"Creating skill: {goal}" if goal else "Creating skill"
+        case "write_file":
+            path = tool_input.get("file_path", "")
+            # Show just filename, not full path
+            filename = path.split("/")[-1] if "/" in path else path
+            return f"Writing: {filename}"
+        case "read_file":
+            path = tool_input.get("file_path", "")
+            filename = path.split("/")[-1] if "/" in path else path
+            return f"Reading: {filename}"
+        case "remember":
+            return "Saving to memory"
+        case "recall":
+            query = tool_input.get("query", "")
+            if len(query) > 30:
+                query = query[:30] + "..."
+            return f"Searching memories: {query}" if query else "Searching memories"
         case _:
-            return f"Running {tool_name}..."
+            # Clean up tool name: bash_tool -> bash, some_tool -> some
+            display_name = tool_name.replace("_tool", "").replace("_", " ")
+            return f"Running: {display_name}"
+
+
+def format_thinking_message(briefs: list[str]) -> str:
+    """Format a list of tool briefs into a thinking message.
+
+    Args:
+        briefs: List of tool brief descriptions.
+
+    Returns:
+        Formatted message with bullet points, escaped for MarkdownV2.
+    """
+    escaped = [escape_markdown_v2(b) for b in briefs]
+    lines = ["_Thinking\\.\\.\\._"] + [f"• {b}" for b in escaped]
+    return "\n".join(lines)
+
+
+def format_tool_summary(num_tools: int, elapsed_seconds: float) -> str:
+    """Format a summary of tool calls.
+
+    Args:
+        num_tools: Number of tool calls made.
+        elapsed_seconds: Time elapsed in seconds.
+
+    Returns:
+        Summary string with trailing newlines.
+    """
+    call_word = "call" if num_tools == 1 else "calls"
+    return f"_Made {num_tools} tool {call_word} in {elapsed_seconds:.1f}s_\n\n"
 
 
 # Maximum number of sessions to cache in memory
@@ -134,6 +203,7 @@ class TelegramMessageHandler:
                 provider=self._provider.name,
                 chat_id=chat_id,
                 user_id=user_id,
+                thread_id=thread_id,
             )
         return self._session_managers[key]
 
@@ -265,28 +335,39 @@ class TelegramMessageHandler:
             # Send typing indicator
             await self._provider.send_typing(message.chat_id)
 
-            # Track thinking message (created on first tool call)
+            # Track thinking message and tool calls
             thinking_msg_id: str | None = None
+            tool_briefs: list[str] = []
+            tool_start_time: float | None = None
 
             async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
-                nonlocal thinking_msg_id
+                nonlocal thinking_msg_id, tool_start_time
                 brief = format_tool_brief(tool_name, tool_input)
                 if not brief:
                     return
 
-                # Escape underscores in brief to avoid breaking markdown italics
-                safe_brief = escape_markdown(brief)
+                # Track start time from first tool call
+                if tool_start_time is None:
+                    tool_start_time = time.monotonic()
+
+                tool_briefs.append(brief)
+                thinking_text = format_thinking_message(tool_briefs)
+
                 if thinking_msg_id is None:
                     thinking_msg_id = await self._provider.send(
                         OutgoingMessage(
                             chat_id=message.chat_id,
-                            text=f"_Thinking... {safe_brief}_",
+                            text=thinking_text,
                             reply_to_message_id=message.id,
+                            parse_mode="markdown_v2",
                         )
                     )
                 else:
                     await self._provider.edit(
-                        message.chat_id, thinking_msg_id, f"_Thinking... {safe_brief}_"
+                        message.chat_id,
+                        thinking_msg_id,
+                        thinking_text,
+                        parse_mode="markdown_v2",
                     )
 
             if self._streaming:
@@ -301,17 +382,32 @@ class TelegramMessageHandler:
                 ):
                     response_content += chunk
 
-                # Delete thinking message and send response
-                if thinking_msg_id:
-                    await self._provider.delete(message.chat_id, thinking_msg_id)
-
-                sent_message_id = await self._provider.send(
-                    OutgoingMessage(
-                        chat_id=message.chat_id,
-                        text=response_content,
-                        reply_to_message_id=message.id,
+                # Combine summary with response in thinking message, or send new message
+                if thinking_msg_id and tool_briefs and tool_start_time:
+                    elapsed = time.monotonic() - tool_start_time
+                    summary = format_tool_summary(len(tool_briefs), elapsed)
+                    await self._provider.edit(
+                        message.chat_id,
+                        thinking_msg_id,
+                        summary + response_content,
                     )
-                )
+                    sent_message_id = thinking_msg_id
+                elif thinking_msg_id:
+                    # No tool calls recorded but had thinking message - just replace with response
+                    await self._provider.edit(
+                        message.chat_id,
+                        thinking_msg_id,
+                        response_content,
+                    )
+                    sent_message_id = thinking_msg_id
+                else:
+                    sent_message_id = await self._provider.send(
+                        OutgoingMessage(
+                            chat_id=message.chat_id,
+                            text=response_content,
+                            reply_to_message_id=message.id,
+                        )
+                    )
 
                 await self._persist_messages(
                     message.chat_id,
@@ -333,9 +429,21 @@ class TelegramMessageHandler:
                     session_path=session.metadata.get("session_path"),
                 )
 
-                if thinking_msg_id:
+                # Combine summary with response in thinking message, or send new message
+                if thinking_msg_id and tool_briefs and tool_start_time:
+                    elapsed = time.monotonic() - tool_start_time
+                    summary = format_tool_summary(len(tool_briefs), elapsed)
                     await self._provider.edit(
-                        message.chat_id, thinking_msg_id, response.text
+                        message.chat_id,
+                        thinking_msg_id,
+                        summary + response.text,
+                    )
+                    sent_message_id = thinking_msg_id
+                elif thinking_msg_id:
+                    await self._provider.edit(
+                        message.chat_id,
+                        thinking_msg_id,
+                        response.text,
                     )
                     sent_message_id = thinking_msg_id
                 else:
@@ -610,30 +718,41 @@ class TelegramMessageHandler:
         response_content = ""
         start_time = time.time()
         last_edit_time = 0.0
+        tool_briefs: list[str] = []
+        tool_start_time: float | None = None
         STREAM_DELAY = 5.0  # Start showing partial response after this many seconds
         MIN_EDIT_INTERVAL = 1.0  # Minimum time between edits
 
         async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
-            nonlocal thinking_msg_id
+            nonlocal thinking_msg_id, tool_start_time
             brief = format_tool_brief(tool_name, tool_input)
             if not brief:
                 return
 
-            # Escape underscores in brief to avoid breaking markdown italics
-            safe_brief = escape_markdown(brief)
+            # Track start time from first tool call
+            if tool_start_time is None:
+                tool_start_time = time.monotonic()
+
+            tool_briefs.append(brief)
+            thinking_text = format_thinking_message(tool_briefs)
+
             if thinking_msg_id is None:
                 # First tool - create thinking message
                 thinking_msg_id = await self._provider.send(
                     OutgoingMessage(
                         chat_id=message.chat_id,
-                        text=f"_Thinking... {safe_brief}_",
+                        text=thinking_text,
                         reply_to_message_id=message.id,
+                        parse_mode="markdown_v2",
                     )
                 )
             else:
                 # Subsequent tools - update existing thinking message
                 await self._provider.edit(
-                    message.chat_id, thinking_msg_id, f"_Thinking... {safe_brief}_"
+                    message.chat_id,
+                    thinking_msg_id,
+                    thinking_text,
+                    parse_mode="markdown_v2",
                 )
 
         # Stream response while accumulating content
@@ -654,35 +773,59 @@ class TelegramMessageHandler:
                 and response_content.strip()
                 and since_last_edit >= MIN_EDIT_INTERVAL
             ):
-                # Delete thinking message on first partial update
-                if thinking_msg_id and response_msg_id is None:
-                    await self._provider.delete(message.chat_id, thinking_msg_id)
-                    thinking_msg_id = None
+                # Build summary prefix if we had tool calls
+                summary_prefix = ""
+                if tool_briefs and tool_start_time and not response_msg_id:
+                    tool_elapsed = time.monotonic() - tool_start_time
+                    summary_prefix = format_tool_summary(len(tool_briefs), tool_elapsed)
 
-                if response_msg_id is None:
+                display_content = summary_prefix + response_content
+
+                # Reuse thinking message as response message
+                if thinking_msg_id and response_msg_id is None:
+                    await self._provider.edit(
+                        message.chat_id,
+                        thinking_msg_id,
+                        display_content,
+                    )
+                    response_msg_id = thinking_msg_id
+                    thinking_msg_id = None
+                    last_edit_time = time.time()
+                elif response_msg_id is None:
                     response_msg_id = await self._provider.send(
                         OutgoingMessage(
                             chat_id=message.chat_id,
-                            text=response_content,
+                            text=display_content,
                             reply_to_message_id=message.id,
                         )
                     )
                     last_edit_time = time.time()
                 else:
                     await self._provider.edit(
-                        message.chat_id, response_msg_id, response_content
+                        message.chat_id, response_msg_id, display_content
                     )
                     last_edit_time = time.time()
 
-        # Final update - clean up thinking message and send/edit final response
-        if thinking_msg_id:
-            await self._provider.delete(message.chat_id, thinking_msg_id)
+        # Build final summary prefix
+        summary_prefix = ""
+        if tool_briefs and tool_start_time:
+            tool_elapsed = time.monotonic() - tool_start_time
+            summary_prefix = format_tool_summary(len(tool_briefs), tool_elapsed)
 
-        if response_msg_id:
-            # Edit existing response message with final content
+        final_content = summary_prefix + response_content
+
+        # Final update
+        if thinking_msg_id:
+            # Still have thinking message - convert it to final response
             await self._provider.edit(
-                message.chat_id, response_msg_id, response_content
+                message.chat_id,
+                thinking_msg_id,
+                final_content,
             )
+            sent_message_id = thinking_msg_id
+        elif response_msg_id:
+            # Edit existing response message with final content
+            await self._provider.edit(message.chat_id, response_msg_id, final_content)
             sent_message_id = response_msg_id
         else:
             # No streaming happened - send as single message
@@ -722,30 +865,41 @@ class TelegramMessageHandler:
             message: Incoming message.
             session: Session state.
         """
-        # Track thinking message (created on first tool call)
+        # Track thinking message and tool calls
         thinking_msg_id: str | None = None
+        tool_briefs: list[str] = []
+        tool_start_time: float | None = None
 
         async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
-            nonlocal thinking_msg_id
+            nonlocal thinking_msg_id, tool_start_time
             brief = format_tool_brief(tool_name, tool_input)
             if not brief:
                 return
 
-            # Escape underscores in brief to avoid breaking markdown italics
-            safe_brief = escape_markdown(brief)
+            # Track start time from first tool call
+            if tool_start_time is None:
+                tool_start_time = time.monotonic()
+
+            tool_briefs.append(brief)
+            thinking_text = format_thinking_message(tool_briefs)
+
             if thinking_msg_id is None:
                 # First tool - create thinking message
                 thinking_msg_id = await self._provider.send(
                     OutgoingMessage(
                         chat_id=message.chat_id,
-                        text=f"_Thinking... {safe_brief}_",
+                        text=thinking_text,
                         reply_to_message_id=message.id,
+                        parse_mode="markdown_v2",
                     )
                 )
             else:
                 # Subsequent tools - update existing thinking message
                 await self._provider.edit(
-                    message.chat_id, thinking_msg_id, f"_Thinking... {safe_brief}_"
+                    message.chat_id,
+                    thinking_msg_id,
+                    thinking_text,
+                    parse_mode="markdown_v2",
                 )
 
         # Start typing indicator loop (Telegram typing only lasts 5 seconds)
@@ -768,30 +922,35 @@ class TelegramMessageHandler:
             except asyncio.CancelledError:
                 pass
 
-        # Send or edit response
-        if thinking_msg_id:
-            if response.text:
-                # Edit thinking message with final response
-                await self._provider.edit(
-                    message.chat_id, thinking_msg_id, response.text
+        # Build response with summary prefix if we had tool calls
+        summary_prefix = ""
+        if tool_briefs and tool_start_time:
+            elapsed = time.monotonic() - tool_start_time
+            summary_prefix = format_tool_summary(len(tool_briefs), elapsed)
+
+        final_content = summary_prefix + (response.text or "")
+
+        # Edit thinking message with combined content, or send new message
+        if thinking_msg_id and final_content.strip():
+            await self._provider.edit(
+                message.chat_id,
+                thinking_msg_id,
+                final_content,
+            )
+            sent_message_id = thinking_msg_id
+        elif thinking_msg_id:
+            await self._provider.delete(message.chat_id, str(thinking_msg_id))
+            sent_message_id = None
+        elif final_content.strip():
+            sent_message_id = await self._provider.send(
+                OutgoingMessage(
+                    chat_id=message.chat_id,
+                    text=final_content,
+                    reply_to_message_id=message.id,
                 )
-                sent_message_id = thinking_msg_id
-            else:
-                # No text response - delete the thinking message
-                await self._provider.delete(message.chat_id, str(thinking_msg_id))
-                sent_message_id = None
+            )
         else:
-            # No tools used - send new message
-            if response.text:
-                sent_message_id = await self._provider.send(
-                    OutgoingMessage(
-                        chat_id=message.chat_id,
-                        text=response.text,
-                        reply_to_message_id=message.id,
-                    )
-                )
-            else:
-                sent_message_id = None
+            sent_message_id = None
 
         # Persist messages to JSONL with reply context
         thread_id = message.metadata.get("thread_id")
@@ -809,11 +968,18 @@ class TelegramMessageHandler:
             thread_id=thread_id,
         )
 
-        # Persist tool results to JSONL
+        # Persist tool uses and results to JSONL
         session_manager = self._get_session_manager(
             message.chat_id, message.user_id, thread_id
         )
         for tool_call in response.tool_calls:
+            # Log tool use (what was called and with what input)
+            await session_manager.add_tool_use(
+                tool_use_id=tool_call["id"],
+                name=tool_call["name"],
+                input_data=tool_call["input"],
+            )
+            # Log tool result (what it returned)
             await session_manager.add_tool_result(
                 tool_use_id=tool_call["id"],
                 output=tool_call["result"],

@@ -57,6 +57,9 @@ class SkillRegistry:
                            e.g., {"check-muni": {"API_KEY": "abc123"}}
         """
         self._skills: dict[str, SkillDefinition] = {}
+        self._skill_sources: dict[
+            str, Path
+        ] = {}  # Track where each skill was loaded from
         self._central_config = central_config or {}
 
     def load_bundled(self) -> None:
@@ -326,7 +329,10 @@ class SkillRegistry:
             source_path: Path where skill was loaded from.
         """
         if skill.name in self._skills:
-            logger.warning(f"Skill '{skill.name}' overwritten by {source_path}")
+            existing_source = self._skill_sources.get(skill.name)
+            # Only warn if being overwritten by a different source
+            if existing_source and existing_source != source_path:
+                logger.warning(f"Skill '{skill.name}' overwritten by {source_path}")
 
         # Check availability and log if not available
         is_available, reason = skill.is_available()
@@ -334,6 +340,7 @@ class SkillRegistry:
             logger.debug(f"Skill '{skill.name}' not available: {reason}")
 
         self._skills[skill.name] = skill
+        self._skill_sources[skill.name] = source_path
         logger.debug(f"Loaded skill: {skill.name} from {source_path}")
 
     def _load_markdown_skill(self, path: Path, default_name: str | None = None) -> None:
@@ -538,6 +545,55 @@ class SkillRegistry:
         if skills_dir.exists():
             self._load_from_directory(skills_dir, source="workspace")
         return len(self._skills) - count_before
+
+    def validate_skill_file(self, path: Path) -> tuple[bool, str | None]:
+        """Validate a skill file without loading it into the registry.
+
+        Checks that the file:
+        - Exists
+        - Has valid YAML frontmatter
+        - Contains required 'description' field
+        - Has instructions in the markdown body
+
+        Args:
+            path: Path to skill file (SKILL.md or <name>.md).
+
+        Returns:
+            Tuple of (is_valid, error_message). If valid, error_message is None.
+        """
+        if not path.exists():
+            return False, f"File not found: {path}"
+
+        if path.suffix != ".md":
+            return False, f"Expected .md file, got: {path.name}"
+
+        try:
+            content = path.read_text()
+        except Exception as e:
+            return False, f"Failed to read file: {e}"
+
+        # Check frontmatter
+        match = FRONTMATTER_PATTERN.match(content)
+        if not match:
+            return False, "No YAML frontmatter found (must start with ---)"
+
+        try:
+            frontmatter_yaml = match.group(1)
+            data = yaml.safe_load(frontmatter_yaml)
+        except yaml.YAMLError as e:
+            return False, f"Invalid YAML in frontmatter: {e}"
+
+        if not isinstance(data, dict):
+            return False, "Frontmatter must be a YAML mapping"
+
+        if "description" not in data:
+            return False, "Missing required field: description"
+
+        instructions = content[match.end() :].strip()
+        if not instructions:
+            return False, "Missing instructions (markdown body after frontmatter)"
+
+        return True, None
 
     def __len__(self) -> int:
         """Get number of registered skills."""

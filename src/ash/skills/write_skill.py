@@ -1,15 +1,13 @@
 """Write-skill subagent - creates high-quality skills.
 
 This module handles the write-skill subagent which creates skills by:
-- Searching for API documentation
-- Reading the docs to understand endpoints
-- Writing the SKILL.md file
-- Testing the implementation
+- Researching API documentation
+- Writing the SKILL.md file with proper format
+- Validating the output before finishing
 """
 
 import logging
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -22,323 +20,167 @@ logger = logging.getLogger(__name__)
 ALLOWED_TOOLS = ["web_search", "web_fetch", "write_file", "read_file", "bash"]
 MAX_ITERATIONS = 15
 
-# Path to bundled skills
-BUNDLED_SKILLS_DIR = Path(__file__).parent / "bundled"
-
-# Example skills to include (in priority order)
-EXAMPLE_SKILL_NAMES = ["research", "code-review", "debug"]
-
-# Skill schema documentation
-SKILL_SCHEMA_DOCS = """
-## Skill Schema
-
-Skills are defined in `SKILL.md` files with YAML frontmatter:
-
-```yaml
+# Mandatory skill template - this exact format must be followed
+SKILL_TEMPLATE = """
 ---
-# === REQUIRED ===
-description: string  # One-line description shown in skill list
-
-# === EXECUTION ===
-subagent: bool  # default: false
-  # false: Returns instructions for main agent to follow (inline)
-  # true: Runs isolated sub-agent loop with own context
-model: string  # Model alias (default, fast, etc.) - default: "default"
-max_iterations: int  # Max iterations for subagent mode - default: 5
-
-# === TOOLS ===
-required_tools: list[string]  # Tools the skill needs access to
-  # Examples: bash, web_search, remember, recall
-
-# === INPUT ===
-input_schema:  # JSON Schema for skill inputs
-  type: object
-  properties:
-    param_name:
-      type: string
-      description: What this parameter is for
-  required: [param_name]
-
-# === REQUIREMENTS ===
-requires:
-  bins: list[string]   # Required binaries in PATH
-  env: list[string]    # Required environment variables
-  os: list[string]     # Supported OS: darwin, linux, windows
-
-# === CONFIGURATION ===
-config: list[string]
-  # Config values: "NAME" (required) or "NAME=default" (with default)
-  # Passed to tools as SKILL_NAME environment variables
+description: One-line description starting with a verb (under 80 chars)
+config:
+  - API_KEY
+required_tools:
+  - bash
 ---
 
-# Instructions (markdown body)
+Brief explanation of what this skill does.
 
-These become the system prompt (subagent) or returned instructions (inline).
+## Implementation
+
+```bash
+curl -sfS "https://api.example.com/endpoint?key=$SKILL_API_KEY" | jq '.results'
 ```
 """.strip()
 
-# Validation rules
-VALIDATION_RULES = """
-## Validation Rules
+# Validation checklist - must pass before finishing
+VALIDATION_CHECKLIST = """
+## Validation Checklist
 
-### Name Format
-- Lowercase letters, numbers, and hyphens only
-- Must start with a letter
-- Examples: `check-weather`, `muni-arrivals`, `code-review`
+Before finishing, read back the file and verify ALL of these:
 
-### Description
-- One line, under 80 characters
-- No trailing period
-- Starts with a verb (Check, Search, Generate, etc.)
-- Examples:
-  - Good: "Check SF Muni arrival times"
-  - Bad: "This skill checks Muni arrivals."
+- [ ] File path is `/workspace/skills/<name>/SKILL.md`
+- [ ] File starts with `---` (YAML frontmatter delimiter)
+- [ ] Has `description:` field (required, under 80 chars)
+- [ ] API keys use `config: [API_KEY]` (not custom names like `MUNI_API_KEY`)
+- [ ] Bash commands use `$SKILL_API_KEY` (not `$MUNI_API_KEY` or other custom vars)
+- [ ] No emoji characters anywhere in the file
+- [ ] Any scripts are in `scripts/` subdirectory, not skill root
 
-### Instructions
-- Clear process with numbered steps
-- Specific about what tools to use and how
-- Include example commands where relevant
-- Structure with markdown headers
-
-### Execution Mode
-- Use `inline` (default) for:
-  - Simple documentation-style skills
-  - Skills where main agent should see full context
-  - Quick lookup or formatting tasks
-- Use `subagent` for:
-  - Multi-step tool orchestration
-  - Skills needing isolated context
-  - Complex iterative workflows
-
-### Config for Secrets
-- Always use `config` for API keys, tokens, and credentials
-- Never hardcode secrets in instructions or scripts
-- Config values become `$SKILL_<NAME>` environment variables
-- **Always use `API_KEY`** as the config name for API keys
-- Example: `config: [API_KEY]` -> accessible as `$SKILL_API_KEY` in bash
+If any check fails, fix the file before reporting success.
 """.strip()
 
-# Anti-patterns to avoid
-ANTI_PATTERNS = """
-## Anti-patterns to Avoid
+# Directory structure guide
+DIRECTORY_STRUCTURE = """
+## Directory Structure
 
-### Vague Instructions
-- Bad: "Help the user with their task"
-- Good: "1. Parse the input query\\n2. Search using web_search tool\\n3. Summarize findings"
+```
+/workspace/skills/<skill-name>/
+├── SKILL.md           # Required: frontmatter + instructions
+├── scripts/           # Optional: bash/python scripts
+│   └── check.sh
+├── references/        # Optional: docs loaded via read_file
+└── assets/            # Optional: templates, data files
+```
 
-### Missing Process Structure
-- Bad: "Do code review"
-- Good: "## Process\\n### 1. Read the code\\n### 2. Check for bugs\\n### 3. Report findings"
+**Critical paths:**
+- SKILL.md goes at: `/workspace/skills/<name>/SKILL.md`
+- Scripts go at: `/workspace/skills/<name>/scripts/<script>.sh`
 
-### Missing Implementation Details
-- Bad: "Query the API to get data" (vague description)
-- Bad: Describing what to do without showing how
-- Good: Include actual executable commands:
-  ```bash
-  curl -s "https://api.example.com/data?key=$SKILL_API_KEY" | jq '.results'
-  ```
-- Good: If bash is needed, set `required_tools: [bash]`
-
-### Hardcoding Secrets or Custom Config Names
-- Bad: API keys in instructions or scripts: `api_key = "abc123"`
-- Bad: Custom config names: `config: [SFMTA_API_KEY]`, `config: [MY_TOKEN]`
-- Good: Use standard name: `config: [API_KEY]` and reference as `$SKILL_API_KEY`
-
-### Using Emoji
-- Bad: Any emoji anywhere: "🚌", "👋", "✓"
-- Good: Plain text only, no emoji characters anywhere in the skill
-
-### Overusing Subagent Mode
-- Bad: Using subagent for a simple greeting skill
-- Good: Use inline for simple skills, subagent only when needed
-
-### Generic Descriptions
-- Bad: "A useful skill"
-- Good: "Search git history for commits matching a pattern"
-
-### ALL CAPS Emphasis
-- Bad: "ALWAYS do X, NEVER do Y"
-- Good: Use **bold** for emphasis instead
-
-### Overly Complex Input Schema
-- Bad: Deep nested objects for simple skills
-- Good: Flat properties with clear descriptions
+**Do NOT:**
+- Write to `/workspace/<name>.md` (missing `skills/` directory)
+- Write to `/workspace/workspace/...` (double workspace)
+- Put scripts directly in skill root (use `scripts/` subdir)
 """.strip()
-
-# Execution mode guidance
-EXECUTION_MODE_GUIDANCE = """
-## Choosing Execution Mode
-
-### Use `inline` (default) when:
-- The skill is primarily documentation/instructions
-- The main agent should follow the steps directly
-- You want the agent to have full conversation context
-- The task is simple (greeting, formatting, explanations)
-- Speed is important (no sub-agent overhead)
-
-### Use `subagent` when:
-- Multiple tool calls in a coordinated sequence
-- The skill needs isolated context from parent conversation
-- Complex multi-step workflows (research, debugging, code review)
-- You want model/iteration control per-skill
-- The skill should run autonomously
-
-### Examples
-
-Inline skills:
-- `greet`: Just return a greeting message
-- `explain`: Return explanation for main agent to deliver
-- `summarize`: Return summary instructions
-
-Subagent skills:
-- `research`: Multiple web searches, synthesize results
-- `code-review`: Read files, analyze, produce report
-- `debug`: Systematic investigation with multiple tools
-""".strip()
-
-
-def load_example_skill(skill_name: str) -> str | None:
-    """Load a bundled skill's content as an example.
-
-    Args:
-        skill_name: Name of the bundled skill.
-
-    Returns:
-        The skill's SKILL.md content, or None if not found.
-    """
-    skill_path = BUNDLED_SKILLS_DIR / skill_name / "SKILL.md"
-    if not skill_path.exists():
-        return None
-    return skill_path.read_text()
-
-
-def format_tool_list(tool_definitions: list[dict[str, Any]]) -> str:
-    """Format available tools for inclusion in prompt.
-
-    Args:
-        tool_definitions: List of tool definition dicts with name and description.
-
-    Returns:
-        Formatted markdown list of tools.
-    """
-    lines = []
-    for tool_def in tool_definitions:
-        name = tool_def["name"]
-        desc = tool_def.get("description", "")
-        # Truncate long descriptions
-        if len(desc) > 100:
-            desc = desc[:97] + "..."
-        lines.append(f"- **{name}**: {desc}")
-    return "\n".join(lines)
 
 
 def build_write_skill_prompt(
     goal: str,
     skill_name: str | None = None,
-    tool_definitions: list[dict[str, Any]] | None = None,
-    workspace_path: Path | None = None,
+    existing_skill: str | None = None,
 ) -> str:
-    """Build the dynamic system prompt for the write-skill subagent.
+    """Build the system prompt for write-skill subagent.
 
-    This prompt includes:
-    - Available tools from the registry
-    - Skill schema documentation
-    - Example skills from bundled
-    - Validation rules and anti-patterns
-    - The user's goal
+    Structured as:
+    1. Template (mandatory format)
+    2. Process (research → write → validate → report)
+    3. Checklist (verification before finishing)
+    4. Directory structure
+    5. Task (goal + existing skill if updating)
 
     Args:
         goal: What the skill should accomplish.
         skill_name: Optional suggested skill name.
-        tool_definitions: List of available tool definitions.
-        workspace_path: Path to workspace for skill creation.
+        existing_skill: Content of existing skill to update (None for new skills).
 
     Returns:
-        Complete system prompt for the write-skill subagent.
+        Complete system prompt.
     """
     parts = []
 
-    # Header
-    parts.append("""# Skill Writer
+    # 1. Header with mandatory template
+    parts.append(f"""# Skill Writer
 
-Create SKILL.md files (markdown with YAML frontmatter).
+You create SKILL.md files. Every skill **must** follow this exact format:
 
-## Process
+```markdown
+{SKILL_TEMPLATE}
+```
 
-1. Search for API documentation
-2. Read the docs to get exact endpoints and parameters
-3. Write the SKILL.md
-4. Test with bash to verify it works
+## Critical Rules
 
-**Never guess at APIs** - research first, then write. If you can't find docs, tell the user.
+1. **YAML frontmatter is mandatory** - file MUST start with `---`
+2. **Use `config: [API_KEY]`** for API keys - NOT custom names
+3. **Use `$SKILL_API_KEY`** in bash - the system adds the `SKILL_` prefix
+4. **No emoji** - plain text only
+5. **Scripts in `scripts/`** - not in skill root directory""")
 
-## Rules
+    # 2. Process
+    parts.append("""## Process
 
-- Output is a SKILL.md file, not Python/shell scripts
-- Use `curl -sfS --compressed` for API calls
-- Use `config: [API_KEY]` for secrets (accessed as `$SKILL_API_KEY`)
-- No emoji
-- Test before finishing""")
+1. **Research** - Find API documentation (web_search, web_fetch)
+2. **Write** - Create SKILL.md with proper frontmatter at the correct path
+3. **Validate** - Read the file back and run through the checklist below
+4. **Report** - Tell user what was created and any setup needed (e.g., get API key)
 
-    # Tools that skills can reference (for the skill author to know what's available)
-    if tool_definitions:
-        tools_formatted = format_tool_list(tool_definitions)
-        parts.append(f"""
-## Available Tools
+### When to Stop
 
-Skills can use these tools in their instructions:
+Stop and report to user if:
+- API requires authentication you don't have
+- No working public API exists after 2-3 search attempts
+- API is down or rate-limited
 
-{tools_formatted}""")
+Do NOT keep trying different approaches. Report what's blocking you.""")
 
-    # Schema documentation
-    parts.append(SKILL_SCHEMA_DOCS)
+    # 3. Validation checklist
+    parts.append(VALIDATION_CHECKLIST)
 
-    # Example skills
-    examples_loaded = []
-    for name in EXAMPLE_SKILL_NAMES:
-        content = load_example_skill(name)
-        if content:
-            examples_loaded.append((name, content))
+    # 4. Directory structure
+    parts.append(DIRECTORY_STRUCTURE)
 
-    if examples_loaded:
-        parts.append(
-            "\n## Example Skills\n\nStudy these examples of well-structured skills:"
-        )
-        for name, content in examples_loaded[:2]:  # Limit to 2 to save context
-            # Truncate if too long
-            if len(content) > 2000:
-                content = content[:2000] + "\n... (truncated)"
-            parts.append(f"\n### {name}\n\n```markdown\n{content}\n```")
+    # 5. Task
+    task_parts = ["## Your Task"]
 
-    # Validation rules
-    parts.append(VALIDATION_RULES)
+    if existing_skill:
+        task_parts.append(f"""
+**Mode:** UPDATE existing skill
+**Skill name:** `{skill_name}` (do not change)
+**Path:** `/workspace/skills/{skill_name}/SKILL.md`
+**Goal:** {goal}
 
-    # Anti-patterns
-    parts.append(ANTI_PATTERNS)
+### Current Skill Content (broken - needs fixing)
 
-    # Execution mode guidance
-    parts.append(EXECUTION_MODE_GUIDANCE)
+```markdown
+{existing_skill}
+```
 
-    # Workspace info - always use /workspace (sandbox mount point)
-    # The host workspace path is mounted at /workspace inside the sandbox
-    parts.append("""
-## Workspace
+Fix this skill to match the required format. Common issues:
+- Missing YAML frontmatter (`---` delimiters)
+- Custom config names instead of `API_KEY`
+- Custom env vars instead of `$SKILL_API_KEY`
+- Emoji characters
+- Scripts in wrong location""")
+    else:
+        if skill_name:
+            task_parts.append(f"""
+**Skill name:** `{skill_name}` (use this exact name)
+**Path:** `/workspace/skills/{skill_name}/SKILL.md`""")
+        else:
+            task_parts.append("""
+**Choose a skill name** - lowercase, hyphens only (e.g., `check-muni`, `search-github`)""")
 
-Skills directory: `/workspace/skills/`
-
-Create skills in: `/workspace/skills/<skill-name>/SKILL.md`""")
-
-    # The task
-    task_parts = ["\n## Your Task"]
-    if skill_name:
-        task_parts.append(f"\n**Skill name:** `{skill_name}`")
-        task_parts.append(f"\n**Path:** `/workspace/skills/{skill_name}/SKILL.md`")
-    task_parts.append(f"\n**Goal:** {goal}")
-    task_parts.append("""
+        task_parts.append(f"""
+**Goal:** {goal}
 
 Hardcode specific details (stop IDs, routes, etc.) rather than making generic parameterized skills.""")
 
-    parts.append("".join(task_parts))
+    parts.append("\n".join(task_parts))
 
     return "\n\n---\n\n".join(parts)
 
@@ -367,10 +209,11 @@ def build_subagent_config(
     """Build SubagentConfig for write-skill execution.
 
     Args:
-        input_data: Input containing 'goal' and optional 'name'.
-        **kwargs: Extra context from executor:
-            - tool_definitions: All available tool definitions (for showing in prompt).
-            - workspace_path: Workspace path for skill creation.
+        input_data: Input containing:
+            - goal: What the skill should accomplish (required)
+            - name: Skill name (optional)
+            - existing_skill: Content of existing skill for updates (optional)
+        **kwargs: Extra context from executor (tool_definitions, workspace_path).
 
     Returns:
         SubagentConfig ready for execution.
@@ -380,15 +223,12 @@ def build_subagent_config(
     """
     from ash.skills.base import SubagentConfig
 
-    # Extract context from kwargs
-    tool_definitions: list[dict[str, Any]] = kwargs.get("tool_definitions", [])
-    workspace_path: Path | None = kwargs.get("workspace_path")
-
     goal = input_data.get("goal")
     if not goal:
         raise ValueError("Missing required input: goal")
 
     skill_name = input_data.get("name")
+    existing_skill: str | None = input_data.get("existing_skill")
 
     # Try to extract skill name from goal if not provided
     if not skill_name and goal:
@@ -401,15 +241,26 @@ def build_subagent_config(
     system_prompt = build_write_skill_prompt(
         goal=goal,
         skill_name=skill_name,
-        tool_definitions=tool_definitions,
-        workspace_path=workspace_path,
+        existing_skill=existing_skill,
     )
+
+    # Adjust initial message based on mode
+    if existing_skill:
+        initial_message = (
+            "Update the skill to fix format issues. "
+            "Read it back after writing to verify the checklist passes."
+        )
+    else:
+        initial_message = (
+            "Create the skill following the process: research, write, validate, report. "
+            "Read the file back after writing to verify the checklist passes."
+        )
 
     return SubagentConfig(
         system_prompt=system_prompt,
         allowed_tools=ALLOWED_TOOLS,
         max_iterations=MAX_ITERATIONS,
-        initial_message="Create the skill according to the instructions provided.",
+        initial_message=initial_message,
     )
 
 

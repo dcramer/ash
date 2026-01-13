@@ -236,8 +236,13 @@ async def _run_chat(
                     if response.text:
                         await session_manager.add_assistant_message(response.text)
 
-                    # Persist tool calls to JSONL
+                    # Persist tool uses and results to JSONL
                     for tool_call in response.tool_calls:
+                        await session_manager.add_tool_use(
+                            tool_use_id=tool_call["id"],
+                            name=tool_call["name"],
+                            input_data=tool_call["input"],
+                        )
                         await session_manager.add_tool_result(
                             tool_use_id=tool_call["id"],
                             output=tool_call["result"],
@@ -317,8 +322,13 @@ async def _run_chat(
                         if response.text:
                             await session_manager.add_assistant_message(response.text)
 
-                        # Persist tool calls to JSONL
+                        # Persist tool uses and results to JSONL
                         for tool_call in response.tool_calls:
+                            await session_manager.add_tool_use(
+                                tool_use_id=tool_call["id"],
+                                name=tool_call["name"],
+                                input_data=tool_call["input"],
+                            )
                             await session_manager.add_tool_result(
                                 tool_use_id=tool_call["id"],
                                 output=tool_call["result"],

@@ -27,6 +27,28 @@ logger = logging.getLogger("telegram")
 EDIT_INTERVAL = 1.0
 
 
+def _get_parse_mode(mode: str | None) -> ParseMode:
+    """Convert a parse mode string to ParseMode enum.
+
+    Args:
+        mode: Parse mode string (e.g., "markdown", "markdown_v2", "html").
+
+    Returns:
+        ParseMode enum value, defaults to MARKDOWN.
+    """
+    if not mode:
+        return ParseMode.MARKDOWN
+
+    # Normalize: "markdown_v2" -> "MARKDOWN_V2"
+    normalized = mode.upper().replace("-", "_")
+
+    try:
+        return ParseMode[normalized]
+    except KeyError:
+        logger.warning(f"Unknown parse mode '{mode}', using MARKDOWN")
+        return ParseMode.MARKDOWN
+
+
 class TelegramProvider(Provider):
     """Telegram provider using aiogram 3.x.
 
@@ -198,13 +220,21 @@ class TelegramProvider(Provider):
                 parse_mode=parse_mode,
             )
         except TelegramBadRequest as e:
-            if "can't parse" in str(e).lower() and parse_mode is not None:
+            error_msg = str(e).lower()
+            if "can't parse" in error_msg and parse_mode is not None:
                 logger.debug(f"Markdown parsing failed, sending as plain text: {e}")
                 return await self._bot.send_message(
                     chat_id=chat_id,
                     text=text,
                     reply_to_message_id=reply_to,
                     parse_mode=None,
+                )
+            if "message to be replied not found" in error_msg and reply_to is not None:
+                logger.debug(f"Reply target not found, sending without reply: {e}")
+                return await self._bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode=parse_mode,
                 )
             raise
 
@@ -528,11 +558,7 @@ class TelegramProvider(Provider):
         Returns:
             Sent message ID.
         """
-        parse_mode = (
-            ParseMode(message.parse_mode.upper())
-            if message.parse_mode
-            else ParseMode.MARKDOWN
-        )
+        parse_mode = _get_parse_mode(message.parse_mode)
         sent = await self._send_with_fallback(
             chat_id=int(message.chat_id),
             text=message.text,
@@ -662,7 +688,7 @@ class TelegramProvider(Provider):
             text: New text content.
             parse_mode: Text parsing mode.
         """
-        pm = ParseMode(parse_mode.upper()) if parse_mode else ParseMode.MARKDOWN
+        pm = _get_parse_mode(parse_mode)
         await self._edit_with_fallback(int(chat_id), int(message_id), text, pm)
 
     async def delete(self, chat_id: str, message_id: str) -> None:

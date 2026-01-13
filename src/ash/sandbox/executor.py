@@ -10,6 +10,37 @@ from ash.sandbox.manager import SandboxConfig, SandboxManager
 logger = logging.getLogger(__name__)
 
 
+def _normalize_workspace_path(path: str) -> str:
+    """Normalize a workspace path to prevent common issues.
+
+    Fixes:
+    - Double /workspace prefixes: /workspace/workspace/x -> /workspace/x
+    - Trailing slashes
+    - Double slashes
+
+    Args:
+        path: File path (may be absolute or relative).
+
+    Returns:
+        Normalized path.
+    """
+    original = path
+
+    # Remove double /workspace prefix (common LLM mistake)
+    while path.startswith("/workspace/workspace"):
+        path = path.replace("/workspace/workspace", "/workspace", 1)
+
+    # Clean up double slashes and trailing slash
+    while "//" in path:
+        path = path.replace("//", "/")
+    path = path.rstrip("/")
+
+    if path != original:
+        logger.debug(f"Normalized path: {original} -> {path}")
+
+    return path
+
+
 @dataclass
 class ExecutionResult:
     """Result of command execution."""
@@ -157,6 +188,8 @@ class SandboxExecutor:
     ) -> ExecutionResult:
         """Write a file in the sandbox.
 
+        Creates parent directories automatically.
+
         Args:
             path: File path in sandbox.
             content: File content.
@@ -164,11 +197,19 @@ class SandboxExecutor:
         Returns:
             Execution result.
         """
+        # Normalize path to prevent double /workspace issues
+        # e.g., /workspace/workspace/skills -> /workspace/skills
+        normalized_path = _normalize_workspace_path(path)
+
         # Quote path to prevent shell injection
-        safe_path = shlex.quote(path)
+        safe_path = shlex.quote(normalized_path)
         # Escape content for cat heredoc
         escaped = content.replace("'", "'\\''")
-        command = f"cat > {safe_path} << 'ASHEOF'\n{escaped}\nASHEOF"
+        # Create parent directory and write file
+        command = (
+            f'mkdir -p "$(dirname {safe_path})" && '
+            f"cat > {safe_path} << 'ASHEOF'\n{escaped}\nASHEOF"
+        )
         return await self.execute(command)
 
     async def read_file(self, path: str) -> ExecutionResult:

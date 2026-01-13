@@ -48,6 +48,7 @@ class SessionManager:
         provider: str,
         chat_id: str | None = None,
         user_id: str | None = None,
+        thread_id: str | None = None,
         sessions_path: Path | None = None,
     ) -> None:
         """Initialize session manager.
@@ -56,14 +57,16 @@ class SessionManager:
             provider: Provider name (e.g., "cli", "telegram", "api").
             chat_id: Optional chat/conversation ID.
             user_id: Optional user ID.
+            thread_id: Optional thread ID (for forum-style chats).
             sessions_path: Override sessions directory (for testing).
         """
         self.provider = provider
         self.chat_id = chat_id
         self.user_id = user_id
+        self.thread_id = thread_id
 
         # Compute session key and path
-        self._key = session_key(provider, chat_id, user_id)
+        self._key = session_key(provider, chat_id, user_id, thread_id)
         base_path = sessions_path or get_sessions_path()
         self._session_dir = base_path / self._key
 
@@ -215,6 +218,32 @@ class SessionManager:
                     await self._writer.write_tool_use(tool_entry)
 
         return entry.id
+
+    async def add_tool_use(
+        self,
+        tool_use_id: str,
+        name: str,
+        input_data: dict[str, Any],
+    ) -> None:
+        """Add a tool use entry to the session.
+
+        This records what tool was called and with what input.
+        Should be called before add_tool_result for the same tool_use_id.
+
+        Args:
+            tool_use_id: Unique ID for this tool use.
+            name: Name of the tool being called.
+            input_data: Input parameters for the tool.
+        """
+        await self.ensure_session()
+
+        entry = ToolUseEntry.create(
+            tool_use_id=tool_use_id,
+            message_id=self._current_message_id or "",
+            name=name,
+            input_data=input_data,
+        )
+        await self._writer.write_tool_use(entry)
 
     async def add_tool_result(
         self,
