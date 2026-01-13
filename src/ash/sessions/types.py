@@ -26,6 +26,7 @@ def session_key(
     provider: str,
     chat_id: str | None = None,
     user_id: str | None = None,
+    thread_id: str | None = None,
 ) -> str:
     """Generate a session directory key from components.
 
@@ -33,6 +34,7 @@ def session_key(
         provider: Provider name (e.g., "cli", "telegram", "api").
         chat_id: Optional chat/conversation ID.
         user_id: Optional user ID (only used if no chat_id).
+        thread_id: Optional thread/topic ID (for forum-style chats).
 
     Returns:
         Session key suitable for use as directory name.
@@ -40,6 +42,9 @@ def session_key(
     parts = [_sanitize(provider)]
     if chat_id:
         parts.append(_sanitize(chat_id))
+        # Thread ID creates sub-sessions within a chat (e.g., Telegram forum topics)
+        if thread_id:
+            parts.append(_sanitize(thread_id))
     elif user_id:
         parts.append(_sanitize(user_id))
     return "_".join(parts)

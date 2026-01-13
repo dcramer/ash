@@ -17,12 +17,12 @@ from ash.llm.types import Message, Role
 from ash.memory import MemoryStore
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.sessions import MessageEntry, SessionManager
-from ash.sessions.types import session_key
+from ash.sessions.types import session_key as make_session_key
 
 if TYPE_CHECKING:
     from ash.providers.telegram.provider import TelegramProvider
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("telegram")
 
 
 def escape_markdown(text: str) -> str:
@@ -127,17 +127,20 @@ class TelegramMessageHandler:
             self._chat_locks[chat_id] = asyncio.Lock()
         return self._chat_locks[chat_id]
 
-    def _get_session_manager(self, chat_id: str, user_id: str) -> SessionManager:
-        """Get or create a session manager for this chat.
+    def _get_session_manager(
+        self, chat_id: str, user_id: str, thread_id: str | None = None
+    ) -> SessionManager:
+        """Get or create a session manager for this chat/thread.
 
         Args:
             chat_id: Chat ID.
             user_id: User ID.
+            thread_id: Thread ID (for forum topics).
 
         Returns:
             SessionManager instance.
         """
-        key = session_key(self._provider.name, chat_id, user_id)
+        key = make_session_key(self._provider.name, chat_id, user_id, thread_id)
         if key not in self._session_managers:
             self._session_managers[key] = SessionManager(
                 provider=self._provider.name,
@@ -331,6 +334,7 @@ class TelegramMessageHandler:
                     bot_response_id=sent_message_id,
                     username=message.username,
                     display_name=message.display_name,
+                    thread_id=message.metadata.get("thread_id"),
                 )
             else:
                 response = await self._agent.process_message(
@@ -365,6 +369,7 @@ class TelegramMessageHandler:
                     compaction=response.compaction,
                     username=message.username,
                     display_name=message.display_name,
+                    thread_id=message.metadata.get("thread_id"),
                 )
         else:
             # No caption - just acknowledge the image
@@ -386,7 +391,10 @@ class TelegramMessageHandler:
         Returns:
             True if message was already processed.
         """
-        session_manager = self._get_session_manager(message.chat_id, message.user_id)
+        thread_id = message.metadata.get("thread_id")
+        session_manager = self._get_session_manager(
+            message.chat_id, message.user_id, thread_id
+        )
         return await session_manager.has_message_with_external_id(message.id)
 
     async def _should_skip_reply(self, message: IncomingMessage) -> bool:
@@ -416,7 +424,10 @@ class TelegramMessageHandler:
             return False
 
         # Check if reply target is in our conversation history
-        session_manager = self._get_session_manager(message.chat_id, message.user_id)
+        thread_id = message.metadata.get("thread_id")
+        session_manager = self._get_session_manager(
+            message.chat_id, message.user_id, thread_id
+        )
         target = await session_manager.get_message_by_external_id(
             message.reply_to_message_id
         )
@@ -445,7 +456,10 @@ class TelegramMessageHandler:
         Returns:
             Session state.
         """
-        session_manager = self._get_session_manager(message.chat_id, message.user_id)
+        thread_id = message.metadata.get("thread_id")
+        session_manager = self._get_session_manager(
+            message.chat_id, message.user_id, thread_id
+        )
         session_key = session_manager.session_key
         is_fresh_mode = self._conversation_config.session_mode == "fresh"
 
@@ -485,6 +499,17 @@ class TelegramMessageHandler:
         session.metadata["session_path"] = (
             f"/sessions/{session_manager.session_key}/context.jsonl"
         )
+
+        # For thread-based sessions, also store the parent chat session path
+        # so the agent can access broader chat history if needed
+        if thread_id:
+            session.metadata["thread_id"] = thread_id
+            chat_key = make_session_key(
+                self._provider.name, message.chat_id, message.user_id
+            )
+            session.metadata["chat_session_path"] = (
+                f"/sessions/{chat_key}/context.jsonl"
+            )
 
         # Store session mode in metadata for prompt builder
         session.metadata["session_mode"] = self._conversation_config.session_mode
@@ -692,6 +717,7 @@ class TelegramMessageHandler:
             bot_response_id=sent_message_id,
             username=message.username,
             display_name=message.display_name,
+            thread_id=message.metadata.get("thread_id"),
         )
 
     async def _handle_sync(
@@ -770,6 +796,7 @@ class TelegramMessageHandler:
             )
 
         # Persist messages to JSONL with reply context
+        thread_id = message.metadata.get("thread_id")
         await self._persist_messages(
             message.chat_id,
             message.user_id,
@@ -781,10 +808,13 @@ class TelegramMessageHandler:
             compaction=response.compaction,
             username=message.username,
             display_name=message.display_name,
+            thread_id=thread_id,
         )
 
         # Persist tool results to JSONL
-        session_manager = self._get_session_manager(message.chat_id, message.user_id)
+        session_manager = self._get_session_manager(
+            message.chat_id, message.user_id, thread_id
+        )
         for tool_call in response.tool_calls:
             await session_manager.add_tool_result(
                 tool_use_id=tool_call["id"],
@@ -823,6 +853,7 @@ class TelegramMessageHandler:
         compaction: CompactionInfo | None = None,
         username: str | None = None,
         display_name: str | None = None,
+        thread_id: str | None = None,
     ) -> None:
         """Persist messages to JSONL session files.
 
@@ -837,8 +868,9 @@ class TelegramMessageHandler:
             reply_to_external_id: External ID of the message being replied to.
             bot_response_id: External ID of the bot's response message.
             compaction: Optional compaction info to persist.
+            thread_id: Thread ID for forum topics.
         """
-        session_manager = self._get_session_manager(chat_id, user_id)
+        session_manager = self._get_session_manager(chat_id, user_id, thread_id)
 
         # Build user message metadata
         user_metadata: dict[str, Any] = {}

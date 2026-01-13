@@ -21,7 +21,7 @@ from ash.providers.base import (
     Provider,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("telegram")
 
 # Minimum interval between message edits (Telegram rate limit)
 EDIT_INTERVAL = 1.0
@@ -320,6 +320,15 @@ class TelegramProvider(Provider):
         Returns:
             IncomingMessage for handler processing.
         """
+        metadata = {
+            "chat_type": message.chat.type,
+            "chat_title": message.chat.title,
+            "was_mentioned": was_mentioned,
+        }
+        # Include thread_id for forum topics (supergroups with topics enabled)
+        if message.message_thread_id is not None:
+            metadata["thread_id"] = str(message.message_thread_id)
+
         return IncomingMessage(
             id=str(message.message_id),
             chat_id=str(message.chat.id),
@@ -331,11 +340,7 @@ class TelegramProvider(Provider):
             if message.reply_to_message
             else None,
             images=images or [],
-            metadata={
-                "chat_type": message.chat.type,
-                "chat_title": message.chat.title,
-                "was_mentioned": was_mentioned,
-            },
+            metadata=metadata,
             timestamp=message.date,
         )
 
