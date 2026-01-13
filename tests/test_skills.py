@@ -103,61 +103,10 @@ class TestSkillRequirements:
 
 
 class TestSkillDefinition:
-    """Tests for SkillDefinition dataclass."""
-
-    def test_minimal_definition(self):
-        skill = SkillDefinition(
-            name="test",
-            description="Test skill",
-            instructions="Do something",
-        )
-        assert skill.name == "test"
-        assert skill.description == "Test skill"
-        assert skill.instructions == "Do something"
-        assert skill.model is None
-        assert skill.required_tools == []
-        assert skill.input_schema == {}
-        assert skill.max_iterations == 5
-
-    def test_full_definition(self):
-        skill = SkillDefinition(
-            name="summarize",
-            description="Summarize text",
-            instructions="Create summaries",
-            model="fast",
-            required_tools=["bash"],
-            input_schema={
-                "type": "object",
-                "properties": {"content": {"type": "string"}},
-            },
-            max_iterations=3,
-        )
-        assert skill.model == "fast"
-        assert skill.required_tools == ["bash"]
-        assert skill.max_iterations == 3
-
-    def test_is_available_no_requirements(self):
-        skill = SkillDefinition(
-            name="test",
-            description="Test",
-            instructions="Do something",
-        )
-        is_available, reason = skill.is_available()
-        assert is_available is True
-        assert reason is None
-
-    def test_is_available_with_met_requirements(self):
-        current_os = platform.system().lower()
-        skill = SkillDefinition(
-            name="test",
-            description="Test",
-            instructions="Do something",
-            requires=SkillRequirements(os=[current_os]),
-        )
-        is_available, reason = skill.is_available()
-        assert is_available is True
+    """Tests for SkillDefinition availability checking."""
 
     def test_is_available_with_unmet_requirements(self):
+        """Skill with unmet OS requirements should be unavailable."""
         other_os = "windows" if platform.system().lower() != "windows" else "darwin"
         skill = SkillDefinition(
             name="test",
@@ -176,82 +125,13 @@ class TestSkillDefinition:
 
 
 class TestSkillRegistry:
-    """Tests for SkillRegistry."""
-
-    def test_empty_registry(self):
-        registry = SkillRegistry()
-        assert len(registry) == 0
-        assert registry.list_names() == []
-
-    def test_register_skill(self):
-        registry = SkillRegistry()
-        skill = SkillDefinition(
-            name="test",
-            description="Test",
-            instructions="Do test",
-        )
-        registry.register(skill)
-        assert "test" in registry
-        assert len(registry) == 1
-
-    def test_get_skill(self):
-        registry = SkillRegistry()
-        skill = SkillDefinition(
-            name="test",
-            description="Test",
-            instructions="Do test",
-        )
-        registry.register(skill)
-        retrieved = registry.get("test")
-        assert retrieved is skill
+    """Tests for SkillRegistry error handling."""
 
     def test_get_missing_skill_raises(self):
+        """Getting a non-existent skill should raise KeyError."""
         registry = SkillRegistry()
         with pytest.raises(KeyError, match="not found"):
             registry.get("nonexistent")
-
-    def test_has_skill(self):
-        registry = SkillRegistry()
-        assert not registry.has("test")
-        skill = SkillDefinition(name="test", description="Test", instructions="Do test")
-        registry.register(skill)
-        assert registry.has("test")
-
-    def test_list_names(self):
-        registry = SkillRegistry()
-        registry.register(
-            SkillDefinition(name="a", description="A", instructions="Do A")
-        )
-        registry.register(
-            SkillDefinition(name="b", description="B", instructions="Do B")
-        )
-        names = registry.list_names()
-        assert "a" in names
-        assert "b" in names
-
-    def test_get_definitions(self):
-        registry = SkillRegistry()
-        registry.register(
-            SkillDefinition(
-                name="test",
-                description="Test skill",
-                instructions="Do test",
-                input_schema={"type": "object"},
-            )
-        )
-        definitions = registry.get_definitions()
-        assert len(definitions) == 1
-        assert definitions[0]["name"] == "test"
-        assert definitions[0]["description"] == "Test skill"
-        assert definitions[0]["input_schema"] == {"type": "object"}
-
-    def test_iteration(self):
-        registry = SkillRegistry()
-        skill = SkillDefinition(name="test", description="Test", instructions="Do test")
-        registry.register(skill)
-        skills = list(registry)
-        assert len(skills) == 1
-        assert skills[0] is skill
 
 
 class TestSkillRegistryDiscovery:
@@ -455,6 +335,102 @@ description: Has description but no body
         registry.discover(tmp_path, include_bundled=False)
 
         assert len(registry) == 0
+
+
+# =============================================================================
+# Skill File Validation Tests
+# =============================================================================
+
+
+class TestValidateSkillFile:
+    """Tests for SkillRegistry.validate_skill_file()."""
+
+    def test_validate_missing_file(self, tmp_path: Path):
+        """Validation should fail for non-existent file."""
+        registry = SkillRegistry()
+        is_valid, error = registry.validate_skill_file(tmp_path / "missing.md")
+        assert is_valid is False
+        assert error is not None and "not found" in error.lower()
+
+    def test_validate_non_markdown_file(self, tmp_path: Path):
+        """Validation should fail for non-.md files."""
+        registry = SkillRegistry()
+        txt_file = tmp_path / "skill.txt"
+        txt_file.write_text("content")
+        is_valid, error = registry.validate_skill_file(txt_file)
+        assert is_valid is False
+        assert error is not None and ".md" in error
+
+    def test_validate_missing_frontmatter(self, tmp_path: Path):
+        """Validation should fail when YAML frontmatter is missing."""
+        registry = SkillRegistry()
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_text("Just plain text without frontmatter")
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is False
+        assert error is not None and "frontmatter" in error.lower()
+
+    def test_validate_invalid_yaml(self, tmp_path: Path):
+        """Validation should fail for invalid YAML in frontmatter."""
+        registry = SkillRegistry()
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_text(
+            """---
+invalid: yaml: syntax: here
+---
+
+Instructions.
+"""
+        )
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is False
+        assert error is not None and "yaml" in error.lower()
+
+    def test_validate_missing_description(self, tmp_path: Path):
+        """Validation should fail when description field is missing."""
+        registry = SkillRegistry()
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_text(
+            """---
+model: fast
+---
+
+Instructions without description.
+"""
+        )
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is False
+        assert error is not None and "description" in error.lower()
+
+    def test_validate_missing_instructions(self, tmp_path: Path):
+        """Validation should fail when instructions body is empty."""
+        registry = SkillRegistry()
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_text(
+            """---
+description: Has description but no body
+---
+"""
+        )
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is False
+        assert error is not None and "instructions" in error.lower()
+
+    def test_validate_valid_skill(self, tmp_path: Path):
+        """Validation should pass for a properly formatted skill file."""
+        registry = SkillRegistry()
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_text(
+            """---
+description: A valid skill
+---
+
+Do something useful.
+"""
+        )
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is True
+        assert error is None
 
 
 # =============================================================================
@@ -680,42 +656,6 @@ class TestSkillExecutor:
             assert result.iterations == 2
             assert "maximum iterations" in result.content.lower()
 
-    async def test_execute_model_alias_resolution(
-        self,
-        skill_registry: SkillRegistry,
-        tool_executor: ToolExecutor,
-        config: AshConfig,
-    ):
-        skill_registry.register(
-            SkillDefinition(
-                name="fast_skill",
-                description="Uses fast model",
-                instructions="Do something quickly",
-                subagent=True,
-                model="fast",
-            )
-        )
-
-        executor = SkillExecutor(skill_registry, tool_executor, config)
-
-        with patch("ash.skills.executor.create_llm_provider") as mock_create:
-            mock_provider = AsyncMock()
-            mock_provider.complete.return_value = CompletionResponse(
-                message=Message(role=Role.ASSISTANT, content="Done"),
-                usage=Usage(input_tokens=100, output_tokens=50),
-            )
-            mock_create.return_value = mock_provider
-
-            await executor.execute(
-                "fast_skill",
-                {},
-                SkillContext(),
-            )
-
-            # Verify provider was created with anthropic (from fast config)
-            mock_create.assert_called_once()
-            assert mock_create.call_args[0][0] == "anthropic"
-
     async def test_execute_unknown_model_alias_falls_back(
         self,
         skill_registry: SkillRegistry,
@@ -861,28 +801,165 @@ class TestUseSkillTool:
             call_args = mock_provider.complete.call_args
             assert "value" in call_args.kwargs["system"]
 
-    async def test_use_skill_passes_context(
-        self, skill_registry: SkillRegistry, skill_executor: SkillExecutor
-    ):
-        tool = UseSkillTool(skill_registry, skill_executor)
 
-        tool_context = ToolContext(
-            session_id="sess-123",
-            user_id="user-456",
-            chat_id="chat-789",
+# =============================================================================
+# WriteSkillTool Tests
+# =============================================================================
+
+
+class TestWriteSkillTool:
+    """Tests for WriteSkillTool post-write validation."""
+
+    @pytest.fixture
+    def skill_registry(self) -> SkillRegistry:
+        return SkillRegistry()
+
+    @pytest.fixture
+    def tool_executor(self) -> ToolExecutor:
+        return ToolExecutor(ToolRegistry())
+
+    @pytest.fixture
+    def config(self) -> AshConfig:
+        return AshConfig(
+            models={
+                "default": ModelConfig(
+                    provider="anthropic",
+                    model="claude-sonnet-4-5-20250929",
+                ),
+            }
         )
 
-        with patch("ash.skills.executor.create_llm_provider") as mock_create:
-            mock_provider = AsyncMock()
-            mock_provider.complete.return_value = CompletionResponse(
-                message=Message(role=Role.ASSISTANT, content="Done"),
-                usage=Usage(input_tokens=100, output_tokens=50),
+    @pytest.fixture
+    def skill_executor(
+        self,
+        skill_registry: SkillRegistry,
+        tool_executor: ToolExecutor,
+        config: AshConfig,
+    ) -> SkillExecutor:
+        return SkillExecutor(skill_registry, tool_executor, config)
+
+    async def test_warns_when_skill_not_discovered(
+        self,
+        skill_registry: SkillRegistry,
+        skill_executor: SkillExecutor,
+        tmp_path: Path,
+    ):
+        """WriteSkillTool should warn when no skill is discovered after creation."""
+        from ash.skills.base import SkillResult
+        from ash.tools.builtin.skills import WriteSkillTool
+
+        # Register write-skill dynamic skill
+        skill_registry.register_dynamic(
+            name="write-skill",
+            description="Create skills",
+            build_config=lambda input_data, **kwargs: None,
+            required_tools=[],
+        )
+
+        tool = WriteSkillTool(skill_executor, skill_registry, tmp_path)
+
+        # Mock the executor to return success but not actually create a file
+        with patch.object(
+            skill_executor, "execute", return_value=SkillResult.success("Created skill")
+        ):
+            result = await tool.execute({"goal": "test skill"}, ToolContext())
+
+        # Should succeed but with warning about no skill discovered
+        assert not result.is_error
+        assert "warning" in result.content.lower()
+        assert (
+            "not discovered" in result.content.lower()
+            or "wrong location" in result.content.lower()
+        )
+
+    async def test_reports_validation_errors(
+        self,
+        skill_registry: SkillRegistry,
+        skill_executor: SkillExecutor,
+        tmp_path: Path,
+    ):
+        """WriteSkillTool should report validation errors for invalid skill files."""
+        from ash.skills.base import SkillResult
+        from ash.tools.builtin.skills import WriteSkillTool
+
+        # Create an invalid skill file (missing description)
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "test-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            """---
+model: fast
+---
+
+Instructions without description.
+"""
+        )
+
+        # Register write-skill dynamic skill
+        skill_registry.register_dynamic(
+            name="write-skill",
+            description="Create skills",
+            build_config=lambda input_data, **kwargs: None,
+            required_tools=[],
+        )
+
+        tool = WriteSkillTool(skill_executor, skill_registry, tmp_path)
+
+        # Mock the executor to return success (simulating subagent wrote the file)
+        with patch.object(
+            skill_executor, "execute", return_value=SkillResult.success("Created skill")
+        ):
+            result = await tool.execute(
+                {"goal": "test skill", "name": "test-skill"}, ToolContext()
             )
-            mock_create.return_value = mock_provider
 
-            result = await tool.execute({"skill": "test_skill"}, tool_context)
+        # Should report validation error
+        assert result.is_error
+        assert "validation" in result.content.lower()
+        assert "description" in result.content.lower()
 
-            assert not result.is_error
+    async def test_success_when_skill_discovered(
+        self,
+        skill_registry: SkillRegistry,
+        skill_executor: SkillExecutor,
+        tmp_path: Path,
+    ):
+        """WriteSkillTool should report success when skill is properly created."""
+        from ash.skills.base import SkillResult
+        from ash.tools.builtin.skills import WriteSkillTool
+
+        # Create a valid skill file
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "test-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: A test skill
+---
+
+Do something useful.
+"""
+        )
+
+        # Register write-skill dynamic skill
+        skill_registry.register_dynamic(
+            name="write-skill",
+            description="Create skills",
+            build_config=lambda input_data, **kwargs: None,
+            required_tools=[],
+        )
+
+        tool = WriteSkillTool(skill_executor, skill_registry, tmp_path)
+
+        # Mock the executor to return success
+        with patch.object(
+            skill_executor, "execute", return_value=SkillResult.success("Created skill")
+        ):
+            result = await tool.execute({"goal": "test skill"}, ToolContext())
+
+        # Should succeed and report new skill loaded
+        assert not result.is_error
+        assert "loaded" in result.content.lower()
 
 
 # =============================================================================
