@@ -43,7 +43,8 @@ MAX_TOOL_ITERATIONS = 25
 
 
 def _build_routing_env(
-    session: SessionState, effective_user_id: str | None
+    session: SessionState,
+    effective_user_id: str | None,
 ) -> dict[str, str]:
     """Build environment variables for routing context in sandbox.
 
@@ -51,14 +52,13 @@ def _build_routing_env(
     access routing context for operations that need to send responses back.
     Also includes skill env vars set by inline skills.
     """
-    env = {
+    return {
         "ASH_SESSION_ID": session.session_id or "",
         "ASH_USER_ID": effective_user_id or "",
         "ASH_CHAT_ID": session.chat_id or "",
         "ASH_PROVIDER": session.provider or "",
         "ASH_USERNAME": session.metadata.get("username", ""),
     }
-    return env
 
 
 @dataclass
@@ -629,6 +629,8 @@ class Agent:
                 )
 
             # Execute tools with effective user_id (supports group chats)
+            # Note: env vars can be faked by the agent, but we're not optimizing
+            # for security here - just preventing accidental mistakes
             tool_context = ToolContext(
                 session_id=session.session_id,
                 user_id=setup.effective_user_id,
@@ -813,6 +815,8 @@ class Agent:
                 return
 
             # Execute tools (non-streaming) with effective user_id (supports group chats)
+            # Note: env vars can be faked by the agent, but we're not optimizing
+            # for security here - just preventing accidental mistakes
             tool_context = ToolContext(
                 session_id=session.session_id,
                 user_id=setup.effective_user_id,

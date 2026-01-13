@@ -116,12 +116,15 @@ def build_sandbox_manager_config(
     Returns:
         SandboxManagerConfig dataclass for the sandbox executor.
     """
-    from ash.config.paths import get_rpc_socket_path
+    from ash.config.paths import get_logs_path, get_rpc_socket_path
     from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
     from ash.sessions.manager import get_sessions_path
 
     # Get sessions path for mounting chat history in sandbox
     sessions_path = get_sessions_path()
+
+    # Get logs path for mounting server logs in sandbox
+    logs_path = get_logs_path()
 
     # Get RPC socket path for sandbox-to-host communication
     rpc_socket_path = get_rpc_socket_path()
@@ -131,6 +134,7 @@ def build_sandbox_manager_config(
             workspace_path=workspace_path,
             network_mode=default_network_mode,
             sessions_path=sessions_path,
+            logs_path=logs_path,
             rpc_socket_path=rpc_socket_path,
         )
 
@@ -147,5 +151,6 @@ def build_sandbox_manager_config(
         workspace_access=config.workspace_access,
         sessions_path=sessions_path,
         sessions_access=config.sessions_access,
+        logs_path=logs_path,
         rpc_socket_path=rpc_socket_path,
     )

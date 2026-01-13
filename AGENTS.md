@@ -116,8 +116,22 @@ Use **uv**: `uv sync --all-groups`
 
 **Configuration:**
 - All entry points use `ash.logging.configure_logging()`
-- Server mode: Rich formatting with `use_rich=True`
+- Server mode: Rich formatting with `use_rich=True`, JSONL logs to `~/.ash/logs/`
 - Chat mode: Suppressed to WARNING (TUI controls display)
+
+## Authorization
+
+Users interact with Ash through providers (Telegram, CLI). Authorization is provider-specific.
+
+**Telegram Authorization:**
+- `allowed_users` in config lists authorized user IDs or @usernames
+- `allowed_groups` lists group IDs where the bot responds
+- Empty lists = open access (not recommended for production)
+
+**Sandbox Security Model:**
+Environment variables (like `ASH_USER_ID`) are passed to sandbox commands for ownership checks. These can be faked by the agent, but we're not optimizing for security here - just preventing accidental mistakes. The real security boundary is who can talk to the bot at all.
+
+Dangerous bulk operations (like clearing all schedules or memories) are not exposed in the sandbox CLI to prevent accidents.
 
 ## Commit Attribution
 

@@ -3,6 +3,7 @@
 import json
 import os
 import socket
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,8 @@ from ash.rpc.protocol import (
 )
 
 DEFAULT_SOCKET_PATH = "/run/ash/rpc.sock"
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 0.5  # seconds
 
 
 class RPCError(Exception):
@@ -24,19 +27,26 @@ class RPCError(Exception):
         self.data = data
 
 
-def rpc_call(method: str, params: dict[str, Any] | None = None) -> Any:
+def rpc_call(
+    method: str,
+    params: dict[str, Any] | None = None,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_delay: float = DEFAULT_RETRY_DELAY,
+) -> Any:
     """Make an RPC call to the host Ash process.
 
     Args:
         method: RPC method name (e.g., "memory.search").
         params: Method parameters.
+        max_retries: Maximum number of retry attempts for connection errors.
+        retry_delay: Delay between retries in seconds.
 
     Returns:
         The result from the RPC call.
 
     Raises:
         RPCError: If the RPC call fails.
-        ConnectionError: If unable to connect to the RPC server.
+        ConnectionError: If unable to connect to the RPC server after retries.
     """
     socket_path = os.environ.get("ASH_RPC_SOCKET", DEFAULT_SOCKET_PATH)
 
@@ -46,31 +56,43 @@ def rpc_call(method: str, params: dict[str, Any] | None = None) -> Any:
     # Create request
     request = RPCRequest(method=method, params=params or {})
 
-    # Connect and send
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.connect(socket_path)
-        sock.sendall(request.to_bytes())
+    last_error: Exception | None = None
+    for attempt in range(max_retries + 1):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.connect(socket_path)
+            sock.sendall(request.to_bytes())
 
-        # Read response
-        data = read_message_sync(sock)
-        if data is None:
-            raise ConnectionError("Connection closed by server")
+            # Read response
+            data = read_message_sync(sock)
+            if data is None:
+                raise ConnectionError("Connection closed by server")
 
-        # Parse response
-        response = RPCResponse.from_dict(json.loads(data))
+            # Parse response
+            response = RPCResponse.from_dict(json.loads(data))
 
-        if response.error:
-            raise RPCError(
-                code=response.error.code,
-                message=response.error.message,
-                data=response.error.data,
-            )
+            if response.error:
+                raise RPCError(
+                    code=response.error.code,
+                    message=response.error.message,
+                    data=response.error.data,
+                )
 
-        return response.result
+            return response.result
 
-    finally:
-        sock.close()
+        except (ConnectionError, OSError, json.JSONDecodeError) as e:
+            # Retry on connection errors and corrupt responses
+            last_error = e
+            if attempt < max_retries:
+                time.sleep(retry_delay)
+            # Continue to next attempt
+        finally:
+            sock.close()
+
+    # All retries exhausted
+    raise ConnectionError(
+        f"RPC connection failed after {max_retries + 1} attempts: {last_error}"
+    )
 
 
 def get_context_params() -> dict[str, str | None]:

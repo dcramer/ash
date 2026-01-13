@@ -68,8 +68,8 @@ async def _run_server(
 
     from ash.logging import configure_logging
 
-    # Configure logging with Rich for colorful server output
-    configure_logging(use_rich=True)
+    # Configure logging with Rich for colorful server output and file logging
+    configure_logging(use_rich=True, log_to_file=True)
 
     from ash.config import WorkspaceLoader, load_config
     from ash.config.paths import get_pid_path, get_rpc_socket_path

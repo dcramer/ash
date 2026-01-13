@@ -112,5 +112,5 @@ class SkillWriterAgent(Agent):
             description="Create a new skill with proper SKILL.md format",
             system_prompt=SKILL_WRITER_PROMPT,
             allowed_tools=["read_file", "write_file", "bash"],
-            max_iterations=10,
+            max_iterations=15,
         )

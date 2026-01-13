@@ -181,7 +181,7 @@ def _filter_by_user(entries: list[dict]) -> list[dict]:
     """Filter entries to only those owned by the current user."""
     user_id = os.environ.get("ASH_USER_ID")
     if not user_id:
-        return entries  # No user context, show all (e.g., admin CLI)
+        return entries  # No user context, show all
     return [e for e in entries if e.get("user_id") == user_id]
 
 
@@ -250,29 +250,3 @@ def cancel(
     message = found.get("message", "")
     preview = f"{message[:50]}..." if len(message) > 50 else message
     typer.echo(f"Cancelled: {preview}")
-
-
-@app.command()
-def clear() -> None:
-    """Clear all scheduled tasks for the current user."""
-    user_id = os.environ.get("ASH_USER_ID")
-    entries = _read_entries()
-
-    if not entries:
-        typer.echo("No scheduled tasks to clear.")
-        return
-
-    # Separate user's entries from others
-    if user_id:
-        remaining = [e for e in entries if e.get("user_id") != user_id]
-        cleared_count = len(entries) - len(remaining)
-    else:
-        remaining = []
-        cleared_count = len(entries)
-
-    if cleared_count == 0:
-        typer.echo("No scheduled tasks to clear.")
-        return
-
-    _write_entries(remaining)
-    typer.echo(f"Cleared {cleared_count} scheduled task(s)")

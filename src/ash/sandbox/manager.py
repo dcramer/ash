@@ -89,6 +89,9 @@ class SandboxConfig:
     sessions_path: Path | None = None  # Host path to sessions directory
     sessions_access: Literal["none", "ro"] = "ro"  # none or ro (never rw)
 
+    # Logs mounting (for agent to inspect server logs)
+    logs_path: Path | None = None  # Host path to logs directory
+
     # RPC socket mounting (for sandbox to communicate with host)
     rpc_socket_path: Path | None = None  # Host path to RPC socket
 
@@ -231,6 +234,13 @@ class SandboxManager:
             volumes[str(self._config.sessions_path)] = {
                 "bind": "/sessions",
                 "mode": "ro",  # Always read-only for security
+            }
+
+        # Mount logs directory (read-only for agent to inspect server logs)
+        if self._config.logs_path and self._config.logs_path.exists():
+            volumes[str(self._config.logs_path)] = {
+                "bind": "/logs",
+                "mode": "ro",  # Always read-only
             }
 
         # Mount RPC socket for sandbox-to-host communication

@@ -78,8 +78,14 @@ class ScheduleEntry:
         try:
             from croniter import croniter
 
-            base = self.last_run or datetime.now(UTC)
-            return croniter(self.cron, base).get_next(datetime)
+            if self.last_run:
+                # Normal case: get next run after last_run
+                return croniter(self.cron, self.last_run).get_next(datetime)
+            else:
+                # Never run: get the most recent cron occurrence before now.
+                # This makes the task immediately due (since now >= prev_time).
+                # Job runs once on first startup, not once per missed occurrence.
+                return croniter(self.cron, datetime.now(UTC)).get_prev(datetime)
         except Exception as e:
             logger.warning(
                 f"Failed to parse cron expression '{self.cron}' for entry {self.id}: {e}"
