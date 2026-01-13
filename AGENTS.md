@@ -84,12 +84,16 @@ Use **uv**: `uv sync --all-groups`
 
 | Command | Purpose |
 |---------|---------|
+| `uv run ash init` | Initialize config file |
 | `uv run ash chat` | Interactive CLI chat |
 | `uv run ash serve` | Start server |
 | `uv run ash upgrade` | Run migrations, check sandbox |
 | `uv run ash sandbox build` | Build sandbox image |
-| `uv run ash memory <action>` | Manage memories (list, search, add, remove, gc, stats) |
-| `uv run ash sessions <action>` | Manage sessions (list, search, export, clear) |
+| `uv run ash memory <action>` | Manage memories (list, add, remove, clear) |
+| `uv run ash sessions <action>` | Manage sessions (list, view, search, clear) |
+| `uv run ash schedule <action>` | Manage scheduled tasks (list, cancel, clear) |
+| `uv run ash skill <action>` | Manage skills (validate, list) |
+| `uv run ash config <action>` | Configuration management (show, validate) |
 
 ## Conventions
 
@@ -149,6 +153,21 @@ Use `/verify-spec` skill to check implementation. See `.claude/skills/verify-spe
 - Specs live in `specs/<feature>.md`
 - Update spec BEFORE implementing
 - Format defined in `SPECS.md`
+
+### Spec Compliance
+
+Before merging changes to a system with a spec:
+- Verify changes comply with all MUST requirements
+- Update the spec if requirements change
+- Run `/verify-spec <feature>` for affected specs
+
+### Subsystem Patterns
+
+When modifying subsystems (memory, sessions, etc.):
+- Document public API in `__init__.py` with docstring listing what's public vs internal
+- Centralize types in `types.py`
+- Import from subsystem root (`from ash.memory import X`), not internal modules
+- Create factory functions for complex wiring (e.g., `create_memory_manager()`)
 
 ## Database
 

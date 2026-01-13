@@ -18,7 +18,7 @@ Files: src/ash/tools/builtin/web_fetch.py
 - Respect timeout (30s default)
 - Truncate content at max_length parameter
 - Return structured JSON response with metadata
-- Cache fetched content (30 min TTL)
+- Cache fetched content (15 min TTL)
 - Set appropriate User-Agent header
 
 ### SHOULD
@@ -71,7 +71,7 @@ class WebFetchTool(Tool):
 | `{"url": "https://example.com"}` | Page content in markdown | Default mode |
 | `{"url": "...", "extract_mode": "text"}` | Plain text only | No formatting |
 | URL with redirects | Content from final URL | `final_url` in metadata |
-| Repeat URL within 30 min | Cached content | `cached: true` |
+| Repeat URL within 15 min | Cached content | `cached: true` |
 | Very long page | Truncated content | `truncated: true` |
 | Invalid URL scheme | Error | Only http/https |
 | Non-HTML content type | Raw text or JSON | Content-type detection |

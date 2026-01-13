@@ -1,0 +1,123 @@
+---
+title: skill
+description: Manage skills
+sidebar:
+  order: 13
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Manage workspace skills - validate and list available skills.
+
+## Usage
+
+```bash
+uv run ash skill <subcommand> [OPTIONS]
+```
+
+## Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `validate` | Validate a skill file format |
+| `list` | List available skills |
+
+## skill validate
+
+Validate a skill file format:
+
+```bash
+uv run ash skill validate <path>
+```
+
+### Examples
+
+Validate by directory:
+
+```bash
+uv run ash skill validate ~/.ash/workspace/skills/my-skill
+```
+
+Validate by file:
+
+```bash
+uv run ash skill validate ~/.ash/workspace/skills/my-skill/SKILL.md
+```
+
+### Validation Checks
+
+- File exists and is readable
+- Has valid YAML frontmatter
+- Contains required `description` field
+- Has instructions in markdown body
+
+## skill list
+
+List available skills:
+
+```bash
+uv run ash skill list [OPTIONS]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--all`, `-a` | Include unavailable skills |
+| `--config`, `-c` | Path to configuration file |
+
+### Examples
+
+List available skills:
+
+```bash
+uv run ash skill list
+```
+
+Include unavailable skills:
+
+```bash
+uv run ash skill list --all
+```
+
+### Output
+
+```
+┌─────────────┬─────────────────────────┬───────────┬────────────────────────────────────┐
+│ Name        │ Description             │ Status    │ Path                               │
+├─────────────┼─────────────────────────┼───────────┼────────────────────────────────────┤
+│ weather     │ Check weather forecast  │ available │ /home/user/.ash/.../skills/weather │
+│ api-client  │ Call external API       │ missing   │ /home/user/.ash/.../skills/api-... │
+│             │                         │ API_KEY   │                                    │
+└─────────────┴─────────────────────────┴───────────┴────────────────────────────────────┘
+```
+
+## Creating Skills
+
+To create a new skill, simply create a directory with a `SKILL.md` file:
+
+```bash
+# Create skill directory
+mkdir ~/.ash/workspace/skills/my-skill
+
+# Create the skill file
+cat > ~/.ash/workspace/skills/my-skill/SKILL.md << 'EOF'
+---
+description: My custom skill
+---
+
+Instructions for the agent go here...
+EOF
+
+# Validate the skill
+uv run ash skill validate ~/.ash/workspace/skills/my-skill
+```
+
+<Aside type="tip">
+  Skills are automatically discovered when the agent starts. No reload needed.
+</Aside>
+
+## See Also
+
+- [Skills Architecture](/architecture/skills/) - How skills work
+- [Extending Ash](/development/extending/) - Adding custom skills

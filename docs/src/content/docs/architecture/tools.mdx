@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-Tools extend the agent's capabilities with actions like running commands or searching the web.
+Tools extend the agent's capabilities with actions like running commands, searching the web, and reading files.
 
 ## Tool Interface
 
@@ -13,13 +13,13 @@ Location: `src/ash/tools/base.py`
 
 ```python
 from abc import ABC, abstractmethod
-from pydantic import BaseModel
+from typing import Any
 
 class Tool(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """Tool name used in LLM calls."""
+        """Unique identifier for this tool."""
 
     @property
     @abstractmethod
@@ -28,13 +28,13 @@ class Tool(ABC):
 
     @property
     @abstractmethod
-    def input_schema(self) -> type[BaseModel]:
-        """Pydantic model for input validation."""
+    def input_schema(self) -> dict[str, Any]:
+        """JSON Schema for input parameters."""
 
     @abstractmethod
     async def execute(
         self,
-        input: BaseModel,
+        input_data: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
         """Execute the tool and return result."""
@@ -45,11 +45,14 @@ class Tool(ABC):
 Context provided to tool execution:
 
 ```python
+@dataclass
 class ToolContext:
-    session_id: str
-    user_id: str
-    config: AshConfig
-    workspace: Workspace
+    session_id: str | None = None
+    user_id: str | None = None
+    chat_id: str | None = None
+    provider: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
 ```
 
 ## ToolResult
@@ -57,10 +60,19 @@ class ToolContext:
 Tool execution result:
 
 ```python
+@dataclass
 class ToolResult:
-    success: bool
-    output: str
-    error: str | None
+    content: str
+    is_error: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def success(cls, content: str, **metadata) -> "ToolResult":
+        """Create a successful result."""
+
+    @classmethod
+    def error(cls, message: str, **metadata) -> "ToolResult":
+        """Create an error result."""
 ```
 
 ## Built-in Tools
@@ -72,13 +84,19 @@ Location: `src/ash/tools/builtin/bash.py`
 Executes commands in the Docker sandbox:
 
 ```python
-class BashInput(BaseModel):
-    command: str
-
 class BashTool(Tool):
     name = "bash"
     description = "Execute bash commands in a sandboxed environment"
-    input_schema = BashInput
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "The bash command to execute.",
+            },
+        },
+        "required": ["command"],
+    }
 ```
 
 ### Web Search Tool
@@ -88,26 +106,157 @@ Location: `src/ash/tools/builtin/web_search.py`
 Searches the web using Brave Search:
 
 ```python
-class WebSearchInput(BaseModel):
-    query: str
-
 class WebSearchTool(Tool):
     name = "web_search"
     description = "Search the web for information"
-    input_schema = WebSearchInput
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query.",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Maximum results to return (default: 10).",
+            },
+        },
+        "required": ["query"],
+    }
 ```
 
-### Memory Tool
+### Web Fetch Tool
 
-Location: `src/ash/tools/builtin/memory.py`
+Location: `src/ash/tools/builtin/web_fetch.py`
 
-Manages persistent memories:
+Fetches and extracts content from URLs:
 
 ```python
-class MemoryTool(Tool):
-    name = "memory"
-    description = "Store and recall information"
+class WebFetchTool(Tool):
+    name = "web_fetch"
+    description = "Fetch and read the content of a web page"
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "The URL to fetch (http or https).",
+            },
+            "extract_mode": {
+                "type": "string",
+                "enum": ["text", "markdown"],
+                "description": "Content format: 'markdown' preserves structure.",
+            },
+        },
+        "required": ["url"],
+    }
 ```
+
+Features:
+- Extracts readable content from HTML pages
+- Converts to markdown-like format (links, headings, lists)
+- Handles redirects (up to 5 hops)
+- Supports text/HTML/JSON content types
+
+### Read File Tool
+
+Location: `src/ash/tools/builtin/files.py`
+
+Reads file contents from the workspace:
+
+```python
+class ReadFileTool(Tool):
+    name = "read_file"
+    description = "Read file contents from the workspace"
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "Path to the file (relative to workspace).",
+            },
+            "offset": {
+                "type": "integer",
+                "description": "Line number to start from (1-indexed).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum lines to read.",
+            },
+        },
+        "required": ["file_path"],
+    }
+```
+
+Features:
+- Returns content with line numbers
+- Pagination via offset/limit
+- Automatic truncation for large files
+
+### Write File Tool
+
+Location: `src/ash/tools/builtin/files.py`
+
+Writes content to files in the workspace:
+
+```python
+class WriteFileTool(Tool):
+    name = "write_file"
+    description = "Write content to a file in the workspace"
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "Path to write to (relative to workspace).",
+            },
+            "content": {
+                "type": "string",
+                "description": "Content to write to the file.",
+            },
+        },
+        "required": ["file_path", "content"],
+    }
+```
+
+Features:
+- Creates files if they don't exist
+- Creates parent directories automatically
+- Size limits enforced
+
+### Use Agent Tool
+
+Location: `src/ash/tools/builtin/agents.py`
+
+Invokes built-in agents for complex tasks:
+
+```python
+class UseAgentTool(Tool):
+    name = "use_agent"
+    description = "Run a specialized agent for complex tasks"
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "agent": {
+                "type": "string",
+                "description": "Name of the agent to run.",
+            },
+            "message": {
+                "type": "string",
+                "description": "Message/task for the agent.",
+            },
+            "input": {
+                "type": "object",
+                "description": "Additional input data (optional).",
+            },
+        },
+        "required": ["agent", "message"],
+    }
+```
+
+Built-in agents include:
+- **research** - Multi-step research tasks
+- **skill-writer** - Creates new skills autonomously
 
 ## Tool Registry
 
@@ -117,10 +266,11 @@ Tools are discovered and registered:
 
 ```python
 registry = ToolRegistry()
-registry.register(BashTool())
-registry.register(WebSearchTool())
+registry.register(BashTool(executor))
+registry.register(WebSearchTool(cache=cache))
 
 tools = registry.all()
+tool = registry.get("bash")
 ```
 
 ## Tool Execution
@@ -137,29 +287,50 @@ class ToolExecutor:
         context: ToolContext,
     ) -> ToolResult:
         tool = self.registry.get(tool_call.name)
-        input = tool.input_schema.model_validate(tool_call.input)
-        return await tool.execute(input, context)
+        return await tool.execute(tool_call.input, context)
 ```
 
 ## Creating Custom Tools
 
 1. Create a class implementing `Tool`
-2. Define input schema as Pydantic model
-3. Implement `execute()` method
+2. Define `input_schema` as a JSON Schema dict
+3. Implement async `execute()` method
 4. Register with the tool registry
 
 Example:
 
 ```python
-class WeatherInput(BaseModel):
-    location: str
+from typing import Any
+from ash.tools.base import Tool, ToolContext, ToolResult
 
 class WeatherTool(Tool):
-    name = "weather"
-    description = "Get current weather for a location"
-    input_schema = WeatherInput
+    @property
+    def name(self) -> str:
+        return "weather"
 
-    async def execute(self, input: WeatherInput, context: ToolContext) -> ToolResult:
-        # Implementation
-        return ToolResult(success=True, output="...")
+    @property
+    def description(self) -> str:
+        return "Get current weather for a location"
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "City name or coordinates.",
+                },
+            },
+            "required": ["location"],
+        }
+
+    async def execute(
+        self,
+        input_data: dict[str, Any],
+        context: ToolContext,
+    ) -> ToolResult:
+        location = input_data.get("location")
+        # Implementation here
+        return ToolResult.success(f"Weather for {location}: 72°F, sunny")
 ```

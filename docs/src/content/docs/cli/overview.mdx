@@ -24,11 +24,14 @@ uv run ash [OPTIONS] COMMAND [ARGS]
 
 | Command | Description |
 |---------|-------------|
+| [`init`](/cli/init/) | Initialize configuration file |
 | [`chat`](/cli/chat/) | Interactive chat or single prompt |
 | [`serve`](/cli/serve/) | Start the server |
 | [`config`](/cli/config/) | Configuration management |
 | [`memory`](/cli/memory/) | Memory management |
 | [`sessions`](/cli/sessions/) | Session management |
+| [`schedule`](/cli/schedule/) | Scheduled task management |
+| [`skill`](/cli/skill/) | Skill management |
 | [`sandbox`](/cli/sandbox/) | Sandbox management |
 | [`db`](/cli/db/) | Database operations |
 | [`upgrade`](/cli/upgrade/) | Run migrations and checks |
@@ -54,3 +57,39 @@ uv run ash memory --help
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
 | `BRAVE_SEARCH_API_KEY` | Brave Search API key |
 | `SENTRY_DSN` | Sentry DSN |
+
+## Quick Start
+
+1. Initialize configuration:
+   ```bash
+   uv run ash init
+   ```
+
+2. Add your API keys to `~/.ash/config.toml`
+
+3. Run setup tasks:
+   ```bash
+   uv run ash upgrade
+   ```
+
+4. Start chatting:
+   ```bash
+   uv run ash chat
+   ```
+
+## Running as a Service
+
+For persistent operation with Telegram:
+
+```bash
+# Install as system service
+uv run ash service install
+
+# Start the service
+uv run ash service start
+
+# View logs
+uv run ash service logs
+```
+
+See [`service`](/cli/service/) for details.

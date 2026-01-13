@@ -8,6 +8,16 @@ from ash.cli.console import error
 from ash.config import AshConfig, load_config
 from ash.db import Database, init_database
 
+# Model options by provider (ordered by recommendation for cost/speed)
+ANTHROPIC_MODELS = [
+    (
+        "claude-haiku-4-5-20251001",
+        "Claude Haiku 4.5 (Recommended - fast, cost-effective)",
+    ),
+    ("claude-sonnet-4-5-20250929", "Claude Sonnet 4.5 (More capable, higher cost)"),
+    ("claude-opus-4-5-20251101", "Claude Opus 4.5 (Most capable, highest cost)"),
+]
+
 
 def get_config(config_path: Path | None = None) -> AshConfig:
     """Load configuration with error handling.
@@ -24,7 +34,7 @@ def get_config(config_path: Path | None = None) -> AshConfig:
     try:
         return load_config(config_path)
     except FileNotFoundError:
-        error("No configuration found. Run 'ash config init' first.")
+        error("No configuration found. Run 'ash init' first.")
         raise typer.Exit(1) from None
 
 
@@ -48,8 +58,6 @@ def generate_config_template() -> str:
     Returns:
         TOML config template string.
     """
-    from ash.cli.setup import ANTHROPIC_MODELS
-
     default_model = ANTHROPIC_MODELS[0][0]  # Haiku
     sonnet_model = ANTHROPIC_MODELS[1][0]  # Sonnet
 

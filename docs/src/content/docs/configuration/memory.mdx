@@ -1,6 +1,6 @@
 ---
 title: Memory
-description: Configure conversation memory and context management
+description: Configure conversation memory, context management, and extraction
 sidebar:
   order: 6
 ---
@@ -20,7 +20,7 @@ recency_window = 10
 system_prompt_buffer = 8000
 ```
 
-## Options
+## Core Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -29,6 +29,8 @@ system_prompt_buffer = 8000
 | `context_token_budget` | int | `100000` | Target context window size |
 | `recency_window` | int | `10` | Always keep last N messages |
 | `system_prompt_buffer` | int | `8000` | Reserved tokens for system prompt |
+| `auto_gc` | bool | `true` | Run garbage collection on server startup |
+| `max_entries` | int | `null` | Cap on active memories (null = unlimited) |
 
 ## Context Management
 
@@ -40,6 +42,52 @@ Ash uses smart pruning to fit conversations within token limits:
 
 <Aside type="tip">
   Increase `context_token_budget` for longer conversations, but watch API costs.
+</Aside>
+
+## Compaction
+
+When context grows too large, Ash summarizes old messages instead of dropping them:
+
+```toml
+[memory]
+compaction_enabled = true
+compaction_reserve_tokens = 16384
+compaction_keep_recent_tokens = 20000
+compaction_summary_max_tokens = 2000
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `compaction_enabled` | bool | `true` | Enable context compaction |
+| `compaction_reserve_tokens` | int | `16384` | Buffer before triggering compaction |
+| `compaction_keep_recent_tokens` | int | `20000` | Always keep recent context |
+| `compaction_summary_max_tokens` | int | `2000` | Max tokens for summary |
+
+When the context exceeds the budget, older messages are summarized by the LLM, preserving important context while reducing tokens.
+
+## Memory Extraction
+
+Ash can automatically extract facts from conversations and store them as memories:
+
+```toml
+[memory]
+extraction_enabled = true
+extraction_model = null  # Use default model
+extraction_min_message_length = 20
+extraction_debounce_seconds = 30
+extraction_confidence_threshold = 0.7
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `extraction_enabled` | bool | `true` | Enable auto memory extraction |
+| `extraction_model` | string | `null` | Model for extraction (null = default) |
+| `extraction_min_message_length` | int | `20` | Skip short messages |
+| `extraction_debounce_seconds` | int | `30` | Min seconds between extractions |
+| `extraction_confidence_threshold` | float | `0.7` | Minimum confidence for storing |
+
+<Aside type="note">
+  Memory extraction runs in the background after conversations, so it doesn't slow down responses.
 </Aside>
 
 ## Database Location
@@ -71,16 +119,22 @@ Add a memory:
 uv run ash memory add -q "Remember to check logs daily"
 ```
 
-Clear all memories:
+Remove a memory:
 
 ```bash
-uv run ash memory clear
+uv run ash memory remove --id <uuid>
 ```
 
 View statistics:
 
 ```bash
 uv run ash memory stats
+```
+
+Run garbage collection:
+
+```bash
+uv run ash memory gc
 ```
 
 ## Sessions
@@ -100,7 +154,7 @@ uv run ash sessions search -q "keyword"
 Export a session:
 
 ```bash
-uv run ash sessions export --id <session-id>
+uv run ash sessions export -o backup.json
 ```
 
 ## Database Migrations
@@ -115,4 +169,31 @@ Check migration status:
 
 ```bash
 uv run ash db status
+```
+
+## Full Example
+
+```toml
+[memory]
+database_path = "~/.ash/memory.db"
+
+# Context management
+max_context_messages = 30
+context_token_budget = 150000
+recency_window = 15
+system_prompt_buffer = 10000
+
+# Compaction
+compaction_enabled = true
+compaction_reserve_tokens = 20000
+compaction_keep_recent_tokens = 25000
+
+# Extraction
+extraction_enabled = true
+extraction_confidence_threshold = 0.8
+extraction_debounce_seconds = 60
+
+# Maintenance
+auto_gc = true
+max_entries = 1000
 ```

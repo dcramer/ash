@@ -1,13 +1,13 @@
 ---
 title: Extending Ash
-description: Adding tools, skills, and providers
+description: Adding tools, skills, providers, and agents
 sidebar:
   order: 4
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
-Extend Ash with custom tools, skills, and providers.
+Extend Ash with custom tools, skills, providers, and agents.
 
 ## Adding Tools
 
@@ -17,13 +17,8 @@ Tools are Python classes that implement the `Tool` interface.
 
 ```python
 from abc import ABC, abstractmethod
-from pydantic import BaseModel
+from typing import Any
 from ash.tools.base import Tool, ToolContext, ToolResult
-
-class MyToolInput(BaseModel):
-    """Input schema for validation."""
-    query: str
-    limit: int = 10
 
 class MyTool(Tool):
     @property
@@ -35,17 +30,33 @@ class MyTool(Tool):
         return "Description shown to the LLM"
 
     @property
-    def input_schema(self) -> type[BaseModel]:
-        return MyToolInput
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results.",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        }
 
     async def execute(
         self,
-        input: MyToolInput,
+        input_data: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
+        query = input_data.get("query")
+        limit = input_data.get("limit", 10)
         # Implementation
-        result = await do_something(input.query)
-        return ToolResult(success=True, output=result)
+        result = await do_something(query, limit)
+        return ToolResult.success(result)
 ```
 
 ### Registering Tools
@@ -61,51 +72,94 @@ registry.register(MyTool())
 
 ## Adding Skills
 
-Skills are YAML-defined capabilities executed in the sandbox.
+Skills are instruction files that the agent reads and follows. They use markdown with YAML frontmatter.
 
 ### Skill Format
 
-Create `~/.ash/workspace/skills/my_skill.yaml`:
+<Tabs>
+  <TabItem label="Directory Format (Preferred)">
+Create `~/.ash/workspace/skills/my-skill/SKILL.md`:
 
-```yaml
-name: my_skill
+```markdown
+---
 description: What this skill does
-
-requirements:
+requires:
   bins:
     - curl
   env:
     - API_KEY
+required_tools:
+  - bash
+  - web_fetch
+---
 
-inputs:
-  query:
-    type: string
-    description: The search query
-    required: true
-  format:
-    type: string
-    description: Output format
-    default: json
+## Instructions
 
-script: |
-  curl -s "https://api.example.com/search?q=$query&format=$format" \
-    -H "Authorization: Bearer $API_KEY"
+Step-by-step instructions the agent will follow...
+
+1. First, check if the API key is available
+2. Use bash to call the API
+3. Parse the response and format the output
+```
+  </TabItem>
+  <TabItem label="Flat File Format">
+Create `~/.ash/workspace/skills/my-skill.md`:
+
+```markdown
+---
+description: What this skill does
+---
+
+Instructions the agent will follow...
+```
+  </TabItem>
+</Tabs>
+
+### Frontmatter Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `description` | string | Yes | One-line description |
+| `requires` | object | No | System requirements |
+| `required_tools` | list | No | Tools the skill needs |
+| `input_schema` | object | No | JSON Schema for inputs |
+
+### Requirements
+
+```yaml
+requires:
+  bins:           # Required binaries (must be in PATH)
+    - curl
+    - jq
+  env:            # Required environment variables
+    - API_KEY
+  os:             # Supported operating systems
+    - darwin
+    - linux
 ```
 
-### Skill Configuration
+If requirements aren't met, the skill is hidden from the agent.
 
-Add config in `config.toml`:
+### Using the CLI
 
-```toml
-[skills.my_skill]
-api_key = "secret"
+```bash
+# Create a new skill
+uv run ash skill init my-skill -d "Do something useful"
+
+# Validate a skill file
+uv run ash skill validate ~/.ash/workspace/skills/my-skill
+
+# List available skills
+uv run ash skill list
 ```
 
-Config values become environment variables in the script.
+<Aside type="tip">
+  Skills are instruction-based, not script-based. Write clear steps the agent can follow using its available tools.
+</Aside>
 
 ## Adding Providers
 
-Providers handle communication channels.
+Providers handle communication channels (Telegram, CLI, etc.).
 
 ### Provider Interface
 
@@ -208,3 +262,53 @@ class MyLLMProvider(LLMProvider):
 ```
 
 Register in `src/ash/llm/registry.py`.
+
+## Adding Agents
+
+Agents are specialized sub-processes that run in isolated LLM loops with restricted tool access.
+
+### Agent Interface
+
+Location: `src/ash/agents/base.py`
+
+```python
+from abc import ABC, abstractmethod
+from ash.agents.base import Agent, AgentConfig, AgentContext, AgentResult
+
+class MyAgent(Agent):
+    @property
+    def config(self) -> AgentConfig:
+        return AgentConfig(
+            name="my-agent",
+            description="What this agent does",
+            system_prompt="You are a specialized agent that...",
+            model="default",  # Model alias from config
+            max_iterations=25,
+            allowed_tools=["bash", "web_search"],  # Restrict tools
+        )
+
+    async def execute(
+        self,
+        message: str,
+        context: AgentContext,
+    ) -> AgentResult:
+        # Run agent logic using self.llm_provider and self.tools
+        return AgentResult(content="Result", is_error=False)
+```
+
+### Built-in Agents
+
+| Agent | Purpose |
+|-------|---------|
+| `research` | Multi-step research tasks |
+| `skill-writer` | Creates new skills autonomously |
+
+### Agent Configuration
+
+Override agent settings in `config.toml`:
+
+```toml
+[agents.research]
+model = "sonnet"  # Use sonnet model for research
+max_iterations = 50
+```

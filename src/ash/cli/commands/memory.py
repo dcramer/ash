@@ -18,7 +18,7 @@ def register(app: typer.Typer) -> None:
     def memory(
         action: Annotated[
             str,
-            typer.Argument(help="Action: list, search, add, remove, clear, stats, gc"),
+            typer.Argument(help="Action: list, add, remove, clear"),
         ],
         query: Annotated[
             str | None,
@@ -116,16 +116,14 @@ def register(app: typer.Typer) -> None:
 
         Examples:
             ash memory list                    # List all memories
+            ash memory list -q "api keys"      # Filter memories by content
             ash memory list --scope personal   # List personal memories only
             ash memory list --scope shared     # List shared/group memories
             ash memory list --user bob         # List memories owned by bob
-            ash memory search -q "api keys"    # Search memories
             ash memory add -q "User prefers dark mode"
             ash memory remove --id <uuid>      # Remove specific entry
             ash memory remove --all            # Remove all entries
-            ash memory stats                   # Show statistics
-            ash memory stats --scope shared    # Stats for shared memories
-            ash memory gc                      # Remove expired and superseded memories
+            ash memory clear                   # Clear all memory entries
         """
         try:
             asyncio.run(
@@ -178,14 +176,6 @@ async def _run_memory_action(
 
             if action == "list":
                 await _memory_list(
-                    session, limit, include_expired, user_id, chat_id, scope
-                )
-
-            elif action == "search":
-                if not query:
-                    error("--query is required for search")
-                    raise typer.Exit(1)
-                await _memory_search(
                     session, query, limit, include_expired, user_id, chat_id, scope
                 )
 
@@ -203,17 +193,9 @@ async def _run_memory_action(
             elif action == "clear":
                 await _memory_clear(session, force)
 
-            elif action == "stats":
-                await _memory_stats(session, user_id, chat_id, scope)
-
-            elif action == "gc":
-                await _memory_gc(session, force)
-
             else:
                 error(f"Unknown action: {action}")
-                console.print(
-                    "Valid actions: list, search, add, remove, clear, stats, gc"
-                )
+                console.print("Valid actions: list, add, remove, clear")
                 raise typer.Exit(1)
 
     finally:
@@ -222,6 +204,7 @@ async def _run_memory_action(
 
 async def _memory_list(
     session,
+    query: str | None,
     limit: int,
     include_expired: bool,
     user_id: str | None,
@@ -235,6 +218,10 @@ async def _memory_list(
     from ash.db.models import Memory as MemoryModel
 
     stmt = select(MemoryModel).order_by(MemoryModel.created_at.desc()).limit(limit)
+
+    # Filter by content if query provided
+    if query:
+        stmt = stmt.where(MemoryModel.content.ilike(f"%{query}%"))
 
     now = datetime.now(UTC)
     if not include_expired:
@@ -264,10 +251,14 @@ async def _memory_list(
     entries = result.scalars().all()
 
     if not entries:
-        warning("No memory entries found")
+        if query:
+            warning(f"No memories found matching '{query}'")
+        else:
+            warning("No memory entries found")
         return
 
-    table = Table(title="Memory Entries")
+    title = f"Memory Search: '{query}'" if query else "Memory Entries"
+    table = Table(title=title)
     table.add_column("ID", style="dim", max_width=8)
     table.add_column("Scope", style="magenta", max_width=10)
     table.add_column("Created", style="dim")
@@ -311,85 +302,11 @@ async def _memory_list(
     dim(f"\nShowing {len(entries)} entries")
 
 
-async def _memory_search(
-    session,
-    query: str,
-    limit: int,
-    include_expired: bool,
-    user_id: str | None,
-    chat_id: str | None,
-    scope: str | None,
-) -> None:
-    """Search memory entries."""
-    from rich.table import Table
-    from sqlalchemy import select
-
-    from ash.db.models import Memory as MemoryModel
-
-    stmt = (
-        select(MemoryModel)
-        .where(MemoryModel.content.ilike(f"%{query}%"))
-        .order_by(MemoryModel.created_at.desc())
-        .limit(limit)
-    )
-
-    now = datetime.now(UTC)
-    if not include_expired:
-        stmt = stmt.where(
-            (MemoryModel.expires_at.is_(None)) | (MemoryModel.expires_at > now)
-        )
-
-    # Apply filters
-    if user_id:
-        stmt = stmt.where(MemoryModel.owner_user_id == user_id)
-    if chat_id:
-        stmt = stmt.where(MemoryModel.chat_id == chat_id)
-    if scope == "personal":
-        stmt = stmt.where(MemoryModel.owner_user_id.isnot(None))
-    elif scope == "shared":
-        stmt = stmt.where(
-            MemoryModel.owner_user_id.is_(None),
-            MemoryModel.chat_id.isnot(None),
-        )
-    elif scope == "global":
-        stmt = stmt.where(
-            MemoryModel.owner_user_id.is_(None),
-            MemoryModel.chat_id.is_(None),
-        )
-
-    result = await session.execute(stmt)
-    entries = result.scalars().all()
-
-    if not entries:
-        warning(f"No memories found matching '{query}'")
-        return
-
-    table = Table(title=f"Memory Search: '{query}'")
-    table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Created", style="dim")
-    table.add_column("Source", style="cyan")
-    table.add_column("Content", style="white", max_width=60)
-
-    for entry in entries:
-        content = (
-            entry.content[:100] + "..." if len(entry.content) > 100 else entry.content
-        )
-        content = content.replace("\n", " ")
-        table.add_row(
-            entry.id[:8],
-            entry.created_at.strftime("%Y-%m-%d"),
-            entry.source or "[dim]-[/dim]",
-            content,
-        )
-
-    console.print(table)
-
-
 async def _memory_add(
     session, content: str, source: str | None, expires_days: int | None
 ) -> None:
     """Add a memory entry."""
-    from ash.memory.store import MemoryStore
+    from ash.memory import MemoryStore
 
     store = MemoryStore(session)
 
@@ -543,179 +460,3 @@ async def _memory_clear(session, force: bool) -> None:
     await session.commit()
 
     success(f"Cleared {result.rowcount} memory entries")
-
-
-async def _memory_stats(
-    session, user_id: str | None, chat_id: str | None, scope: str | None
-) -> None:
-    """Show memory statistics."""
-    from rich.table import Table
-    from sqlalchemy import func, select
-
-    from ash.db.models import Memory as MemoryModel
-
-    now = datetime.now(UTC)
-
-    # Build base filter
-    base_filters = []
-    if user_id:
-        base_filters.append(MemoryModel.owner_user_id == user_id)
-    if chat_id:
-        base_filters.append(MemoryModel.chat_id == chat_id)
-    if scope == "personal":
-        base_filters.append(MemoryModel.owner_user_id.isnot(None))
-    elif scope == "shared":
-        base_filters.append(MemoryModel.owner_user_id.is_(None))
-        base_filters.append(MemoryModel.chat_id.isnot(None))
-    elif scope == "global":
-        base_filters.append(MemoryModel.owner_user_id.is_(None))
-        base_filters.append(MemoryModel.chat_id.is_(None))
-
-    def apply_filters(stmt):
-        for f in base_filters:
-            stmt = stmt.where(f)
-        return stmt
-
-    # Total count
-    total_stmt = select(func.count(MemoryModel.id))
-    total = await session.scalar(apply_filters(total_stmt))
-
-    # Active (non-expired) count
-    active_stmt = select(func.count(MemoryModel.id)).where(
-        (MemoryModel.expires_at.is_(None)) | (MemoryModel.expires_at > now)
-    )
-    active = await session.scalar(apply_filters(active_stmt))
-
-    # Expired count
-    expired_stmt = select(func.count(MemoryModel.id)).where(
-        MemoryModel.expires_at <= now
-    )
-    expired = await session.scalar(apply_filters(expired_stmt))
-
-    # Superseded count
-    superseded_stmt = select(func.count(MemoryModel.id)).where(
-        MemoryModel.superseded_at.isnot(None)
-    )
-    superseded = await session.scalar(apply_filters(superseded_stmt))
-
-    # By scope (only if no scope filter)
-    scope_stats = {}
-    if not scope:
-        personal_stmt = select(func.count(MemoryModel.id)).where(
-            MemoryModel.owner_user_id.isnot(None)
-        )
-        scope_stats["personal"] = (
-            await session.scalar(apply_filters(personal_stmt)) or 0
-        )
-
-        shared_stmt = select(func.count(MemoryModel.id)).where(
-            MemoryModel.owner_user_id.is_(None),
-            MemoryModel.chat_id.isnot(None),
-        )
-        scope_stats["shared"] = await session.scalar(apply_filters(shared_stmt)) or 0
-
-        global_stmt = select(func.count(MemoryModel.id)).where(
-            MemoryModel.owner_user_id.is_(None),
-            MemoryModel.chat_id.is_(None),
-        )
-        scope_stats["global"] = await session.scalar(apply_filters(global_stmt)) or 0
-
-    # By source
-    source_stmt = select(MemoryModel.source, func.count(MemoryModel.id)).group_by(
-        MemoryModel.source
-    )
-    source_counts = await session.execute(apply_filters(source_stmt))
-    source_stats = dict(source_counts.all())
-
-    # Build title with filters
-    filter_desc = []
-    if user_id:
-        filter_desc.append(f"user={user_id}")
-    if chat_id:
-        filter_desc.append(f"chat={chat_id}")
-    if scope:
-        filter_desc.append(f"scope={scope}")
-    title = "Memory Statistics"
-    if filter_desc:
-        title += f" [{', '.join(filter_desc)}]"
-
-    table = Table(title=title)
-    table.add_column("Metric", style="cyan")
-    table.add_column("Count", style="green", justify="right")
-
-    table.add_row("Total Entries", str(total or 0))
-    table.add_row("Active", str(active or 0))
-    table.add_row("Expired", str(expired or 0))
-    table.add_row("Superseded", str(superseded or 0))
-
-    if scope_stats:
-        table.add_row("", "")  # Spacer
-        table.add_row("[bold]By Scope[/bold]", "")
-        table.add_row("  Personal", str(scope_stats.get("personal", 0)))
-        table.add_row("  Shared", str(scope_stats.get("shared", 0)))
-        table.add_row("  Global", str(scope_stats.get("global", 0)))
-
-    table.add_row("", "")  # Spacer
-    table.add_row("[bold]By Source[/bold]", "")
-    for src, count in sorted(source_stats.items(), key=lambda x: -x[1]):
-        src_label = src if src else "(no source)"
-        table.add_row(f"  {src_label}", str(count))
-
-    console.print(table)
-
-
-async def _memory_gc(session, force: bool) -> None:
-    """Garbage collect expired and superseded memories."""
-    from sqlalchemy import delete, select, text
-
-    from ash.db.models import Memory as MemoryModel
-
-    now = datetime.now(UTC)
-
-    # Count entries to be cleaned
-    expired_stmt = select(MemoryModel.id).where(MemoryModel.expires_at <= now)
-    expired_result = await session.execute(expired_stmt)
-    expired_ids = [r[0] for r in expired_result.all()]
-
-    superseded_stmt = select(MemoryModel.id).where(
-        MemoryModel.superseded_at.isnot(None)
-    )
-    superseded_result = await session.execute(superseded_stmt)
-    superseded_ids = [r[0] for r in superseded_result.all()]
-
-    # Combine and deduplicate
-    ids_to_remove = set(expired_ids) | set(superseded_ids)
-
-    if not ids_to_remove:
-        success("No expired or superseded memories to clean up")
-        return
-
-    if not force:
-        warning(
-            f"Found {len(expired_ids)} expired and "
-            f"{len(superseded_ids)} superseded memories to remove."
-        )
-        confirm = typer.confirm("Proceed with cleanup?")
-        if not confirm:
-            dim("Cancelled")
-            return
-
-    # Delete embeddings for these memories
-    try:
-        for memory_id in ids_to_remove:
-            await session.execute(
-                text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
-                {"id": memory_id},
-            )
-    except Exception:  # noqa: S110
-        pass
-
-    # Delete the memory entries
-    delete_stmt = delete(MemoryModel).where(MemoryModel.id.in_(ids_to_remove))
-    result = await session.execute(delete_stmt)
-    await session.commit()
-
-    success(
-        f"Garbage collected {result.rowcount} memories "
-        f"({len(expired_ids)} expired, {len(superseded_ids)} superseded)"
-    )

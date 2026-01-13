@@ -1,23 +1,41 @@
 ---
-title: ash sessions
+title: sessions
 description: Manage conversation sessions
 sidebar:
   order: 5
 ---
+
+import { Aside } from '@astrojs/starlight/components';
 
 Manage conversation history and sessions.
 
 ## Usage
 
 ```bash
-uv run ash sessions COMMAND [OPTIONS]
+uv run ash sessions <action> [OPTIONS]
 ```
 
-## Commands
+## Actions
 
-### list
+| Action | Description |
+|--------|-------------|
+| `list` | List recent sessions |
+| `view` | View a session with full conversation |
+| `search` | Search messages across sessions |
+| `clear` | Clear all session history |
 
-List all sessions:
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--query`, `-q` | Search query or session key |
+| `--limit`, `-n` | Maximum entries to show (default: 20) |
+| `--force`, `-f` | Skip confirmation prompts |
+| `--verbose`, `-v` | Show full tool outputs (for view) |
+
+## list
+
+List recent sessions:
 
 ```bash
 uv run ash sessions list
@@ -26,43 +44,107 @@ uv run ash sessions list
 Options:
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--limit`, `-l` | 50 | Maximum sessions to show |
+| `--limit`, `-n` | 20 | Maximum sessions to show |
 
-### search
+Output:
+```
+┌────────────────────┬──────────┬───────────────┬──────────┬──────────────────┐
+│ Key                │ Provider │ Chat ID       │ Messages │ Created          │
+├────────────────────┼──────────┼───────────────┼──────────┼──────────────────┤
+│ telegram_-542...   │ telegram │ -54212345     │ 24       │ 2024-01-15 10:30 │
+│ cli_default        │ cli      │ default       │ 156      │ 2024-01-14 09:15 │
+└────────────────────┴──────────┴───────────────┴──────────┴──────────────────┘
+```
 
-Search message history:
+## view
+
+View a session with full conversation and tool calls:
 
 ```bash
-uv run ash sessions search -q "docker commands"
+uv run ash sessions view -q <session-key>
+```
+
+The session key can be a partial match:
+
+```bash
+# View Telegram session (fuzzy match)
+uv run ash sessions view -q telegram_-542
+
+# Show full tool outputs
+uv run ash sessions view -q telegram_-542 -v
+```
+
+Output shows:
+- Messages with timestamps
+- Tool calls with their results
+- Context compaction events
+- User/assistant roles with formatting
+
+<Aside type="tip">
+  Use `-v` (verbose) to see full tool outputs instead of truncated versions.
+</Aside>
+
+## search
+
+Search messages across all sessions:
+
+```bash
+uv run ash sessions search -q "docker"
 ```
 
 Options:
 | Option | Description |
 |--------|-------------|
 | `--query`, `-q` | Search query (required) |
-| `--limit`, `-l` | Maximum results |
+| `--limit`, `-n` | Maximum results (default: 20) |
 
-### export
-
-Export a session to JSON:
-
-```bash
-uv run ash sessions export --id <session-id>
+Output:
+```
+┌───────────────┬──────────────────┬───────────┬────────────────────────────────┐
+│ Session       │ Time             │ Role      │ Content                        │
+├───────────────┼──────────────────┼───────────┼────────────────────────────────┤
+│ telegram_-542 │ 2024-01-15 10:30 │ user      │ How do I run docker commands...│
+│ cli_default   │ 2024-01-14 09:15 │ assistant │ To build a docker image...     │
+└───────────────┴──────────────────┴───────────┴────────────────────────────────┘
 ```
 
-Options:
-| Option | Description |
-|--------|-------------|
-| `--id` | Session ID (required) |
-| `--output`, `-o` | Output file path |
-
-### clear
+## clear
 
 Clear all session history:
 
 ```bash
 uv run ash sessions clear
 ```
+
+Force clear without confirmation:
+
+```bash
+uv run ash sessions clear --force
+```
+
+<Aside type="caution">
+  This permanently deletes all conversation history. Use `--force` carefully.
+</Aside>
+
+## Storage
+
+Sessions are stored as JSONL files in `~/.ash/sessions/`:
+
+```
+~/.ash/sessions/
+├── telegram_-54212345/
+│   └── transcript.jsonl
+├── cli_default/
+│   └── transcript.jsonl
+└── ...
+```
+
+Each session directory contains a `transcript.jsonl` with all messages, tool calls, and results.
+
+<Aside type="tip">
+  Since sessions are plain JSONL files, you can use standard Unix tools to inspect them:
+  `cat`, `grep`, `jq`, etc.
+</Aside>
 
 ## Examples
 
@@ -78,8 +160,12 @@ Find conversations about Python:
 uv run ash sessions search -q "python"
 ```
 
-Export a session:
+View a specific session:
 
 ```bash
-uv run ash sessions export --id abc123 -o session.json
+uv run ash sessions view -q cli_default
 ```
+
+## See Also
+
+- [Memory Configuration](/configuration/memory/) - Context and storage settings

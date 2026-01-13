@@ -14,7 +14,7 @@ def register(app: typer.Typer) -> None:
     def schedule(
         action: Annotated[
             str,
-            typer.Argument(help="Action: list, stats, cancel, clear"),
+            typer.Argument(help="Action: list, cancel, clear"),
         ],
         entry_id: Annotated[
             str | None,
@@ -38,10 +38,9 @@ def register(app: typer.Typer) -> None:
         Scheduled tasks are stored in workspace/schedule.jsonl.
 
         Examples:
-            ash schedule list              # List all scheduled tasks
-            ash schedule stats             # Show schedule statistics
+            ash schedule list                  # List all scheduled tasks
             ash schedule cancel --id a1b2c3d4  # Cancel task by ID
-            ash schedule clear             # Clear all scheduled tasks
+            ash schedule clear                 # Clear all scheduled tasks
         """
         from ash.config import load_config
 
@@ -50,9 +49,6 @@ def register(app: typer.Typer) -> None:
 
         if action == "list":
             _schedule_list(schedule_file)
-
-        elif action == "stats":
-            _schedule_stats(schedule_file)
 
         elif action == "cancel":
             if entry_id is None:
@@ -65,7 +61,7 @@ def register(app: typer.Typer) -> None:
 
         else:
             error(f"Unknown action: {action}")
-            console.print("Valid actions: list, stats, cancel, clear")
+            console.print("Valid actions: list, cancel, clear")
             raise typer.Exit(1)
 
 
@@ -116,20 +112,6 @@ def _schedule_list(schedule_file) -> None:
 
     console.print(table)
     console.print(f"\n{dim(f'Total: {len(entries)} task(s)')}")
-
-
-def _schedule_stats(schedule_file) -> None:
-    """Show schedule statistics."""
-    from ash.events.schedule import ScheduleWatcher
-
-    watcher = ScheduleWatcher(schedule_file)
-    stats = watcher.get_stats()
-
-    console.print(f"Schedule file: {stats['schedule_file']}")
-    console.print(f"Total tasks: {stats['total']}")
-    console.print(f"  One-shot: {stats['one_shot']}")
-    console.print(f"  Periodic: {stats['periodic']}")
-    console.print(f"  Due now: {stats['due']}")
 
 
 def _schedule_cancel(schedule_file, entry_id: str) -> None:

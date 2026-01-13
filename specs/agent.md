@@ -9,7 +9,7 @@ Files: src/ash/core/agent.py, src/ash/core/session.py, src/ash/core/prompt.py
 ### MUST
 
 - Run agentic loop: LLM -> tools -> LLM until text response
-- Limit tool iterations (default 10, configurable)
+- Limit tool iterations (default 25, configurable)
 - Execute multiple tools per iteration if LLM requests them
 - Pass tool results back to LLM for next iteration
 - Track session state across conversation turns
@@ -37,7 +37,7 @@ class AgentConfig:
     model: str | None = None
     max_tokens: int = 4096
     temperature: float | None = None
-    max_tool_iterations: int = 10
+    max_tool_iterations: int = 25
 
 @dataclass
 class AgentResponse:
@@ -47,10 +47,11 @@ class AgentResponse:
 
 @dataclass
 class RuntimeInfo:
-    """Runtime information for system prompt."""
-    os: str | None = None
-    arch: str | None = None
-    python: str | None = None
+    """Runtime information for system prompt.
+
+    Note: os, arch, python are intentionally excluded to prevent
+    host-system awareness in sandbox environments.
+    """
     model: str | None = None
     provider: str | None = None
     timezone: str | None = None
@@ -138,7 +139,7 @@ SystemPromptBuilder constructs prompts with these sections (in order):
 4. **Model Aliases** - configured model names (if > 1)
 5. **Workspace** - working directory path
 6. **Sandbox** - Docker restrictions and access level
-7. **Runtime** - OS, Python version, model, provider, timezone, time
+7. **Runtime** - model, provider, timezone, time
 8. **Memory Context** - user notes and retrieved knowledge (if memory enabled)
 
 ## Behaviors

@@ -146,7 +146,10 @@ class LLMRegistry:
     def register(name: str, provider: LLMProvider) -> None
     def get(name: str) -> LLMProvider
     def has(name: str) -> bool
-    def names() -> list[str]
+
+    @property
+    def providers(self) -> dict[str, LLMProvider]:
+        """Get all registered providers."""
 ```
 
 ## Behaviors

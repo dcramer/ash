@@ -1,152 +1,121 @@
-# Research
+# Research Agent
 
-> Deep research subagent with multi-query orchestration and source synthesis
+> Built-in agent for deep web research with multi-source synthesis
 
-Files: src/ash/skills/research.py, src/ash/skills/executor.py
+Files: src/ash/agents/builtin/research.py
 
 ## Requirements
 
 ### MUST
 
-- Be invoked as a dynamic skill via SkillExecutor (like write-skill)
-- Generate diverse search queries covering different angles
-- Execute web_search for each query
-- Deduplicate sources by URL (exact match)
-- Deduplicate sources by title similarity (fuzzy match >85%)
-- Limit sources per domain (max 3)
-- Fetch content from top sources via web_fetch
-- Handle fetch failures gracefully (continue with available sources)
-- Synthesize findings via LLM with citation instructions
-- Produce inline citations [1], [2], [3] throughout report
-- Include numbered source list at end with titles and URLs
-- Support three depth levels: quick, standard, deep
+- Be invocable via `use_agent` tool with agent="research"
+- Use web_search tool for querying multiple search angles
+- Use web_fetch tool for reading authoritative sources
+- Produce inline citations [1], [2], [3] throughout response
+- Include numbered source list at end with URLs
+- Provide a summary section with key findings
+- Limit tool iterations to prevent runaway searches (default 15)
+- Restrict tools to only web_search and web_fetch
 
 ### SHOULD
 
-- Execute searches in parallel (asyncio.gather)
-- Execute fetches in parallel
-- Rank sources by domain authority (.edu, .gov higher)
-- Track and report methodology (queries used, sources found vs fetched)
-- Note conflicting information between sources
-- Include executive summary at report start
+- Prefer official documentation over blog posts
+- Cross-reference information across multiple sources
+- Note when sources disagree
+- Include publication dates when available
+- Support focus parameter to guide research direction
 
 ### MAY
 
-- Support focus parameter to guide query generation
-- Cache research results by topic hash
-- Include confidence indicators for findings
-- Detect and flag outdated sources
+- Support depth parameter for controlling research thoroughness
+- Track and report methodology (queries used, sources analyzed)
+- Cache research results
 
 ## Interface
 
 ```python
-# Invoked via SkillExecutor
-skill_executor.execute(
-    "research",
-    {
-        "topic": "How do modern AI agents handle web search?",
-        "depth": "standard",  # optional, default: standard
-        "focus": "architecture",  # optional
-    },
-    context,
+# Invoked via use_agent tool
+use_agent(
+    agent="research",
+    message="Research modern AI agent architectures",
+    input={"focus": "tool use patterns"}  # optional
 )
 
-@dataclass
-class ResearchSource:
-    url: str
-    title: str
-    snippet: str
-    content: str | None = None
-    domain: str = ""
-    relevance_score: float = 0.0
+class ResearchAgent(Agent):
+    @property
+    def config(self) -> AgentConfig:
+        return AgentConfig(
+            name="research",
+            description="Research a topic using web search",
+            system_prompt=RESEARCH_SYSTEM_PROMPT,
+            allowed_tools=["web_search", "web_fetch"],
+            max_iterations=15,
+        )
 
-@dataclass
-class ResearchConfig:
-    queries: int
-    sources_to_fetch: int
-    max_per_domain: int = 3
-
-@dataclass
-class ResearchResult:
-    content: str
-    sources_found: int = 0
-    sources_fetched: int = 0
-    queries_used: int = 0
-
-async def execute_research(
-    topic: str,
-    depth: str,
-    focus: str | None,
-    tool_executor: ToolExecutor,
-    llm_provider: LLMProvider,
-    model: str,
-    context: ToolContext,
-) -> ResearchResult: ...
+    def build_system_prompt(self, context: AgentContext) -> str:
+        """Build prompt with optional focus area."""
 ```
 
-## Depth Levels
+## Configuration
 
-| Depth | Queries | Sources Fetched | Description |
-|-------|---------|-----------------|-------------|
-| quick | 2 | 3 | Fast, surface-level |
-| standard | 5 | 10 | Balanced depth |
-| deep | 10 | 20 | Comprehensive |
-
-## Workflow Phases
-
-1. **Query Generation**: LLM generates N diverse queries from topic
-2. **Search Execution**: Parallel web_search for each query
-3. **Dedup & Ranking**: Programmatic - URL dedup, title similarity, domain limits
-4. **Content Fetching**: Parallel web_fetch for top M sources
-5. **Synthesis**: LLM produces cited report from fetched content
+```python
+AgentConfig(
+    name="research",
+    description="Research a topic using web search to find authoritative sources",
+    allowed_tools=["web_search", "web_fetch"],
+    max_iterations=15,
+)
+```
 
 ## Output Format
 
-```markdown
-# Research: {topic}
+The agent produces markdown output:
 
+```markdown
 ## Summary
 [2-3 sentence executive summary of key findings]
 
 ## Findings
-
-### {Subtopic 1}
-[Findings with inline citations [1][2]]
-
-### {Subtopic 2}
-[More findings [3][4]]
-
-## Methodology
-- Queries executed: N
-- Sources found: X
-- Sources analyzed: Y
-- Depth: {depth}
+[Detailed analysis with inline citations [1][2]]
 
 ## Sources
-[1] Title One - https://example.com/article1
-[2] Title Two - https://example.org/article2
-...
+[1] Title - https://example.com/article1
+[2] Title - https://example.org/article2
 ```
+
+## Behaviors
+
+| Input | Output | Notes |
+|-------|--------|-------|
+| Message only | Research report | Agent chooses search strategy |
+| Message + focus | Focused research | Focus guides query generation |
+| Topic with few sources | Report with available sources | Agent adapts to what's found |
 
 ## Errors
 
 | Condition | Response |
 |-----------|----------|
-| Missing topic | SkillResult.error("Missing required input: topic") |
-| Invalid depth | SkillResult.error("Invalid depth: must be quick, standard, or deep") |
-| All searches failed | SkillResult.error("All search queries failed") |
-| All fetches failed | Continue with snippets only, note in report |
-| web_search unavailable | SkillResult.error("Research requires web_search tool") |
+| web_search unavailable | Error: tool not in allowed list |
+| All searches fail | Agent reports inability to find sources |
+| Max iterations reached | Returns partial findings |
+
+## Design Notes
+
+The research agent uses an agentic approach where the LLM decides:
+- Which queries to run
+- Which sources to fetch
+- How to synthesize findings
+
+This is simpler than a multi-phase orchestrator but relies on LLM reasoning
+to produce quality research. The system prompt guides best practices.
 
 ## Verification
 
 ```bash
-uv run pytest tests/test_research.py -v
+uv run ash chat "Use the research agent to find info about Python async"
 ```
 
-- Research skill registered in SkillExecutor
-- Queries generated from topic
-- Sources deduplicated by URL and title
-- Domain limits enforced
-- Synthesis produces cited report
-- Parallel execution for searches and fetches
+- Agent invoked via use_agent tool
+- Multiple web_search queries executed
+- Sources fetched and cited
+- Coherent report produced

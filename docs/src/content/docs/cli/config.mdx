@@ -10,20 +10,10 @@ Manage Ash configuration.
 ## Usage
 
 ```bash
-uv run ash config COMMAND [OPTIONS]
+uv run ash config ACTION [OPTIONS]
 ```
 
-## Commands
-
-### init
-
-Create a new configuration file:
-
-```bash
-uv run ash config init
-```
-
-Creates `~/.ash/config.toml` with default values.
+## Actions
 
 ### show
 
@@ -36,7 +26,7 @@ uv run ash config show
 Options:
 | Option | Description |
 |--------|-------------|
-| `--config`, `-c` | Path to config file |
+| `--path`, `-p` | Path to config file |
 
 ### validate
 
@@ -52,34 +42,7 @@ Checks:
 - Type correctness
 - API key availability
 
-## Setup Wizard
-
-For interactive configuration, use the setup wizard:
-
-```bash
-uv run ash setup
-```
-
-Options:
-| Option | Description |
-|--------|-------------|
-| `--section` | Configure specific section |
-| `--reconfigure` | Reset and reconfigure |
-
-Configure a specific section:
-
-```bash
-uv run ash setup --section models
-uv run ash setup --section telegram
-```
-
 ## Examples
-
-Create initial config:
-
-```bash
-uv run ash config init
-```
 
 Check configuration:
 
@@ -92,3 +55,7 @@ View current settings (redacts secrets):
 ```bash
 uv run ash config show
 ```
+
+## See Also
+
+- [`ash init`](/cli/init/) - Create new configuration file

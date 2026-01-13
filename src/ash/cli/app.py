@@ -13,7 +13,6 @@ from ash.cli.commands import (
     serve,
     service,
     sessions,
-    setup,
     skill,
     upgrade,
 )
@@ -28,7 +27,6 @@ app = typer.Typer(
 init.register(app)
 serve.register(app)
 chat.register(app)
-setup.register(app)
 config.register(app)
 database.register(app)
 memory.register(app)

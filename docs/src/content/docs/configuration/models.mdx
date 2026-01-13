@@ -48,9 +48,35 @@ model = "sonnet"
 | `model` | string | required | Model identifier |
 | `temperature` | float | `null` | Sampling temperature (0.0-1.0) |
 | `max_tokens` | int | `4096` | Maximum response tokens |
+| `thinking` | string | `null` | Extended thinking budget (see below) |
 
 <Aside type="tip">
   Set `temperature` to `null` (or omit it) for reasoning models that don't support temperature control.
+</Aside>
+
+### Extended Thinking
+
+For Claude models that support extended thinking, set the `thinking` option to control how much reasoning the model can do:
+
+| Value | Description |
+|-------|-------------|
+| `"off"` | Disable extended thinking |
+| `"minimal"` | Very brief thinking |
+| `"low"` | Limited thinking budget |
+| `"medium"` | Moderate thinking budget |
+| `"high"` | Maximum thinking budget |
+
+Example:
+
+```toml
+[models.reasoning]
+provider = "anthropic"
+model = "claude-opus-4-5-20251101"
+thinking = "medium"
+```
+
+<Aside type="note">
+  Extended thinking is only supported by certain Claude models. Check model documentation for compatibility.
 </Aside>
 
 ## Per-Skill Model Override

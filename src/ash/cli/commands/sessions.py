@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -36,7 +35,7 @@ def register(app: typer.Typer) -> None:
     def sessions(
         action: Annotated[
             str,
-            typer.Argument(help="Action: list, view, search, export, clear"),
+            typer.Argument(help="Action: list, view, search, clear"),
         ],
         query: Annotated[
             str | None,
@@ -44,14 +43,6 @@ def register(app: typer.Typer) -> None:
                 "--query",
                 "-q",
                 help="Search query or session key for view",
-            ),
-        ] = None,
-        output: Annotated[
-            Path | None,
-            typer.Option(
-                "--output",
-                "-o",
-                help="Output file for export",
             ),
         ] = None,
         limit: Annotated[
@@ -88,7 +79,6 @@ def register(app: typer.Typer) -> None:
             ash sessions view -q telegram_-542      # View session (fuzzy match)
             ash sessions view -q telegram_-542 -v   # View with full tool outputs
             ash sessions search -q "hello"           # Search messages
-            ash sessions export -o backup.json       # Export all sessions
             ash sessions clear                       # Clear all history
         """
         try:
@@ -107,15 +97,12 @@ def register(app: typer.Typer) -> None:
                     raise typer.Exit(1)
                 asyncio.run(_sessions_search(query, limit))
 
-            elif action == "export":
-                asyncio.run(_sessions_export(output))
-
             elif action == "clear":
                 _sessions_clear(force)
 
             else:
                 error(f"Unknown action: {action}")
-                console.print("Valid actions: list, view, search, export, clear")
+                console.print("Valid actions: list, view, search, clear")
                 raise typer.Exit(1)
 
         except KeyboardInterrupt:
@@ -503,64 +490,6 @@ async def _sessions_search(query: str, limit: int) -> None:
         )
 
     console.print(table)
-
-
-async def _sessions_export(output: Path | None) -> None:
-    """Export all sessions to JSON."""
-    from ash.config.paths import get_sessions_path
-    from ash.sessions import SessionReader
-    from ash.sessions.types import MessageEntry, SessionHeader
-
-    sessions_path = get_sessions_path()
-    if not sessions_path.exists():
-        warning("No sessions found")
-        return
-
-    export_data = []
-
-    for session_dir in sorted(sessions_path.iterdir()):
-        if not session_dir.is_dir():
-            continue
-
-        reader = SessionReader(session_dir)
-        entries = await reader.load_entries()
-
-        header = None
-        messages = []
-
-        for entry in entries:
-            if isinstance(entry, SessionHeader):
-                header = entry
-            elif isinstance(entry, MessageEntry):
-                messages.append(
-                    {
-                        "id": entry.id,
-                        "role": entry.role,
-                        "content": _extract_message_text(entry.content),
-                        "created_at": entry.created_at.isoformat(),
-                    }
-                )
-
-        if header:
-            export_data.append(
-                {
-                    "session_key": session_dir.name,
-                    "session_id": header.id,
-                    "provider": header.provider,
-                    "chat_id": header.chat_id,
-                    "user_id": header.user_id,
-                    "created_at": header.created_at.isoformat(),
-                    "messages": messages,
-                }
-            )
-
-    json_output = json.dumps(export_data, indent=2)
-
-    if output:
-        output.write_text(json_output)
-        success(f"Exported {len(export_data)} sessions to {output}")
-    else:
-        console.print(json_output)
 
 
 def _sessions_clear(force: bool) -> None:

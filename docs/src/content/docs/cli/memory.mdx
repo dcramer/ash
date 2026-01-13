@@ -10,10 +10,10 @@ Manage persistent memories that Ash uses across conversations.
 ## Usage
 
 ```bash
-uv run ash memory COMMAND [OPTIONS]
+uv run ash memory ACTION [OPTIONS]
 ```
 
-## Commands
+## Actions
 
 ### list
 
@@ -26,21 +26,18 @@ uv run ash memory list
 Options:
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--limit`, `-l` | 50 | Maximum entries to show |
+| `--query`, `-q` | | Filter by content |
+| `--limit`, `-n` | 20 | Maximum entries to show |
+| `--scope` | | Filter by scope: personal, shared, or global |
+| `--user`, `-u` | | Filter by owner user ID |
+| `--chat` | | Filter by chat ID |
+| `--include-expired` | false | Include expired entries |
 
-### search
-
-Search memories semantically:
+Search memories by content:
 
 ```bash
-uv run ash memory search -q "project ideas"
+uv run ash memory list -q "api keys"
 ```
-
-Options:
-| Option | Description |
-|--------|-------------|
-| `--query`, `-q` | Search query (required) |
-| `--limit`, `-l` | Maximum results |
 
 ### add
 
@@ -54,6 +51,8 @@ Options:
 | Option | Description |
 |--------|-------------|
 | `--query`, `-q` | Memory content (required) |
+| `--source`, `-s` | Source label (default: cli) |
+| `--expires`, `-e` | Days until expiration |
 
 ### remove
 
@@ -66,7 +65,10 @@ uv run ash memory remove --id abc123
 Options:
 | Option | Description |
 |--------|-------------|
-| `--id` | Memory ID (required) |
+| `--id` | Memory ID (required, or use --all) |
+| `--all` | Remove all entries |
+| `--scope` | Filter by scope when using --all |
+| `--force`, `-f` | Skip confirmation |
 
 ### clear
 
@@ -76,30 +78,27 @@ Remove all memories:
 uv run ash memory clear
 ```
 
-### stats
-
-Show memory statistics:
-
-```bash
-uv run ash memory stats
-```
+Options:
+| Option | Description |
+|--------|-------------|
+| `--force`, `-f` | Skip confirmation |
 
 ## Examples
 
-Add a reminder:
+Add a preference:
 
 ```bash
 uv run ash memory add -q "Prefer concise code examples"
 ```
 
-Find project-related memories:
+Search memories by content:
 
 ```bash
-uv run ash memory search -q "project"
+uv run ash memory list -q "project"
 ```
 
-List recent memories:
+List personal memories:
 
 ```bash
-uv run ash memory list --limit 10
+uv run ash memory list --scope personal --limit 10
 ```

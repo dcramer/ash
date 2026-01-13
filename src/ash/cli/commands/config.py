@@ -6,7 +6,6 @@ from typing import Annotated
 import typer
 
 from ash.cli.console import console, error, success
-from ash.cli.context import generate_config_template
 
 
 def register(app: typer.Typer) -> None:
@@ -16,7 +15,7 @@ def register(app: typer.Typer) -> None:
     def config(
         action: Annotated[
             str,
-            typer.Argument(help="Action: init, show, validate"),
+            typer.Argument(help="Action: show, validate"),
         ],
         path: Annotated[
             Path | None,
@@ -37,22 +36,10 @@ def register(app: typer.Typer) -> None:
 
         expanded_path = path.expanduser() if path else get_config_path()
 
-        if action == "init":
-            # Generate template config
-            if expanded_path.exists():
-                error(f"Config file already exists at {expanded_path}")
-                console.print("Use --path to specify a different location")
-                raise typer.Exit(1)
-
-            expanded_path.parent.mkdir(parents=True, exist_ok=True)
-            expanded_path.write_text(generate_config_template())
-            success(f"Created config file at {expanded_path}")
-            console.print("Add your API key, then run: [cyan]ash upgrade[/cyan]")
-
-        elif action == "show":
+        if action == "show":
             if not expanded_path.exists():
                 error(f"Config file not found: {expanded_path}")
-                console.print("Run 'ash config init' to create one")
+                console.print("Run 'ash init' to create one")
                 raise typer.Exit(1)
 
             # Display raw TOML with syntax highlighting
@@ -124,5 +111,5 @@ def register(app: typer.Typer) -> None:
 
         else:
             error(f"Unknown action: {action}")
-            console.print("Valid actions: init, show, validate")
+            console.print("Valid actions: show, validate")
             raise typer.Exit(1)

@@ -11,7 +11,6 @@ from ash.cli.commands import (
     serve,
     service,
     sessions,
-    setup,
     skill,
     upgrade,
 )
@@ -27,7 +26,6 @@ __all__ = [
     "serve",
     "service",
     "sessions",
-    "setup",
     "skill",
     "upgrade",
 ]

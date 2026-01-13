@@ -104,5 +104,7 @@ Specs MUST be updated when:
 | [telegram](specs/telegram.md) | Telegram bot integration |
 | [web_fetch](specs/web_fetch.md) | Fetch and extract content from URLs |
 | [web_search](specs/web_search.md) | Web search via Brave API with caching and retry |
-| [research](specs/research.md) | Deep research subagent with multi-query orchestration |
+| [research](specs/research.md) | Built-in agent for web research with synthesis |
+| [rpc](specs/rpc.md) | Unix domain socket RPC for sandbox-to-host communication |
+| [sessions](specs/sessions.md) | JSONL-based session persistence for conversation history |
 | [workspace](specs/workspace.md) | Agent personality via SOUL.md with inheritance |

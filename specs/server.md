@@ -53,7 +53,7 @@ def create_app(
 ### Routes
 
 ```
-GET  /health          -> {"status": "ok"}
+GET  /health          -> {"status": "healthy"}
 POST /webhook/telegram -> 200 OK (empty)
 ```
 
@@ -90,7 +90,7 @@ uv run ash serve --host 0.0.0.0 --port 8080
 |----------|----------|
 | Startup | Connect DB, init Telegram handler |
 | Shutdown | Stop Telegram, disconnect DB |
-| Health check | Return {"status": "ok"} |
+| Health check | Return {"status": "healthy"} |
 | Telegram webhook | Parse JSON, process update, return 200 |
 | Webhook error | Log exception, return 200 |
 | No Telegram config | Skip Telegram routes |

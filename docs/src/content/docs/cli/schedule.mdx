@@ -1,0 +1,103 @@
+---
+title: schedule
+description: Manage scheduled tasks
+sidebar:
+  order: 12
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Manage scheduled tasks that Ash runs automatically.
+
+## Usage
+
+```bash
+uv run ash schedule <action> [OPTIONS]
+```
+
+## Actions
+
+| Action | Description |
+|--------|-------------|
+| `list` | List all scheduled tasks |
+| `cancel` | Cancel a specific task by ID |
+| `clear` | Clear all scheduled tasks |
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--id`, `-i` | Task ID (8-char hex) for cancel |
+| `--force`, `-f` | Skip confirmation prompts |
+| `--help` | Show help message |
+
+## Examples
+
+List all scheduled tasks:
+
+```bash
+uv run ash schedule list
+```
+
+Cancel a specific task:
+
+```bash
+uv run ash schedule cancel --id a1b2c3d4
+```
+
+Clear all tasks (with confirmation):
+
+```bash
+uv run ash schedule clear
+```
+
+Clear all tasks without confirmation:
+
+```bash
+uv run ash schedule clear --force
+```
+
+## Output
+
+### List Output
+
+```
+┌──────────┬──────────┬─────────────────────┬─────────────────────┬──────────┬─────┐
+│ ID       │ Type     │ Message             │ Schedule            │ Provider │ Due │
+├──────────┼──────────┼─────────────────────┼─────────────────────┼──────────┼─────┤
+│ a1b2c3d4 │ periodic │ Check weather for...│ 0 8 * * *           │ telegram │ no  │
+│ e5f6g7h8 │ one-shot │ Remind me to...     │ 2024-01-15 14:00:00 │ cli      │ yes │
+└──────────┴──────────┴─────────────────────┴─────────────────────┴──────────┴─────┘
+
+Total: 2 task(s)
+```
+
+## Task Types
+
+### One-shot Tasks
+
+Run once at a specific time:
+
+```
+Remind me to call mom at 3pm tomorrow
+```
+
+### Periodic Tasks
+
+Run on a schedule (cron format):
+
+```
+Every morning at 8am, tell me the weather
+```
+
+## Storage
+
+Scheduled tasks are stored in `~/.ash/workspace/schedule.jsonl`.
+
+<Aside type="caution">
+  The `clear` action deletes all scheduled tasks permanently. Use `--force` carefully.
+</Aside>
+
+## See Also
+
+- [`serve`](/cli/serve/) - Run the server (required for schedule execution)

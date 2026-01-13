@@ -81,6 +81,13 @@ max_context_messages = 20
 context_token_budget = 100000
 recency_window = 10
 system_prompt_buffer = 8000
+compaction_enabled = true
+extraction_enabled = true
+
+# Agent-specific overrides
+[agents.research]
+model = "sonnet"
+max_iterations = 50
 
 # Embeddings for semantic search
 [embeddings]

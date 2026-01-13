@@ -37,6 +37,7 @@ workspace_access = "rw"
 | `dns_servers` | list | `[]` | Custom DNS servers |
 | `http_proxy` | string | `""` | HTTP proxy URL |
 | `workspace_access` | string | `"rw"` | Workspace mount mode |
+| `sessions_access` | string | `"none"` | Sessions directory mount mode |
 
 ## Security Features
 
@@ -100,6 +101,22 @@ workspace_access = "ro"  # Read-only for safety
 <Aside type="caution">
   With `workspace_access = "rw"`, commands can modify files in your workspace.
 </Aside>
+
+## Sessions Access
+
+Control whether the agent can read session history from the sandbox:
+
+| Mode | Description |
+|------|-------------|
+| `none` | Sessions not mounted (default) |
+| `ro` | Read-only access to session transcripts |
+
+```toml
+[sandbox]
+sessions_access = "ro"  # Allow reading past conversations
+```
+
+This allows the agent to search and reference previous conversations when executing commands.
 
 ## Container Runtime
 
