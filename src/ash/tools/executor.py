@@ -26,8 +26,6 @@ _TOOL_SUMMARIZERS: dict[str, Any] = {
     "write_file": lambda d: f"{d.get('file_path', '?')}, {d.get('content', '').count(chr(10)) + 1 if d.get('content') else 0} lines",
     "read_file": lambda d: d.get("file_path", "?"),
     "bash": lambda d: _truncate(d.get("command", ""), 50),
-    "remember": lambda d: _truncate(d.get("content", ""), 40),
-    "recall": lambda d: _truncate(d.get("query", ""), 40),
     "use_skill": lambda d: d.get("skill_name", "?"),
     "web_search": lambda d: _truncate(d.get("query", "?"), 40),
     "web_fetch": lambda d: _truncate(d.get("url", "?"), 50),
@@ -112,12 +110,20 @@ class ToolExecutor:
 
         # Log execution - single source of truth for tool logging
         input_summary = _summarize_input(tool_name, input_data)
+        exit_code = result.metadata.get("exit_code") if result.metadata else None
+
         if result.is_error:
             logger.error(
                 f"Tool: {tool_name} | {input_summary} | failed: {result.content[:200]}"
             )
+        elif exit_code is not None and exit_code != 0:
+            # Non-zero exit code - log at WARNING with output preview
+            output_preview = _truncate(result.content, 100)
+            logger.warning(
+                f"Tool: {tool_name} | {input_summary} | exit={exit_code} | {output_preview}"
+            )
         else:
-            # Call + timing at INFO, result at DEBUG
+            # Success - call + timing at INFO, result at DEBUG
             logger.info(f"Tool: {tool_name} | {input_summary} | {duration_ms}ms")
             logger.debug(f"Tool {tool_name} result: {result.content[:200]}")
 

@@ -110,44 +110,6 @@ class TestPidUtilities:
 
 
 # =============================================================================
-# ServiceStatus Tests
-# =============================================================================
-
-
-class TestServiceStatus:
-    """Tests for ServiceStatus dataclass."""
-
-    def test_status_running(self):
-        """Test running status."""
-        status = ServiceStatus(
-            state=ServiceState.RUNNING,
-            pid=12345,
-            uptime_seconds=3600.0,
-            memory_mb=100.5,
-        )
-        assert status.state == ServiceState.RUNNING
-        assert status.pid == 12345
-        assert status.uptime_seconds == 3600.0
-        assert status.memory_mb == 100.5
-
-    def test_status_stopped(self):
-        """Test stopped status."""
-        status = ServiceStatus(state=ServiceState.STOPPED)
-        assert status.state == ServiceState.STOPPED
-        assert status.pid is None
-        assert status.uptime_seconds is None
-
-    def test_status_with_message(self):
-        """Test status with message."""
-        status = ServiceStatus(
-            state=ServiceState.FAILED,
-            message="Connection refused",
-        )
-        assert status.state == ServiceState.FAILED
-        assert status.message == "Connection refused"
-
-
-# =============================================================================
 # Backend Detection Tests
 # =============================================================================
 

@@ -13,8 +13,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ash.memory import MemoryManager, SearchResult
-from ash.tools.base import ToolContext
-from ash.tools.builtin.memory import RememberTool
 
 
 @pytest.fixture
@@ -370,74 +368,6 @@ class TestSubjectValidation:
         )
 
         assert memory.subject_person_ids == [person.id]
-
-
-class TestRememberTool:
-    """Tests for RememberTool error handling."""
-
-    @pytest.fixture
-    def mock_memory_manager(self):
-        """Create a mock memory manager."""
-        manager = MagicMock()
-        manager.add_memory = AsyncMock()
-        return manager
-
-    @pytest.fixture
-    def remember_tool(self, mock_memory_manager):
-        """Create a remember tool with mocked manager."""
-        return RememberTool(memory_manager=mock_memory_manager)
-
-    async def test_missing_content_returns_error(self, remember_tool):
-        """Test error when content is missing."""
-        context = ToolContext()
-        result = await remember_tool.execute({}, context)
-
-        assert result.is_error
-        assert "Missing required parameter" in result.content
-
-    async def test_storage_failure_returns_error(
-        self, remember_tool, mock_memory_manager
-    ):
-        """Test error handling when storage fails."""
-        mock_memory_manager.add_memory.side_effect = Exception("DB error")
-        context = ToolContext()
-
-        result = await remember_tool.execute({"content": "Test"}, context)
-
-        assert result.is_error
-        assert "Failed to store" in result.content
-
-    async def test_continues_after_partial_subject_resolution_failure(self):
-        """Test graceful degradation when subject resolution partially fails."""
-        manager = MagicMock()
-        manager.add_memory = AsyncMock()
-
-        async def resolve_or_create_person(owner_user_id, reference, content_hint=None):
-            if reference == "Sarah":
-                from ash.memory.types import PersonResolutionResult
-
-                return PersonResolutionResult(
-                    person_id="person-1", created=True, person_name="Sarah"
-                )
-            raise Exception("Database error")
-
-        manager.resolve_or_create_person = AsyncMock(
-            side_effect=resolve_or_create_person
-        )
-
-        tool = RememberTool(memory_manager=manager)
-        context = ToolContext(session_id="s1", user_id="u1")
-
-        result = await tool.execute(
-            {"content": "Both like pizza", "subjects": ["Sarah", "BadRef"]},
-            context,
-        )
-
-        # Should not be an error - stored with partial subjects
-        assert not result.is_error
-        manager.add_memory.assert_called_once()
-        call_kwargs = manager.add_memory.call_args.kwargs
-        assert call_kwargs["subject_person_ids"] == ["person-1"]
 
 
 class TestMemoryDeletion:

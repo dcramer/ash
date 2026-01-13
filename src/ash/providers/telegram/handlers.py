@@ -53,18 +53,6 @@ def format_tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
             if len(cmd) > 60:
                 cmd = cmd[:60] + "..."
             return f"Running: `{cmd}`"
-        case "recall":
-            query = tool_input.get("query", "")
-            return f"Searching memory for '{query}'..."
-        case "remember":
-            # Check for batch vs single
-            facts = tool_input.get("facts", [])
-            if facts:
-                return f"Saving {len(facts)} facts to memory..."
-            content = tool_input.get("content", "")
-            if len(content) > 50:
-                content = content[:50] + "..."
-            return f"Remembering: {content}"
         case "web_search":
             query = tool_input.get("query", "")
             return f"Searching the web for '{query}'..."
@@ -782,18 +770,28 @@ class TelegramMessageHandler:
 
         # Send or edit response
         if thinking_msg_id:
-            # Edit thinking message with final response
-            await self._provider.edit(message.chat_id, thinking_msg_id, response.text)
-            sent_message_id = thinking_msg_id
+            if response.text:
+                # Edit thinking message with final response
+                await self._provider.edit(
+                    message.chat_id, thinking_msg_id, response.text
+                )
+                sent_message_id = thinking_msg_id
+            else:
+                # No text response - delete the thinking message
+                await self._provider.delete(message.chat_id, str(thinking_msg_id))
+                sent_message_id = None
         else:
             # No tools used - send new message
-            sent_message_id = await self._provider.send(
-                OutgoingMessage(
-                    chat_id=message.chat_id,
-                    text=response.text,
-                    reply_to_message_id=message.id,
+            if response.text:
+                sent_message_id = await self._provider.send(
+                    OutgoingMessage(
+                        chat_id=message.chat_id,
+                        text=response.text,
+                        reply_to_message_id=message.id,
+                    )
                 )
-            )
+            else:
+                sent_message_id = None
 
         # Persist messages to JSONL with reply context
         thread_id = message.metadata.get("thread_id")

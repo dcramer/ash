@@ -895,7 +895,6 @@ async def create_agent(
     from ash.skills import SkillExecutor, SkillRegistry
     from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
     from ash.tools.builtin.files import ReadFileTool, WriteFileTool
-    from ash.tools.builtin.memory import RememberTool
     from ash.tools.builtin.search_cache import SearchCache
     from ash.tools.builtin.skills import UseSkillTool, WriteSkillTool
 
@@ -985,11 +984,8 @@ async def create_agent(
                 max_entries=config.memory.max_entries,
             )
 
-            # Register memory tools
-            # Note: recall functionality is available via 'ash memory search' in sandbox
-            tool_registry.register(RememberTool(memory_manager))
-
-            logger.debug("Memory tools registered")
+            # Memory tools available via sandbox CLI: ash memory add/search/list
+            logger.debug("Memory manager initialized")
         except ValueError as e:
             # Expected when embeddings not configured or no API key
             logger.debug(f"Memory disabled: {e}")

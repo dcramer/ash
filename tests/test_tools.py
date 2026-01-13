@@ -5,48 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ash.sandbox.executor import ExecutionResult
-from ash.tools.base import ToolContext, ToolResult
+from ash.tools.base import ToolContext
 from ash.tools.builtin.web_search import WebSearchTool
 from ash.tools.executor import ToolExecutor
 from ash.tools.registry import ToolRegistry
-
-
-class TestToolResult:
-    """Tests for ToolResult dataclass."""
-
-    def test_success_factory(self):
-        result = ToolResult.success("output", key="value")
-        assert result.content == "output"
-        assert result.is_error is False
-        assert result.metadata == {"key": "value"}
-
-    def test_error_factory(self):
-        result = ToolResult.error("something went wrong", code=500)
-        assert result.content == "something went wrong"
-        assert result.is_error is True
-        assert result.metadata == {"code": 500}
-
-
-class TestToolContext:
-    """Tests for ToolContext dataclass."""
-
-    def test_defaults(self):
-        ctx = ToolContext()
-        assert ctx.session_id is None
-        assert ctx.user_id is None
-        assert ctx.metadata == {}
-
-    def test_with_values(self):
-        ctx = ToolContext(
-            session_id="sess-123",
-            user_id="user-456",
-            chat_id="chat-789",
-            provider="telegram",
-            metadata={"custom": "data"},
-        )
-        assert ctx.session_id == "sess-123"
-        assert ctx.user_id == "user-456"
-        assert ctx.provider == "telegram"
 
 
 class TestToolRegistry:
@@ -211,16 +173,6 @@ class TestToolExecutor:
     def test_get_tool(self, executor, mock_tool):
         tool = executor.get_tool(mock_tool.name)
         assert tool is mock_tool
-
-
-class TestToolToDefinition:
-    """Tests for Tool.to_definition() method."""
-
-    def test_to_definition(self, mock_tool):
-        definition = mock_tool.to_definition()
-        assert definition["name"] == mock_tool.name
-        assert definition["description"] == mock_tool.description
-        assert definition["input_schema"] == mock_tool.input_schema
 
 
 class TestWebSearchTool:

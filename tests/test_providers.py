@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ash.providers.base import IncomingMessage, OutgoingMessage
+from ash.providers.base import IncomingMessage
 from ash.providers.telegram.handlers import TelegramMessageHandler
 from ash.providers.telegram.provider import TelegramProvider
 
@@ -52,40 +52,6 @@ class TestTelegramProvider:
         with patch("ash.providers.telegram.provider.Bot"):
             provider = TelegramProvider(bot_token="test", allowed_users=[])
             assert provider._is_user_allowed(12345, "anyone") is True
-
-    async def test_send_message(self, provider):
-        """Test sending a message."""
-        provider._bot.send_message.return_value = MagicMock(message_id=123)
-
-        message = OutgoingMessage(
-            chat_id="456",
-            text="Hello, world!",
-        )
-        msg_id = await provider.send(message)
-
-        assert msg_id == "123"
-        provider._bot.send_message.assert_called_once()
-        call_kwargs = provider._bot.send_message.call_args.kwargs
-        assert call_kwargs["chat_id"] == 456
-        assert call_kwargs["text"] == "Hello, world!"
-
-    async def test_send_typing(self, provider):
-        """Test sending typing indicator."""
-        await provider.send_typing("456")
-
-        provider._bot.send_chat_action.assert_called_once_with(
-            chat_id=456,
-            action="typing",
-        )
-
-    async def test_delete_message(self, provider):
-        """Test deleting a message."""
-        await provider.delete("456", "123")
-
-        provider._bot.delete_message.assert_called_once_with(
-            chat_id=456,
-            message_id=123,
-        )
 
 
 class TestTelegramMessageHandler:

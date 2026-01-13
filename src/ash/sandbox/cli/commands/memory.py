@@ -91,11 +91,16 @@ def add_memory(
     shared: Annotated[
         bool, typer.Option("--shared", help="Create as group memory (visible to chat)")
     ] = False,
+    subject: Annotated[
+        list[str] | None,
+        typer.Option("--subject", "-S", help="Who this is about (can repeat)"),
+    ] = None,
 ) -> None:
     """Add a new memory.
 
     By default creates a personal memory (only visible to you).
     Use --shared to create a group memory visible to everyone in the chat.
+    Use --subject to link the memory to a person (e.g., --subject "Sarah").
     """
     try:
         params = {
@@ -106,6 +111,8 @@ def add_memory(
         }
         if expires is not None:
             params["expires_days"] = expires
+        if subject:
+            params["subjects"] = subject
 
         result = rpc_call("memory.add", params)
     except ConnectionError as e:

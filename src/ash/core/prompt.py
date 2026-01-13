@@ -442,9 +442,9 @@ class SystemPromptBuilder:
             "and people in their lives are extracted and stored in the background "
             "after each exchange. You don't need to decide what to remember.\n\n"
             "When a user explicitly asks you to remember something (e.g., "
-            '"remember that I prefer dark mode"), use the remember tool to '
-            "guarantee it's stored, then confirm to them. For everything else, "
-            "trust the automatic extraction."
+            '"remember that I prefer dark mode"), use `ash memory add` to '
+            "store it (use --subject for facts about specific people), then confirm. "
+            "For everything else, trust the automatic extraction."
         )
         parts.append(guidance)
 

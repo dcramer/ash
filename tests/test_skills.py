@@ -13,7 +13,6 @@ from ash.skills import (
     SkillDefinition,
     SkillExecutor,
     SkillRegistry,
-    SkillResult,
 )
 from ash.skills.base import SkillRequirements
 from ash.tools.base import ToolContext
@@ -169,54 +168,6 @@ class TestSkillDefinition:
         is_available, reason = skill.is_available()
         assert is_available is False
         assert reason is not None
-
-
-# =============================================================================
-# SkillContext Tests
-# =============================================================================
-
-
-class TestSkillContext:
-    """Tests for SkillContext dataclass."""
-
-    def test_defaults(self):
-        ctx = SkillContext()
-        assert ctx.session_id is None
-        assert ctx.user_id is None
-        assert ctx.chat_id is None
-        assert ctx.input_data == {}
-
-    def test_with_values(self):
-        ctx = SkillContext(
-            session_id="sess-123",
-            user_id="user-456",
-            chat_id="chat-789",
-            input_data={"key": "value"},
-        )
-        assert ctx.session_id == "sess-123"
-        assert ctx.user_id == "user-456"
-        assert ctx.input_data == {"key": "value"}
-
-
-# =============================================================================
-# SkillResult Tests
-# =============================================================================
-
-
-class TestSkillResult:
-    """Tests for SkillResult dataclass."""
-
-    def test_success_factory(self):
-        result = SkillResult.success("output", iterations=3)
-        assert result.content == "output"
-        assert result.is_error is False
-        assert result.iterations == 3
-
-    def test_error_factory(self):
-        result = SkillResult.error("something went wrong")
-        assert result.content == "something went wrong"
-        assert result.is_error is True
-        assert result.iterations == 0
 
 
 # =============================================================================

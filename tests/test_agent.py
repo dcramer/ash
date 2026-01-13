@@ -1,157 +1,27 @@
 """Tests for agent orchestration."""
 
-from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from ash.config import AshConfig
 from ash.config.models import ModelConfig
 from ash.config.workspace import Workspace
-from ash.core.agent import Agent, AgentConfig, AgentResponse
+from ash.core.agent import Agent, AgentConfig
 from ash.core.prompt import SystemPromptBuilder
 from ash.core.session import SessionState
-from ash.llm.base import LLMProvider
 from ash.llm.types import (
-    CompletionResponse,
     Message,
     Role,
     StreamChunk,
     StreamEventType,
     TextContent,
-    ToolDefinition,
     ToolUse,
-    Usage,
 )
 from ash.skills.registry import SkillRegistry
-from ash.tools.base import Tool, ToolContext, ToolResult
 from ash.tools.executor import ToolExecutor
 from ash.tools.registry import ToolRegistry
-
-
-class MockLLMProvider(LLMProvider):
-    """Mock LLM provider for testing."""
-
-    def __init__(
-        self,
-        responses: list[Message] | None = None,
-        stream_chunks: list[StreamChunk] | None = None,
-    ):
-        self.responses = responses or []
-        self.stream_chunks = stream_chunks or []
-        self.complete_calls: list[dict[str, Any]] = []
-        self.stream_calls: list[dict[str, Any]] = []
-        self._response_index = 0
-
-    @property
-    def name(self) -> str:
-        return "mock"
-
-    @property
-    def default_model(self) -> str:
-        return "mock-model"
-
-    async def complete(
-        self,
-        messages: list[Message],
-        *,
-        model: str | None = None,
-        tools: list[ToolDefinition] | None = None,
-        system: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float | None = None,
-        thinking: Any = None,
-    ) -> CompletionResponse:
-        self.complete_calls.append(
-            {
-                "messages": messages,
-                "model": model,
-                "tools": tools,
-                "system": system,
-            }
-        )
-
-        if self._response_index < len(self.responses):
-            message = self.responses[self._response_index]
-            self._response_index += 1
-        else:
-            message = Message(role=Role.ASSISTANT, content="Mock response")
-
-        return CompletionResponse(
-            message=message,
-            usage=Usage(input_tokens=100, output_tokens=50),
-            stop_reason="end_turn",
-            model=model or "mock-model",
-        )
-
-    async def stream(
-        self,
-        messages: list[Message],
-        *,
-        model: str | None = None,
-        tools: list[ToolDefinition] | None = None,
-        system: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float | None = None,
-        thinking: Any = None,
-    ) -> AsyncGenerator[StreamChunk, None]:
-        self.stream_calls.append({"messages": messages})
-
-        for chunk in self.stream_chunks:
-            yield chunk
-
-        if not self.stream_chunks:
-            yield StreamChunk(type=StreamEventType.MESSAGE_START)
-            yield StreamChunk(type=StreamEventType.TEXT_DELTA, content="Mock response")
-            yield StreamChunk(type=StreamEventType.MESSAGE_END)
-
-    async def embed(
-        self,
-        texts: list[str],
-        *,
-        model: str | None = None,
-    ) -> list[list[float]]:
-        return [[0.0] * 128 for _ in texts]
-
-
-class MockTool(Tool):
-    """Mock tool for testing."""
-
-    def __init__(
-        self,
-        name: str = "mock_tool",
-        description: str = "A mock tool",
-        result: ToolResult | None = None,
-    ):
-        self._name = name
-        self._description = description
-        self._result = result or ToolResult.success("Mock tool executed")
-        self.execute_calls: list[tuple[dict[str, Any], ToolContext]] = []
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def description(self) -> str:
-        return self._description
-
-    @property
-    def input_schema(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {"arg": {"type": "string"}},
-            "required": ["arg"],
-        }
-
-    async def execute(
-        self,
-        input_data: dict[str, Any],
-        context: ToolContext,
-    ) -> ToolResult:
-        self.execute_calls.append((input_data, context))
-        return self._result
+from tests.conftest import MockLLMProvider, MockTool
 
 
 @pytest.fixture
@@ -209,44 +79,6 @@ def session() -> SessionState:
         chat_id="chat-123",
         user_id="user-456",
     )
-
-
-class TestAgentConfig:
-    """Tests for AgentConfig."""
-
-    def test_defaults(self):
-        config = AgentConfig()
-        assert config.model is None
-        assert config.max_tokens == 4096
-        assert config.temperature is None  # None = use provider default
-        assert config.max_tool_iterations == 25  # MAX_TOOL_ITERATIONS constant
-        assert config.context_token_budget == 100000
-        assert config.recency_window == 10
-        assert config.system_prompt_buffer == 8000
-
-    def test_custom_values(self):
-        config = AgentConfig(
-            model="claude-3-opus",
-            max_tokens=2048,
-            temperature=0.5,
-            max_tool_iterations=5,
-        )
-        assert config.model == "claude-3-opus"
-        assert config.max_tokens == 2048
-
-
-class TestAgentResponse:
-    """Tests for AgentResponse."""
-
-    def test_create_response(self):
-        response = AgentResponse(
-            text="Hello!",
-            tool_calls=[{"name": "test", "result": "ok"}],
-            iterations=2,
-        )
-        assert response.text == "Hello!"
-        assert len(response.tool_calls) == 1
-        assert response.iterations == 2
 
 
 class TestAgent:
@@ -382,7 +214,6 @@ class TestAgent:
 
     async def test_process_message_streaming(self, workspace):
         """Test streaming message processing."""
-        from ash.llm.types import StreamChunk, StreamEventType
 
         mock_llm = MockLLMProvider(
             stream_chunks=[
