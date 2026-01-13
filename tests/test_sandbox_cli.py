@@ -127,10 +127,10 @@ class TestScheduleList:
         assert "No scheduled tasks found" in result.stdout
 
     def test_list_with_entries(self, cli_runner, schedule_file):
-        """Test listing tasks."""
+        """Test listing tasks owned by current user."""
         schedule_file.write_text(
-            '{"id": "abc12345", "trigger_at": "2026-01-12T09:00:00Z", "message": "Task 1"}\n'
-            '{"id": "def67890", "cron": "0 8 * * *", "message": "Task 2"}\n'
+            '{"id": "abc12345", "trigger_at": "2026-01-12T09:00:00Z", "message": "Task 1", "user_id": "user123"}\n'
+            '{"id": "def67890", "cron": "0 8 * * *", "message": "Task 2", "user_id": "user123"}\n'
         )
 
         result = cli_runner.invoke(app, ["list"])
@@ -144,6 +144,22 @@ class TestScheduleList:
         assert "periodic" in result.stdout
         assert "Total: 2 task(s)" in result.stdout
 
+    def test_list_filters_by_user(self, cli_runner, schedule_file):
+        """Test that list only shows tasks owned by current user."""
+        schedule_file.write_text(
+            '{"id": "mine", "trigger_at": "2026-01-12T09:00:00Z", "message": "My task", "user_id": "user123"}\n'
+            '{"id": "other", "trigger_at": "2026-01-12T09:00:00Z", "message": "Other task", "user_id": "other999"}\n'
+        )
+
+        result = cli_runner.invoke(app, ["list"])
+
+        assert result.exit_code == 0
+        assert "mine" in result.stdout
+        assert "My task" in result.stdout
+        assert "other" not in result.stdout
+        assert "Other task" not in result.stdout
+        assert "Total: 1 task(s)" in result.stdout
+
 
 class TestScheduleCancel:
     """Tests for 'ash schedule cancel' command."""
@@ -151,8 +167,8 @@ class TestScheduleCancel:
     def test_cancel_success(self, cli_runner, schedule_file):
         """Test cancelling a task by ID."""
         schedule_file.write_text(
-            '{"id": "abc12345", "trigger_at": "2026-01-12T09:00:00Z", "message": "To cancel"}\n'
-            '{"id": "def67890", "trigger_at": "2026-01-13T09:00:00Z", "message": "To keep"}\n'
+            '{"id": "abc12345", "trigger_at": "2026-01-12T09:00:00Z", "message": "To cancel", "user_id": "user123"}\n'
+            '{"id": "def67890", "trigger_at": "2026-01-13T09:00:00Z", "message": "To keep", "user_id": "user123"}\n'
         )
 
         result = cli_runner.invoke(app, ["cancel", "--id", "abc12345"])
@@ -167,12 +183,25 @@ class TestScheduleCancel:
 
     def test_cancel_not_found(self, cli_runner, schedule_file):
         """Test cancelling non-existent task."""
-        schedule_file.write_text('{"id": "abc12345", "message": "Existing task"}\n')
+        schedule_file.write_text(
+            '{"id": "abc12345", "message": "Existing task", "user_id": "user123"}\n'
+        )
 
         result = cli_runner.invoke(app, ["cancel", "--id", "nonexist"])
 
         assert result.exit_code == 1
         assert "No task found with ID" in result.output
+
+    def test_cancel_other_user_task(self, cli_runner, schedule_file):
+        """Test that cancel rejects tasks owned by other users."""
+        schedule_file.write_text(
+            '{"id": "other123", "message": "Other user task", "user_id": "other999"}\n'
+        )
+
+        result = cli_runner.invoke(app, ["cancel", "--id", "other123"])
+
+        assert result.exit_code == 1
+        assert "does not belong to you" in result.output
 
     def test_cancel_requires_id(self, cli_runner, schedule_file):
         """Test that cancel requires --id."""
@@ -185,17 +214,17 @@ class TestScheduleClear:
     """Tests for 'ash schedule clear' command."""
 
     def test_clear_empty(self, cli_runner, schedule_file):
-        """Test clearing with no tasks."""
+        """Test clearing with no tasks for current user."""
         result = cli_runner.invoke(app, ["clear"])
 
         assert result.exit_code == 0
         assert "No scheduled tasks to clear" in result.stdout
 
     def test_clear_success(self, cli_runner, schedule_file):
-        """Test clearing all tasks."""
+        """Test clearing all tasks owned by current user."""
         schedule_file.write_text(
-            '{"id": "abc12345", "message": "Task 1"}\n'
-            '{"id": "def67890", "message": "Task 2"}\n'
+            '{"id": "abc12345", "message": "Task 1", "user_id": "user123"}\n'
+            '{"id": "def67890", "message": "Task 2", "user_id": "user123"}\n'
         )
 
         result = cli_runner.invoke(app, ["clear"])
@@ -203,3 +232,19 @@ class TestScheduleClear:
         assert result.exit_code == 0
         assert "Cleared 2 scheduled task(s)" in result.stdout
         assert schedule_file.read_text() == ""
+
+    def test_clear_preserves_other_users_tasks(self, cli_runner, schedule_file):
+        """Test that clear only removes current user's tasks."""
+        schedule_file.write_text(
+            '{"id": "mine", "message": "My task", "user_id": "user123"}\n'
+            '{"id": "other", "message": "Other task", "user_id": "other999"}\n'
+        )
+
+        result = cli_runner.invoke(app, ["clear"])
+
+        assert result.exit_code == 0
+        assert "Cleared 1 scheduled task(s)" in result.stdout
+        # Other user's task should remain
+        content = schedule_file.read_text()
+        assert "My task" not in content
+        assert "Other task" in content

@@ -348,3 +348,95 @@ class TestScheduleWatcher:
         count = watcher.clear_all()
 
         assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_failed_one_shot_removed(self, tmp_path: Path):
+        """Test that failed one-shot entries are removed (not retried forever)."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        schedule_file.write_text(f'{{"trigger_at": "{past}", "message": "Fail me"}}\n')
+
+        watcher = ScheduleWatcher(schedule_file)
+
+        @watcher.on_due
+        async def handler(entry: ScheduleEntry):
+            raise RuntimeError("Handler failed intentionally")
+
+        await watcher._check_schedule()
+
+        # Entry should be removed even though handler failed
+        assert "Fail me" not in schedule_file.read_text()
+
+    @pytest.mark.asyncio
+    async def test_failed_periodic_updates_last_run(self, tmp_path: Path):
+        """Test that failed periodic entries update last_run (prevent immediate retry)."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        old_time = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+        schedule_file.write_text(
+            f'{{"cron": "* * * * *", "message": "Fail periodic", "last_run": "{old_time}"}}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+
+        @watcher.on_due
+        async def handler(entry: ScheduleEntry):
+            raise RuntimeError("Periodic handler failed")
+
+        await watcher._check_schedule()
+
+        # Entry should still exist with updated last_run
+        content = schedule_file.read_text()
+        assert "Fail periodic" in content
+        assert old_time not in content  # last_run should be updated
+
+
+class TestScheduledTaskHandler:
+    """Tests for ScheduledTaskHandler."""
+
+    @pytest.mark.asyncio
+    async def test_handle_missing_context(self):
+        """Test handler rejects entries without routing context."""
+        from unittest.mock import MagicMock
+
+        from ash.events.handler import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        handler = ScheduledTaskHandler(agent=mock_agent, senders={})
+
+        # Entry without provider/chat_id
+        entry = ScheduleEntry(message="Test", trigger_at=datetime.now(UTC))
+
+        with pytest.raises(ValueError, match="Missing required routing context"):
+            await handler.handle(entry)
+
+    @pytest.mark.asyncio
+    async def test_handle_valid_context(self):
+        """Test handler accepts entries with valid routing context."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.events.handler import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Response"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        handler = ScheduledTaskHandler(
+            agent=mock_agent, senders={"telegram": mock_sender}
+        )
+
+        entry = ScheduleEntry(
+            message="Test",
+            trigger_at=datetime.now(UTC),
+            provider="telegram",
+            chat_id="123",
+            user_id="456",
+        )
+
+        await handler.handle(entry)
+
+        # Verify agent was called
+        mock_agent.process_message.assert_called_once()
+        # Verify response was sent
+        mock_sender.assert_called_once()

@@ -20,13 +20,15 @@ Two entry types:
 """
 
 import asyncio
+import fcntl
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,10 @@ class ScheduleEntry:
 
             base = self.last_run or datetime.now(UTC)
             return croniter(self.cron, base).get_next(datetime)
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                f"Failed to parse cron expression '{self.cron}' for entry {self.id}: {e}"
+            )
             return None
 
     def to_json_line(self) -> str:
@@ -203,9 +208,21 @@ class ScheduleWatcher:
     def schedule_file(self) -> Path:
         return self._schedule_file
 
+    @contextmanager
+    def _file_lock(self, file: IO) -> Iterator[None]:
+        """Acquire exclusive lock on file."""
+        try:
+            fcntl.flock(file.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(file.fileno(), fcntl.LOCK_UN)
+
     def _write_lines(self, lines: list[str]) -> None:
-        """Write lines to the schedule file."""
-        self._schedule_file.write_text("\n".join(lines) + "\n" if lines else "")
+        """Write lines to the schedule file with locking."""
+        content = "\n".join(lines) + "\n" if lines else ""
+        with self._schedule_file.open("w") as f:
+            with self._file_lock(f):
+                f.write(content)
 
     def on_due(self, handler: ScheduleHandler) -> ScheduleHandler:
         """Decorator to register a handler."""
@@ -247,7 +264,10 @@ class ScheduleWatcher:
         if not self._schedule_file.exists():
             return
 
-        lines = self._schedule_file.read_text().splitlines()
+        # Read with lock to get consistent state
+        with self._schedule_file.open("r") as f:
+            with self._file_lock(f):
+                lines = f.read().splitlines()
 
         # Parse and find due entries
         entries = []
@@ -272,14 +292,17 @@ class ScheduleWatcher:
             try:
                 for handler in self._handlers:
                     await handler(entry)
-
-                if entry.is_periodic:
-                    entry.last_run = datetime.now(UTC)
-                    updated_periodic[entry.line_number] = entry
-                else:
-                    triggered_one_shot.add(entry.line_number)
             except Exception as e:
                 logger.error(f"Handler error for scheduled task: {e}")
+                # Mark entry as processed even on failure to prevent infinite retries
+                # One-shot tasks get removed, periodic tasks get last_run updated
+
+            # Always mark entry as processed (success or failure)
+            if entry.is_periodic:
+                entry.last_run = datetime.now(UTC)
+                updated_periodic[entry.line_number] = entry
+            else:
+                triggered_one_shot.add(entry.line_number)
 
         # Rewrite file: remove one-shots, update periodic
         if triggered_one_shot or updated_periodic:

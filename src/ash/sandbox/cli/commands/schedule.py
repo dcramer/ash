@@ -177,10 +177,18 @@ def create(
         typer.echo(f"Scheduled recurring task (id={entry_id}) ({cron}): {preview}")
 
 
+def _filter_by_user(entries: list[dict]) -> list[dict]:
+    """Filter entries to only those owned by the current user."""
+    user_id = os.environ.get("ASH_USER_ID")
+    if not user_id:
+        return entries  # No user context, show all (e.g., admin CLI)
+    return [e for e in entries if e.get("user_id") == user_id]
+
+
 @app.command("list")
 def list_tasks() -> None:
-    """List all scheduled tasks."""
-    entries = _read_entries()
+    """List scheduled tasks for the current user."""
+    entries = _filter_by_user(_read_entries())
 
     if not entries:
         typer.echo("No scheduled tasks found.")
@@ -214,9 +222,8 @@ def cancel(
         str, typer.Option("--id", "-i", help="Entry ID to cancel (8-char hex)")
     ],
 ) -> None:
-    """Cancel a scheduled task by ID."""
-    # TODO: Come up with a system that prevents abuse on untrusted users
-    # cancelling others' tasks
+    """Cancel a scheduled task by ID (must be owned by current user)."""
+    user_id = os.environ.get("ASH_USER_ID")
     entries = _read_entries()
 
     # Find entry
@@ -232,6 +239,11 @@ def cancel(
         typer.echo(f"Error: No task found with ID {entry_id}", err=True)
         raise typer.Exit(1)
 
+    # Check ownership if user context is available
+    if user_id and found.get("user_id") != user_id:
+        typer.echo(f"Error: Task {entry_id} does not belong to you", err=True)
+        raise typer.Exit(1)
+
     # Rewrite file without the cancelled entry
     _write_entries(remaining)
 
@@ -242,13 +254,25 @@ def cancel(
 
 @app.command()
 def clear() -> None:
-    """Clear all scheduled tasks."""
+    """Clear all scheduled tasks for the current user."""
+    user_id = os.environ.get("ASH_USER_ID")
     entries = _read_entries()
 
     if not entries:
         typer.echo("No scheduled tasks to clear.")
         return
 
-    count = len(entries)
-    SCHEDULE_FILE.write_text("")
-    typer.echo(f"Cleared {count} scheduled task(s)")
+    # Separate user's entries from others
+    if user_id:
+        remaining = [e for e in entries if e.get("user_id") != user_id]
+        cleared_count = len(entries) - len(remaining)
+    else:
+        remaining = []
+        cleared_count = len(entries)
+
+    if cleared_count == 0:
+        typer.echo("No scheduled tasks to clear.")
+        return
+
+    _write_entries(remaining)
+    typer.echo(f"Cleared {cleared_count} scheduled task(s)")

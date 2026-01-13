@@ -46,7 +46,18 @@ class ScheduledTaskHandler:
 
         Args:
             entry: The schedule entry to process.
+
+        Raises:
+            ValueError: If required routing context is missing.
         """
+        # Validate routing context
+        if not entry.provider or not entry.chat_id:
+            logger.error(
+                f"Skipping scheduled task - missing routing context: "
+                f"provider={entry.provider!r}, chat_id={entry.chat_id!r}"
+            )
+            raise ValueError("Missing required routing context (provider/chat_id)")
+
         logger.info(
             f"Executing scheduled task: {entry.message[:50]}... "
             f"(provider={entry.provider}, chat_id={entry.chat_id})"

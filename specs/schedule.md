@@ -6,7 +6,7 @@ File-based task scheduling following the "filesystem first" principle.
 
 ## Overview
 
-The schedule system allows the agent to schedule future tasks using the `schedule_task` tool. The tool writes entries to a JSONL file with routing context. A background watcher triggers entries when due, processes them through the agent, and routes responses back.
+The schedule system allows the agent to schedule future tasks using sandbox CLI commands (`ash schedule create`). The commands write entries to a JSONL file with routing context. A background watcher triggers entries when due, processes them through the agent, and routes responses back.
 
 **Key principle:** All state lives in the file. `cat schedule.jsonl` shows the truth.
 
@@ -60,33 +60,39 @@ Examples:
 
 ## Agent Usage
 
-The agent uses the `schedule_task` tool to create entries:
+The agent uses sandbox CLI commands to create entries:
 
-```
+```bash
 # One-time task
-schedule_task(message="Check the build", trigger_at="2026-01-12T09:00:00Z")
+ash schedule create "Check the build" --at 2026-01-12T09:00:00Z
 
 # Recurring task
-schedule_task(message="Daily summary", cron="0 8 * * *")
+ash schedule create "Daily summary" --cron "0 8 * * *"
+
+# List scheduled tasks
+ash schedule list
+
+# Cancel a task by ID
+ash schedule cancel --id abc12345
 ```
 
-The tool automatically injects `chat_id`, `user_id`, and `provider` from the current context.
+The commands automatically inject `chat_id`, `user_id`, and `provider` from environment variables (`ASH_CHAT_ID`, `ASH_USER_ID`, `ASH_PROVIDER`).
 
 **Note:** Scheduling only works from providers with persistent chats (e.g., Telegram). Cannot schedule from CLI.
 
 ## Behavior
 
 ### One-Shot
-1. Agent calls `schedule_task` with `trigger_at`
-2. Tool writes entry with context to `schedule.jsonl`
+1. Agent runs `ash schedule create "msg" --at TIME`
+2. Command writes entry with context to `schedule.jsonl`
 3. Watcher detects entry is due
 4. Handler creates ephemeral session, runs agent with message
 5. Response sent back to original chat
 6. Entry deleted from file
 
 ### Periodic
-1. Agent calls `schedule_task` with `cron`
-2. Tool writes entry with context to `schedule.jsonl`
+1. Agent runs `ash schedule create "msg" --cron "EXPR"`
+2. Command writes entry with context to `schedule.jsonl`
 3. Watcher calculates next run from cron (and `last_run` if present)
 4. Handler creates ephemeral session, runs agent with message
 5. Response sent back to original chat
@@ -133,7 +139,8 @@ cat workspace/schedule.jsonl
 1. **Single JSONL file** - Simple, grepable, git-friendly
 2. **State in file** - `last_run` persisted, survives restarts
 3. **Delete vs update** - One-shot deleted, periodic updated in place
-4. **Tool injects context** - `schedule_task` adds chat_id/provider automatically
-5. **CLI not supported** - Requires provider with persistent chat for response routing
+4. **CLI injects context** - `ash schedule create` adds chat_id/provider from env vars
+5. **Provider required** - Requires provider with persistent chat for response routing
 6. **Fresh context per task** - Each task runs in ephemeral session
 7. **UTC times** - Avoids timezone confusion
+8. **Ownership filtering** - Users can only see/cancel their own tasks
