@@ -26,12 +26,13 @@ from ash.tools import ToolContext, ToolExecutor, ToolRegistry
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ash.agents import AgentRegistry
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
     from ash.db.models import Person
     from ash.memory import MemoryExtractor, MemoryManager, RetrievedContext
     from ash.sandbox import SandboxExecutor
-    from ash.skills import SkillExecutor, SkillRegistry
+    from ash.skills import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,6 @@ def _build_routing_env(
         "ASH_PROVIDER": session.provider or "",
         "ASH_USERNAME": session.metadata.get("username", ""),
     }
-    # Include active skill env vars (from inline skill execution)
-    env.update(session.skill_env)
     return env
 
 
@@ -650,10 +649,6 @@ class Agent:
                     tool_context,
                 )
 
-                # If skill returns env vars, update session for subsequent bash calls
-                if skill_env := result.metadata.get("skill_env"):
-                    session.skill_env.update(skill_env)
-
                 tool_calls.append(
                     {
                         "id": tool_use.id,
@@ -838,10 +833,6 @@ class Agent:
                     tool_context,
                 )
 
-                # If skill returns env vars, update session for subsequent bash calls
-                if skill_env := result.metadata.get("skill_env"):
-                    session.skill_env.update(skill_env)
-
                 # Add tool result to session
                 session.add_tool_result(
                     tool_use_id=tool_use.id,
@@ -871,9 +862,9 @@ class AgentComponents:
     tool_executor: ToolExecutor
     prompt_builder: SystemPromptBuilder
     skill_registry: SkillRegistry
-    skill_executor: SkillExecutor | None
     memory_manager: MemoryManager | None
     sandbox_executor: SandboxExecutor | None = None
+    agent_registry: AgentRegistry | None = None
 
 
 async def create_agent(
@@ -904,11 +895,10 @@ async def create_agent(
     from ash.core.prompt import RuntimeInfo
     from ash.llm import create_llm_provider
     from ash.memory import create_memory_manager
-    from ash.skills import SkillExecutor, SkillRegistry
+    from ash.skills import SkillRegistry
     from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
     from ash.tools.builtin.files import ReadFileTool, WriteFileTool
     from ash.tools.builtin.search_cache import SearchCache
-    from ash.tools.builtin.skills import UseSkillTool, WriteSkillTool
 
     # Resolve model configuration
     model_config = config.get_model(model_alias)
@@ -1035,25 +1025,29 @@ async def create_agent(
         except Exception:
             logger.warning("Failed to initialize memory extractor", exc_info=True)
 
-    # Create tool executor (needed by skill executor)
-    tool_executor = ToolExecutor(tool_registry)
-
-    # Discover and register skills (pass central config for skill-specific settings)
-    skill_registry = SkillRegistry(central_config=config.skills)
+    # Discover skills (for system prompt - agent reads SKILL.md files directly)
+    skill_registry = SkillRegistry()
     skill_registry.discover(config.workspace)
     logger.info(f"Discovered {len(skill_registry)} skills from workspace")
 
-    # Create skill executor and register skill tools
-    skill_executor = SkillExecutor(skill_registry, tool_executor, config)
-    tool_registry.register(UseSkillTool(skill_registry, skill_executor))
-    tool_registry.register(
-        WriteSkillTool(skill_executor, skill_registry, config.workspace)
-    )
-    logger.debug("Skill tools registered")
-
-    # Recreate tool executor with all tools registered
+    # Create tool executor
     tool_executor = ToolExecutor(tool_registry)
     logger.info(f"Registered {len(tool_registry)} tools")
+
+    # Set up agents (built-in subagents for complex tasks)
+    from ash.agents import AgentExecutor, AgentRegistry
+    from ash.agents.builtin import register_builtin_agents
+    from ash.tools.builtin.agents import UseAgentTool
+
+    agent_registry = AgentRegistry()
+    register_builtin_agents(agent_registry)
+    logger.info(f"Registered {len(agent_registry)} built-in agents")
+
+    # Create agent executor
+    agent_executor = AgentExecutor(llm, tool_executor, config)
+
+    # Register use_agent tool
+    tool_registry.register(UseAgentTool(agent_registry, agent_executor))
 
     # Create runtime info
     runtime = RuntimeInfo.from_environment(
@@ -1067,6 +1061,7 @@ async def create_agent(
         tool_registry=tool_registry,
         skill_registry=skill_registry,
         config=config,
+        agent_registry=agent_registry,
     )
 
     # Resolve thinking configuration from model config
@@ -1108,7 +1103,7 @@ async def create_agent(
         tool_executor=tool_executor,
         prompt_builder=prompt_builder,
         skill_registry=skill_registry,
-        skill_executor=skill_executor,
         memory_manager=memory_manager,
         sandbox_executor=shared_executor,
+        agent_registry=agent_registry,
     )

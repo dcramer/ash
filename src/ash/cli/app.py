@@ -14,6 +14,7 @@ from ash.cli.commands import (
     service,
     sessions,
     setup,
+    skill,
     upgrade,
 )
 
@@ -36,6 +37,7 @@ sessions.register(app)
 upgrade.register(app)
 sandbox.register(app)
 service.register(app)
+skill.register(app)
 
 if __name__ == "__main__":
     app()

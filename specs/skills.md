@@ -1,48 +1,41 @@
 # Skills
 
-> Reusable behaviors that orchestrate tools with model preferences
+> Reusable instructions that the agent reads and follows
 
-Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/executor.py, src/ash/tools/builtin/skills.py
+Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/cli/commands/skill.py
+
+## Overview
+
+Skills are markdown files with YAML frontmatter containing instructions the agent reads and follows. There is no execution machinery - the agent reads the SKILL.md file directly and uses its available tools to follow the instructions.
+
+This is the "pi-mono model" of skills: knowledge packages that augment the agent's capabilities without separate execution contexts.
+
+**Note:** For complex multi-step tasks like research, use Agents instead (see specs/agents.md).
 
 ## Requirements
 
 ### MUST
 
-- Load workspace skills from `workspace/skills/` (can override bundled)
+- Load workspace skills from `workspace/skills/`
 - Support directory format: `skills/<name>/SKILL.md` (preferred)
 - Support flat markdown: `skills/<name>.md` (convenience)
 - Support pure YAML: `skills/<name>.yaml` (backward compatibility)
-- Each skill defines: name, description, instructions, subagent, model, required_tools
-- Support two execution modes via `subagent` flag:
-  - `subagent: false` (default): Returns instructions for main agent to follow
-  - `subagent: true`: Runs isolated LLM loop with restricted tools
+- Each skill defines: name, description, instructions
 - Support skill requirements: bins, env, os filtering
-- Support skill config: list of env var names with optional defaults
-- Load config values from layered sources (skill config.toml → central config → env vars → defaults)
-- Mark skill unavailable if required config missing
-- Pass resolved config to sandbox as `SKILL_*` environment variables
 - Filter unavailable skills from system prompt and iteration
-- SkillRegistry discovers and loads skills from workspace
-- SkillExecutor handles execution (inline or subagent)
-- Validate skill availability before execution
-- List skills in system prompt (via SystemPromptBuilder)
-- Expose `use_skill` tool for invoking skills
-- Skills can reference model aliases (e.g., "fast", "default")
-- Validate required_tools exist before subagent execution
-- Pass skill results back to parent agent
+- List skills in system prompt with file paths
+- Provide CLI commands for skill management
+- Default skill name to directory/filename if not specified
 
 ### SHOULD
 
-- Support skill parameters via input_schema (JSON Schema)
-- Allow skills to specify max_iterations independently (subagent mode)
-- Log skill execution with duration and iteration count
-- Provide clear error when referenced model alias not found
-- Default skill name to filename stem if not specified
+- Support optional `required_tools` field (documentation only)
+- Support optional `input_schema` field (documentation only)
+- Log skill discovery with count
 
 ### MAY
 
-- Support skill chaining (one skill invoking another via use_skill)
-- Watch workspace/skills/ for changes and reload
+- Watch workspace/skills/ for changes and hot-reload
 - Track skill usage statistics
 
 ## Interface
@@ -53,8 +46,7 @@ Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/skills/execut
 workspace/skills/
   summarize/
     SKILL.md
-    config.toml           # Optional: skill-local config values
-    scripts/              # Optional: executable scripts
+    scripts/              # Optional: referenced scripts
       main.py
   explain/
     SKILL.md
@@ -64,31 +56,20 @@ workspace/skills/
 <!-- workspace/skills/summarize/SKILL.md -->
 ---
 description: Summarize text or documents concisely
-subagent: true               # Run isolated LLM loop (false = inline)
-model: fast                  # Model alias
 required_tools:
   - bash
-max_iterations: 3            # Only used when subagent: true
 requires:
   bins:
     - pandoc
-  env: []
   os:
     - linux
     - darwin
-config:
-  - API_KEY                   # Required (no default)
-  - MAX_LENGTH=1000           # Optional with default
 input_schema:
   type: object
   properties:
     content:
       type: string
       description: Text or file path to summarize
-    format:
-      type: string
-      enum: [bullets, paragraph, tldr]
-      default: bullets
   required:
     - content
 ---
@@ -96,86 +77,62 @@ input_schema:
 You are a summarization assistant. Create clear, concise summaries.
 
 Extract key points only. Maintain factual accuracy.
-Use the requested format for output.
 ```
 
-### Execution Modes
+### System Prompt Format
 
-**Inline mode (`subagent: false`, default):**
-- Skill instructions returned to main agent
-- Main agent follows instructions using its tools
-- Faster, maintains conversation context
-- Best for: simple documentation, formatting, explanations
+Skills are listed in the system prompt with their file paths:
 
-**Subagent mode (`subagent: true`):**
-- Isolated LLM loop with skill instructions as system prompt
-- Restricted to `required_tools` (or all tools if empty)
-- Own conversation context, max_iterations limit
-- Best for: multi-step tasks, complex workflows, isolated execution
+```markdown
+## Skills
 
-Note: `name` defaults to the directory name (e.g., `skills/summarize/` → `summarize`).
+Skills provide task-specific instructions.
+Read a skill's file when the task matches its description.
 
-### Skill Config Format
+### Available Skills
 
-Skills declare config requirements in SKILL.md. Values are provided via layered sources.
-
-**SKILL.md config declaration:**
-```yaml
-config:
-  - API_KEY                   # Required (no default)
-  - DEFAULT_VALUE=fallback    # Optional with default
+- **summarize**: Summarize text or documents concisely
+  File: /workspace/skills/summarize/SKILL.md
 ```
 
-**Skill-local config.toml (gitignored):**
-```toml
-# workspace/skills/<name>/config.toml
-API_KEY = "$MY_API_KEY"       # Reference env var
-DEFAULT_VALUE = "custom"       # Literal value
+The agent reads the SKILL.md file using `read_file` when a task matches the skill description.
+
+### CLI Commands
+
+```bash
+# Scaffold new skill
+ash skill init <name> [--resources scripts,references,assets]
+
+# Validate skill format
+ash skill validate <path>
+
+# List skills (with availability status)
+ash skill list [--all]
+
+# Reload skills (after manual creation)
+ash skill reload
 ```
 
-**Central config.toml:**
+### Environment Variables
+
+Skills that need environment variables should reference vars from the central `[env]` section in `~/.ash/config.toml`:
+
 ```toml
 # ~/.ash/config.toml
-[skills.summarize]
-API_KEY = "abc123"
-model = "sonnet"  # Override model for this skill (see specs/models.md)
+[env]
+MUNI_API_KEY = "abc123"
+BRAVE_API_KEY = "xyz789"
+GITHUB_TOKEN = "$GITHUB_TOKEN"  # Reference actual env var
 ```
 
-**Resolution order for config values (first match wins):**
-1. Skill's `config.toml`
-2. Central `[skills.<name>]` section
-3. Environment variable by name
-4. Default from SKILL.md (after `=`)
+Skills reference these directly in their instructions:
 
-**Resolution order for model (first match wins):**
-1. `[skills.<name>] model` in central config
-2. `model` in SKILL.md
-3. `"default"` fallback
-
-**Passed to sandbox as:**
-- `SKILL_API_KEY`
-- `SKILL_DEFAULT_VALUE`
-
-### YAML Skill Format (Backward Compatibility)
-
-```yaml
-# workspace/skills/summarize.yaml
-name: summarize
-description: Summarize text or documents concisely
-model: fast
-required_tools:
-  - bash
-max_iterations: 3
-input_schema:
-  type: object
-  properties:
-    content:
-      type: string
-  required:
-    - content
-instructions: |
-  You are a summarization assistant.
+```bash
+# In SKILL.md
+curl "https://api.example.com?key=$MUNI_API_KEY"
 ```
+
+No `SKILL_*` prefix needed - variables are loaded into the session environment at startup.
 
 ### Python Classes
 
@@ -193,82 +150,26 @@ class SkillRequirements:
 
 @dataclass
 class SkillDefinition:
-    """Skill loaded from workspace."""
+    """Skill loaded from SKILL.md files."""
     name: str
     description: str
     instructions: str
-    subagent: bool = False  # True = isolated LLM loop, False = inline
-    model: str | None = None
     required_tools: list[str] = field(default_factory=list)
     input_schema: dict[str, Any] = field(default_factory=dict)
-    max_iterations: int = 5
     requires: SkillRequirements = field(default_factory=SkillRequirements)
-    config: list[str] = field(default_factory=list)  # Env var names with optional =default
-    config_values: dict[str, str] = field(default_factory=dict)  # Resolved values
     skill_path: Path | None = None  # Path to skill directory
 
     def is_available(self) -> tuple[bool, str | None]:
         """Check if skill is available on current system."""
-        # Check requirements first
-        ok, msg = self.requires.check()
-        if not ok:
-            return ok, msg
-        # Check config
-        return self.is_config_valid()
-
-    def is_config_valid(self) -> tuple[bool, str | None]:
-        """Check if all required config values are present."""
-        for item in self.config:
-            name = item.split("=")[0]
-            if "=" not in item and name not in self.config_values:
-                return False, f"Missing required config: {name}"
-        return True, None
-
-@dataclass
-class SubagentConfig:
-    """Configuration for running a subagent.
-
-    Used by skills with subagent=True and dynamic skills (write-skill, research).
-    """
-    system_prompt: str
-    allowed_tools: list[str] = field(default_factory=list)  # Empty = all tools
-    max_iterations: int = 10
-    model: str | None = None  # Model alias (None = default)
-    env: dict[str, str] = field(default_factory=dict)  # SKILL_* env vars
-    initial_message: str = "Execute according to the instructions provided."
-
-@dataclass
-class SkillContext:
-    """Context passed to skill execution."""
-    session_id: str | None = None
-    user_id: str | None = None
-    chat_id: str | None = None
-    input_data: dict[str, Any] = field(default_factory=dict)
-
-@dataclass
-class SkillResult:
-    """Result from skill execution."""
-    content: str
-    is_error: bool = False
-    iterations: int = 0
-
-    @classmethod
-    def success(cls, content: str, iterations: int = 0) -> "SkillResult": ...
-
-    @classmethod
-    def error(cls, message: str) -> "SkillResult": ...
+        return self.requires.check()
 ```
 
 ### Registry
 
 ```python
 class SkillRegistry:
-    def load_bundled(self) -> None:
-        """Load bundled skills from src/ash/skills/bundled/."""
-        ...
-
-    def discover(self, workspace_path: Path, *, include_bundled: bool = True) -> None:
-        """Load skills from bundled (optional) and workspace directories."""
+    def discover(self, workspace_path: Path) -> None:
+        """Load skills from workspace directory."""
         ...
 
     def get(self, name: str) -> SkillDefinition:
@@ -285,8 +186,8 @@ class SkillRegistry:
         """List skills available on current system."""
         ...
 
-    def get_definitions(self, include_unavailable: bool = False) -> list[dict[str, Any]]:
-        """Get skill definitions for LLM. By default only returns available skills."""
+    def validate_skill_file(self, path: Path) -> tuple[bool, str | None]:
+        """Validate a skill file format without loading."""
         ...
 
     def __iter__(self) -> Iterator[SkillDefinition]:
@@ -296,133 +197,48 @@ class SkillRegistry:
     def __len__(self) -> int: ...
 ```
 
-### Executor
-
-```python
-class SkillExecutor:
-    def __init__(
-        self,
-        registry: SkillRegistry,
-        tool_executor: ToolExecutor,
-        config: AshConfig,
-    ) -> None: ...
-
-    def has_skill(self, skill_name: str) -> bool:
-        """Check if skill exists (including dynamic skills)."""
-        ...
-
-    async def execute(
-        self,
-        skill_name: str,
-        input_data: dict[str, Any],
-        context: SkillContext,
-    ) -> SkillResult:
-        """Execute skill - routes to inline, subagent, or dynamic execution."""
-        ...
-
-    async def _run_subagent(
-        self,
-        config: SubagentConfig,
-        context: SkillContext,
-        name: str = "subagent",
-    ) -> SkillResult:
-        """Run isolated subagent loop - shared by all subagent execution paths."""
-        ...
-```
-
-**Execution routing:**
-1. Dynamic skills (`write-skill`, `research`) → call module's `build_subagent_config()` → `_run_subagent()`
-2. Registered skills with `subagent: true` → build config → `_run_subagent()`
-3. Registered skills with `subagent: false` → return instructions for main agent
-
-### LLM Tool
-
-```python
-class UseSkillTool(Tool):
-    """Invoke a skill by name."""
-    name = "use_skill"
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "skill": {"type": "string", "description": "Skill name"},
-            "input": {"type": "object", "description": "Skill input parameters"},
-        },
-        "required": ["skill"],
-    }
-```
-
-### Bundled Skills
-
-Skills shipped with Ash in `src/ash/skills/bundled/`:
-
-| Skill | Mode | Description |
-|-------|------|-------------|
-| code-review | subagent | Review code for bugs, security issues, and improvements |
-| debug | subagent | Systematically debug issues in code or systems |
-| research | inline | Research a topic (documentation for main agent) |
-
-### Dynamic Skills
-
-Skills constructed at runtime with injected context (not defined in SKILL.md):
-
-| Skill | Module | Description |
-|-------|--------|-------------|
-| write-skill | `skills/write_skill.py` | Create high-quality SKILL.md files with examples and validation |
-| research | `skills/research.py` | Research a topic using web search (subagent with dynamic prompt) |
-
-Dynamic skills build their `SubagentConfig` at invocation time, allowing them to inject:
-- Current available tools from registry
-- Example skills from bundled
-- Validation rules and anti-patterns
-
 ## Behaviors
 
 | Input | Output | Notes |
 |-------|--------|-------|
-| Registry.discover() called | Bundled + workspace skills loaded | Bundled first, workspace can override |
-| Skills discovered | Listed in system prompt | Via SystemPromptBuilder |
-| `use_skill(summarize, {content: "..."})` | SkillResult with summary | Sub-agent executes |
-| Skill with `model: fast` | Uses `models.fast` config | Model alias resolved |
-| Skill with unknown model alias | Falls back to default model | Warning logged |
-| Skill requires unavailable tool | Error before execution | Validation fails |
-| Skill exceeds max_iterations | Returns partial result | With limit message |
-| Empty workspace/skills/ | Bundled skills only | No error |
-| Skill without `name` in frontmatter | Uses filename stem | e.g., `foo.md` → `foo` |
+| Registry.discover() called | Workspace skills loaded | From workspace/skills/ |
+| Skills discovered | Listed in system prompt with paths | Agent reads file to follow |
+| Task matches skill description | Agent reads SKILL.md | Follows instructions directly |
+| Empty workspace/skills/ | No skills | No error |
+| Skill without `name` in frontmatter | Uses directory/filename | e.g., `summarize/SKILL.md` → `summarize` |
 | Skill with `requires.bins` not in PATH | Filtered from prompt/iteration | Still registered |
 | Skill with `requires.env` not set | Filtered from prompt/iteration | Still registered |
 | Skill with `requires.os` not matching | Filtered from prompt/iteration | Still registered |
-| Workspace skill same name as bundled | Workspace overrides bundled | Customization |
-| Skill with `config` declared | Registry loads config.toml if exists | Layered resolution |
-| Config value `$VAR` | Resolved from environment | Env var expansion |
-| Required config missing | Skill marked unavailable | Filtered from prompt |
-| Config provided | Passed as `SKILL_*` env vars to sandbox | Uppercase, prefixed |
+| `ash skill init foo` | Creates skills/foo/SKILL.md template | Scaffolding |
+| `ash skill validate path` | Validates format | Returns errors if invalid |
+| `ash skill list` | Shows available skills | With availability status |
 
 ## Errors
 
 | Condition | Response |
 |-----------|----------|
-| Skill not found | SkillResult.error("Skill 'name' not found") |
-| Skill not available | SkillResult.error("Skill 'name' not available: <reason>") |
-| Required tool unavailable | SkillResult.error("Skill requires tool 'bash' which is not available") |
-| Invalid input schema | SkillResult.error("Invalid input: <validation error>") |
+| Skill not found | KeyError from registry.get() |
 | Missing frontmatter | Logged warning, skill skipped during discovery |
 | Missing description | Logged warning, skill skipped |
 | Empty instructions | Logged warning, skill skipped |
-| Model alias not found | Uses default model, logs warning |
-| Required config missing | SkillResult.error("Skill 'name' not available: Missing required config: X") |
-| Config.toml parse error | Logged warning, config values empty |
+| Invalid YAML frontmatter | Logged warning, skill skipped |
 
 ## Verification
 
 ```bash
 uv run pytest tests/test_skills.py -v
 
-# Test bundled skills loaded
-uv run ash chat "What skills are available?"
-# Should show: manage-skill, research, code-review, debug
+# Test skill creation via CLI
+uv run ash skill init greeting --description "Greet the user warmly"
+# Creates workspace/skills/greeting/SKILL.md
 
-# Test skill creation via manage-skill
-uv run ash chat "Use the manage-skill skill to create a greeting skill"
+# Test skill validation
+uv run ash skill validate workspace/skills/greeting/SKILL.md
+# Should report valid or list errors
+
+# Test skill list
+uv run ash skill list
+# Shows available skills
 
 # Test skill with requirements
 mkdir -p workspace/skills/darwin-only
@@ -438,50 +254,15 @@ This skill only works on macOS.
 EOF
 
 # Verify filtering (skill should not appear on Linux)
-uv run ash chat "What skills are available?"
-
-# Test skill config
-mkdir -p workspace/skills/config-test
-cat > workspace/skills/config-test/SKILL.md << 'EOF'
----
-description: Test config loading
-required_tools:
-  - bash
-config:
-  - TEST_KEY
-  - OPTIONAL_KEY=default
----
-Echo the SKILL_* env vars.
-EOF
-
-# Without config, skill should be unavailable
-uv run ash chat "What skills are available?"
-# config-test should NOT be listed
-
-# Add config
-cat > workspace/skills/config-test/config.toml << 'EOF'
-TEST_KEY = "hello"
-EOF
-
-# Now skill should be available
-uv run ash chat "use the config-test skill"
-# Should see SKILL_TEST_KEY=hello, SKILL_OPTIONAL_KEY=default
+uv run ash skill list
 ```
 
-- Bundled skills loaded from src/ash/skills/bundled/
 - Workspace skills loaded from workspace/skills/
-- Workspace skills can override bundled skills
-- Skills listed in system prompt
+- Skills listed in system prompt with file paths
+- Agent reads SKILL.md directly to follow instructions
 - Directory format `<name>/SKILL.md` loads correctly
 - Flat markdown files still supported
-- YAML files still supported
-- use_skill executes skill with sub-agent
-- Model alias resolution works
-- Missing tools detected before execution
+- YAML files still supported (backward compatibility)
 - Invalid files skipped with warning
 - Skills with unmet requirements filtered from prompt
-- Skills with unmet requirements return error on execution
-- Skills with `config` load values from config.toml
-- Config values resolved from layered sources
-- Required config missing marks skill unavailable
-- Config passed as SKILL_* env vars to sandbox
+- CLI commands work for init/validate/list/reload

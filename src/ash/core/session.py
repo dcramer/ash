@@ -23,8 +23,6 @@ class SessionState:
     user_id: str
     messages: list[Message] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    # Active skill environment variables (populated by use_skill for inline skills)
-    skill_env: dict[str, str] = field(default_factory=dict)
     # Token tracking for smart pruning (populated from DB)
     _token_counts: list[int] = field(default_factory=list, repr=False)
     _message_ids: list[str] = field(default_factory=list, repr=False)

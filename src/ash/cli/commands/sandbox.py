@@ -96,6 +96,8 @@ def _sandbox_build(dockerfile_path: Path, force: bool) -> None:
     dim(f"Using {dockerfile_path}")
     console.print()
 
+    # Build context is the project root (parent of docker/)
+    build_context = dockerfile_path.parent.parent
     result = subprocess.run(
         [
             "docker",
@@ -104,7 +106,7 @@ def _sandbox_build(dockerfile_path: Path, force: bool) -> None:
             "ash-sandbox:latest",
             "-f",
             str(dockerfile_path),
-            str(dockerfile_path.parent),
+            str(build_context),
         ],
     )
 

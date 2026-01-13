@@ -18,10 +18,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 
 # Install Python dependencies for sandboxed CLI
-RUN pip install --no-cache-dir typer croniter
+RUN pip install --no-cache-dir typer croniter pyyaml
 
-# Copy sandboxed CLI
+# Copy sandboxed CLI and dependencies
 COPY src/ash/sandbox/cli /opt/ash-cli/ash/sandbox/cli
+COPY src/ash/rpc /opt/ash-cli/ash/rpc
 
 # Create entry point script for the CLI
 RUN printf '#!/bin/bash\nPYTHONPATH=/opt/ash-cli python -m ash.sandbox.cli "$@"\n' > /usr/local/bin/ash \

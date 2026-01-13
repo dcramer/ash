@@ -6,9 +6,6 @@ Core tools are exported here:
 - WebFetchTool: Fetch and extract content from URLs
 - ReadFileTool, WriteFileTool: File operations
 
-Tools with dependencies are available from their modules:
-- ash.tools.builtin.skills: UseSkillTool
-
 All tools are also exported from ash.tools for convenience.
 """
 

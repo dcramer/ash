@@ -7,6 +7,7 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ash.agents import AgentRegistry
     from ash.config import AshConfig, Workspace
     from ash.db.models import Person
     from ash.memory import RetrievedContext
@@ -117,6 +118,7 @@ class SystemPromptBuilder:
         tool_registry: ToolRegistry,
         skill_registry: SkillRegistry,
         config: AshConfig,
+        agent_registry: AgentRegistry | None = None,
     ):
         """Initialize prompt builder.
 
@@ -125,11 +127,13 @@ class SystemPromptBuilder:
             tool_registry: Registry of available tools.
             skill_registry: Registry of available skills.
             config: Application configuration.
+            agent_registry: Optional registry of built-in agents.
         """
         self._workspace = workspace
         self._tools = tool_registry
         self._skills = skill_registry
         self._config = config
+        self._agents = agent_registry
 
     def build(self, context: PromptContext | None = None) -> str:
         """Build complete system prompt.
@@ -156,6 +160,11 @@ class SystemPromptBuilder:
         skills_section = self._build_skills_section()
         if skills_section:
             parts.append(f"\n\n{skills_section}")
+
+        # 3.5. Agents section
+        agents_section = self._build_agents_section()
+        if agents_section:
+            parts.append(f"\n\n{agents_section}")
 
         # 4. Model aliases
         aliases_section = self._build_model_aliases_section()
@@ -256,30 +265,59 @@ class SystemPromptBuilder:
     def _build_skills_section(self) -> str:
         """Build skills listing section.
 
+        Skills are reusable instructions. When a task matches a skill's
+        description, read the SKILL.md file and follow the instructions.
+
         Returns:
-            Skills section string.
+            Skills section string or empty if no skills.
         """
+        available_skills = list(self._skills)
+        if not available_skills:
+            return ""
+
         lines = [
             "## Skills",
             "",
-            "Skills are reusable behaviors. Invoke with `use_skill`.",
+            "Skills provide task-specific instructions.",
+            "Read a skill's file when the task matches its description.",
             "",
-            "**Execution Modes:**",
-            "- `inline`: Instructions returned for you to follow directly",
-            "- `subagent`: Runs in isolated sub-agent loop",
+            "### Available Skills",
             "",
         ]
 
-        lines.append("### Available Skills")
-        lines.append("")
+        for skill in sorted(available_skills, key=lambda s: s.name):
+            path = skill.skill_path / "SKILL.md" if skill.skill_path else "N/A"
+            lines.append(f"- **{skill.name}**: {skill.description}")
+            lines.append(f"  File: {path}")
 
-        available_skills = list(self._skills)
-        if available_skills:
-            for skill in available_skills:
-                badge = " [subagent]" if skill.subagent else ""
-                lines.append(f"- **{skill.name}**{badge}: {skill.description}")
-        else:
-            lines.append("*No additional skills registered.*")
+        return "\n".join(lines)
+
+    def _build_agents_section(self) -> str:
+        """Build agents listing section.
+
+        Agents are built-in subagents that handle complex multi-step tasks
+        in isolated execution contexts.
+
+        Returns:
+            Agents section string or empty if no agents.
+        """
+        if not self._agents:
+            return ""
+
+        available_agents = list(self._agents.list_available())
+        if not available_agents:
+            return ""
+
+        lines = [
+            "## Agents",
+            "",
+            "Agents handle complex multi-step tasks autonomously.",
+            "Use the `use_agent` tool to invoke them.",
+            "",
+        ]
+
+        for agent in sorted(available_agents, key=lambda a: a.config.name):
+            lines.append(f"- **{agent.config.name}**: {agent.config.description}")
 
         return "\n".join(lines)
 

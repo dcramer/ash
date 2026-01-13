@@ -26,7 +26,7 @@ _TOOL_SUMMARIZERS: dict[str, Any] = {
     "write_file": lambda d: f"{d.get('file_path', '?')}, {d.get('content', '').count(chr(10)) + 1 if d.get('content') else 0} lines",
     "read_file": lambda d: d.get("file_path", "?"),
     "bash": lambda d: _truncate(d.get("command", ""), 50),
-    "use_skill": lambda d: d.get("skill_name", "?"),
+    "use_agent": lambda d: d.get("agent", "?"),
     "web_search": lambda d: _truncate(d.get("query", "?"), 40),
     "web_fetch": lambda d: _truncate(d.get("url", "?"), 50),
 }

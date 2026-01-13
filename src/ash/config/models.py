@@ -167,6 +167,19 @@ class SentryConfig(BaseModel):
     debug: bool = False
 
 
+class AgentOverrideConfig(BaseModel):
+    """Configuration overrides for a built-in agent.
+
+    Used to customize agent behavior via [agents.<name>] sections.
+    Example:
+        [agents.research]
+        model = "sonnet"
+    """
+
+    model: str | None = None  # Model alias to use (None = agent default)
+    max_iterations: int | None = None  # Override max iterations
+
+
 class ConfigError(Exception):
     """Configuration error."""
 
@@ -191,9 +204,15 @@ class AshConfig(BaseModel):
     embeddings: EmbeddingsConfig | None = None
     brave_search: BraveSearchConfig | None = None
     sentry: SentryConfig | None = None
-    # Skill-specific configuration: [skills.<name>] sections
+    # Environment variables from [env] section
+    # Loaded into session environment for skills and bash commands
+    env: dict[str, str] = Field(default_factory=dict)
+    # Skill-specific configuration: [skills.<name>] sections (deprecated)
     # Maps skill name to config key-value pairs
     skills: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Agent-specific configuration: [agents.<name>] sections
+    # Allows overriding model, max_iterations per agent
+    agents: dict[str, AgentOverrideConfig] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _migrate_default_llm(self) -> "AshConfig":
@@ -329,3 +348,21 @@ class AshConfig(BaseModel):
             Dict of config key-value pairs, empty if no config found.
         """
         return self.skills.get(skill_name, {})
+
+    def get_resolved_env(self) -> dict[str, str]:
+        """Get env vars from [env] section with $VAR references resolved.
+
+        Values starting with $ are resolved from environment variables.
+
+        Returns:
+            Dict of env var name to resolved value.
+        """
+        resolved = {}
+        for name, value in self.env.items():
+            if value.startswith("$"):
+                # Resolve from environment
+                env_var = value[1:]
+                resolved[name] = os.environ.get(env_var, "")
+            else:
+                resolved[name] = value
+        return resolved

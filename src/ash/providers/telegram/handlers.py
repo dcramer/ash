@@ -75,14 +75,9 @@ def format_tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
             else:
                 domain = url.split("/")[0]
             return f"Reading: {domain}"
-        case "use_skill":
-            skill = tool_input.get("skill", "unknown")
-            return f"Running: {skill}"
-        case "write_skill":
-            goal = tool_input.get("goal", "")
-            if len(goal) > 40:
-                goal = goal[:40] + "..."
-            return f"Creating skill: {goal}" if goal else "Creating skill"
+        case "use_agent":
+            agent = tool_input.get("agent", "unknown")
+            return f"Running agent: {agent}"
         case "write_file":
             path = tool_input.get("file_path", "")
             # Show just filename, not full path

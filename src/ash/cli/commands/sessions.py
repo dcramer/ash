@@ -432,10 +432,8 @@ def _format_tool_input(name: str, input_data: dict[str, Any], verbose: bool) -> 
             if len(content) > 50:
                 content = content[:50] + "..."
             return content
-        case "use_skill":
-            return input_data.get("skill_name", "")
-        case "write_skill":
-            return f"name={input_data.get('name', '')}, goal={input_data.get('goal', '')[:50]}..."
+        case "use_agent":
+            return input_data.get("agent", "")
         case _:
             if verbose:
                 return json.dumps(input_data, indent=2)[:500]
