@@ -91,6 +91,14 @@ model = "{sonnet_model}"
 max_tokens = 8192
 
 # =============================================================================
+# Agent Overrides
+# =============================================================================
+# Override model or iteration limits for built-in agents
+
+[agents.skill-writer]
+model = "sonnet"  # Use more capable model for skill creation
+
+# =============================================================================
 # Optional: Telegram Integration
 # =============================================================================
 # Get bot token from @BotFather, user ID from @userinfobot

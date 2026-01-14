@@ -212,6 +212,6 @@ class AgentExecutor:
 
         return AgentResult(
             content=last_text or f"Agent reached iteration limit ({max_iterations})",
-            is_error=False,
+            is_error=True,
             iterations=iterations,
         )

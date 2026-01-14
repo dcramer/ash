@@ -57,7 +57,7 @@ def format_tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
         A brief, user-friendly message describing what's happening.
     """
     match tool_name:
-        case "bash_tool":
+        case "bash":
             cmd = tool_input.get("command", "")
             if len(cmd) > 50:
                 cmd = cmd[:50] + "..."
