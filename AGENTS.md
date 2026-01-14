@@ -37,6 +37,7 @@ Co-Authored-By: (the agent model's name and attribution byline)
 | `/verify-spec` | Check implementation against spec |
 | `/create-migration` | Database schema changes |
 | `/write-docs` | Documentation pages |
+| `/create-skill` | Create Ash skills in workspace |
 
 ## Specs
 

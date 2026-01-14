@@ -61,6 +61,7 @@ claude plugin add anthropics/code-simplifier
 | `/write-spec <feature>` | Create/update a feature spec |
 | `/verify-spec <feature>` | Verify implementation matches spec |
 | `/create-migration` | Database schema changes |
+| `/create-skill <name>` | Create Ash skills in workspace |
 
 ## License
 
