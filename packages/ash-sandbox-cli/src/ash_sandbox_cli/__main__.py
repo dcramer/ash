@@ -1,6 +1,6 @@
 """Entry point for sandboxed CLI."""
 
-from ash.sandbox.cli.app import app
+from ash_sandbox_cli.app import app
 
 if __name__ == "__main__":
     app()

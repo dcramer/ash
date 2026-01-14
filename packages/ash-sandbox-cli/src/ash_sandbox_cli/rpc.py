@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ash.rpc.protocol import (
+from ash_rpc_protocol import (
     RPCRequest,
     RPCResponse,
     read_message_sync,

@@ -5,9 +5,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from ash_sandbox_cli.commands.schedule import app
 from typer.testing import CliRunner
-
-from ash.sandbox.cli.commands.schedule import app
 
 
 @pytest.fixture
@@ -34,7 +33,7 @@ def cli_runner_no_context():
 def schedule_file(tmp_path: Path, monkeypatch):
     """Create a temporary schedule file."""
     schedule = tmp_path / "schedule.jsonl"
-    monkeypatch.setattr("ash.sandbox.cli.commands.schedule.SCHEDULE_FILE", schedule)
+    monkeypatch.setattr("ash_sandbox_cli.commands.schedule.SCHEDULE_FILE", schedule)
     return schedule
 
 

@@ -4,7 +4,7 @@ from typing import Annotated
 
 import typer
 
-from ash.sandbox.cli.rpc import RPCError, get_context_params, rpc_call
+from ash_sandbox_cli.rpc import RPCError, get_context_params, rpc_call
 
 app = typer.Typer(
     name="memory",

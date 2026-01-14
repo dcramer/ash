@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ash-rpc-protocol"
+version = "0.1.0"
+description = "JSON-RPC 2.0 protocol for Ash sandbox communication"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ash_rpc_protocol"]

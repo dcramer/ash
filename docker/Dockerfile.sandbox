@@ -27,16 +27,17 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/uv \
     && mv /root/.local/bin/uvx /usr/local/bin/uvx
 
-# Install Python dependencies for sandboxed CLI + optional packages
-RUN uv pip install --system --no-cache typer croniter pyyaml ${EXTRA_PYTHON_PACKAGES}
+# Copy workspace packages
+COPY packages/ash-rpc-protocol /tmp/ash-rpc-protocol
+COPY packages/ash-sandbox-cli /tmp/ash-sandbox-cli
 
-# Copy sandboxed CLI and dependencies
-COPY src/ash/sandbox/cli /opt/ash-cli/ash/sandbox/cli
-COPY src/ash/rpc /opt/ash-cli/ash/rpc
-
-# Create entry point script for the CLI
-RUN printf '#!/bin/bash\nPYTHONPATH=/opt/ash-cli python -m ash.sandbox.cli "$@"\n' > /usr/local/bin/ash \
-    && chmod +x /usr/local/bin/ash
+# Install sandboxed CLI and dependencies (scripts go to /usr/local/bin/ which is on PATH)
+RUN uv pip install --system --no-cache \
+    /tmp/ash-rpc-protocol \
+    /tmp/ash-sandbox-cli \
+    ${EXTRA_PYTHON_PACKAGES} \
+    && rm -rf /tmp/ash-rpc-protocol /tmp/ash-sandbox-cli \
+    && which ash-sb && ash-sb --help  # Verify ash-sb is on PATH and works
 
 # Create non-root user for sandbox execution
 RUN useradd -m -s /bin/bash -u 1000 sandbox

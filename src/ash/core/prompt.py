@@ -252,11 +252,12 @@ class SystemPromptBuilder:
                 "",
                 "### Presenting Results",
                 "",
-                "**CRITICAL**: When tools return results, you MUST include the content:",
-                "- If asked to 'show', 'read', or 'display' something, include the actual content",
-                "- Use code blocks for file contents and command output",
-                "- Never say 'here it is' or 'I found it' without showing the actual content",
-                "- For large outputs, show a relevant excerpt and offer to show more",
+                "**CRITICAL**: The user CANNOT see tool results directly - only YOUR response.",
+                "When tools return content, you MUST include it in your response:",
+                "- If asked to 'show', 'read', 'display', or 'what is in' something: PASTE THE CONTENT",
+                "- Use ``` code blocks for file contents, command output, and data",
+                "- NEVER say 'here it is', 'there it is', or 'done' without the actual content",
+                "- For large outputs (>100 lines), show first 50 lines and offer to show more",
                 "",
                 "### Handling Failures",
                 "",
@@ -389,23 +390,23 @@ class SystemPromptBuilder:
         lines.extend(
             [
                 "",
-                "### ash CLI",
+                "### ash-sb CLI",
                 "",
-                "The `ash` command is available in the sandbox for self-service operations:",
+                "The `ash-sb` command is available in the sandbox for self-service operations:",
                 "",
                 "**Memory:**",
-                "- `ash memory search 'query'` - Search memories (semantic search)",
-                "- `ash memory list` - List recent memories",
-                "- `ash memory add 'content'` - Store a memory",
+                "- `ash-sb memory search 'query'` - Search memories (semantic search)",
+                "- `ash-sb memory list` - List recent memories",
+                "- `ash-sb memory add 'content'` - Store a memory",
                 "",
                 "**Scheduling:**",
-                "- `ash schedule create 'message' --at 2026-01-12T09:00:00Z` - One-time task",
-                "- `ash schedule create 'message' --cron '0 8 * * *'` - Recurring task",
-                "- `ash schedule list` - List scheduled tasks (shows IDs)",
-                "- `ash schedule cancel --id <ID>` - Cancel a task by ID",
-                "- `ash schedule clear` - Clear all tasks",
+                "- `ash-sb schedule create 'message' --at 2026-01-12T09:00:00Z` - One-time task",
+                "- `ash-sb schedule create 'message' --cron '0 8 * * *'` - Recurring task",
+                "- `ash-sb schedule list` - List scheduled tasks (shows IDs)",
+                "- `ash-sb schedule cancel --id <ID>` - Cancel a task by ID",
+                "- `ash-sb schedule clear` - Clear all tasks",
                 "",
-                "Run `ash --help` for all available commands.",
+                "Run `ash-sb --help` for all available commands.",
             ]
         )
 
@@ -489,7 +490,7 @@ class SystemPromptBuilder:
             "and people in their lives are extracted and stored in the background "
             "after each exchange. You don't need to decide what to remember.\n\n"
             "When a user explicitly asks you to remember something (e.g., "
-            '"remember that I prefer dark mode"), use `ash memory add` to '
+            '"remember that I prefer dark mode"), use `ash-sb memory add` to '
             "store it (use --subject for facts about specific people), then confirm. "
             "For everything else, trust the automatic extraction."
         )
@@ -507,7 +508,7 @@ class SystemPromptBuilder:
             retrieved_header = (
                 "\n\n### Relevant Context from Memory\n\n"
                 "The following has been automatically retrieved. "
-                "Use it directly. For additional searches, use `ash memory search`.\n\n"
+                "Use it directly. For additional searches, use `ash-sb memory search`.\n\n"
             )
             parts.append(retrieved_header + "\n".join(context_items))
 

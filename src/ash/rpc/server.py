@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from ash.rpc.protocol import (
+from ash_rpc_protocol import (
     ErrorCode,
     RPCRequest,
     RPCResponse,

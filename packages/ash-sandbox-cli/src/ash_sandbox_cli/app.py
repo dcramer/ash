@@ -2,7 +2,7 @@
 
 import typer
 
-from ash.sandbox.cli.commands import memory, schedule, skill
+from ash_sandbox_cli.commands import memory, schedule, skill
 
 app = typer.Typer(
     name="ash",

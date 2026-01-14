@@ -48,6 +48,8 @@ dependencies = [
     # Caching
     "cachetools>=5.3.0",
     "croniter>=6.0.0",
+    # Workspace packages
+    "ash-rpc-protocol",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +73,13 @@ ash = "ash.cli:app"
 [tool.uv]
 managed = true
 
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+ash-rpc-protocol = { workspace = true }
+ash-sandbox-cli = { workspace = true }
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
@@ -79,6 +88,8 @@ dev = [
     "ruff>=0.8.0",
     "pre-commit>=4.0.0",
     "ty>=0.0.1a11",
+    # For testing sandbox CLI (module only, entry point conflicts with main ash)
+    "ash-sandbox-cli",
 ]
 sentry = [
     "sentry-sdk[fastapi]>=2.0.0",

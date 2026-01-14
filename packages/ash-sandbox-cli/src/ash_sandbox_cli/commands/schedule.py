@@ -95,8 +95,8 @@ def create(
     """Create a scheduled task.
 
     Examples:
-        ash schedule create "Remind me to check the build" --at 2026-01-12T10:00:00Z
-        ash schedule create "Daily status check" --cron "0 8 * * *"
+        ash-sb schedule create "Remind me to check the build" --at 2026-01-12T10:00:00Z
+        ash-sb schedule create "Daily status check" --cron "0 8 * * *"
     """
     # Require routing context
     ctx = _require_routing_context()

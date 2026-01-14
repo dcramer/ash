@@ -23,7 +23,7 @@ def register(app: typer.Typer) -> None:
             typer.Option(
                 "--force",
                 "-f",
-                help="Force rebuild even if image exists",
+                help="For clean: also remove the sandbox image",
             ),
         ] = False,
         config: Annotated[
@@ -52,7 +52,7 @@ def register(app: typer.Typer) -> None:
                 dockerfile_path = package_dir / "docker" / "Dockerfile.sandbox"
 
         if action == "build":
-            _sandbox_build(dockerfile_path, force, config)
+            _sandbox_build(dockerfile_path, config)
 
         elif action == "status":
             _sandbox_status()
@@ -66,9 +66,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
 
-def _sandbox_build(
-    dockerfile_path: Path, force: bool, config_path: Path | None = None
-) -> None:
+def _sandbox_build(dockerfile_path: Path, config_path: Path | None = None) -> None:
     """Build the sandbox Docker image."""
     # Check if Docker is available
     try:
@@ -85,18 +83,6 @@ def _sandbox_build(
         error("Docker is not installed")
         console.print("Install Docker from https://docs.docker.com/get-docker/")
         raise typer.Exit(1) from None
-
-    # Check if image already exists
-    if not force:
-        result = subprocess.run(
-            ["docker", "images", "-q", "ash-sandbox:latest"],
-            capture_output=True,
-            text=True,
-        )
-        if result.stdout.strip():
-            warning("Sandbox image already exists")
-            console.print("Use --force to rebuild")
-            return
 
     if not dockerfile_path.exists():
         error(f"Dockerfile not found: {dockerfile_path}")
