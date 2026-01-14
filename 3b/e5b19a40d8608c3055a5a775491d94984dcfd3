@@ -1,0 +1,35 @@
+tests/test_chat_state.py
+  5181a011cad17607 677-826
+src/ash/chats/models.py
+  5181a011cad17607 14,47,60-61,67
+src/ash/sessions/manager.py
+  5181a011cad17607 5,18,28,67-70,80,89,93-106
+src/ash/sessions/__init__.py
+  5181a011cad17607 17,40
+src/ash/providers/telegram/handlers.py
+  5181a011cad17607 600-605,610
+src/ash/chats/manager.py
+  5181a011cad17607 74,78
+src/ash/sessions/types.py
+  5181a011cad17607 11-12,339-348
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "3be5b19a40d8608c3055a5a775491d94984dcfd3",
+  "prompts": {
+    "5181a011cad17607": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "421d0edb-fbbb-40c4-bfe1-ba3337ac369d",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 221,
+      "total_deletions": 20,
+      "accepted_lines": 203,
+      "overriden_lines": 0
+    }
+  }
+}
