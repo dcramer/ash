@@ -1,0 +1,70 @@
+"""Chat state models."""
+
+from datetime import UTC, datetime
+
+from pydantic import BaseModel, Field
+
+
+class Participant(BaseModel):
+    """A participant in a chat."""
+
+    id: str
+    username: str | None = None
+    display_name: str | None = None
+    first_seen: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_active: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    message_count: int = 0
+
+
+class ChatInfo(BaseModel):
+    """Chat metadata."""
+
+    id: str
+    type: str | None = None  # "private", "group", "supergroup", "channel"
+    title: str | None = None
+
+
+class ChatState(BaseModel):
+    """State for a chat, stored in state.json."""
+
+    chat: ChatInfo
+    participants: list[Participant] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    def get_participant(self, user_id: str) -> Participant | None:
+        """Get a participant by ID."""
+        for p in self.participants:
+            if p.id == user_id:
+                return p
+        return None
+
+    def update_participant(
+        self,
+        user_id: str,
+        username: str | None = None,
+        display_name: str | None = None,
+    ) -> Participant:
+        """Update or add a participant, returns the participant."""
+        now = datetime.now(UTC)
+        participant = self.get_participant(user_id)
+
+        if participant:
+            participant.last_active = now
+            participant.message_count += 1
+            if username is not None:
+                participant.username = username
+            if display_name is not None:
+                participant.display_name = display_name
+        else:
+            participant = Participant(
+                id=user_id,
+                username=username,
+                display_name=display_name,
+                first_seen=now,
+                last_active=now,
+                message_count=1,
+            )
+            self.participants.append(participant)
+
+        self.updated_at = now
+        return participant

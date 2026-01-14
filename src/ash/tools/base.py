@@ -104,11 +104,17 @@ def build_sandbox_manager_config(
     workspace_path: Path | None,
     default_network_mode: Literal["none", "bridge"] = "none",
 ) -> "SandboxManagerConfig":
-    from ash.config.paths import get_logs_path, get_rpc_socket_path, get_uv_cache_path
+    from ash.config.paths import (
+        get_chats_path,
+        get_logs_path,
+        get_rpc_socket_path,
+        get_uv_cache_path,
+    )
     from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
     from ash.sessions.manager import get_sessions_path
 
     sessions_path = get_sessions_path()
+    chats_path = get_chats_path()
     logs_path = get_logs_path()
     rpc_socket_path = get_rpc_socket_path()
     uv_cache_path = get_uv_cache_path()
@@ -118,6 +124,7 @@ def build_sandbox_manager_config(
             workspace_path=workspace_path,
             network_mode=default_network_mode,
             sessions_path=sessions_path,
+            chats_path=chats_path,
             logs_path=logs_path,
             rpc_socket_path=rpc_socket_path,
             uv_cache_path=uv_cache_path,
@@ -136,6 +143,7 @@ def build_sandbox_manager_config(
         workspace_access=config.workspace_access,
         sessions_path=sessions_path,
         sessions_access=config.sessions_access,
+        chats_path=chats_path,
         logs_path=logs_path,
         rpc_socket_path=rpc_socket_path,
         uv_cache_path=uv_cache_path,

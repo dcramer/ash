@@ -64,6 +64,36 @@ def get_sessions_path() -> Path:
     return get_ash_home() / "sessions"
 
 
+def get_chats_path() -> Path:
+    """Get the chats directory path.
+
+    Structure: chats/{provider}/{chat_id}/
+    With optional threads: chats/{provider}/{chat_id}/threads/{thread_id}/
+    """
+    return get_ash_home() / "chats"
+
+
+def get_chat_dir(
+    provider: str,
+    chat_id: str,
+    thread_id: str | None = None,
+) -> Path:
+    """Get the directory for a specific chat or thread.
+
+    Args:
+        provider: Provider name (e.g., "telegram").
+        chat_id: Chat identifier.
+        thread_id: Optional thread identifier for forum topics.
+
+    Returns:
+        Path to the chat/thread directory.
+    """
+    base = get_chats_path() / provider / chat_id
+    if thread_id:
+        return base / "threads" / thread_id
+    return base
+
+
 def get_skill_state_path() -> Path:
     """Get the skill state directory path (per-skill JSON files)."""
     return get_ash_home() / "data" / "skills"
@@ -113,6 +143,7 @@ def get_all_paths() -> dict[str, Path]:
         "workspace": get_workspace_path(),
         "logs": get_logs_path(),
         "run": get_run_path(),
+        "chats": get_chats_path(),
         "sessions": get_sessions_path(),
         "skill_state": get_skill_state_path(),
         "uv_cache": get_uv_cache_path(),

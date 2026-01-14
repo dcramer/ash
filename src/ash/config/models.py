@@ -89,6 +89,10 @@ class SandboxConfig(BaseModel):
     # Mounted at /sessions in the container
     sessions_access: Literal["none", "ro"] = "ro"
 
+    # Chats mounting into sandbox (for agent to read chat state/participants)
+    # Mounted at /chats in the container
+    chats_access: Literal["none", "ro"] = "ro"
+
     # Build-time packages (requires `ash sandbox build` to take effect)
     apt_packages: list[str] = []
     python_packages: list[str] = []

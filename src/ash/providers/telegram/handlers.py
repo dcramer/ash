@@ -574,7 +574,35 @@ class TelegramMessageHandler:
                 display_name=message.display_name,
             )
 
+        # Update chat state with participant info
+        self._update_chat_state(message, thread_id)
+
         return session
+
+    def _update_chat_state(
+        self, message: IncomingMessage, thread_id: str | None
+    ) -> None:
+        """Update chat state with participant and chat info."""
+        from ash.chats import ChatStateManager
+
+        chat_state = ChatStateManager(
+            provider=self._provider.name,
+            chat_id=message.chat_id,
+            thread_id=thread_id,
+        )
+
+        # Update chat metadata if available
+        chat_type = message.metadata.get("chat_type")
+        chat_title = message.metadata.get("chat_title")
+        if chat_type or chat_title:
+            chat_state.update_chat_info(chat_type=chat_type, title=chat_title)
+
+        # Update participant
+        chat_state.update_participant(
+            user_id=message.user_id,
+            username=message.username,
+            display_name=message.display_name,
+        )
 
     async def _load_persistent_session(
         self,

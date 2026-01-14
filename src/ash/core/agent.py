@@ -57,13 +57,25 @@ def _build_routing_env(
     access routing context for operations that need to send responses back.
     Also includes skill env vars set by inline skills.
     """
-    return {
+    env = {
         "ASH_SESSION_ID": session.session_id or "",
         "ASH_USER_ID": effective_user_id or "",
         "ASH_CHAT_ID": session.chat_id or "",
         "ASH_PROVIDER": session.provider or "",
         "ASH_USERNAME": session.metadata.get("username", ""),
     }
+
+    # Build chat path for sandbox access to chat state
+    if session.provider and session.chat_id:
+        thread_id = session.metadata.get("thread_id")
+        if thread_id:
+            env["ASH_CHAT_PATH"] = (
+                f"/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
+            )
+        else:
+            env["ASH_CHAT_PATH"] = f"/chats/{session.provider}/{session.chat_id}"
+
+    return env
 
 
 @dataclass

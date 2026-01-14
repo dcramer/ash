@@ -78,6 +78,9 @@ class SandboxConfig:
     sessions_path: Path | None = None  # Host path to sessions directory
     sessions_access: Literal["none", "ro"] = "ro"  # none or ro (never rw)
 
+    # Chats mounting (for agent to read chat state/participants)
+    chats_path: Path | None = None  # Host path to chats directory
+
     # Logs mounting (for agent to inspect server logs)
     logs_path: Path | None = None  # Host path to logs directory
 
@@ -176,6 +179,12 @@ class SandboxManager:
         ):
             volumes[str(self._config.sessions_path)] = {
                 "bind": "/sessions",
+                "mode": "ro",
+            }
+
+        if self._config.chats_path and self._config.chats_path.exists():
+            volumes[str(self._config.chats_path)] = {
+                "bind": "/chats",
                 "mode": "ro",
             }
 
