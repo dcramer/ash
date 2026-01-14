@@ -76,15 +76,17 @@ class TestScheduleEntry:
         assert entry.is_due() is False
 
     def test_is_due_periodic_no_last_run(self):
-        """Test periodic entry without last_run calculates from now."""
+        """Test periodic entry without last_run waits for next occurrence."""
         entry = ScheduleEntry(
             message="Test",
             cron="0 8 * * *",  # 8 AM daily
         )
-        # Should calculate next_run from now
-        # The entry is due if next_run <= now, which won't be true
-        # for a future cron time
-        assert entry._next_run_time() is not None
+        # New cron task should NOT be immediately due - it should wait
+        # for the next scheduled occurrence
+        next_run = entry._next_run_time()
+        assert next_run is not None
+        assert next_run > datetime.now(UTC)  # Next run is in the future
+        assert entry.is_due() is False  # Therefore not due yet
 
     def test_to_json_line_one_shot(self):
         """Test serializing one-shot entry."""

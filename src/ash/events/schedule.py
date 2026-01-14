@@ -82,10 +82,8 @@ class ScheduleEntry:
                 # Normal case: get next run after last_run
                 return croniter(self.cron, self.last_run).get_next(datetime)
             else:
-                # Never run: get the most recent cron occurrence before now.
-                # This makes the task immediately due (since now >= prev_time).
-                # Job runs once on first startup, not once per missed occurrence.
-                return croniter(self.cron, datetime.now(UTC)).get_prev(datetime)
+                # New task: wait for the next scheduled occurrence
+                return croniter(self.cron, datetime.now(UTC)).get_next(datetime)
         except Exception as e:
             logger.warning(
                 f"Failed to parse cron expression '{self.cron}' for entry {self.id}: {e}"

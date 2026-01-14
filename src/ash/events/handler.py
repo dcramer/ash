@@ -2,7 +2,6 @@
 
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -66,16 +65,14 @@ class ScheduledTaskHandler:
         # Build context for the agent
         # The critical requirement is that the agent MUST produce text output that gets
         # sent to the user. The user scheduled this and expects a notification.
-        created_at = entry.created_at.isoformat() if entry.created_at else "unknown"
-        user_ref = f"@{entry.username}" if entry.username else "the user"
-        now = datetime.now(UTC).isoformat()
+        scheduled_by = f"@{entry.username}" if entry.username else "unknown"
         prefixed_message = (
-            f"[SCHEDULED NOTIFICATION for {user_ref}]\n"
-            f"Originally scheduled at {created_at}, now triggered at {now}.\n\n"
-            f"Task: {entry.message}\n\n"
-            f"CRITICAL: {user_ref} expects to be notified. You MUST end with a text message "
-            f"that will be sent to them. If this is a reminder, deliver it. If this is an action, "
-            f"do it and report the result. Your final response goes directly to {user_ref}."
+            f"[SCHEDULED TASK - scheduled by {scheduled_by}]\n\n"
+            f"Message to deliver: {entry.message}\n\n"
+            f"Instructions: Send this message to the chat. If the message mentions a specific "
+            f"person (like @someone), that's who it's for. If it's a reminder, just deliver it. "
+            f"If it asks you to do something (like check weather, run a command), do it and "
+            f"report the result. Keep your response concise."
         )
 
         # Create ephemeral session for this task
