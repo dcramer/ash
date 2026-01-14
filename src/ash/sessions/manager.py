@@ -91,7 +91,6 @@ class SessionManager:
         return self._header
 
     def _ensure_state_file(self) -> None:
-        """Write state.json if it doesn't exist."""
         if self.state_path.exists():
             return
 
@@ -102,8 +101,9 @@ class SessionManager:
             thread_id=self.thread_id,
         )
         self._session_dir.mkdir(parents=True, exist_ok=True)
-        data = state.model_dump(mode="json")
-        self.state_path.write_text(json.dumps(data, indent=2, default=str))
+        self.state_path.write_text(
+            json.dumps(state.model_dump(mode="json"), indent=2, default=str)
+        )
 
     async def add_user_message(
         self,

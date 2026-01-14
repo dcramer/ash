@@ -591,18 +591,14 @@ class TelegramMessageHandler:
             thread_id=thread_id,
         )
 
-        # Update chat metadata if available
         chat_type = message.metadata.get("chat_type")
         chat_title = message.metadata.get("chat_title")
         if chat_type or chat_title:
             chat_state.update_chat_info(chat_type=chat_type, title=chat_title)
 
-        # Compute session_id for participant reference
         session_id = make_session_key(
             self._provider.name, message.chat_id, message.user_id, thread_id
         )
-
-        # Update participant with session reference
         chat_state.update_participant(
             user_id=message.user_id,
             username=message.username,

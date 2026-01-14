@@ -10,14 +10,9 @@ import pytest
 from ash.chats import ChatInfo, ChatState, ChatStateManager, Participant
 from ash.providers.base import IncomingMessage
 
-# =============================================================================
-# Telegram Message Fixtures
-# =============================================================================
-
 
 @pytest.fixture
 def telegram_private_message() -> IncomingMessage:
-    """A private message from a Telegram user."""
     return IncomingMessage(
         id="12345",
         chat_id="67890",
@@ -34,7 +29,6 @@ def telegram_private_message() -> IncomingMessage:
 
 @pytest.fixture
 def telegram_group_message() -> IncomingMessage:
-    """A message in a Telegram group."""
     return IncomingMessage(
         id="12346",
         chat_id="-100123456789",
@@ -52,7 +46,6 @@ def telegram_group_message() -> IncomingMessage:
 
 @pytest.fixture
 def telegram_thread_message() -> IncomingMessage:
-    """A message in a Telegram topic/thread."""
     return IncomingMessage(
         id="12347",
         chat_id="-100123456789",
@@ -71,7 +64,6 @@ def telegram_thread_message() -> IncomingMessage:
 
 @pytest.fixture
 def telegram_message_no_username() -> IncomingMessage:
-    """A Telegram message from a user without a username."""
     return IncomingMessage(
         id="12348",
         chat_id="-100123456789",
@@ -89,7 +81,6 @@ def telegram_message_no_username() -> IncomingMessage:
 
 @pytest.fixture
 def ash_home(tmp_path: Path) -> Path:
-    """Create a temporary ash home directory."""
     ash_home = tmp_path / ".ash"
     ash_home.mkdir()
     return ash_home
@@ -97,8 +88,6 @@ def ash_home(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def mock_get_chat_dir(ash_home: Path):
-    """Factory that creates a mock get_chat_dir function using tmp_path."""
-
     def _get_chat_dir(
         provider: str, chat_id: str, thread_id: str | None = None
     ) -> Path:
@@ -110,16 +99,8 @@ def mock_get_chat_dir(ash_home: Path):
     return _get_chat_dir
 
 
-# =============================================================================
-# ChatState Model Tests
-# =============================================================================
-
-
 class TestChatStateModel:
-    """Tests for ChatState model."""
-
     def test_create_default_state(self):
-        """Test creating a default chat state."""
         state = ChatState(chat=ChatInfo(id="123"))
 
         assert state.chat.id == "123"
@@ -127,7 +108,6 @@ class TestChatStateModel:
         assert state.updated_at is not None
 
     def test_create_state_with_chat_metadata(self):
-        """Test creating state with full chat info."""
         state = ChatState(
             chat=ChatInfo(
                 id="-100123456789",
@@ -141,13 +121,10 @@ class TestChatStateModel:
         assert state.chat.title == "My Test Group"
 
     def test_get_participant_not_found(self):
-        """Test getting non-existent participant returns None."""
         state = ChatState(chat=ChatInfo(id="123"))
-
         assert state.get_participant("user-1") is None
 
     def test_get_participant_found(self):
-        """Test getting existing participant."""
         state = ChatState(
             chat=ChatInfo(id="123"),
             participants=[
@@ -165,7 +142,6 @@ class TestChatStateModel:
         assert participant.username == "alice"
 
     def test_update_participant_creates_new(self):
-        """Test update_participant creates new participant if not exists."""
         state = ChatState(chat=ChatInfo(id="123"))
 
         participant = state.update_participant(
@@ -183,7 +159,6 @@ class TestChatStateModel:
         assert len(state.participants) == 1
 
     def test_update_participant_updates_existing(self):
-        """Test update_participant updates existing participant."""
         now = datetime.now(UTC)
         state = ChatState(
             chat=ChatInfo(id="123"),
@@ -213,7 +188,6 @@ class TestChatStateModel:
         assert len(state.participants) == 1
 
     def test_update_participant_preserves_none_fields(self):
-        """Test that None values don't overwrite existing data."""
         state = ChatState(
             chat=ChatInfo(id="123"),
             participants=[
@@ -226,18 +200,16 @@ class TestChatStateModel:
             ],
         )
 
-        # Update with None username should preserve existing
         participant = state.update_participant(
             user_id="user-1",
             username=None,
             display_name="Alice Updated",
         )
 
-        assert participant.username == "alice"  # Preserved
-        assert participant.display_name == "Alice Updated"  # Updated
+        assert participant.username == "alice"
+        assert participant.display_name == "Alice Updated"
 
     def test_multiple_participants(self):
-        """Test tracking multiple participants."""
         state = ChatState(chat=ChatInfo(id="group-123"))
 
         state.update_participant("user-1", "alice", "Alice")
@@ -250,16 +222,8 @@ class TestChatStateModel:
         assert state.get_participant("user-3").username is None
 
 
-# =============================================================================
-# ChatStateManager Tests
-# =============================================================================
-
-
 class TestChatStateManager:
-    """Tests for ChatStateManager."""
-
     def test_creates_default_state(self, monkeypatch, mock_get_chat_dir):
-        """Test manager creates default state for new chat."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         manager = ChatStateManager(
@@ -272,7 +236,6 @@ class TestChatStateManager:
         assert state.participants == []
 
     def test_saves_and_loads_state(self, monkeypatch, mock_get_chat_dir):
-        """Test state persistence."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         manager = ChatStateManager(
@@ -296,7 +259,6 @@ class TestChatStateManager:
         assert state.participants[0].username == "alice"
 
     def test_state_file_location(self, monkeypatch, mock_get_chat_dir, ash_home: Path):
-        """Test that state file is written to correct location."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         manager = ChatStateManager(
@@ -308,23 +270,19 @@ class TestChatStateManager:
         expected_path = ash_home / "chats" / "telegram" / "-100123456789" / "state.json"
         assert expected_path.exists()
 
-        # Verify JSON structure
         data = json.loads(expected_path.read_text())
         assert data["chat"]["id"] == "-100123456789"
         assert len(data["participants"]) == 1
 
     def test_thread_creates_separate_state(self, monkeypatch, mock_get_chat_dir):
-        """Test thread has separate state from parent chat."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
-        # Update chat state
         chat_manager = ChatStateManager(
             provider="telegram",
             chat_id="-123456",
         )
         chat_manager.update_participant("user-1", "alice", "Alice")
 
-        # Update thread state
         thread_manager = ChatStateManager(
             provider="telegram",
             chat_id="-123456",
@@ -332,7 +290,6 @@ class TestChatStateManager:
         )
         thread_manager.update_participant("user-2", "bob", "Bob")
 
-        # Verify separate states
         chat_state = chat_manager.load()
         thread_state = thread_manager.load()
 
@@ -345,7 +302,6 @@ class TestChatStateManager:
     def test_thread_state_file_location(
         self, monkeypatch, mock_get_chat_dir, ash_home: Path
     ):
-        """Test that thread state file is in correct nested location."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         manager = ChatStateManager(
@@ -367,7 +323,6 @@ class TestChatStateManager:
         assert expected_path.exists()
 
     def test_update_chat_info_partial(self, monkeypatch, mock_get_chat_dir):
-        """Test updating chat info partially."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         manager = ChatStateManager(
@@ -375,20 +330,17 @@ class TestChatStateManager:
             chat_id="-123456",
         )
 
-        # Update only type
         manager.update_chat_info(chat_type="supergroup")
         state = manager.load()
         assert state.chat.type == "supergroup"
         assert state.chat.title is None
 
-        # Update only title
         manager.update_chat_info(title="My Group")
         state = manager.load()
-        assert state.chat.type == "supergroup"  # Preserved
+        assert state.chat.type == "supergroup"
         assert state.chat.title == "My Group"
 
     def test_multiple_updates_same_participant(self, monkeypatch, mock_get_chat_dir):
-        """Test multiple updates from same participant increment count."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         manager = ChatStateManager(
@@ -396,7 +348,6 @@ class TestChatStateManager:
             chat_id="-123456",
         )
 
-        # Simulate multiple messages from same user
         for _ in range(5):
             manager.update_participant("user-1", "alice", "Alice")
 
@@ -405,14 +356,7 @@ class TestChatStateManager:
         assert state.participants[0].message_count == 5
 
 
-# =============================================================================
-# Integration Tests - Telegram Handler
-# =============================================================================
-
-
 class TestTelegramChatStateIntegration:
-    """Integration tests for chat state updates from Telegram handler."""
-
     def test_private_message_updates_state(
         self,
         monkeypatch,
@@ -420,22 +364,18 @@ class TestTelegramChatStateIntegration:
         ash_home: Path,
         telegram_private_message: IncomingMessage,
     ):
-        """Test that a private message creates correct chat state."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         from ash.providers.telegram.handlers import TelegramMessageHandler
 
-        # Call the _update_chat_state method directly
         handler = MagicMock(spec=TelegramMessageHandler)
         handler._provider = MagicMock()
         handler._provider.name = "telegram"
 
-        # Import and call the actual method
         TelegramMessageHandler._update_chat_state(
             handler, telegram_private_message, thread_id=None
         )
 
-        # Verify state file
         state_path = (
             ash_home
             / "chats"
@@ -460,7 +400,6 @@ class TestTelegramChatStateIntegration:
         ash_home: Path,
         telegram_group_message: IncomingMessage,
     ):
-        """Test that a group message creates correct chat state."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         from ash.providers.telegram.handlers import TelegramMessageHandler
@@ -473,7 +412,6 @@ class TestTelegramChatStateIntegration:
             handler, telegram_group_message, thread_id=None
         )
 
-        # Verify state file
         state_path = (
             ash_home
             / "chats"
@@ -497,7 +435,6 @@ class TestTelegramChatStateIntegration:
         ash_home: Path,
         telegram_thread_message: IncomingMessage,
     ):
-        """Test that a thread message creates state in correct location."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         from ash.providers.telegram.handlers import TelegramMessageHandler
@@ -511,7 +448,6 @@ class TestTelegramChatStateIntegration:
             handler, telegram_thread_message, thread_id=thread_id
         )
 
-        # Verify thread state file location
         state_path = (
             ash_home
             / "chats"
@@ -533,7 +469,6 @@ class TestTelegramChatStateIntegration:
         ash_home: Path,
         telegram_message_no_username: IncomingMessage,
     ):
-        """Test handling messages from users without usernames."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         from ash.providers.telegram.handlers import TelegramMessageHandler
@@ -565,7 +500,6 @@ class TestTelegramChatStateIntegration:
         mock_get_chat_dir,
         ash_home: Path,
     ):
-        """Test multiple users in a group are tracked correctly."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         from ash.providers.telegram.handlers import TelegramMessageHandler
@@ -575,8 +509,6 @@ class TestTelegramChatStateIntegration:
         handler._provider.name = "telegram"
 
         chat_id = "-100999888777"
-
-        # Simulate messages from multiple users
         users = [
             ("11111", "alice", "Alice"),
             ("22222", "bob", "Bob"),
@@ -597,31 +529,21 @@ class TestTelegramChatStateIntegration:
             )
             TelegramMessageHandler._update_chat_state(handler, message, thread_id=None)
 
-        # Verify state
         state_path = ash_home / "chats" / "telegram" / chat_id / "state.json"
         data = json.loads(state_path.read_text())
 
         assert len(data["participants"]) == 3
 
-        # Find participants by username
         by_username = {p["username"]: p for p in data["participants"]}
         assert by_username["alice"]["message_count"] == 2
         assert by_username["bob"]["message_count"] == 2
         assert by_username["charlie"]["message_count"] == 1
 
 
-# =============================================================================
-# State File Format Tests
-# =============================================================================
-
-
 class TestChatStateFileFormat:
-    """Tests for the state file JSON format."""
-
     def test_state_json_serialization(
         self, monkeypatch, mock_get_chat_dir, ash_home: Path
     ):
-        """Test that state is serialized correctly to JSON."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         manager = ChatStateManager(
@@ -634,17 +556,13 @@ class TestChatStateFileFormat:
         state_path = ash_home / "chats" / "telegram" / "-123456" / "state.json"
         data = json.loads(state_path.read_text())
 
-        # Verify required fields
         assert "chat" in data
         assert "participants" in data
         assert "updated_at" in data
-
-        # Verify chat structure
         assert data["chat"]["id"] == "-123456"
         assert data["chat"]["type"] == "supergroup"
         assert data["chat"]["title"] == "Test Group"
 
-        # Verify participant structure
         participant = data["participants"][0]
         assert participant["id"] == "user-1"
         assert participant["username"] == "alice"
@@ -656,7 +574,6 @@ class TestChatStateFileFormat:
     def test_state_datetime_format(
         self, monkeypatch, mock_get_chat_dir, ash_home: Path
     ):
-        """Test that datetimes are serialized in ISO format."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         manager = ChatStateManager(
@@ -668,24 +585,12 @@ class TestChatStateFileFormat:
         state_path = ash_home / "chats" / "telegram" / "-123456" / "state.json"
         data = json.loads(state_path.read_text())
 
-        # Verify datetime format is ISO
-        updated_at = data["updated_at"]
-        assert "T" in updated_at  # ISO format has T separator
-
-        first_seen = data["participants"][0]["first_seen"]
-        assert "T" in first_seen
-
-
-# =============================================================================
-# Bidirectional Reference Tests
-# =============================================================================
+        assert "T" in data["updated_at"]
+        assert "T" in data["participants"][0]["first_seen"]
 
 
 class TestBidirectionalReferences:
-    """Tests for bidirectional references between chat state and sessions."""
-
     def test_participant_has_session_id(self, monkeypatch, mock_get_chat_dir):
-        """Test that participants store session_id reference."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         manager = ChatStateManager(
@@ -710,7 +615,6 @@ class TestBidirectionalReferences:
         ash_home: Path,
         telegram_group_message: IncomingMessage,
     ):
-        """Test that Telegram handler sets session_id on participants."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         from ash.providers.telegram.handlers import TelegramMessageHandler
@@ -734,12 +638,10 @@ class TestBidirectionalReferences:
 
         participant = data["participants"][0]
         assert "session_id" in participant
-        # Session key follows pattern: provider_chatid (user_id only used for DMs)
         assert participant["session_id"].startswith("telegram_")
         assert telegram_group_message.chat_id.lstrip("-") in participant["session_id"]
 
     async def test_session_state_has_chat_reference(self, tmp_path: Path):
-        """Test that session state.json contains chat reference."""
         from ash.sessions import SessionManager
 
         sessions_path = tmp_path / "sessions"
@@ -763,7 +665,6 @@ class TestBidirectionalReferences:
         assert "created_at" in data
 
     async def test_session_state_with_thread_id(self, tmp_path: Path):
-        """Test that session state.json includes thread_id when present."""
         from ash.sessions import SessionManager
 
         sessions_path = tmp_path / "sessions"
@@ -784,7 +685,6 @@ class TestBidirectionalReferences:
     async def test_round_trip_references(
         self, monkeypatch, mock_get_chat_dir, ash_home: Path, tmp_path: Path
     ):
-        """Test that chat state -> session -> chat state references work."""
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
         from ash.sessions import SessionManager, session_key
@@ -794,7 +694,6 @@ class TestBidirectionalReferences:
         chat_id = "-100123456789"
         user_id = "user-1"
 
-        # Create session (this creates session state.json)
         session_manager = SessionManager(
             provider=provider,
             chat_id=chat_id,
@@ -803,7 +702,6 @@ class TestBidirectionalReferences:
         )
         await session_manager.ensure_session()
 
-        # Create chat state with session reference
         sess_id = session_key(provider, chat_id, user_id)
         chat_state_manager = ChatStateManager(
             provider=provider,
@@ -815,12 +713,10 @@ class TestBidirectionalReferences:
             session_id=sess_id,
         )
 
-        # Verify chat state has session_id
         chat_state = chat_state_manager.load()
         participant = chat_state.get_participant(user_id)
         assert participant.session_id == sess_id
 
-        # Verify session state has chat reference
         session_state_data = json.loads(session_manager.state_path.read_text())
         assert session_state_data["chat_id"] == chat_id
         assert session_state_data["provider"] == provider

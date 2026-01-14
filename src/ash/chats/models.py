@@ -34,10 +34,7 @@ class ChatState(BaseModel):
 
     def get_participant(self, user_id: str) -> Participant | None:
         """Get a participant by ID."""
-        for p in self.participants:
-            if p.id == user_id:
-                return p
-        return None
+        return next((p for p in self.participants if p.id == user_id), None)
 
     def update_participant(
         self,
