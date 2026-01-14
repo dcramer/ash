@@ -11,7 +11,7 @@ from ash.cli.context import get_config
 
 def register(app: typer.Typer) -> None:
     """Register the skill command group."""
-    skill_app = typer.Typer(name="skill", help="Manage skills")
+    skill_app = typer.Typer(name="skill", help="Manage skills", no_args_is_help=True)
 
     @skill_app.command("validate")
     def validate(

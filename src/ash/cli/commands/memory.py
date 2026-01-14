@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
+import click
 import typer
 
 from ash.cli.console import console, dim, error, success, warning
@@ -17,9 +18,9 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def memory(
         action: Annotated[
-            str,
+            str | None,
             typer.Argument(help="Action: list, add, remove, clear"),
-        ],
+        ] = None,
         query: Annotated[
             str | None,
             typer.Option(
@@ -125,6 +126,11 @@ def register(app: typer.Typer) -> None:
             ash memory remove --all            # Remove all entries
             ash memory clear                   # Clear all memory entries
         """
+        if action is None:
+            ctx = click.get_current_context()
+            click.echo(ctx.get_help())
+            raise typer.Exit(0)
+
         try:
             asyncio.run(
                 _run_memory_action(

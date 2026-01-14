@@ -4,6 +4,7 @@ import asyncio
 import json
 from typing import Annotated, Any
 
+import click
 import typer
 
 from ash.cli.console import console, dim, error, success, warning
@@ -34,9 +35,9 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def sessions(
         action: Annotated[
-            str,
+            str | None,
             typer.Argument(help="Action: list, view, search, clear"),
-        ],
+        ] = None,
         query: Annotated[
             str | None,
             typer.Option(
@@ -81,6 +82,11 @@ def register(app: typer.Typer) -> None:
             ash sessions search -q "hello"           # Search messages
             ash sessions clear                       # Clear all history
         """
+        if action is None:
+            ctx = click.get_current_context()
+            click.echo(ctx.get_help())
+            raise typer.Exit(0)
+
         try:
             if action == "list":
                 asyncio.run(_sessions_list(limit))

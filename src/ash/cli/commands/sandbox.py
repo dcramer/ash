@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Annotated
 
+import click
 import typer
 
 from ash.cli.console import console, dim, error, success, warning
@@ -15,9 +16,9 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def sandbox(
         action: Annotated[
-            str,
+            str | None,
             typer.Argument(help="Action: build, status, clean"),
-        ],
+        ] = None,
         force: Annotated[
             bool,
             typer.Option(
@@ -36,6 +37,10 @@ def register(app: typer.Typer) -> None:
         ] = None,
     ) -> None:
         """Manage the Docker sandbox environment."""
+        if action is None:
+            ctx = click.get_current_context()
+            click.echo(ctx.get_help())
+            raise typer.Exit(0)
 
         # Find Dockerfile.sandbox
         dockerfile_path = (

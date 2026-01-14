@@ -89,6 +89,7 @@ Specs MUST be updated when:
 
 | Spec | Description |
 |------|-------------|
+| [cli](specs/cli.md) | Typer-based command-line interface with consistent help behavior |
 | [subsystems](specs/subsystems.md) | Modular components with clear boundaries and interfaces |
 | [agent](specs/agent.md) | Agent orchestrator with agentic loop |
 | [agent-prompts](specs/agent-prompts.md) | Patterns for writing effective agent and skill prompts |

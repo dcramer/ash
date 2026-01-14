@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Annotated
 
+import click
 import typer
 
 from ash.cli.console import console, error, success
@@ -14,9 +15,9 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def config(
         action: Annotated[
-            str,
+            str | None,
             typer.Argument(help="Action: show, validate"),
-        ],
+        ] = None,
         path: Annotated[
             Path | None,
             typer.Option(
@@ -27,6 +28,11 @@ def register(app: typer.Typer) -> None:
         ] = None,
     ) -> None:
         """Manage configuration."""
+        if action is None:
+            ctx = click.get_current_context()
+            click.echo(ctx.get_help())
+            raise typer.Exit(0)
+
         from pydantic import ValidationError
         from rich.syntax import Syntax
         from rich.table import Table

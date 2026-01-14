@@ -23,6 +23,14 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+
+@app.command()
+def help(ctx: typer.Context) -> None:
+    """Show help information."""
+    if ctx.parent:
+        print(ctx.parent.get_help())
+
+
 # Register commands from modules
 init.register(app)
 serve.register(app)

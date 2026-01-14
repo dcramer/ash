@@ -2,6 +2,7 @@
 
 from typing import Annotated
 
+import click
 import typer
 
 from ash.cli.console import console, dim, error, success, warning
@@ -13,9 +14,9 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def schedule(
         action: Annotated[
-            str,
+            str | None,
             typer.Argument(help="Action: list, cancel, clear"),
-        ],
+        ] = None,
         entry_id: Annotated[
             str | None,
             typer.Option(
@@ -42,6 +43,11 @@ def register(app: typer.Typer) -> None:
             ash schedule cancel --id a1b2c3d4  # Cancel task by ID
             ash schedule clear                 # Clear all scheduled tasks
         """
+        if action is None:
+            ctx = click.get_current_context()
+            click.echo(ctx.get_help())
+            raise typer.Exit(0)
+
         from ash.config import load_config
 
         config = load_config()

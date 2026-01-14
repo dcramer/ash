@@ -29,7 +29,9 @@ def _run_service_action(action_name: str) -> None:
 
 def register(app: typer.Typer) -> None:
     """Register service subcommands."""
-    service_app = typer.Typer(help="Manage the Ash background service")
+    service_app = typer.Typer(
+        help="Manage the Ash background service", no_args_is_help=True
+    )
     app.add_typer(service_app, name="service")
 
     @service_app.command("start")
