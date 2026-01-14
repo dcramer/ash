@@ -220,24 +220,6 @@ class TestTelegramMessageHandler:
         assert session.user_id == "789"
         assert session.provider == "telegram"
 
-    async def test_session_reuse(self, handler, incoming_message):
-        """Test session is reused for same chat."""
-        from ash.sessions import SessionManager
-
-        # Set up session manager to use temp path
-        session_manager = SessionManager(
-            provider="telegram",
-            chat_id="456",
-            user_id="789",
-            sessions_path=handler._test_sessions_path,
-        )
-        handler._session_managers[session_manager.session_key] = session_manager
-
-        session1 = await handler._get_or_create_session(incoming_message)
-        session2 = await handler._get_or_create_session(incoming_message)
-
-        assert session1 is session2
-
     async def test_session_restoration(self, handler, incoming_message, tmp_path):
         """Test messages are restored from JSONL files."""
         from ash.sessions import SessionManager
@@ -272,28 +254,33 @@ class TestTelegramMessageHandler:
 
     async def test_clear_session(self, handler, incoming_message):
         """Test clearing a session."""
+        from ash.providers.telegram.handlers import SessionContext
         from ash.sessions import SessionManager
 
-        # Set up session manager to use temp path
+        # Set up session manager and context directly
         session_manager = SessionManager(
             provider="telegram",
             chat_id="456",
             user_id="789",
             sessions_path=handler._test_sessions_path,
         )
-        handler._session_managers[session_manager.session_key] = session_manager
+        session_key = session_manager.session_key
+        handler._session_managers[session_key] = session_manager
+        handler._session_contexts[session_key] = SessionContext()
 
-        await handler._get_or_create_session(incoming_message)
-        assert len(handler._sessions) == 1
+        assert len(handler._session_contexts) == 1
+        assert len(handler._session_managers) == 1
 
         handler.clear_session("456")
-        assert len(handler._sessions) == 0
+        assert len(handler._session_contexts) == 0
+        assert len(handler._session_managers) == 0
 
     async def test_clear_all_sessions(self, handler, incoming_message):
         """Test clearing all sessions."""
+        from ash.providers.telegram.handlers import SessionContext
         from ash.sessions import SessionManager
 
-        # Set up session manager for first message
+        # Set up session managers and contexts directly
         session_manager1 = SessionManager(
             provider="telegram",
             chat_id="456",
@@ -301,16 +288,8 @@ class TestTelegramMessageHandler:
             sessions_path=handler._test_sessions_path,
         )
         handler._session_managers[session_manager1.session_key] = session_manager1
+        handler._session_contexts[session_manager1.session_key] = SessionContext()
 
-        await handler._get_or_create_session(incoming_message)
-
-        # Create another session
-        msg2 = IncomingMessage(
-            id="2",
-            chat_id="999",
-            user_id="888",
-            text="Hi",
-        )
         session_manager2 = SessionManager(
             provider="telegram",
             chat_id="999",
@@ -318,12 +297,14 @@ class TestTelegramMessageHandler:
             sessions_path=handler._test_sessions_path,
         )
         handler._session_managers[session_manager2.session_key] = session_manager2
+        handler._session_contexts[session_manager2.session_key] = SessionContext()
 
-        await handler._get_or_create_session(msg2)
-        assert len(handler._sessions) == 2
+        assert len(handler._session_contexts) == 2
+        assert len(handler._session_managers) == 2
 
         handler.clear_all_sessions()
-        assert len(handler._sessions) == 0
+        assert len(handler._session_contexts) == 0
+        assert len(handler._session_managers) == 0
 
     async def test_message_persistence(self, handler, incoming_message, tmp_path):
         """Test messages are persisted to JSONL files."""

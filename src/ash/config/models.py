@@ -148,10 +148,16 @@ class MemoryConfig(BaseModel):
 class ConversationConfig(BaseModel):
     """Configuration for conversation context management."""
 
-    session_mode: Literal["persistent", "fresh"] = "persistent"
     recency_window: int = 10  # Always include last N messages
     gap_threshold_minutes: int = 15  # Signal gap if longer than this
     reply_context_window: int = 3  # Messages before/after reply target
+
+
+class SessionsConfig(BaseModel):
+    """Configuration for session management."""
+
+    mode: Literal["persistent", "fresh"] = "persistent"
+    max_concurrent: int = 2  # Parallel session processing limit
 
 
 class BraveSearchConfig(BaseModel):
@@ -243,6 +249,7 @@ class AshConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     conversation: ConversationConfig = Field(default_factory=ConversationConfig)
+    sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     embeddings: EmbeddingsConfig | None = None
     brave_search: BraveSearchConfig | None = None
     sentry: SentryConfig | None = None

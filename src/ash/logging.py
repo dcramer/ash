@@ -19,9 +19,144 @@ Guidelines:
 import json
 import logging
 import os
-from datetime import UTC, datetime
+import re
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TextIO
+
+# Default retention period for log files
+DEFAULT_LOG_RETENTION_DAYS = 7
+
+# Default patterns for secret detection and redaction
+DEFAULT_REDACT_PATTERNS: list[str] = [
+    # API key prefixes (Anthropic, OpenAI, GitHub, Slack, etc.)
+    r"\b(sk-[A-Za-z0-9_-]{20,})\b",
+    r"\b(ghp_[A-Za-z0-9]{20,})\b",
+    r"\b(github_pat_[A-Za-z0-9_]{20,})\b",
+    r"\b(xox[baprs]-[A-Za-z0-9-]{10,})\b",
+    r"\b(xapp-[A-Za-z0-9-]{10,})\b",
+    r"\b(gsk_[A-Za-z0-9_-]{10,})\b",
+    r"\b(AIza[0-9A-Za-z\-_]{20,})\b",
+    r"\b(npm_[A-Za-z0-9]{10,})\b",
+    # Telegram bot tokens (numeric_id:alphanumeric_token)
+    r"\b(\d{8,}:[A-Za-z0-9_-]{30,})\b",
+    # ENV-style assignments: API_KEY=secret or API_KEY: secret
+    # Requires at least one char before keyword to avoid matching standalone words like "Token:"
+    r"\b[A-Z0-9_]+(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)\s*[=:]\s*([^\s\"']{8,})",
+    # Bearer tokens in headers
+    r"\bBearer\s+([A-Za-z0-9._\-+=]{20,})\b",
+    # PEM private key blocks
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----",
+]
+
+
+@dataclass
+class SecretRedactor:
+    """Redacts sensitive information from log messages.
+
+    Patterns match common secret formats (API keys, tokens, passwords)
+    and replace them with partially masked versions for debuggability.
+    """
+
+    patterns: list[re.Pattern[str]] = field(default_factory=list)
+    enabled: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.patterns:
+            self.patterns = [
+                re.compile(p, re.IGNORECASE) for p in DEFAULT_REDACT_PATTERNS
+            ]
+
+    def redact(self, text: str) -> str:
+        """Redact secrets from text, preserving partial info for debugging."""
+        if not self.enabled or not text:
+            return text
+        result = text
+        for pattern in self.patterns:
+            result = pattern.sub(self._mask_match, result)
+        return result
+
+    def _mask_match(self, match: re.Match[str]) -> str:
+        """Mask a matched secret, preserving start/end for identification."""
+        full = match.group(0)
+
+        # For PEM blocks, show headers only
+        if "PRIVATE KEY" in full:
+            lines = full.strip().split("\n")
+            if len(lines) >= 2:
+                return f"{lines[0]}\n...redacted...\n{lines[-1]}"
+            return "***PRIVATE KEY***"
+
+        # Get the captured group (the actual secret value)
+        token = match.group(1) if match.lastindex else full
+
+        # Skip if already redacted (contains our masking pattern)
+        if "..." in token:
+            return full
+
+        # For short tokens, fully mask
+        if len(token) < 12:
+            return full.replace(token, "***") if token != full else "***"
+
+        # For longer tokens, show first 4 and last 4 chars
+        masked = f"{token[:4]}...{token[-4:]}"
+        return full.replace(token, masked) if token != full else masked
+
+
+# Module-level redactor instance
+_redactor = SecretRedactor()
+
+
+def configure_redaction(
+    enabled: bool = True, extra_patterns: list[str] | None = None
+) -> None:
+    """Configure secret redaction for log messages.
+
+    Args:
+        enabled: Whether to enable redaction.
+        extra_patterns: Additional regex patterns to match secrets.
+    """
+    global _redactor
+    patterns = [re.compile(p, re.IGNORECASE) for p in DEFAULT_REDACT_PATTERNS]
+    if extra_patterns:
+        patterns.extend(re.compile(p, re.IGNORECASE) for p in extra_patterns)
+    _redactor = SecretRedactor(patterns=patterns, enabled=enabled)
+
+
+def prune_old_logs(
+    logs_dir: Path,
+    retention_days: int = DEFAULT_LOG_RETENTION_DAYS,
+    suffix: str = ".jsonl",
+) -> int:
+    """Delete log files older than retention period.
+
+    Args:
+        logs_dir: Directory containing log files.
+        retention_days: Number of days to retain logs.
+        suffix: File suffix to match (default: .jsonl).
+
+    Returns:
+        Number of files deleted.
+    """
+    if not logs_dir.exists():
+        return 0
+
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    deleted = 0
+
+    for entry in logs_dir.iterdir():
+        if not entry.is_file() or not entry.name.endswith(suffix):
+            continue
+        try:
+            mtime = datetime.fromtimestamp(entry.stat().st_mtime, UTC)
+            if mtime < cutoff:
+                entry.unlink()
+                deleted += 1
+        except OSError:
+            pass  # Ignore errors on individual files
+
+    return deleted
 
 
 class JSONLHandler(logging.Handler):
@@ -30,12 +165,22 @@ class JSONLHandler(logging.Handler):
     Logs are written to ~/.ash/logs/YYYY-MM-DD.jsonl with one JSON object per line.
     This format is inspectable with standard tools (cat, grep, jq) and can be
     mounted read-only in the sandbox for debugging.
+
+    Features:
+    - Daily log rotation
+    - Secret redaction (API keys, tokens, passwords)
+    - Auto-pruning of old logs (default: 7 days retention)
     """
 
-    def __init__(self, logs_dir: Path):
+    def __init__(
+        self,
+        logs_dir: Path,
+        retention_days: int = DEFAULT_LOG_RETENTION_DAYS,
+    ):
         super().__init__()
         self._logs_dir = logs_dir
         self._logs_dir.mkdir(parents=True, exist_ok=True)
+        self._retention_days = retention_days
         self._current_date: str | None = None
         self._file: TextIO | None = None
 
@@ -48,10 +193,14 @@ class JSONLHandler(logging.Handler):
             self._current_date = today
             log_path = self._logs_dir / f"{today}.jsonl"
             self._file = log_path.open("a", encoding="utf-8")
+
+            # Prune old logs on rotation (once per day)
+            prune_old_logs(self._logs_dir, self._retention_days)
+
         return self._file
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Write a log record as JSON."""
+        """Write a log record as JSON with secret redaction."""
         try:
             # Extract component from logger name
             parts = record.name.split(".")
@@ -60,22 +209,32 @@ class JSONLHandler(logging.Handler):
             else:
                 component = parts[0]
 
+            # Redact secrets from message
+            message = _redactor.redact(record.getMessage())
+
             entry = {
                 "ts": datetime.now(UTC).isoformat(),
                 "level": record.levelname,
                 "component": component,
                 "logger": record.name,
-                "message": record.getMessage(),
+                "message": message,
             }
 
-            # Add exception info if present
+            # Add exception info if present (also redacted)
             if record.exc_info:
                 formatter = self.formatter or logging.Formatter()
-                entry["exception"] = formatter.formatException(record.exc_info)
+                exception_text = formatter.formatException(record.exc_info)
+                entry["exception"] = _redactor.redact(exception_text)
 
-            # Add extra fields from record
+            # Add extra fields from record (also redacted)
             if hasattr(record, "extra") and record.extra:
-                entry["extra"] = record.extra
+                extra_str = json.dumps(record.extra)
+                redacted_str = _redactor.redact(extra_str)
+                try:
+                    entry["extra"] = json.loads(redacted_str)
+                except json.JSONDecodeError:
+                    # Redaction broke JSON structure - use raw redacted string
+                    entry["extra"] = {"_redacted_raw": redacted_str}
 
             log_file = self._get_log_file()
             log_file.write(json.dumps(entry) + "\n")

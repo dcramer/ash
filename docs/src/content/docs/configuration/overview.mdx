@@ -77,6 +77,11 @@ system_prompt_buffer = 8000
 compaction_enabled = true
 extraction_enabled = true
 
+# Session management
+[sessions]
+mode = "persistent"  # "persistent" or "fresh"
+max_concurrent = 2   # Parallel session processing limit
+
 # Agent-specific overrides
 [agents.research]
 model = "sonnet"
@@ -169,6 +174,7 @@ uv run ash config validate
 | `[sandbox]` | Docker sandbox settings | [Sandbox](/configuration/sandbox/) |
 | `[server]` | HTTP server settings | [Server](/configuration/server/) |
 | `[memory]` | Memory and context | [Memory](/configuration/memory/) |
+| `[sessions]` | Session management | [Sessions](/configuration/sessions/) |
 | `[embeddings]` | Semantic search | [Embeddings](/configuration/embeddings/) |
 | `[brave_search]` | Web search | [Brave Search](/configuration/brave-search/) |
 | `[sentry]` | Error tracking | [Sentry](/configuration/sentry/) |

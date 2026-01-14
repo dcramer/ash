@@ -248,6 +248,75 @@ class TestAgent:
         assert "Hello " in chunks
         assert "world!" in chunks
 
+    async def test_steering_messages_skips_remaining_tools(self, workspace):
+        """Test that steering messages skip remaining tools and inject new messages."""
+        # First response requests multiple tool uses
+        tool_use_response = Message(
+            role=Role.ASSISTANT,
+            content=[
+                ToolUse(id="tool-1", name="test_tool", input={"arg": "first"}),
+                ToolUse(id="tool-2", name="test_tool", input={"arg": "second"}),
+                ToolUse(id="tool-3", name="test_tool", input={"arg": "third"}),
+            ],
+        )
+        # Second response is final text (after steering redirects)
+        final_response = Message(
+            role=Role.ASSISTANT,
+            content="Redirected to new request.",
+        )
+
+        mock_llm = MockLLMProvider(responses=[tool_use_response, final_response])
+        registry = ToolRegistry()
+        mock_tool = MockTool(name="test_tool")
+        registry.register(mock_tool)
+        executor = ToolExecutor(registry)
+        prompt_builder = create_test_prompt_builder(workspace, registry)
+
+        agent = Agent(
+            llm=mock_llm,
+            tool_executor=executor,
+            prompt_builder=prompt_builder,
+        )
+
+        session = SessionState(
+            session_id="test",
+            provider="test",
+            chat_id="chat",
+            user_id="user",
+        )
+
+        # Steering callback that injects a new message after first tool
+        steering_call_count = 0
+
+        async def get_steering() -> list[str]:
+            nonlocal steering_call_count
+            steering_call_count += 1
+            if steering_call_count == 1:
+                # After first tool, return steering message
+                return ["Actually, do something else instead"]
+            return []
+
+        response = await agent.process_message(
+            "Execute all tools",
+            session,
+            get_steering_messages=get_steering,
+        )
+
+        # Should have executed only first tool
+        assert len(mock_tool.execute_calls) == 1
+        assert mock_tool.execute_calls[0][0] == {"arg": "first"}
+
+        # Should have 3 tool calls in response (1 executed, 2 skipped)
+        assert len(response.tool_calls) == 3
+        assert response.tool_calls[0]["is_error"] is False  # First executed
+        assert response.tool_calls[1]["is_error"] is True  # Second skipped
+        assert response.tool_calls[2]["is_error"] is True  # Third skipped
+        assert "Skipped" in response.tool_calls[1]["result"]
+
+        # Final response should be from second LLM call
+        assert response.text == "Redirected to new request."
+        assert response.iterations == 2
+
 
 class TestSessionState:
     """Tests for SessionState."""

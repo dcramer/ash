@@ -1,0 +1,59 @@
+---
+title: Sessions
+description: Configure session management and concurrency
+sidebar:
+  order: 7
+---
+
+Configure how Ash manages conversation sessions.
+
+## Configuration
+
+```toml
+[sessions]
+mode = "persistent"
+max_concurrent = 2
+```
+
+## Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `mode` | string | `"persistent"` | Session mode: `"persistent"` or `"fresh"` |
+| `max_concurrent` | int | `2` | Maximum parallel sessions processing at once |
+
+## Session Modes
+
+### Persistent (default)
+
+In persistent mode, conversation history is maintained across messages. The agent sees previous messages and can reference earlier context.
+
+```toml
+[sessions]
+mode = "persistent"
+```
+
+### Fresh
+
+In fresh mode, each message starts with a clean slate. The agent doesn't see previous messages (though it can read the session file if needed via tools).
+
+```toml
+[sessions]
+mode = "fresh"
+```
+
+Useful for stateless interactions or when you want explicit context control.
+
+## Concurrency
+
+The `max_concurrent` setting controls how many different sessions can process messages simultaneously.
+
+- **Same session** (same user/thread): Messages are serialized and can be "steered" into the running conversation
+- **Different sessions** (different users or forum topics): Process in parallel up to the limit
+
+```toml
+[sessions]
+max_concurrent = 4  # Allow 4 parallel sessions
+```
+
+Higher values allow more parallel processing but use more resources.

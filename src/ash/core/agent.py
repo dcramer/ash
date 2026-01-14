@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 # Callback type for tool start notifications
 OnToolStartCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
+# Callback to check for steering messages during tool execution
+# Returns list of user messages to inject, or empty list to continue normally
+GetSteeringMessagesCallback = Callable[[], Awaitable[list[str]]]
+
 MAX_TOOL_ITERATIONS = 25
 
 
@@ -625,21 +629,27 @@ class Agent:
         session: SessionState,
         tool_context: ToolContext,
         on_tool_start: OnToolStartCallback | None,
-    ) -> list[dict[str, Any]]:
+        get_steering_messages: GetSteeringMessagesCallback | None = None,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
         """Execute pending tool uses and add results to session.
+
+        Checks for steering messages after each tool execution. If steering
+        messages are received, remaining tools are skipped and the messages
+        are returned for injection into the conversation.
 
         Args:
             pending_tools: List of tool use requests.
             session: Session to add results to.
             tool_context: Context for tool execution.
             on_tool_start: Optional callback before each tool.
+            get_steering_messages: Optional callback to check for user interruptions.
 
         Returns:
-            List of tool call result dicts.
+            Tuple of (tool_calls, steering_messages).
         """
         tool_calls: list[dict[str, Any]] = []
 
-        for tool_use in pending_tools:
+        for i, tool_use in enumerate(pending_tools):
             if on_tool_start:
                 await on_tool_start(tool_use.name, tool_use.input)
 
@@ -665,7 +675,32 @@ class Agent:
                 is_error=result.is_error,
             )
 
-        return tool_calls
+            # Check for steering messages after each tool (except last)
+            if get_steering_messages and i < len(pending_tools) - 1:
+                steering = await get_steering_messages()
+                if steering:
+                    # Skip remaining tools - user wants to redirect
+                    for remaining in pending_tools[i + 1 :]:
+                        tool_calls.append(
+                            {
+                                "id": remaining.id,
+                                "name": remaining.name,
+                                "input": remaining.input,
+                                "result": "Skipped: user sent new message",
+                                "is_error": True,
+                            }
+                        )
+                        session.add_tool_result(
+                            tool_use_id=remaining.id,
+                            content="Skipped: user sent new message",
+                            is_error=True,
+                        )
+                    logger.info(
+                        f"Steering received: skipping {len(pending_tools) - i - 1} remaining tools"
+                    )
+                    return tool_calls, steering
+
+        return tool_calls, []
 
     async def process_message(
         self,
@@ -673,6 +708,7 @@ class Agent:
         session: SessionState,
         user_id: str | None = None,
         on_tool_start: OnToolStartCallback | None = None,
+        get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_path: str | None = None,
     ) -> AgentResponse:
         """Process a user message and return response.
@@ -688,6 +724,9 @@ class Agent:
                 When provided, this is used for memory retrieval and known_people lookup.
             on_tool_start: Optional callback invoked before each tool execution.
                 Receives tool name and input dict.
+            get_steering_messages: Optional callback to check for user interruptions
+                during tool execution. If messages are returned, remaining tools are
+                skipped and the messages are injected before the next LLM call.
             session_path: Optional path to session file for agent self-inspection.
 
         Returns:
@@ -755,10 +794,20 @@ class Agent:
                 env=_build_routing_env(session, setup.effective_user_id),
             )
 
-            new_calls = await self._execute_pending_tools(
-                pending_tools, session, tool_context, on_tool_start
+            new_calls, steering = await self._execute_pending_tools(
+                pending_tools,
+                session,
+                tool_context,
+                on_tool_start,
+                get_steering_messages,
             )
             tool_calls.extend(new_calls)
+
+            # If steering messages received, inject them before next LLM call
+            if steering:
+                for msg in steering:
+                    session.add_user_message(msg)
+                # Continue loop - next iteration will see the new user messages
 
         # Max iterations reached
         logger.warning(
@@ -781,6 +830,7 @@ class Agent:
         session: SessionState,
         user_id: str | None = None,
         on_tool_start: OnToolStartCallback | None = None,
+        get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_path: str | None = None,
     ) -> AsyncIterator[str]:
         """Process a user message with streaming response.
@@ -796,6 +846,9 @@ class Agent:
                 When provided, this is used for memory retrieval and known_people lookup.
             on_tool_start: Optional callback invoked before each tool execution.
                 Receives tool name and input dict.
+            get_steering_messages: Optional callback to check for user interruptions
+                during tool execution. If messages are returned, remaining tools are
+                skipped and the messages are injected before the next LLM call.
             session_path: Optional path to session file for agent self-inspection.
 
         Yields:
@@ -889,9 +942,19 @@ class Agent:
                 env=_build_routing_env(session, setup.effective_user_id),
             )
 
-            await self._execute_pending_tools(
-                pending_tools, session, tool_context, on_tool_start
+            _, steering = await self._execute_pending_tools(
+                pending_tools,
+                session,
+                tool_context,
+                on_tool_start,
+                get_steering_messages,
             )
+
+            # If steering messages received, inject them before next LLM call
+            if steering:
+                for msg in steering:
+                    session.add_user_message(msg)
+                # Continue loop - next iteration will see the new user messages
 
         # Max iterations reached
         self._maybe_spawn_memory_extraction(
@@ -1118,7 +1181,9 @@ async def create_agent(
     agent_executor = AgentExecutor(llm, tool_executor, config)
 
     # Register use_agent tool
-    tool_registry.register(UseAgentTool(agent_registry, agent_executor))
+    tool_registry.register(
+        UseAgentTool(agent_registry, agent_executor, skill_registry, config)
+    )
 
     # Register use_skill tool
     from ash.tools.builtin.skills import UseSkillTool

@@ -97,10 +97,11 @@ class TestUseSkillToolErrorHandling:
         return registry
 
     @pytest.fixture
-    def tool(self, registry):
+    def tool(self, registry, tmp_path):
         executor = MagicMock()
         config = MagicMock(spec=AshConfig)
         config.skills = {}
+        config.workspace = tmp_path
         return UseSkillTool(registry, executor, config)
 
     @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 """Agent invocation tool."""
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from ash.agents.base import AgentContext
@@ -7,6 +8,10 @@ from ash.tools.base import Tool, ToolContext, ToolResult
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor, AgentRegistry
+    from ash.config import AshConfig
+    from ash.skills import SkillRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class UseAgentTool(Tool):
@@ -21,15 +26,21 @@ class UseAgentTool(Tool):
         self,
         registry: "AgentRegistry",
         executor: "AgentExecutor",
+        skill_registry: "SkillRegistry | None" = None,
+        config: "AshConfig | None" = None,
     ) -> None:
         """Initialize the tool.
 
         Args:
             registry: Agent registry to look up agents.
             executor: Agent executor to run agents.
+            skill_registry: Optional skill registry for reloading after skill-writer.
+            config: Optional config for workspace path.
         """
         self._registry = registry
         self._executor = executor
+        self._skill_registry = skill_registry
+        self._config = config
 
     @property
     def name(self) -> str:
@@ -108,6 +119,13 @@ class UseAgentTool(Tool):
 
         # Execute agent
         result = await self._executor.execute(agent, message, agent_context)
+
+        # Reload skills after skill-writer completes successfully
+        if agent_name == "skill-writer" and not result.is_error:
+            if self._skill_registry and self._config:
+                count = self._skill_registry.reload_workspace(self._config.workspace)
+                if count > 0:
+                    logger.info(f"Reloaded {count} new skill(s) after skill-writer")
 
         if result.is_error:
             return ToolResult.error(result.content)

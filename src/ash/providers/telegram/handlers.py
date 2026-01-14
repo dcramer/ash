@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from collections import OrderedDict
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -181,8 +181,45 @@ def format_tool_summary(num_tools: int, elapsed_seconds: float) -> str:
     return f"_Made {num_tools} tool {call_word} in {elapsed_seconds:.1f}s_\n\n"
 
 
-# Maximum number of sessions to cache in memory
-MAX_CACHED_SESSIONS = 100
+@dataclass
+class SessionContext:
+    """Per-session state for message handling.
+
+    Encapsulates lock, pending messages, and other session-scoped state.
+    Each session_key gets its own isolated context, enabling parallel
+    processing of different sessions (e.g., forum topics) in the same chat.
+    """
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    pending_messages: list[IncomingMessage] = field(default_factory=list)
+    steered_messages: list[IncomingMessage] = field(default_factory=list)
+
+    def add_pending(self, message: IncomingMessage) -> None:
+        """Queue a message for steering."""
+        self.pending_messages.append(message)
+
+    def take_pending(self) -> list[IncomingMessage]:
+        """Get and clear pending messages, moving to steered for cleanup.
+
+        Returns:
+            List of pending messages (empties the pending queue).
+        """
+        messages = self.pending_messages
+        self.pending_messages = []
+        if messages:
+            # Extend rather than replace to handle multiple steering cycles
+            self.steered_messages.extend(messages)
+        return messages
+
+    def take_steered(self) -> list[IncomingMessage]:
+        """Get and clear steered messages for cleanup (reaction removal).
+
+        Returns:
+            List of messages that were steered (empties the steered queue).
+        """
+        messages = self.steered_messages
+        self.steered_messages = []
+        return messages
 
 
 class TelegramMessageHandler:
@@ -222,25 +259,27 @@ class TelegramMessageHandler:
         self._config = config
         self._agent_registry = agent_registry
         self._skill_registry = skill_registry
-        # Use OrderedDict for LRU-style eviction of cached sessions
-        self._sessions: OrderedDict[str, SessionState] = OrderedDict()
         # Session managers keyed by session_key
         self._session_managers: dict[str, SessionManager] = {}
-        # Per-chat locks to serialize message handling
-        self._chat_locks: dict[str, asyncio.Lock] = {}
+        # Per-session contexts (lock, pending messages, etc.)
+        # Keyed by session_key, enabling parallel processing of different sessions
+        self._session_contexts: dict[str, SessionContext] = {}
+        # Global concurrency limit for parallel session processing
+        max_concurrent = config.sessions.max_concurrent if config else 2
+        self._concurrency_semaphore = asyncio.Semaphore(max_concurrent)
 
-    def _get_chat_lock(self, chat_id: str) -> asyncio.Lock:
-        """Get or create a lock for a chat.
+    def _get_session_context(self, session_key: str) -> SessionContext:
+        """Get or create context for a session.
 
         Args:
-            chat_id: Chat ID.
+            session_key: Session key (e.g., telegram_123_456).
 
         Returns:
-            Lock for the chat.
+            SessionContext for the session.
         """
-        if chat_id not in self._chat_locks:
-            self._chat_locks[chat_id] = asyncio.Lock()
-        return self._chat_locks[chat_id]
+        if session_key not in self._session_contexts:
+            self._session_contexts[session_key] = SessionContext()
+        return self._session_contexts[session_key]
 
     def _get_session_manager(
         self, chat_id: str, user_id: str, thread_id: str | None = None
@@ -332,45 +371,126 @@ class TelegramMessageHandler:
                 await self._handle_image_message(message)
                 return
 
-            # Acquire per-chat lock to serialize message handling
-            chat_lock = self._get_chat_lock(message.chat_id)
-            async with chat_lock:
-                # Set processing indicator (eyes reaction - "looking at it")
+            # Compute session_key BEFORE acquiring lock
+            # This enables parallel processing of different sessions (e.g., forum topics)
+            thread_id = message.metadata.get("thread_id")
+            session_key = make_session_key(
+                self._provider.name,
+                message.chat_id,
+                message.user_id,
+                thread_id,
+            )
+
+            # Get this session's context (lock, pending messages, etc.)
+            ctx = self._get_session_context(session_key)
+
+            # Check if THIS SESSION is busy (not the whole chat)
+            # If so, queue this message for steering and return early
+            if ctx.lock.locked():
+                ctx.add_pending(message)
+                # Set a reaction to indicate we received the message
                 await self._provider.set_reaction(message.chat_id, message.id, "👀")
-
-                # Get or create session
-                session = await self._get_or_create_session(message)
-
-                # Repair session if it has incomplete tool use (e.g., from interruption)
-                if session.has_incomplete_tool_use():
-                    logger.warning(
-                        f"Session {session.session_id} has incomplete tool use, repairing..."
-                    )
-                    session.repair_incomplete_tool_use()
-
-                # Log incoming message
                 logger.info(
-                    "[dim]%s:[/dim] %s",
+                    "Message from %s queued for steering (session %s busy)",
                     message.username or message.user_id,
-                    _truncate(message.text),
+                    session_key,
                 )
+                return
 
-                try:
-                    if self._streaming:
-                        # Stream response
-                        await self._handle_streaming(message, session)
-                    else:
-                        # Non-streaming response
-                        await self._handle_sync(message, session)
-                finally:
-                    # Clear processing indicator
-                    await self._provider.clear_reaction(message.chat_id, message.id)
+            # Process this message and any that queue up during processing
+            await self._process_message_loop(message, ctx)
 
         except Exception:
             logger.exception("Error handling message")
             # Clear reaction on error too
             await self._provider.clear_reaction(message.chat_id, message.id)
             await self._send_error(message.chat_id)
+
+    async def _process_message_loop(
+        self,
+        initial_message: IncomingMessage,
+        ctx: SessionContext,
+    ) -> None:
+        """Process a message and any pending messages that arrive.
+
+        This loop ensures that messages queued during processing (that weren't
+        consumed via steering) are processed after the current message completes.
+
+        The pending check happens INSIDE the lock to prevent race conditions
+        where a new message could start its own loop between lock release and
+        pending check.
+
+        Args:
+            initial_message: First message to process.
+            ctx: Session context for this session.
+        """
+        message: IncomingMessage | None = initial_message
+
+        while message:
+            # Acquire global concurrency limit, then session lock
+            async with self._concurrency_semaphore:
+                async with ctx.lock:
+                    await self._process_single_message(message, ctx)
+
+                    # Check for pending messages INSIDE the lock
+                    # This prevents race conditions with new messages
+                    pending = ctx.take_pending()
+                    if pending:
+                        # Process first pending message, re-queue the rest
+                        message = pending[0]
+                        for msg in pending[1:]:
+                            ctx.add_pending(msg)
+                        logger.debug(
+                            "Processing queued message (remaining in queue: %d)",
+                            len(pending) - 1,
+                        )
+                    else:
+                        message = None
+
+    async def _process_single_message(
+        self,
+        message: IncomingMessage,
+        ctx: SessionContext,
+    ) -> None:
+        """Process a single message within the session lock.
+
+        Args:
+            message: Message to process.
+            ctx: Session context for this session.
+        """
+        # Set processing indicator (eyes reaction - "looking at it")
+        await self._provider.set_reaction(message.chat_id, message.id, "👀")
+
+        # Get or create session
+        session = await self._get_or_create_session(message)
+
+        # Repair session if it has incomplete tool use (e.g., from interruption)
+        if session.has_incomplete_tool_use():
+            logger.warning(
+                f"Session {session.session_id} has incomplete tool use, repairing..."
+            )
+            session.repair_incomplete_tool_use()
+
+        # Log incoming message
+        logger.info(
+            "[dim]%s:[/dim] %s",
+            message.username or message.user_id,
+            _truncate(message.text),
+        )
+
+        try:
+            if self._streaming:
+                # Stream response
+                await self._handle_streaming(message, session, ctx)
+            else:
+                # Non-streaming response
+                await self._handle_sync(message, session, ctx)
+        finally:
+            # Clear processing indicator
+            await self._provider.clear_reaction(message.chat_id, message.id)
+            # Clear reactions on any messages that were steered during processing
+            for steered in ctx.take_steered():
+                await self._provider.clear_reaction(steered.chat_id, steered.id)
 
     async def _handle_image_message(self, message: IncomingMessage) -> None:
         """Handle a message containing images.
@@ -654,13 +774,8 @@ class TelegramMessageHandler:
             message.chat_id, message.user_id, thread_id
         )
         session_key = session_manager.session_key
-        is_fresh_mode = self._conversation_config.session_mode == "fresh"
-
-        # In persistent mode, check cache first
-        if not is_fresh_mode and session_key in self._sessions:
-            # Move to end (most recently used)
-            self._sessions.move_to_end(session_key)
-            return self._sessions[session_key]
+        session_mode = self._config.sessions.mode if self._config else "persistent"
+        is_fresh_mode = session_mode == "fresh"
 
         # Ensure session exists in JSONL
         await session_manager.ensure_session()
@@ -705,7 +820,7 @@ class TelegramMessageHandler:
             )
 
         # Store session mode in metadata for prompt builder
-        session.metadata["session_mode"] = self._conversation_config.session_mode
+        session.metadata["session_mode"] = session_mode
 
         if is_fresh_mode:
             # Fresh mode: don't load history, agent can read session file if needed
@@ -771,14 +886,6 @@ class TelegramMessageHandler:
                     )
                 )
 
-            # Cache session in persistent mode only
-            # Evict oldest sessions if cache is full
-            while len(self._sessions) >= MAX_CACHED_SESSIONS:
-                evicted_key, _ = self._sessions.popitem(last=False)
-                logger.debug(f"Evicted session from cache: {evicted_key}")
-
-            self._sessions[session_key] = session
-
         # Update user profile (still in SQLite)
         async with self._database.session() as db_session:
             store = MemoryStore(db_session)
@@ -795,6 +902,7 @@ class TelegramMessageHandler:
         self,
         message: IncomingMessage,
         session: SessionState,
+        ctx: SessionContext,
     ) -> None:
         """Handle message with streaming response.
 
@@ -805,6 +913,7 @@ class TelegramMessageHandler:
         Args:
             message: Incoming message.
             session: Session state.
+            ctx: Session context for pending messages and steering.
         """
         # Send typing indicator
         await self._provider.send_typing(message.chat_id)
@@ -858,12 +967,27 @@ class TelegramMessageHandler:
                     parse_mode="markdown_v2",
                 )
 
+        async def get_steering_messages() -> list[str]:
+            """Check for messages that arrived during processing.
+
+            Returns message texts for injection into the conversation.
+            """
+            pending = ctx.take_pending()
+            if pending:
+                logger.info(
+                    "Steering: %d new message(s) arrived during processing",
+                    len(pending),
+                )
+                return [msg.text for msg in pending if msg.text]
+            return []
+
         # Stream response while accumulating content
         async for chunk in self._agent.process_message_streaming(
             message.text,
             session,
             user_id=message.user_id,
             on_tool_start=on_tool_start,
+            get_steering_messages=get_steering_messages,
             session_path=session.metadata.get("session_path"),
         ):
             response_content += chunk
@@ -966,6 +1090,7 @@ class TelegramMessageHandler:
         self,
         message: IncomingMessage,
         session: SessionState,
+        ctx: SessionContext,
     ) -> None:
         """Handle message with synchronous response.
 
@@ -975,6 +1100,7 @@ class TelegramMessageHandler:
         Args:
             message: Incoming message.
             session: Session state.
+            ctx: Session context for pending messages and steering.
         """
         # Track thinking message and tool calls
         thinking_msg_id: str | None = None
@@ -1019,6 +1145,20 @@ class TelegramMessageHandler:
                     parse_mode="markdown_v2",
                 )
 
+        async def get_steering_messages() -> list[str]:
+            """Check for messages that arrived during processing.
+
+            Returns message texts for injection into the conversation.
+            """
+            pending = ctx.take_pending()
+            if pending:
+                logger.info(
+                    "Steering: %d new message(s) arrived during processing",
+                    len(pending),
+                )
+                return [msg.text for msg in pending if msg.text]
+            return []
+
         # Start typing indicator loop (Telegram typing only lasts 5 seconds)
         typing_task = asyncio.create_task(self._typing_loop(message.chat_id))
 
@@ -1029,6 +1169,7 @@ class TelegramMessageHandler:
                 session,
                 user_id=message.user_id,
                 on_tool_start=on_tool_start,
+                get_steering_messages=get_steering_messages,
                 session_path=session.metadata.get("session_path"),
             )
         finally:
@@ -1223,13 +1364,13 @@ class TelegramMessageHandler:
             chat_id: Chat ID to clear.
         """
         session_key = f"{self._provider.name}_{chat_id}"
-        self._sessions.pop(session_key, None)
         self._session_managers.pop(session_key, None)
+        self._session_contexts.pop(session_key, None)
 
     def clear_all_sessions(self) -> None:
         """Clear all sessions from memory."""
-        self._sessions.clear()
         self._session_managers.clear()
+        self._session_contexts.clear()
 
 
 def _extract_text_content(content: list[dict[str, Any]]) -> str:

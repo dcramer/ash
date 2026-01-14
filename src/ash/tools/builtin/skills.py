@@ -191,10 +191,14 @@ class UseSkillTool(Tool):
 
         # Look up skill
         if not self._registry.has(skill_name):
-            available = ", ".join(self._registry.list_names())
-            return ToolResult.error(
-                f"Skill '{skill_name}' not found. Available: {available}"
-            )
+            # Try reloading in case skill was just created
+            self._registry.reload_workspace(self._config.workspace)
+
+            if not self._registry.has(skill_name):
+                available = ", ".join(self._registry.list_names())
+                return ToolResult.error(
+                    f"Skill '{skill_name}' not found. Available: {available}"
+                )
 
         skill = self._registry.get(skill_name)
 
