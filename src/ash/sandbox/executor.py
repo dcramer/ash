@@ -70,6 +70,7 @@ class SandboxExecutor:
         config: SandboxConfig | None = None,
         dockerfile_path: Path | None = None,
         environment: dict[str, str] | None = None,
+        setup_command: str | None = None,
     ):
         """Initialize executor.
 
@@ -77,12 +78,15 @@ class SandboxExecutor:
             config: Sandbox configuration.
             dockerfile_path: Path to Dockerfile for building image.
             environment: Environment variables to set in container.
+            setup_command: Command to run once after container creation.
         """
         self._config = config or SandboxConfig()
         self._manager = SandboxManager(self._config)
         self._dockerfile_path = dockerfile_path
         self._environment = environment or {}
+        self._setup_command = setup_command
         self._container_id: str | None = None
+        self._container_setup_done: bool = False
         self._initialized = False
 
     async def initialize(self) -> bool:
@@ -252,6 +256,22 @@ class SandboxExecutor:
             environment=self._environment if self._environment else None,
         )
         await self._manager.start_container(container_id)
+
+        # Run setup command once per container
+        if self._setup_command and not self._container_setup_done:
+            logger.info("Running container setup command")
+            exit_code, stdout, stderr = await self._manager.exec_command(
+                container_id,
+                self._setup_command,
+                timeout=300,  # 5 minute timeout for setup
+            )
+            if exit_code != 0:
+                logger.warning(f"Setup command failed (exit {exit_code}): {stderr}")
+            else:
+                logger.debug(
+                    f"Setup command completed: {stdout[:200] if stdout else ''}"
+                )
+            self._container_setup_done = True
 
         if reuse:
             self._container_id = container_id

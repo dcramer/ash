@@ -25,8 +25,16 @@ class SkillRequirements:
     # Values: "darwin", "linux", "windows"
     os: list[str] = field(default_factory=list)
 
+    # Sandbox package requirements (installed at runtime)
+    apt_packages: list[str] = field(default_factory=list)  # System packages
+    python_packages: list[str] = field(default_factory=list)  # Python libraries
+    python_tools: list[str] = field(default_factory=list)  # CLI tools (via uvx)
+
     def check(self) -> tuple[bool, str | None]:
         """Check if all requirements are met.
+
+        Note: Package requirements are not checked here - they are
+        installed at container creation time via setup_command.
 
         Returns:
             Tuple of (is_met, error_message).

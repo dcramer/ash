@@ -115,6 +115,9 @@ class SkillRegistry:
             bins=requires.get("bins", []),
             env=requires.get("env", []),
             os=requires.get("os", []),
+            apt_packages=requires.get("apt_packages", []),
+            python_packages=requires.get("python_packages", []),
+            python_tools=requires.get("python_tools", []),
         )
 
     def _create_skill_definition(

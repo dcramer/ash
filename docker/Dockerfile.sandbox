@@ -4,7 +4,11 @@
 
 FROM python:3.12-slim-bookworm
 
-# Install common utilities that might be needed
+# Build-time arguments for optional packages
+ARG EXTRA_APT_PACKAGES=""
+ARG EXTRA_PYTHON_PACKAGES=""
+
+# Install common utilities + optional apt packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
@@ -14,11 +18,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     less \
     tree \
     unzip \
+    ${EXTRA_APT_PACKAGES} \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install Python dependencies for sandboxed CLI
-RUN pip install --no-cache-dir typer croniter pyyaml
+# Install uv for fast Python package management (in shared location)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && mv /root/.local/bin/uv /usr/local/bin/uv \
+    && mv /root/.local/bin/uvx /usr/local/bin/uvx
+
+# Install Python dependencies for sandboxed CLI + optional packages
+RUN uv pip install --system --no-cache typer croniter pyyaml ${EXTRA_PYTHON_PACKAGES}
 
 # Copy sandboxed CLI and dependencies
 COPY src/ash/sandbox/cli /opt/ash-cli/ash/sandbox/cli

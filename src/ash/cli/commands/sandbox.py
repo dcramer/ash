@@ -26,6 +26,14 @@ def register(app: typer.Typer) -> None:
                 help="Force rebuild even if image exists",
             ),
         ] = False,
+        config: Annotated[
+            Path | None,
+            typer.Option(
+                "--config",
+                "-c",
+                help="Config file for build-time packages",
+            ),
+        ] = None,
     ) -> None:
         """Manage the Docker sandbox environment."""
 
@@ -44,7 +52,7 @@ def register(app: typer.Typer) -> None:
                 dockerfile_path = package_dir / "docker" / "Dockerfile.sandbox"
 
         if action == "build":
-            _sandbox_build(dockerfile_path, force)
+            _sandbox_build(dockerfile_path, force, config)
 
         elif action == "status":
             _sandbox_status()
@@ -58,7 +66,9 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
 
-def _sandbox_build(dockerfile_path: Path, force: bool) -> None:
+def _sandbox_build(
+    dockerfile_path: Path, force: bool, config_path: Path | None = None
+) -> None:
     """Build the sandbox Docker image."""
     # Check if Docker is available
     try:
@@ -92,6 +102,30 @@ def _sandbox_build(dockerfile_path: Path, force: bool) -> None:
         error(f"Dockerfile not found: {dockerfile_path}")
         raise typer.Exit(1)
 
+    # Load config for build-time packages
+    build_args: list[str] = []
+    from ash.config import load_config
+    from ash.sandbox.packages import _validate_package_names
+
+    try:
+        cfg = load_config(config_path)  # Uses default path if None
+        if cfg.sandbox.apt_packages:
+            valid_apt = _validate_package_names(cfg.sandbox.apt_packages)
+            if valid_apt:
+                apt_str = " ".join(valid_apt)
+                build_args.extend(["--build-arg", f"EXTRA_APT_PACKAGES={apt_str}"])
+                dim(f"apt packages: {apt_str}")
+        if cfg.sandbox.python_packages:
+            valid_python = _validate_package_names(cfg.sandbox.python_packages)
+            if valid_python:
+                python_str = " ".join(valid_python)
+                build_args.extend(
+                    ["--build-arg", f"EXTRA_PYTHON_PACKAGES={python_str}"]
+                )
+                dim(f"python packages: {python_str}")
+    except Exception as e:
+        warning(f"Could not load config: {e}")
+
     console.print("[bold]Building sandbox image...[/bold]")
     dim(f"Using {dockerfile_path}")
     console.print()
@@ -106,6 +140,7 @@ def _sandbox_build(dockerfile_path: Path, force: bool) -> None:
             "ash-sandbox:latest",
             "-f",
             str(dockerfile_path),
+            *build_args,
             str(build_context),
         ],
     )

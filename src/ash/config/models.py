@@ -89,6 +89,15 @@ class SandboxConfig(BaseModel):
     # Mounted at /sessions in the container
     sessions_access: Literal["none", "ro"] = "ro"
 
+    # Build-time packages (requires `ash sandbox build` to take effect)
+    apt_packages: list[str] = []
+    python_packages: list[str] = []
+
+    # Runtime setup command (runs once per container creation)
+    # Use for packages that don't need to be baked into the image
+    # Example: "uv pip install --user some-package"
+    setup_command: str | None = None
+
 
 class ServerConfig(BaseModel):
     """Configuration for HTTP server."""

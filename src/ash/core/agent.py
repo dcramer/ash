@@ -917,14 +917,38 @@ async def create_agent(
     # Create tool registry with core tools
     tool_registry = ToolRegistry()
 
+    # Discover skills early (needed for package requirements)
+    skill_registry = SkillRegistry()
+    skill_registry.discover(config.workspace)
+    logger.info(f"Discovered {len(skill_registry)} skills from workspace")
+
     # Create shared sandbox executor for all sandbox-based tools
     from ash.sandbox import SandboxExecutor
+    from ash.sandbox.packages import (
+        build_setup_command,
+        collect_skill_packages,
+        warn_missing_apt_packages,
+    )
     from ash.tools.base import build_sandbox_manager_config
 
     sandbox_manager_config = build_sandbox_manager_config(
         config.sandbox, config.workspace
     )
-    shared_executor = SandboxExecutor(config=sandbox_manager_config)
+
+    # Collect package requirements from skills and build setup command
+    apt_packages, python_packages, python_tools = collect_skill_packages(skill_registry)
+    warn_missing_apt_packages(apt_packages)
+
+    setup_command = build_setup_command(
+        python_packages=python_packages,
+        python_tools=python_tools,
+        base_setup_command=config.sandbox.setup_command,
+    )
+
+    shared_executor = SandboxExecutor(
+        config=sandbox_manager_config,
+        setup_command=setup_command,
+    )
 
     # Register bash tool (uses shared executor)
     tool_registry.register(BashTool(executor=shared_executor))
@@ -1028,11 +1052,6 @@ async def create_agent(
             )
         except Exception:
             logger.warning("Failed to initialize memory extractor", exc_info=True)
-
-    # Discover skills (for system prompt - agent reads SKILL.md files directly)
-    skill_registry = SkillRegistry()
-    skill_registry.discover(config.workspace)
-    logger.info(f"Discovered {len(skill_registry)} skills from workspace")
 
     # Create tool executor
     tool_executor = ToolExecutor(tool_registry)
