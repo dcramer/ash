@@ -29,7 +29,6 @@ This enables:
 - Support `allowed_tools` to restrict subagent's tools
 - Support `model` override per skill
 - Support `max_iterations` limit per skill
-- Filter unavailable skills (bins/os requirements not met)
 - Provide CLI commands for skill management
 
 ### SHOULD
@@ -67,9 +66,6 @@ allowed_tools:                 # Tool whitelist (empty = all tools)
   - web_fetch
 model: haiku                   # Optional model override
 max_iterations: 10             # Iteration limit (default: 10)
-requires:                      # Availability filtering
-  bins: [curl]
-  os: [linux, darwin]
 ---
 
 You are a research assistant with access to Perplexity AI.
@@ -135,23 +131,13 @@ Use the `use_skill` tool to invoke a skill with context.
 # Validate skill format
 ash skill validate <path>
 
-# List skills (with availability status)
-ash skill list [--all]
+# List skills
+ash skill list
 ```
 
 ### Python Classes
 
 ```python
-@dataclass
-class SkillRequirements:
-    """Requirements for a skill to be available."""
-    bins: list[str] = field(default_factory=list)  # Required binaries in PATH
-    os: list[str] = field(default_factory=list)    # Supported OS (darwin, linux, windows)
-
-    def check(self) -> tuple[bool, str | None]:
-        """Check if requirements are met. Returns (is_met, error_message)."""
-        ...
-
 @dataclass
 class SkillDefinition:
     """Skill loaded from SKILL.md files."""
@@ -159,8 +145,6 @@ class SkillDefinition:
     description: str
     instructions: str
 
-    # Availability filtering
-    requires: SkillRequirements = field(default_factory=SkillRequirements)
     skill_path: Path | None = None
 
     # Subagent execution
@@ -168,10 +152,6 @@ class SkillDefinition:
     allowed_tools: list[str] = field(default_factory=list) # Tool whitelist
     model: str | None = None                                # Model override
     max_iterations: int = 10                                # Iteration limit
-
-    def is_available(self) -> tuple[bool, str | None]:
-        """Check if skill is available on current system."""
-        return self.requires.check()
 ```
 
 ```python
@@ -223,9 +203,8 @@ class SkillRegistry:
 | Skill with `env: [FOO]` | FOO injected from config | `[skills.x].FOO = "..."` |
 | Skill with `allowed_tools` | Subagent restricted to those tools | Empty = all tools |
 | Skill with `model: haiku` | Uses haiku model | Config can override |
-| Skill with `requires.bins` not in PATH | Filtered from prompt | Not invocable |
 | Skill with config `enabled = false` | Filtered from prompt | Not invocable |
-| `ash skill list` | Shows available skills | With availability status |
+| `ash skill list` | Shows registered skills | |
 
 ## Errors
 

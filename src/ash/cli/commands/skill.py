@@ -49,14 +49,6 @@ def register(app: typer.Typer) -> None:
 
     @skill_app.command("list")
     def list_skills(
-        show_all: Annotated[
-            bool,
-            typer.Option(
-                "--all",
-                "-a",
-                help="Include unavailable skills",
-            ),
-        ] = False,
         config_path: Annotated[
             Path | None,
             typer.Option(
@@ -66,11 +58,10 @@ def register(app: typer.Typer) -> None:
             ),
         ] = None,
     ) -> None:
-        """List available skills.
+        """List registered skills.
 
         Examples:
             ash skill list
-            ash skill list --all
         """
         from rich.table import Table
 
@@ -80,10 +71,7 @@ def register(app: typer.Typer) -> None:
         registry = SkillRegistry()
         registry.discover(config.workspace)
 
-        if show_all:
-            skills = list(registry._skills.values())
-        else:
-            skills = registry.list_available()
+        skills = registry.list_available()
 
         if not skills:
             warning("No skills found")
@@ -92,18 +80,11 @@ def register(app: typer.Typer) -> None:
         table = Table(title="Skills")
         table.add_column("Name", style="cyan")
         table.add_column("Description", style="white")
-        table.add_column("Status", style="green")
         table.add_column("Path", style="dim")
 
         for skill in sorted(skills, key=lambda s: s.name):
-            is_available, reason = skill.is_available()
-            if is_available:
-                status = "[green]available[/green]"
-            else:
-                status = f"[red]{reason}[/red]"
-
             path = str(skill.skill_path) if skill.skill_path else "-"
-            table.add_row(skill.name, skill.description, status, path)
+            table.add_row(skill.name, skill.description, path)
 
         console.print(table)
 

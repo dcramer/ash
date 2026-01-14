@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from ash.skills.base import SkillDefinition, SkillRequirements
+from ash.skills.base import SkillDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -98,27 +98,6 @@ class SkillRegistry:
         if count_loaded > 0:
             logger.info(f"Loaded {count_loaded} skills from {source} ({skills_dir})")
 
-    def _parse_requirements(self, data: dict[str, Any]) -> SkillRequirements:
-        """Parse requirements from skill data.
-
-        Args:
-            data: Skill data dict (from YAML).
-
-        Returns:
-            SkillRequirements instance.
-        """
-        requires = data.get("requires", {})
-        if not isinstance(requires, dict):
-            return SkillRequirements()
-
-        return SkillRequirements(
-            bins=requires.get("bins", []),
-            os=requires.get("os", []),
-            apt_packages=requires.get("apt_packages", []),
-            python_packages=requires.get("python_packages", []),
-            python_tools=requires.get("python_tools", []),
-        )
-
     def _create_skill_definition(
         self,
         name: str,
@@ -139,13 +118,10 @@ class SkillRegistry:
         Returns:
             SkillDefinition instance.
         """
-        requirements = self._parse_requirements(data)
-
         return SkillDefinition(
             name=name,
             description=description,
             instructions=instructions,
-            requires=requirements,
             skill_path=skill_path,
             # Subagent execution settings
             env=data.get("env", []),
@@ -165,11 +141,6 @@ class SkillRegistry:
             existing_source = self._skill_sources.get(skill.name)
             if existing_source and existing_source != source_path:
                 logger.warning(f"Skill '{skill.name}' overwritten by {source_path}")
-
-        # Check availability and log if not available
-        is_available, reason = skill.is_available()
-        if not is_available:
-            logger.debug(f"Skill '{skill.name}' not available: {reason}")
 
         self._skills[skill.name] = skill
         self._skill_sources[skill.name] = source_path
@@ -290,7 +261,7 @@ class SkillRegistry:
         return name in self._skills
 
     def list_names(self) -> list[str]:
-        """List all registered skill names (including unavailable).
+        """List all registered skill names.
 
         Returns:
             List of skill names.
@@ -298,31 +269,25 @@ class SkillRegistry:
         return list(self._skills.keys())
 
     def list_available(self) -> list[SkillDefinition]:
-        """List skills available on the current system.
+        """List all registered skills.
 
         Returns:
-            List of available skill definitions.
+            List of skill definitions.
         """
-        return [skill for skill in self._skills.values() if skill.is_available()[0]]
+        return list(self._skills.values())
 
-    def get_definitions(
-        self, include_unavailable: bool = False
-    ) -> list[dict[str, str]]:
+    def get_definitions(self) -> list[dict[str, str]]:
         """Get skill definitions for system prompt.
-
-        Args:
-            include_unavailable: If True, include skills that don't meet requirements.
 
         Returns:
             List of skill definitions with name and description.
         """
-        skills = self._skills.values() if include_unavailable else self.list_available()
         return [
             {
                 "name": skill.name,
                 "description": skill.description,
             }
-            for skill in skills
+            for skill in self._skills.values()
         ]
 
     def reload_workspace(self, workspace_path: Path) -> int:

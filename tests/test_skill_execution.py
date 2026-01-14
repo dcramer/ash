@@ -6,7 +6,7 @@ import pytest
 
 from ash.agents.base import AgentContext, AgentResult
 from ash.config.models import AshConfig, SkillConfig
-from ash.skills.base import SkillDefinition, SkillRequirements
+from ash.skills.base import SkillDefinition
 from ash.tools.builtin.skills import SkillAgent, UseSkillTool
 
 
@@ -109,23 +109,6 @@ class TestUseSkillToolErrorHandling:
 
         assert result.is_error
         assert "not found" in result.content
-
-    @pytest.mark.asyncio
-    async def test_unavailable_skill_returns_error(self, tool, registry):
-        """Should return error when skill requirements aren't met."""
-        skill = SkillDefinition(
-            name="test",
-            description="Test",
-            instructions="x",
-            requires=SkillRequirements(bins=["nonexistent-bin-xyz"]),
-        )
-        registry.has.return_value = True
-        registry.get.return_value = skill
-
-        result = await tool.execute({"skill": "test", "message": "do"})
-
-        assert result.is_error
-        assert "not available" in result.content
 
     @pytest.mark.asyncio
     async def test_disabled_skill_returns_error(self, tool, registry):

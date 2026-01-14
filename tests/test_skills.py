@@ -1,96 +1,10 @@
 """Tests for skills system."""
 
-import platform
 from pathlib import Path
 
 import pytest
 
-from ash.skills import SkillDefinition, SkillRegistry
-from ash.skills.base import SkillRequirements
-
-# =============================================================================
-# SkillRequirements Tests
-# =============================================================================
-
-
-class TestSkillRequirements:
-    """Tests for SkillRequirements dataclass."""
-
-    def test_empty_requirements_pass(self):
-        req = SkillRequirements()
-        is_met, reason = req.check()
-        assert is_met is True
-        assert reason is None
-
-    def test_os_requirement_current_os_passes(self):
-        current_os = platform.system().lower()
-        req = SkillRequirements(os=[current_os])
-        is_met, reason = req.check()
-        assert is_met is True
-        assert reason is None
-
-    def test_os_requirement_other_os_fails(self):
-        # Pick an OS that's definitely not the current one
-        other_os = "windows" if platform.system().lower() != "windows" else "darwin"
-        req = SkillRequirements(os=[other_os])
-        is_met, reason = req.check()
-        assert is_met is False
-        assert reason is not None and "Requires OS" in reason
-
-    def test_bin_requirement_existing_binary_passes(self):
-        # python should always be available
-        req = SkillRequirements(bins=["python"])
-        is_met, reason = req.check()
-        assert is_met is True
-        assert reason is None
-
-    def test_bin_requirement_missing_binary_fails(self):
-        req = SkillRequirements(bins=["nonexistent-binary-xyz123"])
-        is_met, reason = req.check()
-        assert is_met is False
-        assert reason is not None and "Requires binary" in reason
-
-    def test_multiple_requirements_all_pass(self):
-        current_os = platform.system().lower()
-        req = SkillRequirements(
-            bins=["python"],
-            os=[current_os],
-        )
-        is_met, reason = req.check()
-        assert is_met is True
-
-    def test_multiple_requirements_one_fails(self):
-        current_os = platform.system().lower()
-        req = SkillRequirements(
-            bins=["python", "nonexistent-xyz"],
-            os=[current_os],
-        )
-        is_met, reason = req.check()
-        assert is_met is False
-        assert reason is not None and "nonexistent-xyz" in reason
-
-
-# =============================================================================
-# SkillDefinition Tests
-# =============================================================================
-
-
-class TestSkillDefinition:
-    """Tests for SkillDefinition availability checking."""
-
-    def test_is_available_with_unmet_requirements(self):
-        """Skill with unmet OS requirements should be unavailable."""
-        other_os = "windows" if platform.system().lower() != "windows" else "darwin"
-        skill = SkillDefinition(
-            name="test",
-            description="Test",
-            instructions="Do something",
-            requires=SkillRequirements(os=[other_os]),
-        )
-        is_available, reason = skill.is_available()
-        assert is_available is False
-        assert reason is not None
-
+from ash.skills import SkillRegistry
 
 # =============================================================================
 # SkillRegistry Tests
@@ -290,36 +204,6 @@ description: No instructions
         registry = SkillRegistry()
         registry.discover(tmp_path, include_bundled=False)
         assert len(registry) == 0
-
-    def test_discover_with_requirements(self, tmp_path: Path):
-        """Skills with unmet requirements are loaded but not available."""
-        skills_dir = tmp_path / "skills"
-        skill_dir = skills_dir / "darwin-only"
-        skill_dir.mkdir(parents=True)
-
-        # Create skill that requires a different OS
-        other_os = "windows" if platform.system().lower() != "windows" else "darwin"
-        (skill_dir / "SKILL.md").write_text(
-            f"""---
-description: OS-specific skill
-requires:
-  os:
-    - {other_os}
----
-
-OS-specific instructions.
-"""
-        )
-
-        registry = SkillRegistry()
-        registry.discover(tmp_path, include_bundled=False)
-
-        # Skill is registered
-        assert len(registry._skills) == 1
-        assert registry.has("darwin-only")
-
-        # But not available (filtered by list_available)
-        assert len(registry.list_available()) == 0
 
 
 class TestSkillRegistryValidation:

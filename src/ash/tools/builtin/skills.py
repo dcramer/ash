@@ -161,11 +161,6 @@ class UseSkillTool(Tool):
 
         skill = self._registry.get(skill_name)
 
-        # Check if skill is available (bins/os requirements)
-        is_available, reason = skill.is_available()
-        if not is_available:
-            return ToolResult.error(f"Skill '{skill_name}' not available: {reason}")
-
         # Check if skill is enabled in config
         skill_config = self._config.skills.get(skill_name)
         if skill_config and not skill_config.enabled:

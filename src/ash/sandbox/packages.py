@@ -35,22 +35,19 @@ def collect_skill_packages(
 ) -> tuple[list[str], list[str], list[str]]:
     """Collect all package requirements from available skills.
 
+    Note: Skill requirements have been removed. This function now returns
+    empty lists but is kept for API compatibility.
+
     Args:
-        registry: Skill registry to scan.
+        registry: Skill registry to scan (unused).
 
     Returns:
-        Tuple of (apt_packages, python_packages, python_tools) with duplicates removed.
+        Tuple of (apt_packages, python_packages, python_tools) - all empty.
     """
-    apt_packages: set[str] = set()
-    python_packages: set[str] = set()
-    python_tools: set[str] = set()
-
-    for skill in registry.list_available():
-        apt_packages.update(skill.requires.apt_packages)
-        python_packages.update(skill.requires.python_packages)
-        python_tools.update(skill.requires.python_tools)
-
-    return sorted(apt_packages), sorted(python_packages), sorted(python_tools)
+    # Skills no longer declare package requirements
+    # Keep function signature for API compatibility
+    _ = registry  # unused
+    return [], [], []
 
 
 def build_setup_command(

@@ -2,7 +2,7 @@
 
 from ash.agents.base import Agent, AgentConfig
 
-SKILL_WRITER_PROMPT = """You help create SKILL.md files for Ash skills.
+SKILL_WRITER_PROMPT = """You help create and update SKILL.md files for Ash skills.
 
 ## Skill Directory Structure
 
@@ -25,14 +25,8 @@ description: One-line description of what the skill does
 allowed_tools:        # Optional - tools the skill needs
   - bash
   - web_search
-requires:              # Optional - system requirements
-  bins:
-    - jq              # Required binaries in PATH
-  env:
-    - API_KEY         # Required environment variables
-  os:
-    - darwin          # Supported operating systems
-    - linux
+env:                  # Optional - env vars to inject from config
+  - API_KEY
 ---
 
 Instructions for the agent to follow when using this skill.
@@ -44,7 +38,17 @@ Instructions for the agent to follow when using this skill.
 2. Create the skill directory: `/workspace/skills/<name>/`
 3. For complex skills: Create separate script/data files first
 4. Write the SKILL.md file with proper frontmatter and instructions
-5. Run `ash skill validate /workspace/skills/<name>/SKILL.md` to verify
+5. Run `ash-sb skill validate /workspace/skills/<name>/SKILL.md` to verify
+6. Report to the user what was created:
+   - **Skill name**: The name of the skill
+   - **Description**: The description from frontmatter
+   - **Configuration needed**: If the skill has `env`, tell them to add config:
+     ```
+     Add to ~/.ash/config.toml:
+
+     [skills.<name>]
+     ENV_VAR_NAME = "your-value-here"
+     ```
 
 ## Best Practices
 
@@ -128,9 +132,9 @@ allowed_tools:
 
 
 class SkillWriterAgent(Agent):
-    """Help create well-structured SKILL.md files.
+    """Help create or update well-structured SKILL.md files.
 
-    This agent guides the user through creating a new skill:
+    This agent guides the user through creating or updating a skill:
     1. Understanding what the skill should do
     2. Creating the skill directory structure
     3. Writing proper SKILL.md with frontmatter
@@ -142,8 +146,8 @@ class SkillWriterAgent(Agent):
         """Return agent configuration."""
         return AgentConfig(
             name="skill-writer",
-            description="Create a new skill with proper SKILL.md format",
+            description="Create, update, or rewrite a skill with proper SKILL.md format",
             system_prompt=SKILL_WRITER_PROMPT,
             allowed_tools=["read_file", "write_file", "bash"],
-            max_iterations=15,
+            max_iterations=25,
         )
