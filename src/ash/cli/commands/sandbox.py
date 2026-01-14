@@ -96,16 +96,30 @@ def _sandbox_build(dockerfile_path: Path, config_path: Path | None = None) -> No
     # Load config for build-time packages
     build_args: list[str] = []
     from ash.config import load_config
-    from ash.sandbox.packages import _validate_package_names
+    from ash.sandbox.packages import _validate_package_names, collect_skill_packages
+    from ash.skills import SkillRegistry
 
     try:
         cfg = load_config(config_path)  # Uses default path if None
-        if cfg.sandbox.apt_packages:
-            valid_apt = _validate_package_names(cfg.sandbox.apt_packages)
+
+        # Discover skill packages from workspace
+        skill_apt: list[str] = []
+        if cfg.workspace and cfg.workspace.exists():
+            skill_registry = SkillRegistry()
+            skill_registry.discover(cfg.workspace, include_bundled=False)
+            skill_apt, _, _ = collect_skill_packages(skill_registry)
+            if skill_apt:
+                dim(f"from skills: {', '.join(skill_apt)}")
+
+        # Merge config + skill packages
+        all_apt = sorted(set(cfg.sandbox.apt_packages + skill_apt))
+        if all_apt:
+            valid_apt = _validate_package_names(all_apt)
             if valid_apt:
                 apt_str = " ".join(valid_apt)
                 build_args.extend(["--build-arg", f"EXTRA_APT_PACKAGES={apt_str}"])
                 dim(f"apt packages: {apt_str}")
+
         if cfg.sandbox.python_packages:
             valid_python = _validate_package_names(cfg.sandbox.python_packages)
             if valid_python:

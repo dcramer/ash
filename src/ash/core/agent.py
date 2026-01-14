@@ -1038,7 +1038,6 @@ async def create_agent(
     from ash.sandbox.packages import (
         build_setup_command,
         collect_skill_packages,
-        warn_missing_apt_packages,
     )
     from ash.tools.base import build_sandbox_manager_config
 
@@ -1047,8 +1046,8 @@ async def create_agent(
     )
 
     # Collect package requirements from skills and build setup command
-    apt_packages, python_packages, python_tools = collect_skill_packages(skill_registry)
-    warn_missing_apt_packages(apt_packages)
+    # Note: apt_packages are handled at image build time via `ash sandbox build`
+    _, python_packages, python_tools = collect_skill_packages(skill_registry)
 
     setup_command = build_setup_command(
         python_packages=python_packages,

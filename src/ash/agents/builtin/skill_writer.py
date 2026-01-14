@@ -35,6 +35,9 @@ allowed_tools:        # Optional - tools the skill needs
   - web_search
 env:                  # Optional - env vars to inject from config
   - API_KEY
+packages:             # Optional - system packages needed (apt)
+  - jq
+  - ffmpeg
 ---
 
 Instructions for the agent to follow when using this skill.
@@ -144,6 +147,63 @@ fi
 
 If a script won't work after 3 attempts, tell the user and stop.
 
+## Dependencies
+
+Skills can declare dependencies in three ways:
+
+### System Packages
+
+Use the `packages:` field for system binaries (installed via apt):
+
+```yaml
+---
+packages:
+  - jq
+  - ffmpeg
+  - curl
+---
+```
+
+### Python Dependencies (PEP 723)
+
+For Python scripts, declare dependencies inline using PEP 723:
+
+```python
+# /// script
+# dependencies = ["requests>=2.28", "pandas"]
+# ///
+
+import requests
+import pandas as pd
+
+# Your script code...
+```
+
+Run with `uv run script.py` - dependencies are resolved automatically.
+
+**Benefits:**
+- No sandbox pre-installation needed
+- Version pinning supported
+- Each script is self-contained
+
+### CLI Tools (uvx)
+
+For Python CLI tools, use `uvx` to run them without installation:
+
+```bash
+uvx ruff check .
+uvx black --check file.py
+uvx mypy src/
+```
+
+**When to use what:**
+
+| Need | Solution |
+|------|----------|
+| System binary (jq, ffmpeg) | `packages: [jq, ffmpeg]` |
+| Python library to import | PEP 723 in script |
+| Python CLI tool to run | `uvx toolname` |
+
 ## Example: Simple Skill
 
 ```markdown
@@ -212,6 +272,79 @@ allowed_tools:
    cat /workspace/skills/quotes/quotes.json | jq -r '.[]' | shuf -n1
    ```
 2. Present the quote to the user
+```
+
+## Example: Skill with Python Dependencies
+
+Directory structure:
+```
+/workspace/skills/fetch-data/
+├── SKILL.md
+└── fetch.py
+```
+
+fetch.py:
+```python
+# /// script
+# dependencies = ["requests", "beautifulsoup4"]
+# ///
+
+import sys
+import requests
+from bs4 import BeautifulSoup
+
+url = sys.argv[1] if len(sys.argv) > 1 else "https://example.com"
+response = requests.get(url)
+soup = BeautifulSoup(response.text, "html.parser")
+print(soup.title.string if soup.title else "No title")
+```
+
+SKILL.md:
+```markdown
+---
+description: Fetch and parse web page titles
+allowed_tools:
+  - bash
+---
+
+Fetch the title from a URL:
+```bash
+uv run /workspace/skills/fetch-data/fetch.py "$URL"
+```
+```
+
+## Example: Skill with System Packages
+
+Directory structure:
+```
+/workspace/skills/json-stats/
+├── SKILL.md
+└── analyze.sh
+```
+
+analyze.sh:
+```bash
+#!/bin/bash
+# Analyze JSON file and report stats
+FILE="$1"
+echo "Keys: $(jq 'keys | length' "$FILE")"
+echo "Size: $(jq 'length' "$FILE")"
+```
+
+SKILL.md:
+```markdown
+---
+description: Analyze JSON file structure
+allowed_tools:
+  - bash
+packages:
+  - jq
+---
+
+Analyze a JSON file:
+```bash
+bash /workspace/skills/json-stats/analyze.sh "$FILE"
+```
 ```
 """
 

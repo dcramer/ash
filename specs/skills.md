@@ -60,6 +60,9 @@ workspace/skills/
 description: Research topics using Perplexity AI
 env:                           # Env vars to inject from config
   - PERPLEXITY_API_KEY
+packages:                      # System packages to install (apt)
+  - jq
+  - curl
 allowed_tools:                 # Tool whitelist (empty = all tools)
   - bash
   - web_search
@@ -149,6 +152,7 @@ class SkillDefinition:
 
     # Subagent execution
     env: list[str] = field(default_factory=list)           # Env vars to inject
+    packages: list[str] = field(default_factory=list)      # System packages (apt)
     allowed_tools: list[str] = field(default_factory=list) # Tool whitelist
     model: str | None = None                                # Model override
     max_iterations: int = 10                                # Iteration limit
@@ -201,6 +205,7 @@ class SkillRegistry:
 |-------|--------|-------|
 | `use_skill("research", ...)` | Spawns subagent, returns result | Isolated LLM loop |
 | Skill with `env: [FOO]` | FOO injected from config | `[skills.x].FOO = "..."` |
+| Skill with `packages: [jq]` | jq installed in sandbox | Via apt-get at build |
 | Skill with `allowed_tools` | Subagent restricted to those tools | Empty = all tools |
 | Skill with `model: haiku` | Uses haiku model | Config can override |
 | Skill with config `enabled = false` | Filtered from prompt | Not invocable |
@@ -215,6 +220,54 @@ class SkillRegistry:
 | Missing env var in config | Skill runs without that var (warning logged) |
 | Max iterations exceeded | Returns partial result with error flag |
 | Tool not in allowed_tools | Subagent tool call blocked with error |
+
+## Dependencies
+
+Skills can declare dependencies in three ways:
+
+### System Packages
+
+Use the `packages:` field for system binaries (installed via apt at sandbox build):
+
+```yaml
+---
+packages:
+  - jq
+  - ffmpeg
+  - curl
+---
+```
+
+### Python Dependencies (PEP 723)
+
+For Python scripts, declare dependencies inline using PEP 723:
+
+```python
+# /// script
+# dependencies = ["requests>=2.28", "pandas"]
+# ///
+
+import requests
+import pandas as pd
+# ...
+```
+
+Run with `uv run script.py` - dependencies are resolved automatically.
+
+### CLI Tools (uvx)
+
+For Python CLI tools, use `uvx` to run them without installation:
+
+```bash
+uvx ruff check .
+uvx black --check file.py
+```
+
+| Need | Solution |
+|------|----------|
+| System binary (jq, ffmpeg) | `packages: [jq, ffmpeg]` |
+| Python library to import | PEP 723 in script |
+| Python CLI tool to run | `uvx toolname` |
 
 ## Verification
 

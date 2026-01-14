@@ -70,6 +70,9 @@ Do something useful.
 description: Research topics
 env:
   - PERPLEXITY_API_KEY
+packages:
+  - jq
+  - curl
 allowed_tools:
   - bash
   - web_search
@@ -86,10 +89,35 @@ Research and summarize topics.
 
         skill = registry.get("research")
         assert skill.env == ["PERPLEXITY_API_KEY"]
+        assert skill.packages == ["jq", "curl"]
         assert skill.allowed_tools == ["bash", "web_search"]
         assert skill.model == "haiku"
         assert skill.max_iterations == 15
         assert skill.instructions == "Research and summarize topics."
+
+    def test_discover_skill_with_packages(self, tmp_path: Path):
+        """Test that packages field is parsed from frontmatter."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "media"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Process media files
+packages:
+  - ffmpeg
+  - imagemagick
+---
+
+Convert and process media files.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("media")
+        assert skill.packages == ["ffmpeg", "imagemagick"]
 
     def test_discover_flat_markdown(self, tmp_path: Path):
         """Flat markdown files also supported."""
@@ -294,3 +322,113 @@ Do something.
         is_valid, error = registry.validate_skill_file(skill_file)
         assert is_valid is True
         assert error is None
+
+
+# =============================================================================
+# Package Collection Tests
+# =============================================================================
+
+
+class TestCollectSkillPackages:
+    """Tests for collect_skill_packages()."""
+
+    def test_collect_packages_from_skills(self, tmp_path: Path):
+        """Test that packages are collected from all skills."""
+        from ash.sandbox.packages import collect_skill_packages
+
+        skills_dir = tmp_path / "skills"
+
+        # Skill 1 with packages
+        skill1_dir = skills_dir / "media"
+        skill1_dir.mkdir(parents=True)
+        (skill1_dir / "SKILL.md").write_text(
+            """---
+description: Media processing
+packages:
+  - ffmpeg
+  - jq
+---
+
+Process media files.
+"""
+        )
+
+        # Skill 2 with different packages
+        skill2_dir = skills_dir / "data"
+        skill2_dir.mkdir()
+        (skill2_dir / "SKILL.md").write_text(
+            """---
+description: Data processing
+packages:
+  - jq
+  - curl
+---
+
+Process data files.
+"""
+        )
+
+        # Skill 3 without packages
+        skill3_dir = skills_dir / "simple"
+        skill3_dir.mkdir()
+        (skill3_dir / "SKILL.md").write_text(
+            """---
+description: Simple skill
+---
+
+Do something simple.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        apt_packages, python_packages, python_tools = collect_skill_packages(registry)
+
+        # Should have deduplicated apt packages
+        assert sorted(apt_packages) == ["curl", "ffmpeg", "jq"]
+        # Python packages and tools should be empty (use PEP 723)
+        assert python_packages == []
+        assert python_tools == []
+
+    def test_collect_packages_empty_registry(self):
+        """Test with empty registry returns empty lists."""
+        from ash.sandbox.packages import collect_skill_packages
+
+        registry = SkillRegistry()
+        apt, python, tools = collect_skill_packages(registry)
+
+        assert apt == []
+        assert python == []
+        assert tools == []
+
+    def test_collect_packages_filters_invalid_names(self, tmp_path: Path):
+        """Test that invalid package names are filtered out."""
+        from ash.sandbox.packages import collect_skill_packages
+
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "test"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Test skill
+packages:
+  - valid-package
+  - "invalid; rm -rf /"
+  - another_valid
+---
+
+Test.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        apt, _, _ = collect_skill_packages(registry)
+
+        # Only valid packages should be included
+        assert "valid-package" in apt
+        assert "another_valid" in apt
+        assert len(apt) == 2  # Invalid one filtered out

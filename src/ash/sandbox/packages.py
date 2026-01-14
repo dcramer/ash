@@ -33,21 +33,25 @@ def _validate_package_names(packages: list[str]) -> list[str]:
 def collect_skill_packages(
     registry: SkillRegistry,
 ) -> tuple[list[str], list[str], list[str]]:
-    """Collect all package requirements from available skills.
+    """Collect system package requirements from available skills.
 
-    Note: Skill requirements have been removed. This function now returns
-    empty lists but is kept for API compatibility.
+    Skills declare system packages via the `packages:` field in SKILL.md.
+    Python dependencies should use PEP 723 inline script metadata instead.
 
     Args:
-        registry: Skill registry to scan (unused).
+        registry: Skill registry to scan.
 
     Returns:
-        Tuple of (apt_packages, python_packages, python_tools) - all empty.
+        Tuple of (apt_packages, python_packages, python_tools).
+        Only apt_packages is populated from skill packages fields.
     """
-    # Skills no longer declare package requirements
-    # Keep function signature for API compatibility
-    _ = registry  # unused
-    return [], [], []
+    apt_packages: set[str] = set()
+
+    for skill in registry.list_available():
+        apt_packages.update(skill.packages)
+
+    valid_apt = _validate_package_names(sorted(apt_packages))
+    return valid_apt, [], []
 
 
 def build_setup_command(

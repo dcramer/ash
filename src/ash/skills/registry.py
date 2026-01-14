@@ -125,6 +125,7 @@ class SkillRegistry:
             skill_path=skill_path,
             # Subagent execution settings
             env=data.get("env", []),
+            packages=data.get("packages", []),
             allowed_tools=data.get("allowed_tools", []),
             model=data.get("model"),
             max_iterations=data.get("max_iterations", 10),
