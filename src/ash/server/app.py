@@ -11,6 +11,8 @@ from ash.server.routes import health, webhooks
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from ash.agents import AgentRegistry
+    from ash.config import AshConfig
     from ash.core import Agent
     from ash.db import Database
     from ash.providers.telegram import TelegramMessageHandler, TelegramProvider
@@ -29,10 +31,14 @@ class AshServer:
         database: "Database",
         agent: "Agent",
         telegram_provider: "TelegramProvider | None" = None,
+        config: "AshConfig | None" = None,
+        agent_registry: "AgentRegistry | None" = None,
     ):
         self._database = database
         self._agent = agent
         self._telegram_provider = telegram_provider
+        self._config = config
+        self._agent_registry = agent_registry
         self._telegram_handler: TelegramMessageHandler | None = None
 
         self._app = self._create_app()
@@ -59,6 +65,8 @@ class AshServer:
                     agent=self._agent,
                     database=self._database,
                     streaming=False,
+                    config=self._config,
+                    agent_registry=self._agent_registry,
                 )
                 # Start in polling mode if no webhook
                 # Webhook mode is handled via the routes
@@ -105,11 +113,15 @@ def create_app(
     database: "Database",
     agent: "Agent",
     telegram_provider: "TelegramProvider | None" = None,
+    config: "AshConfig | None" = None,
+    agent_registry: "AgentRegistry | None" = None,
 ) -> FastAPI:
     """Create the FastAPI application."""
     server = AshServer(
         database=database,
         agent=agent,
         telegram_provider=telegram_provider,
+        config=config,
+        agent_registry=agent_registry,
     )
     return server.app

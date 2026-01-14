@@ -21,6 +21,8 @@ from ash.sessions import MessageEntry, SessionManager
 from ash.sessions.types import session_key as make_session_key
 
 if TYPE_CHECKING:
+    from ash.agents import AgentRegistry
+    from ash.config import AshConfig
     from ash.providers.telegram.provider import TelegramProvider
 
 logger = logging.getLogger("telegram")
@@ -46,12 +48,19 @@ def escape_markdown_v2(text: str) -> str:
     return "".join(result)
 
 
-def format_tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
+def format_tool_brief(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    config: "AshConfig | None" = None,
+    agent_registry: "AgentRegistry | None" = None,
+) -> str:
     """Format tool execution into a brief status message.
 
     Args:
         tool_name: Name of the tool being executed.
         tool_input: Input parameters for the tool.
+        config: Optional app config for resolving agent models.
+        agent_registry: Optional agent registry for looking up agents.
 
     Returns:
         A brief, user-friendly message describing what's happening.
@@ -76,8 +85,27 @@ def format_tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
                 domain = url.split("/")[0]
             return f"Reading: {domain}"
         case "use_agent":
-            agent = tool_input.get("agent", "unknown")
-            return f"Running agent: {agent}"
+            agent_name = tool_input.get("agent", "unknown")
+            message = tool_input.get("message", "")
+
+            # Resolve model if we have context
+            model_name = None
+            if agent_registry and config and agent_registry.has(agent_name):
+                agent = agent_registry.get(agent_name)
+                # Check for config override first
+                override = config.agents.get(agent_name)
+                model_alias = (
+                    override.model
+                    if override and override.model
+                    else agent.config.model
+                )
+                if model_alias:
+                    model_name = model_alias
+
+            # Build display string
+            model_suffix = f" ({model_name})" if model_name else ""
+            msg_preview = message[:40] + "..." if len(message) > 40 else message
+            return f"{agent_name}{model_suffix}: {msg_preview}"
         case "write_file":
             path = tool_input.get("file_path", "")
             # Show just filename, not full path
@@ -145,6 +173,8 @@ class TelegramMessageHandler:
         database: Database,
         streaming: bool = False,
         conversation_config: ConversationConfig | None = None,
+        config: "AshConfig | None" = None,
+        agent_registry: "AgentRegistry | None" = None,
     ):
         """Initialize handler.
 
@@ -154,12 +184,16 @@ class TelegramMessageHandler:
             database: Database for session persistence.
             streaming: Whether to use streaming responses.
             conversation_config: Optional conversation context config.
+            config: Optional app config for tool brief formatting.
+            agent_registry: Optional agent registry for tool brief formatting.
         """
         self._provider = provider
         self._agent = agent
         self._database = database
         self._streaming = streaming
         self._conversation_config = conversation_config or ConversationConfig()
+        self._config = config
+        self._agent_registry = agent_registry
         # Use OrderedDict for LRU-style eviction of cached sessions
         self._sessions: OrderedDict[str, SessionState] = OrderedDict()
         # Session managers keyed by session_key
@@ -350,7 +384,12 @@ class TelegramMessageHandler:
 
             async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
                 nonlocal thinking_msg_id, tool_start_time
-                brief = format_tool_brief(tool_name, tool_input)
+                brief = format_tool_brief(
+                    tool_name,
+                    tool_input,
+                    config=self._config,
+                    agent_registry=self._agent_registry,
+                )
                 if not brief:
                     return
 
@@ -754,7 +793,12 @@ class TelegramMessageHandler:
 
         async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
             nonlocal thinking_msg_id, tool_start_time
-            brief = format_tool_brief(tool_name, tool_input)
+            brief = format_tool_brief(
+                tool_name,
+                tool_input,
+                config=self._config,
+                agent_registry=self._agent_registry,
+            )
             if not brief:
                 return
 
@@ -909,7 +953,12 @@ class TelegramMessageHandler:
 
         async def on_tool_start(tool_name: str, tool_input: dict[str, Any]) -> None:
             nonlocal thinking_msg_id, tool_start_time
-            brief = format_tool_brief(tool_name, tool_input)
+            brief = format_tool_brief(
+                tool_name,
+                tool_input,
+                config=self._config,
+                agent_registry=self._agent_registry,
+            )
             if not brief:
                 return
 

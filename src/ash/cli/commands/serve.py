@@ -180,6 +180,8 @@ async def _run_server(
         database=database,
         agent=agent,
         telegram_provider=telegram_provider,
+        config=ash_config,
+        agent_registry=components.agent_registry,
     )
 
     # Start server
