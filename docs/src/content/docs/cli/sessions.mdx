@@ -133,13 +133,17 @@ Sessions are stored as JSONL files in `~/.ash/sessions/`:
 ```
 ~/.ash/sessions/
 ├── telegram_-54212345/
-│   └── transcript.jsonl
+│   ├── context.jsonl     # Full LLM context (messages, tool calls, results)
+│   └── history.jsonl     # Human-readable conversation only
 ├── cli_default/
-│   └── transcript.jsonl
+│   ├── context.jsonl
+│   └── history.jsonl
 └── ...
 ```
 
-Each session directory contains a `transcript.jsonl` with all messages, tool calls, and results.
+Each session directory contains:
+- `context.jsonl` - Full context including tool calls, results, and compaction events
+- `history.jsonl` - Just the messages for easy reading
 
 <Aside type="tip">
   Since sessions are plain JSONL files, you can use standard Unix tools to inspect them:

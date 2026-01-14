@@ -5,7 +5,8 @@ A personal assistant agent with customizable personality, memory, and sandboxed 
 ## Features
 
 - **Customizable Personality**: Define your assistant's behavior via SOUL.md
-- **Memory**: SQLite-based conversation history with semantic search
+- **Sessions**: JSONL-based conversation history
+- **Memory**: SQLite-backed semantic search for extracted facts
 - **Multi-LLM Support**: Anthropic Claude and OpenAI
 - **Telegram Integration**: Chat with your assistant via Telegram
 - **Sandboxed Tools**: Execute bash commands in Docker containers
