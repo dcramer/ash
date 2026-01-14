@@ -73,7 +73,7 @@ Skill state uses simple JSON files at `~/.ash/data/skills/<skill-name>.json` rat
 | **uv** | latest | Package management, virtual environments, lockfile |
 | **ruff** | >=0.8.0 | Linting (replaces flake8, pylint) + formatting (replaces black, isort) |
 | **ty** | beta | Type checking (Astral's mypy replacement, 10-60x faster) |
-| **pre-commit** | >=4.0.0 | Git hooks for automated quality checks |
+| **prek** | latest | Git hooks for automated quality checks (Rust-based pre-commit) |
 | **pytest** | >=8.0.0 | Testing framework |
 | **pytest-asyncio** | >=0.24.0 | Async test support |
 | **pytest-cov** | >=5.0.0 | Code coverage |
@@ -110,7 +110,7 @@ ash/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                  # GitHub Actions CI
-├── .pre-commit-config.yaml         # Pre-commit hooks
+├── .pre-commit-config.yaml         # Prek/pre-commit hooks config
 ├── .python-version                 # Python 3.12
 ├── .gitignore
 ├── LICENSE
@@ -236,7 +236,7 @@ ash/
 1. Initialize with `uv init`
 2. Set up pyproject.toml with all dependencies and tool config
 3. Create directory structure (src layout)
-4. Set up pre-commit hooks
+4. Set up prek hooks
 5. Create .gitignore, README.md, LICENSE
 6. Implement configuration loading (`config/loader.py`, `config/models.py`)
 7. Create example config file (`config.example.toml`)
@@ -640,7 +640,7 @@ max_context_messages = 20
 git clone <repo>
 cd ash
 uv sync --all-groups
-uv run pre-commit install
+prek install
 
 # Database migrations
 uv run ash upgrade                  # Apply migrations + check sandbox

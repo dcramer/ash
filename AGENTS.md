@@ -78,7 +78,7 @@ Use **uv**: `uv sync --all-groups`
 | ruff | `uv run ruff format .` | Format code |
 | ty | `uv run ty check` | Type check |
 | pytest | `uv run pytest` | Run tests |
-| pre-commit | `pre-commit run --all-files` | Run all hooks |
+| prek | `prek run --all-files` | Run all hooks |
 
 ## Commands
 

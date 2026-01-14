@@ -1,15 +1,15 @@
-.PHONY: setup install lint format typecheck test pre-commit clean
+.PHONY: setup install lint format typecheck test hooks clean
 
 # Set up development environment
-setup: install pre-commit
+setup: install hooks
 
 # Install dependencies
 install:
 	uv sync --all-groups
 
-# Install pre-commit hooks
-pre-commit:
-	uv run pre-commit install
+# Install prek hooks
+hooks:
+	prek install
 
 # Run all linters and formatters
 lint:
@@ -28,9 +28,9 @@ typecheck:
 test:
 	uv run pytest tests/ -v
 
-# Run pre-commit on all files
+# Run prek on all files
 check:
-	uv run pre-commit run --all-files
+	prek run --all-files
 
 # Clean up build artifacts
 clean:

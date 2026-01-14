@@ -24,17 +24,17 @@ Full documentation at **https://dcramer.github.io/ash/**
 make setup
 ```
 
-This installs dependencies and configures pre-commit hooks.
+This installs dependencies and configures git hooks via [prek](https://github.com/j178/prek).
 
 ### Make Targets
 
 | Command | Purpose |
 |---------|---------|
-| `make setup` | Install deps + pre-commit hooks |
+| `make setup` | Install deps + prek hooks |
 | `make lint` | Run ruff linting and formatting |
 | `make typecheck` | Run ty type checker |
 | `make test` | Run pytest |
-| `make check` | Run all pre-commit hooks |
+| `make check` | Run all hooks |
 
 ### Manual Setup
 
@@ -42,13 +42,13 @@ This installs dependencies and configures pre-commit hooks.
 # Install dev dependencies
 uv sync --all-groups
 
-# Install pre-commit hooks
-uv run pre-commit install
+# Install prek hooks
+prek install
 ```
 
-### Pre-commit Hooks
+### Git Hooks
 
-Pre-commit runs automatically on `git commit`:
+Prek runs automatically on `git commit`:
 - **ruff**: Linting with auto-fix
 - **ruff-format**: Code formatting
 - **ty**: Type checking

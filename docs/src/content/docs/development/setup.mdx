@@ -35,10 +35,10 @@ Set up a development environment for contributing to Ash.
 
    This installs all dependencies including dev tools.
 
-3. **Install pre-commit hooks**
+3. **Install prek hooks**
 
    ```bash
-   uv run pre-commit install
+   prek install
    ```
 
 4. **Create config file**
@@ -69,7 +69,7 @@ Set up a development environment for contributing to Ash.
 |------|---------|---------|
 | ruff | Linting + formatting | `uv run ruff check --fix .` |
 | pytest | Testing | `uv run pytest` |
-| pre-commit | Git hooks | `uv run pre-commit run --all-files` |
+| prek | Git hooks | `prek run --all-files` |
 
 ## Running Locally
 
@@ -99,7 +99,7 @@ Format code:
 uv run ruff format .
 ```
 
-Both run automatically via pre-commit hooks.
+Both run automatically via prek hooks.
 
 ## Adding Dependencies
 
