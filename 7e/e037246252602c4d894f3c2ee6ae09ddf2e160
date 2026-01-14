@@ -1,0 +1,23 @@
+tests/test_chat_state.py
+  5181a011cad17607 3-4,8,11-87,90-115,129-137,139-142,149-161,163-166,181-182,187,196-197,211-212,215-241,243-245,247-256,261,263,274,276,298-300,302-306,308-309,311-317,344-676
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "7ee037246252602c4d894f3c2ee6ae09ddf2e160",
+  "prompts": {
+    "5181a011cad17607": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "421d0edb-fbbb-40c4-bfe1-ba3337ac369d",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 537,
+      "total_deletions": 16,
+      "accepted_lines": 545,
+      "overriden_lines": 1
+    }
+  }
+}
