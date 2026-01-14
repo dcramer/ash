@@ -1,5 +1,3 @@
-"""Tests for agent orchestration."""
-
 from pathlib import Path
 
 import pytest
@@ -23,90 +21,83 @@ from ash.tools.executor import ToolExecutor
 from ash.tools.registry import ToolRegistry
 from tests.conftest import MockLLMProvider, MockTool
 
+DEFAULT_MODEL_CONFIG = {
+    "default": ModelConfig(provider="anthropic", model="claude-test")
+}
 
-@pytest.fixture
-def workspace(tmp_path: Path) -> Workspace:
-    """Create a test workspace."""
-    return Workspace(
-        path=tmp_path,
-        soul="You are a test assistant.",
+
+def make_session(
+    session_id: str = "test",
+    provider: str = "test",
+    chat_id: str = "chat",
+    user_id: str = "user",
+) -> SessionState:
+    return SessionState(
+        session_id=session_id,
+        provider=provider,
+        chat_id=chat_id,
+        user_id=user_id,
+    )
+
+
+def make_tool_registry(*tool_names: str) -> ToolRegistry:
+    registry = ToolRegistry()
+    for name in tool_names:
+        registry.register(MockTool(name=name))
+    return registry
+
+
+def make_prompt_builder(
+    workspace: Workspace,
+    tool_registry: ToolRegistry,
+) -> SystemPromptBuilder:
+    return SystemPromptBuilder(
+        workspace=workspace,
+        tool_registry=tool_registry,
+        skill_registry=SkillRegistry(),
+        config=AshConfig(workspace=workspace.path, models=DEFAULT_MODEL_CONFIG),
     )
 
 
 @pytest.fixture
+def workspace(tmp_path: Path) -> Workspace:
+    return Workspace(path=tmp_path, soul="You are a test assistant.")
+
+
+@pytest.fixture
 def skill_registry() -> SkillRegistry:
-    """Create empty skill registry for testing."""
     return SkillRegistry()
 
 
 @pytest.fixture
 def config(tmp_path: Path) -> AshConfig:
-    """Create test config."""
-    return AshConfig(
-        workspace=tmp_path,
-        models={"default": ModelConfig(provider="anthropic", model="claude-test")},
-    )
-
-
-def create_test_prompt_builder(
-    workspace: Workspace,
-    tool_registry: ToolRegistry,
-    skill_registry: SkillRegistry | None = None,
-    config: AshConfig | None = None,
-) -> SystemPromptBuilder:
-    """Helper to create prompt builder for tests."""
-    if skill_registry is None:
-        skill_registry = SkillRegistry()
-    if config is None:
-        config = AshConfig(
-            workspace=workspace.path,
-            models={"default": ModelConfig(provider="anthropic", model="claude-test")},
-        )
-    return SystemPromptBuilder(
-        workspace=workspace,
-        tool_registry=tool_registry,
-        skill_registry=skill_registry,
-        config=config,
-    )
+    return AshConfig(workspace=tmp_path, models=DEFAULT_MODEL_CONFIG)
 
 
 @pytest.fixture
 def session() -> SessionState:
-    """Create a test session."""
-    return SessionState(
-        session_id="test-session",
-        provider="test",
-        chat_id="chat-123",
-        user_id="user-456",
+    return make_session(
+        session_id="test-session", chat_id="chat-123", user_id="user-456"
     )
 
 
 class TestAgent:
-    """Tests for Agent orchestrator."""
-
     @pytest.fixture
     def mock_llm(self):
-        """Create mock LLM that returns simple text."""
         return MockLLMProvider(
             responses=[Message(role=Role.ASSISTANT, content="Hello! How can I help?")]
         )
 
     @pytest.fixture
     def test_tool_registry(self):
-        """Create tool registry with mock tool."""
-        registry = ToolRegistry()
-        registry.register(MockTool(name="test_tool"))
-        return registry
+        return make_tool_registry("test_tool")
 
     @pytest.fixture
     def agent(self, mock_llm, test_tool_registry, workspace):
-        """Create agent for testing."""
-        executor = ToolExecutor(test_tool_registry)
-        prompt_builder = create_test_prompt_builder(workspace, test_tool_registry)
         return Agent(
             llm=mock_llm,
-            tool_executor=executor,
-            prompt_builder=prompt_builder,
+            tool_executor=ToolExecutor(test_tool_registry),
+            prompt_builder=make_prompt_builder(workspace, test_tool_registry),
         )
 
     async def test_process_simple_message(self, agent, session):
@@ -126,40 +117,23 @@ class TestAgent:
         assert messages[1].role == Role.ASSISTANT
 
     async def test_process_message_with_tool_use(self, workspace):
-        """Test agent handles tool use correctly."""
-        # First response requests tool use
         tool_use_response = Message(
             role=Role.ASSISTANT,
-            content=[
-                ToolUse(id="tool-1", name="test_tool", input={"arg": "value"}),
-            ],
+            content=[ToolUse(id="tool-1", name="test_tool", input={"arg": "value"})],
         )
-        # Second response is final text
         final_response = Message(
             role=Role.ASSISTANT,
             content="Tool executed, here's the result.",
         )
 
-        mock_llm = MockLLMProvider(responses=[tool_use_response, final_response])
-        registry = ToolRegistry()
-        registry.register(MockTool(name="test_tool"))
-        executor = ToolExecutor(registry)
-        prompt_builder = create_test_prompt_builder(workspace, registry)
-
+        registry = make_tool_registry("test_tool")
         agent = Agent(
-            llm=mock_llm,
-            tool_executor=executor,
-            prompt_builder=prompt_builder,
+            llm=MockLLMProvider(responses=[tool_use_response, final_response]),
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
         )
 
-        session = SessionState(
-            session_id="test",
-            provider="test",
-            chat_id="chat",
-            user_id="user",
-        )
-
-        response = await agent.process_message("Use the tool", session)
+        response = await agent.process_message("Use the tool", make_session())
 
         assert response.text == "Tool executed, here's the result."
         assert response.iterations == 2
@@ -167,44 +141,25 @@ class TestAgent:
         assert response.tool_calls[0]["name"] == "test_tool"
 
     async def test_max_iterations_limit(self, workspace):
-        """Test agent stops at max iterations."""
-        # LLM always requests tool use
         tool_use_response = Message(
             role=Role.ASSISTANT,
-            content=[
-                ToolUse(id="tool-1", name="test_tool", input={"arg": "loop"}),
-            ],
+            content=[ToolUse(id="tool-1", name="test_tool", input={"arg": "loop"})],
         )
 
-        # Create LLM that always returns tool use
-        mock_llm = MockLLMProvider(responses=[tool_use_response] * 20)
-        registry = ToolRegistry()
-        registry.register(MockTool(name="test_tool"))
-        executor = ToolExecutor(registry)
-        prompt_builder = create_test_prompt_builder(workspace, registry)
-
-        config = AgentConfig(max_tool_iterations=3)
+        registry = make_tool_registry("test_tool")
         agent = Agent(
-            llm=mock_llm,
-            tool_executor=executor,
-            prompt_builder=prompt_builder,
-            config=config,
+            llm=MockLLMProvider(responses=[tool_use_response] * 20),
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
+            config=AgentConfig(max_tool_iterations=3),
         )
 
-        session = SessionState(
-            session_id="test",
-            provider="test",
-            chat_id="chat",
-            user_id="user",
-        )
-
-        response = await agent.process_message("Loop forever", session)
+        response = await agent.process_message("Loop forever", make_session())
 
         assert response.iterations == 3
         assert "maximum" in response.text.lower()
 
     async def test_system_prompt_from_workspace(self, agent):
-        """Test that system prompt includes workspace content."""
         assert "test assistant" in agent.system_prompt.lower()
 
     async def test_tool_definitions_conversion(self, agent):
@@ -213,8 +168,6 @@ class TestAgent:
         assert definitions[0].name == "test_tool"
 
     async def test_process_message_streaming(self, workspace):
-        """Test streaming message processing."""
-
         mock_llm = MockLLMProvider(
             stream_chunks=[
                 StreamChunk(type=StreamEventType.MESSAGE_START),
@@ -225,32 +178,20 @@ class TestAgent:
         )
 
         registry = ToolRegistry()
-        executor = ToolExecutor(registry)
-        prompt_builder = create_test_prompt_builder(workspace, registry)
-
         agent = Agent(
             llm=mock_llm,
-            tool_executor=executor,
-            prompt_builder=prompt_builder,
-        )
-
-        session = SessionState(
-            session_id="test",
-            provider="test",
-            chat_id="chat",
-            user_id="user",
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
         )
 
         chunks = []
-        async for chunk in agent.process_message_streaming("Hi", session):
+        async for chunk in agent.process_message_streaming("Hi", make_session()):
             chunks.append(chunk)
 
         assert "Hello " in chunks
         assert "world!" in chunks
 
     async def test_steering_messages_skips_remaining_tools(self, workspace):
-        """Test that steering messages skip remaining tools and inject new messages."""
-        # First response requests multiple tool uses
         tool_use_response = Message(
             role=Role.ASSISTANT,
             content=[
@@ -259,70 +200,52 @@ class TestAgent:
                 ToolUse(id="tool-3", name="test_tool", input={"arg": "third"}),
             ],
         )
-        # Second response is final text (after steering redirects)
         final_response = Message(
             role=Role.ASSISTANT,
             content="Redirected to new request.",
         )
 
-        mock_llm = MockLLMProvider(responses=[tool_use_response, final_response])
         registry = ToolRegistry()
         mock_tool = MockTool(name="test_tool")
         registry.register(mock_tool)
-        executor = ToolExecutor(registry)
-        prompt_builder = create_test_prompt_builder(workspace, registry)
 
         agent = Agent(
-            llm=mock_llm,
-            tool_executor=executor,
-            prompt_builder=prompt_builder,
+            llm=MockLLMProvider(responses=[tool_use_response, final_response]),
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
         )
 
-        session = SessionState(
-            session_id="test",
-            provider="test",
-            chat_id="chat",
-            user_id="user",
-        )
-
-        # Steering callback that injects a new message after first tool
         steering_call_count = 0
 
         async def get_steering() -> list[str]:
             nonlocal steering_call_count
             steering_call_count += 1
             if steering_call_count == 1:
-                # After first tool, return steering message
                 return ["Actually, do something else instead"]
             return []
 
         response = await agent.process_message(
             "Execute all tools",
-            session,
+            make_session(),
             get_steering_messages=get_steering,
         )
 
-        # Should have executed only first tool
         assert len(mock_tool.execute_calls) == 1
         assert mock_tool.execute_calls[0][0] == {"arg": "first"}
 
-        # Should have 3 tool calls in response (1 executed, 2 skipped)
         assert len(response.tool_calls) == 3
-        assert response.tool_calls[0]["is_error"] is False  # First executed
-        assert response.tool_calls[1]["is_error"] is True  # Second skipped
-        assert response.tool_calls[2]["is_error"] is True  # Third skipped
+        assert response.tool_calls[0]["is_error"] is False
+        assert response.tool_calls[1]["is_error"] is True
+        assert response.tool_calls[2]["is_error"] is True
         assert "Skipped" in response.tool_calls[1]["result"]
 
-        # Final response should be from second LLM call
         assert response.text == "Redirected to new request."
         assert response.iterations == 2
 
 
 class TestSessionState:
-    """Tests for SessionState."""
-
     def test_create_session(self):
-        session = SessionState(
+        session = make_session(
             session_id="sess-1",
             provider="telegram",
             chat_id="chat-123",
@@ -431,10 +354,7 @@ class TestSessionState:
         assert restored.session_id == session.session_id
         assert len(restored.messages) == 1
 
-    # Tests for smart pruning
-
     def test_get_messages_for_llm_no_budget(self, session):
-        """Without budget, returns all messages."""
         session.add_user_message("Hello")
         session.add_assistant_message("Hi!")
         session.add_user_message("How are you?")
@@ -444,7 +364,6 @@ class TestSessionState:
         assert len(messages) == 4
 
     def test_get_messages_for_llm_with_large_budget(self, session):
-        """With large budget, returns all messages."""
         session.add_user_message("Hello")
         session.add_assistant_message("Hi!")
 
@@ -452,70 +371,54 @@ class TestSessionState:
         assert len(messages) == 2
 
     def test_get_messages_for_llm_keeps_recency_window(self, session):
-        """Recency window is always kept even when budget is tight."""
-        # Add 15 messages with explicit token counts
         for i in range(15):
             if i % 2 == 0:
                 session.add_user_message(f"Message {i}")
             else:
                 session.add_assistant_message(f"Response {i}")
 
-        # Set explicit token counts (100 tokens each message)
         session.set_token_counts([100] * 15)
 
-        # Budget of 500 with recency_window=5 means:
-        # - Recency window uses 5 * 100 = 500 tokens (exactly fits)
-        # - No room for older messages
+        # Budget of 500 with recency_window=5: exactly fits 5 messages
         messages = session.get_messages_for_llm(token_budget=500, recency_window=5)
         assert len(messages) == 5
-
-        # Verify it's the last 5 messages
         assert messages[0].content == "Message 10"
         assert messages[-1].content == "Message 14"
 
     def test_get_messages_for_llm_prunes_old_messages(self, session):
-        """Old messages are pruned when budget is tight."""
-        # Add messages with known token counts
-        session.add_user_message("a" * 100)  # ~26 tokens
-        session.add_assistant_message("b" * 100)  # ~26 tokens
-        session.add_user_message("c" * 100)  # ~26 tokens
-        session.add_assistant_message("d" * 100)  # ~26 tokens
+        session.add_user_message("a" * 100)
+        session.add_assistant_message("b" * 100)
+        session.add_user_message("c" * 100)
+        session.add_assistant_message("d" * 100)
 
-        # Set token counts (simulating DB load)
         session.set_token_counts([30, 30, 30, 30])
 
-        # Budget of 70 with recency window of 2 = keep last 2 (60 tokens)
-        # Then try to fit more from older = 0 more fit
+        # Budget of 70 with recency window of 2 = only last 2 fit (60 tokens)
         messages = session.get_messages_for_llm(token_budget=70, recency_window=2)
-        assert len(messages) == 2  # Only recency window fits
+        assert len(messages) == 2
 
     def test_get_messages_for_llm_adds_older_when_budget_allows(self, session):
-        """Older messages included when budget allows."""
-        session.add_user_message("a" * 40)  # ~11 tokens
-        session.add_assistant_message("b" * 40)  # ~11 tokens
-        session.add_user_message("c" * 40)  # ~11 tokens
-        session.add_assistant_message("d" * 40)  # ~11 tokens
+        session.add_user_message("a" * 40)
+        session.add_assistant_message("b" * 40)
+        session.add_user_message("c" * 40)
+        session.add_assistant_message("d" * 40)
 
         session.set_token_counts([15, 15, 15, 15])
 
-        # Budget of 100 with recency of 2 = 30 used, 70 remaining
-        # Can fit both older messages (30 tokens)
+        # Budget of 100 with recency of 2: 30 used, 70 remaining fits both older
         messages = session.get_messages_for_llm(token_budget=100, recency_window=2)
         assert len(messages) == 4
 
     def test_set_and_get_token_counts(self, session):
-        """Token counts can be set and used."""
         session.add_user_message("Hello")
         session.add_assistant_message("Hi!")
 
         session.set_token_counts([10, 15])
 
-        # _get_token_counts should return cached values
         counts = session._get_token_counts()
         assert counts == [10, 15]
 
     def test_set_and_get_message_ids(self, session):
-        """Message IDs can be set and retrieved."""
         session.add_user_message("Hello")
         session.add_assistant_message("Hi!")
 
@@ -525,7 +428,6 @@ class TestSessionState:
         assert recent == {"msg-1", "msg-2"}
 
     def test_get_recent_message_ids_subset(self, session):
-        """Only recent message IDs returned."""
         session.add_user_message("M1")
         session.add_user_message("M2")
         session.add_user_message("M3")
@@ -537,29 +439,21 @@ class TestSessionState:
         assert recent == {"id-3", "id-4"}
 
     def test_get_recent_message_ids_empty(self, session):
-        """Returns empty set when no IDs set."""
         recent = session.get_recent_message_ids(5)
         assert recent == set()
 
     def test_token_counts_estimated_when_not_cached(self, session):
-        """Token counts are estimated for new messages."""
         session.add_user_message("Hello there!")
         session.add_assistant_message("Hi!")
 
-        # No cached counts, so should estimate
         counts = session._get_token_counts()
         assert len(counts) == 2
         assert all(c > 0 for c in counts)
 
 
 class TestWorkspace:
-    """Tests for Workspace."""
-
     def test_soul_content(self, tmp_path):
-        workspace = Workspace(
-            path=tmp_path,
-            soul="You are Ash.",
-        )
+        workspace = Workspace(path=tmp_path, soul="You are Ash.")
         assert workspace.soul == "You are Ash."
 
     def test_custom_files(self, tmp_path):
@@ -572,51 +466,39 @@ class TestWorkspace:
 
 
 class TestSystemPromptBuilder:
-    """Tests for SystemPromptBuilder."""
-
     @pytest.fixture
     def prompt_builder(self, workspace, config) -> SystemPromptBuilder:
-        """Create a prompt builder for testing."""
         registry = ToolRegistry()
         registry.register(MockTool(name="test_tool", description="A test tool"))
-        skill_registry = SkillRegistry()
         return SystemPromptBuilder(
             workspace=workspace,
             tool_registry=registry,
-            skill_registry=skill_registry,
+            skill_registry=SkillRegistry(),
             config=config,
         )
 
     def test_build_includes_soul(self, prompt_builder):
-        """Test that build includes SOUL content."""
         prompt = prompt_builder.build()
         assert "test assistant" in prompt.lower()
 
     def test_build_includes_tools_section(self, prompt_builder):
-        """Test that build includes tools section."""
         prompt = prompt_builder.build()
         assert "Available Tools" in prompt
         assert "test_tool" in prompt
         assert "A test tool" in prompt
 
     def test_build_includes_workspace_section(self, prompt_builder):
-        """Test that build includes workspace info."""
         prompt = prompt_builder.build()
         assert "Workspace" in prompt
         assert "Working directory" in prompt
 
     def test_build_includes_sandbox_section(self, prompt_builder):
-        """Test that build includes sandbox info."""
         prompt = prompt_builder.build()
         assert "Sandbox" in prompt
         assert "sandboxed environment" in prompt
 
     def test_build_with_runtime_info(self, prompt_builder):
-        """Test that runtime info is included when provided.
-
-        Note: os, arch, python are intentionally excluded to prevent
-        host system awareness. Only model/provider/timezone/time are shown.
-        """
+        """Runtime info excludes host system details (os, arch, python)."""
         from ash.core.prompt import PromptContext, RuntimeInfo
 
         runtime = RuntimeInfo(
@@ -631,6 +513,5 @@ class TestSystemPromptBuilder:
         assert "Runtime" in prompt
         assert "model=claude-test" in prompt
         assert "America/New_York" in prompt
-        # Host system info (os, arch, python) should NOT be present
         assert "os=" not in prompt
         assert "python=" not in prompt
