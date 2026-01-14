@@ -1,0 +1,27 @@
+src/ash/core/prompt.py
+  5181a011cad17607 70-71,244,246-248,252,254-255,257,371,377-384,386-388
+tests/test_chat_state.py
+  5181a011cad17607 351,533-535
+src/ash/core/agent.py
+  5181a011cad17607 244,278,378-388,400
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "900934fcd5bb34948ab95ed285ea002d1cb8aa8b",
+  "prompts": {
+    "5181a011cad17607": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "421d0edb-fbbb-40c4-bfe1-ba3337ac369d",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 75,
+      "total_deletions": 63,
+      "accepted_lines": 42,
+      "overriden_lines": 0
+    }
+  }
+}
