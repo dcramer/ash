@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from ash.llm.types import ToolDefinition
 from ash.tools.base import Tool, ToolContext, ToolResult
 from ash.tools.registry import ToolRegistry
 
@@ -181,10 +182,10 @@ class ToolExecutor:
         """Get list of available tool names."""
         return self._registry.names
 
-    def get_definitions(self) -> list[dict[str, Any]]:
+    def get_definitions(self) -> list[ToolDefinition]:
         """Get tool definitions for LLM.
 
         Returns:
-            List of tool definitions.
+            List of ToolDefinition objects.
         """
         return self._registry.get_definitions()

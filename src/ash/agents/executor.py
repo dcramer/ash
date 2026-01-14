@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from ash.agents.base import Agent, AgentContext, AgentResult
 from ash.core.session import SessionState
-from ash.llm.types import Message, Role, ToolDefinition
+from ash.llm.types import Role, ToolDefinition
 from ash.tools.base import ToolContext
 
 if TYPE_CHECKING:
@@ -52,16 +52,9 @@ class AgentExecutor:
         all_defs = self._tools.get_definitions()
 
         if allowed_tools:
-            all_defs = [d for d in all_defs if d["name"] in allowed_tools]
+            return [d for d in all_defs if d.name in allowed_tools]
 
-        return [
-            ToolDefinition(
-                name=d["name"],
-                description=d["description"],
-                input_schema=d["input_schema"],
-            )
-            for d in all_defs
-        ]
+        return all_defs
 
     async def execute(
         self,
@@ -116,6 +109,10 @@ class AgentExecutor:
 
         # Get filtered tool definitions
         tool_definitions = self._filter_tools(agent_config.allowed_tools)
+
+        # Block use_skill for skill agents to prevent recursive invocation
+        if agent_config.is_skill_agent:
+            tool_definitions = [t for t in tool_definitions if t.name != "use_skill"]
 
         # Create isolated session for this agent
         session = SessionState(
@@ -235,13 +232,7 @@ class AgentExecutor:
         if session.messages:
             last_msg = session.messages[-1]
             if last_msg.role == Role.ASSISTANT:
-                last_text = (
-                    last_msg.content
-                    if isinstance(last_msg.content, str)
-                    else Message(
-                        role=Role.ASSISTANT, content=last_msg.content
-                    ).get_text()
-                )
+                last_text = last_msg.get_text()
 
         return AgentResult(
             content=last_text or f"Agent reached iteration limit ({max_iterations})",

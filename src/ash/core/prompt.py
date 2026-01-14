@@ -234,9 +234,7 @@ class SystemPromptBuilder:
         ]
 
         for tool_def in tool_defs:
-            name = tool_def["name"]
-            desc = tool_def["description"]
-            lines.append(f"- **{name}**: {desc}")
+            lines.append(f"- **{tool_def.name}**: {tool_def.description}")
 
         # Add guidance on tool usage and presenting results
         lines.extend(

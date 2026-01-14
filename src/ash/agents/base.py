@@ -19,6 +19,7 @@ class AgentConfig:
     allowed_tools: list[str] = field(default_factory=list)  # Empty = all tools
     max_iterations: int = 10
     model: str | None = None  # None = use session model
+    is_skill_agent: bool = False  # True = block use_skill to prevent recursion
 
 
 @dataclass

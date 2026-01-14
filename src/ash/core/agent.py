@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -110,6 +111,64 @@ class _MessageSetup:
     effective_user_id: str
     system_prompt: str
     message_budget: int
+
+
+@dataclass
+class _StreamToolAccumulator:
+    """Accumulates tool use data from stream events.
+
+    Handles the state machine for reconstructing ToolUse objects
+    from streaming events with proper validation and error handling.
+    """
+
+    _tool_id: str | None = field(default=None, repr=False)
+    _tool_name: str | None = field(default=None, repr=False)
+    _tool_args: str = field(default="", repr=False)
+
+    def start(self, tool_use_id: str, tool_name: str) -> None:
+        """Start accumulating a new tool use."""
+        self._tool_id = tool_use_id
+        self._tool_name = tool_name
+        self._tool_args = ""
+
+    def add_delta(self, content: str) -> None:
+        """Add argument delta content."""
+        self._tool_args += content
+
+    def finish(self) -> ToolUse | None:
+        """Finish and return the accumulated ToolUse, or None if invalid.
+
+        Returns:
+            ToolUse if valid state, None otherwise (logs warning).
+        """
+        if not self._tool_id or not self._tool_name:
+            logger.warning(
+                "Tool use end without start: id=%s, name=%s",
+                self._tool_id,
+                self._tool_name,
+            )
+            self._reset()
+            return None
+
+        try:
+            args = json.loads(self._tool_args) if self._tool_args else {}
+        except json.JSONDecodeError as e:
+            logger.warning("Invalid JSON in tool args for %s: %s", self._tool_name, e)
+            args = {}
+
+        tool_use = ToolUse(
+            id=self._tool_id,
+            name=self._tool_name,
+            input=args,
+        )
+        self._reset()
+        return tool_use
+
+    def _reset(self) -> None:
+        """Reset accumulator state."""
+        self._tool_id = None
+        self._tool_name = None
+        self._tool_args = ""
 
 
 @dataclass
@@ -228,14 +287,7 @@ class Agent:
         Returns:
             List of tool definitions.
         """
-        return [
-            ToolDefinition(
-                name=tool_def["name"],
-                description=tool_def["description"],
-                input_schema=tool_def["input_schema"],
-            )
-            for tool_def in self._tools.get_definitions()
-        ]
+        return self._tools.get_definitions()
 
     async def _maybe_compact(self, session: SessionState) -> CompactionInfo | None:
         """Check if compaction is needed and run it if so.
@@ -548,6 +600,73 @@ class Agent:
         )
         task.add_done_callback(_handle_extraction_error)
 
+    def _maybe_spawn_memory_extraction(
+        self,
+        user_message: str,
+        effective_user_id: str,
+        session: SessionState,
+    ) -> None:
+        """Spawn memory extraction if conditions are met.
+
+        Convenience method combining the should-extract check with spawning.
+        Call at natural exit points from message processing.
+
+        Args:
+            user_message: The original user message.
+            effective_user_id: User ID for memory ownership.
+            session: Session for extraction context.
+        """
+        if self._should_extract_memories(user_message):
+            self._spawn_memory_extraction(session, effective_user_id, session.chat_id)
+
+    async def _execute_pending_tools(
+        self,
+        pending_tools: list[ToolUse],
+        session: SessionState,
+        tool_context: ToolContext,
+        on_tool_start: OnToolStartCallback | None,
+    ) -> list[dict[str, Any]]:
+        """Execute pending tool uses and add results to session.
+
+        Args:
+            pending_tools: List of tool use requests.
+            session: Session to add results to.
+            tool_context: Context for tool execution.
+            on_tool_start: Optional callback before each tool.
+
+        Returns:
+            List of tool call result dicts.
+        """
+        tool_calls: list[dict[str, Any]] = []
+
+        for tool_use in pending_tools:
+            if on_tool_start:
+                await on_tool_start(tool_use.name, tool_use.input)
+
+            result = await self._tools.execute(
+                tool_use.name,
+                tool_use.input,
+                tool_context,
+            )
+
+            tool_calls.append(
+                {
+                    "id": tool_use.id,
+                    "name": tool_use.name,
+                    "input": tool_use.input,
+                    "result": result.content,
+                    "is_error": result.is_error,
+                }
+            )
+
+            session.add_tool_result(
+                tool_use_id=tool_use.id,
+                content=result.content,
+                is_error=result.is_error,
+            )
+
+        return tool_calls
+
     async def process_message(
         self,
         user_message: str,
@@ -614,13 +733,9 @@ class Agent:
             if not pending_tools:
                 # No tool calls, return text response
                 final_text = response.message.get_text() or ""
-
-                # Spawn background memory extraction (non-blocking)
-                if self._should_extract_memories(user_message):
-                    self._spawn_memory_extraction(
-                        session, setup.effective_user_id, session.chat_id
-                    )
-
+                self._maybe_spawn_memory_extraction(
+                    user_message, setup.effective_user_id, session
+                )
                 return AgentResponse(
                     text=final_text,
                     tool_calls=tool_calls,
@@ -640,46 +755,19 @@ class Agent:
                 env=_build_routing_env(session, setup.effective_user_id),
             )
 
-            for tool_use in pending_tools:
-                # Notify callback before execution
-                if on_tool_start:
-                    await on_tool_start(tool_use.name, tool_use.input)
-
-                result = await self._tools.execute(
-                    tool_use.name,
-                    tool_use.input,
-                    tool_context,
-                )
-
-                tool_calls.append(
-                    {
-                        "id": tool_use.id,
-                        "name": tool_use.name,
-                        "input": tool_use.input,
-                        "result": result.content,
-                        "is_error": result.is_error,
-                    }
-                )
-
-                # Add tool result to session
-                session.add_tool_result(
-                    tool_use_id=tool_use.id,
-                    content=result.content,
-                    is_error=result.is_error,
-                )
+            new_calls = await self._execute_pending_tools(
+                pending_tools, session, tool_context, on_tool_start
+            )
+            tool_calls.extend(new_calls)
 
         # Max iterations reached
         logger.warning(
             f"Max tool iterations ({self._config.max_tool_iterations}) reached"
         )
         final_text = "I've reached the maximum number of tool calls. Please try again with a simpler request."
-
-        # Spawn background memory extraction even on max iterations
-        if self._should_extract_memories(user_message):
-            self._spawn_memory_extraction(
-                session, setup.effective_user_id, session.chat_id
-            )
-
+        self._maybe_spawn_memory_extraction(
+            user_message, setup.effective_user_id, session
+        )
         return AgentResponse(
             text=final_text,
             tool_calls=tool_calls,
@@ -733,9 +821,7 @@ class Agent:
             # Stream LLM response
             content_blocks: list[ContentBlock] = []
             current_text = ""
-            current_tool_id: str | None = None
-            current_tool_name: str | None = None
-            current_tool_args = ""
+            tool_accumulator = _StreamToolAccumulator()
 
             async for chunk in self._llm.stream(
                 messages=session.get_messages_for_llm(
@@ -756,38 +842,17 @@ class Agent:
                     yield text
 
                 elif chunk.type == StreamEventType.TOOL_USE_START:
-                    current_tool_id = chunk.tool_use_id
-                    current_tool_name = chunk.tool_name
-                    current_tool_args = ""
+                    if chunk.tool_use_id and chunk.tool_name:
+                        tool_accumulator.start(chunk.tool_use_id, chunk.tool_name)
 
                 elif chunk.type == StreamEventType.TOOL_USE_DELTA:
-                    current_tool_args += (
+                    tool_accumulator.add_delta(
                         chunk.content if isinstance(chunk.content, str) else ""
                     )
 
                 elif chunk.type == StreamEventType.TOOL_USE_END:
-                    if current_tool_id and current_tool_name:
-                        import json
-
-                        try:
-                            args = (
-                                json.loads(current_tool_args)
-                                if current_tool_args
-                                else {}
-                            )
-                        except json.JSONDecodeError:
-                            args = {}
-
-                        content_blocks.append(
-                            ToolUse(
-                                id=current_tool_id,
-                                name=current_tool_name,
-                                input=args,
-                            )
-                        )
-                    current_tool_id = None
-                    current_tool_name = None
-                    current_tool_args = ""
+                    if tool_use := tool_accumulator.finish():
+                        content_blocks.append(tool_use)
 
             # Add any accumulated text
             if current_text:
@@ -797,21 +862,19 @@ class Agent:
             if content_blocks:
                 session.add_assistant_message(content_blocks)
             else:
-                # Empty response - spawn extraction before returning
-                if self._should_extract_memories(user_message):
-                    self._spawn_memory_extraction(
-                        session, setup.effective_user_id, session.chat_id
-                    )
+                # Empty response
+                self._maybe_spawn_memory_extraction(
+                    user_message, setup.effective_user_id, session
+                )
                 return
 
             # Get tool uses from what we just added
             pending_tools = [b for b in content_blocks if isinstance(b, ToolUse)]
             if not pending_tools:
-                # No tool calls - spawn extraction before returning
-                if self._should_extract_memories(user_message):
-                    self._spawn_memory_extraction(
-                        session, setup.effective_user_id, session.chat_id
-                    )
+                # No tool calls
+                self._maybe_spawn_memory_extraction(
+                    user_message, setup.effective_user_id, session
+                )
                 return
 
             # Execute tools (non-streaming) with effective user_id (supports group chats)
@@ -826,29 +889,14 @@ class Agent:
                 env=_build_routing_env(session, setup.effective_user_id),
             )
 
-            for tool_use in pending_tools:
-                # Notify callback before execution
-                if on_tool_start:
-                    await on_tool_start(tool_use.name, tool_use.input)
-
-                result = await self._tools.execute(
-                    tool_use.name,
-                    tool_use.input,
-                    tool_context,
-                )
-
-                # Add tool result to session
-                session.add_tool_result(
-                    tool_use_id=tool_use.id,
-                    content=result.content,
-                    is_error=result.is_error,
-                )
-
-        # Max iterations reached - spawn extraction before final yield
-        if self._should_extract_memories(user_message):
-            self._spawn_memory_extraction(
-                session, setup.effective_user_id, session.chat_id
+            await self._execute_pending_tools(
+                pending_tools, session, tool_context, on_tool_start
             )
+
+        # Max iterations reached
+        self._maybe_spawn_memory_extraction(
+            user_message, setup.effective_user_id, session
+        )
         yield "\n\n[Max tool iterations reached]"
 
 

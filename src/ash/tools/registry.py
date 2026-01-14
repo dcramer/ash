@@ -1,8 +1,8 @@
 """Tool registry for managing available tools."""
 
 import logging
-from typing import Any
 
+from ash.llm.types import ToolDefinition
 from ash.tools.base import Tool
 
 logger = logging.getLogger(__name__)
@@ -77,13 +77,20 @@ class ToolRegistry:
         """Get list of registered tool names."""
         return list(self._tools.keys())
 
-    def get_definitions(self) -> list[dict[str, Any]]:
+    def get_definitions(self) -> list[ToolDefinition]:
         """Get tool definitions for LLM.
 
         Returns:
-            List of tool definitions.
+            List of ToolDefinition objects.
         """
-        return [tool.to_definition() for tool in self._tools.values()]
+        return [
+            ToolDefinition(
+                name=tool.name,
+                description=tool.description,
+                input_schema=tool.input_schema,
+            )
+            for tool in self._tools.values()
+        ]
 
     def __len__(self) -> int:
         """Get number of registered tools."""

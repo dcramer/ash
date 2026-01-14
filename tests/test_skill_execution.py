@@ -40,19 +40,17 @@ class TestSkillAgent:
         assert prompt.startswith("Base instructions")
         assert "User wants X" in prompt
 
-    def test_filters_use_skill_from_allowed_tools(self):
-        """Should filter out use_skill to prevent recursive invocation."""
+    def test_passes_allowed_tools_to_config(self):
+        """Should pass allowed_tools to agent config (filtering done by executor)."""
         skill = SkillDefinition(
             name="test",
             description="Test",
             instructions="Do something",
-            allowed_tools=["bash", "use_skill", "web_search"],
+            allowed_tools=["bash", "web_search"],
         )
         agent = SkillAgent(skill)
 
-        assert "use_skill" not in agent.config.allowed_tools
-        assert "bash" in agent.config.allowed_tools
-        assert "web_search" in agent.config.allowed_tools
+        assert agent.config.allowed_tools == ["bash", "web_search"]
 
 
 class TestUseSkillToolValidation:
@@ -142,6 +140,27 @@ class TestUseSkillToolErrorHandling:
         assert result.is_error
         assert "disabled" in result.content
 
+    @pytest.mark.asyncio
+    async def test_missing_env_vars_returns_config_instructions(self, tool, registry):
+        """Should return config instructions when required env vars are missing."""
+        skill = SkillDefinition(
+            name="test",
+            description="Test",
+            instructions="x",
+            env=["API_KEY", "SECRET"],
+        )
+        registry.has.return_value = True
+        registry.get.return_value = skill
+        tool._config.skills = {}  # No config for this skill
+
+        result = await tool.execute({"skill": "test", "message": "do"})
+
+        assert result.is_error
+        assert "requires configuration" in result.content
+        assert "[skills.test]" in result.content
+        assert "API_KEY" in result.content
+        assert "SECRET" in result.content
+
 
 class TestUseSkillToolExecution:
     """Tests for UseSkillTool execution behavior."""
@@ -152,7 +171,6 @@ class TestUseSkillToolExecution:
             name="test",
             description="Test skill",
             instructions="Do the thing",
-            env=["API_KEY"],
         )
 
     @pytest.fixture

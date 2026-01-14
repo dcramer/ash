@@ -70,9 +70,9 @@ class TestToolRegistry:
         registry.register(mock_tool)
         definitions = registry.get_definitions()
         assert len(definitions) == 1
-        assert definitions[0]["name"] == mock_tool.name
-        assert "description" in definitions[0]
-        assert "input_schema" in definitions[0]
+        assert definitions[0].name == mock_tool.name
+        assert definitions[0].description == mock_tool.description
+        assert definitions[0].input_schema == mock_tool.input_schema
 
     def test_iteration(self, mock_tool):
         registry = ToolRegistry()
@@ -168,7 +168,7 @@ class TestToolExecutor:
     def test_get_definitions(self, executor, mock_tool):
         definitions = executor.get_definitions()
         assert len(definitions) == 1
-        assert definitions[0]["name"] == mock_tool.name
+        assert definitions[0].name == mock_tool.name
 
     def test_get_tool(self, executor, mock_tool):
         tool = executor.get_tool(mock_tool.name)

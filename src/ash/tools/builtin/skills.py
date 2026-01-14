@@ -39,15 +39,14 @@ class SkillAgent(Agent):
     @property
     def config(self) -> AgentConfig:
         """Return agent configuration derived from skill."""
-        # Filter out use_skill to prevent recursive invocation
-        allowed_tools = [t for t in self._skill.allowed_tools if t != "use_skill"]
         return AgentConfig(
             name=f"skill:{self._skill.name}",
             description=self._skill.description,
             system_prompt=self._skill.instructions,
-            allowed_tools=allowed_tools,
+            allowed_tools=self._skill.allowed_tools,
             max_iterations=self._skill.max_iterations,
             model=self._model_override or self._skill.model,
+            is_skill_agent=True,
         )
 
     def build_system_prompt(self, context: AgentContext) -> str:
@@ -171,6 +170,18 @@ class UseSkillTool(Tool):
         skill_config = self._config.skills.get(skill_name)
         if skill_config and not skill_config.enabled:
             return ToolResult.error(f"Skill '{skill_name}' is disabled in config")
+
+        # Check if skill has required env vars that aren't configured
+        if skill.env:
+            config_env = skill_config.get_env_vars() if skill_config else {}
+            missing = [var for var in skill.env if var not in config_env]
+            if missing:
+                return ToolResult.error(
+                    f"Skill '{skill_name}' requires configuration.\n\n"
+                    f"Add to ~/.ash/config.toml:\n\n"
+                    f"[skills.{skill_name}]\n"
+                    + "\n".join(f'{var} = "your-value-here"' for var in missing)
+                )
 
         # Build scoped environment from config
         env = self._build_skill_environment(skill, skill_config)
