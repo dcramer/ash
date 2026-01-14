@@ -16,6 +16,7 @@ from ash.llm.types import (
     TextContent,
     ToolUse,
 )
+from ash.providers.base import IncomingMessage
 from ash.skills.registry import SkillRegistry
 from ash.tools.executor import ToolExecutor
 from ash.tools.registry import ToolRegistry
@@ -217,11 +218,18 @@ class TestAgent:
 
         steering_call_count = 0
 
-        async def get_steering() -> list[str]:
+        async def get_steering() -> list[IncomingMessage]:
             nonlocal steering_call_count
             steering_call_count += 1
             if steering_call_count == 1:
-                return ["Actually, do something else instead"]
+                return [
+                    IncomingMessage(
+                        id="steering-1",
+                        chat_id="chat-123",
+                        user_id="user-456",
+                        text="Actually, do something else instead",
+                    )
+                ]
             return []
 
         response = await agent.process_message(

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from ash.core.prompt import RuntimeInfo
     from ash.db.models import Person
     from ash.memory import MemoryExtractor, MemoryManager, RetrievedContext
+    from ash.providers.base import IncomingMessage
     from ash.sandbox import SandboxExecutor
     from ash.skills import SkillRegistry
 
@@ -41,10 +42,19 @@ logger = logging.getLogger(__name__)
 OnToolStartCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 # Callback to check for steering messages during tool execution
-# Returns list of user messages to inject, or empty list to continue normally
-GetSteeringMessagesCallback = Callable[[], Awaitable[list[str]]]
+# Returns list of IncomingMessage objects, or empty list to continue normally
+GetSteeringMessagesCallback = Callable[[], Awaitable[list["IncomingMessage"]]]
 
 MAX_TOOL_ITERATIONS = 25
+
+
+def _build_chat_state_path(session: SessionState) -> str | None:
+    """Build the chat state path for a session."""
+    if not (session.provider and session.chat_id):
+        return None
+    base = f"/chats/{session.provider}/{session.chat_id}"
+    thread_id = session.metadata.get("thread_id")
+    return f"{base}/threads/{thread_id}" if thread_id else base
 
 
 def _build_routing_env(
@@ -65,15 +75,8 @@ def _build_routing_env(
         "ASH_USERNAME": session.metadata.get("username", ""),
     }
 
-    # Build chat path for sandbox access to chat state
-    if session.provider and session.chat_id:
-        thread_id = session.metadata.get("thread_id")
-        if thread_id:
-            env["ASH_CHAT_PATH"] = (
-                f"/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
-            )
-        else:
-            env["ASH_CHAT_PATH"] = f"/chats/{session.provider}/{session.chat_id}"
+    if chat_path := _build_chat_state_path(session):
+        env["ASH_CHAT_PATH"] = chat_path
 
     return env
 
@@ -375,17 +378,6 @@ class Agent:
                 except Exception:
                     logger.warning("Failed to get known people", exc_info=True)
 
-        # Build chat state path for group chats
-        chat_state_path: str | None = None
-        if session.provider and session.chat_id:
-            thread_id = session.metadata.get("thread_id")
-            if thread_id:
-                chat_state_path = (
-                    f"/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
-                )
-            else:
-                chat_state_path = f"/chats/{session.provider}/{session.chat_id}"
-
         system_prompt = self._build_system_prompt(
             context=memory_context,
             known_people=known_people,
@@ -397,7 +389,7 @@ class Agent:
             sender_display_name=session.metadata.get("display_name"),
             chat_title=session.metadata.get("chat_title"),
             chat_type=session.metadata.get("chat_type"),
-            chat_state_path=chat_state_path,
+            chat_state_path=_build_chat_state_path(session),
         )
 
         system_tokens = estimate_tokens(system_prompt)
@@ -547,7 +539,7 @@ class Agent:
         tool_context: ToolContext,
         on_tool_start: OnToolStartCallback | None,
         get_steering_messages: GetSteeringMessagesCallback | None = None,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[dict[str, Any]], list[IncomingMessage]]:
         tool_calls: list[dict[str, Any]] = []
 
         for i, tool_use in enumerate(pending_tools):
@@ -669,7 +661,8 @@ class Agent:
 
             if steering:
                 for msg in steering:
-                    session.add_user_message(msg)
+                    if msg.text:
+                        session.add_user_message(msg.text)
 
         logger.warning(
             f"Max tool iterations ({self._config.max_tool_iterations}) reached"
@@ -772,7 +765,8 @@ class Agent:
 
             if steering:
                 for msg in steering:
-                    session.add_user_message(msg)
+                    if msg.text:
+                        session.add_user_message(msg.text)
 
         self._maybe_spawn_memory_extraction(
             user_message, setup.effective_user_id, session

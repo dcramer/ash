@@ -29,6 +29,7 @@ class ChatState(BaseModel):
 
     chat: ChatInfo
     participants: list[Participant] = Field(default_factory=list)
+    thread_index: dict[str, str] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def get_participant(self, user_id: str) -> Participant | None:

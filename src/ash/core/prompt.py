@@ -355,18 +355,17 @@ class SystemPromptBuilder:
         if not context.sender_username and not context.sender_display_name:
             return ""
 
-        if context.sender_username and context.sender_display_name:
-            sender = f"**@{context.sender_username}** ({context.sender_display_name})"
-        elif context.sender_username:
+        # Build sender identifier with username taking precedence
+        if context.sender_username:
             sender = f"**@{context.sender_username}**"
+            if context.sender_display_name:
+                sender = f"{sender} ({context.sender_display_name})"
         else:
             sender = f"**{context.sender_display_name}**"
 
-        from_line = (
-            f'From: {sender} in the group "{context.chat_title}"'
-            if context.chat_title
-            else f"From: {sender}"
-        )
+        from_line = f"From: {sender}"
+        if context.chat_title:
+            from_line = f'{from_line} in the group "{context.chat_title}"'
 
         lines = [
             "## Current Message",

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from ash.chats import ChatStateManager, ThreadIndex
 from ash.config.models import ConversationConfig
 from ash.core import Agent, SessionState
 from ash.core.agent import CompactionInfo
@@ -259,8 +260,60 @@ class TelegramMessageHandler:
         self._skill_registry = skill_registry
         self._session_managers: dict[str, SessionManager] = {}
         self._session_contexts: dict[str, SessionContext] = {}
+        self._thread_indexes: dict[str, ThreadIndex] = {}
         max_concurrent = config.sessions.max_concurrent if config else 2
         self._concurrency_semaphore = asyncio.Semaphore(max_concurrent)
+
+    def _get_thread_index(self, chat_id: str) -> ThreadIndex:
+        """Get or create a ThreadIndex for a chat."""
+        if chat_id not in self._thread_indexes:
+            manager = ChatStateManager(
+                provider=self._provider.name,
+                chat_id=chat_id,
+            )
+            self._thread_indexes[chat_id] = ThreadIndex(manager)
+        return self._thread_indexes[chat_id]
+
+    async def _resolve_reply_chain_thread(self, message: IncomingMessage) -> str | None:
+        """For group messages, determine thread_id from reply chain.
+
+        Returns:
+            thread_id for session key, or None for DMs or legacy sessions
+        """
+        chat_type = message.metadata.get("chat_type")
+        if chat_type not in ("group", "supergroup"):
+            return None  # DMs don't use reply threading
+
+        # If Telegram already provides a thread_id (forum topics), use it
+        if thread_id := message.metadata.get("thread_id"):
+            return thread_id
+
+        # Migration: check if reply target exists in legacy session (no thread_id)
+        # If so, continue using that session to maintain conversation continuity
+        if message.reply_to_message_id:
+            legacy_manager = self._get_session_manager(
+                message.chat_id, message.user_id, thread_id=None
+            )
+            if await legacy_manager.has_message_with_external_id(
+                message.reply_to_message_id
+            ):
+                logger.debug(
+                    "Reply target %s found in legacy session, continuing there",
+                    message.reply_to_message_id,
+                )
+                return None
+
+        # Resolve thread from reply chain
+        thread_index = self._get_thread_index(message.chat_id)
+        thread_id = thread_index.resolve_thread_id(
+            external_id=message.id,
+            reply_to_external_id=message.reply_to_message_id,
+        )
+
+        # Register this message in the thread
+        thread_index.register_message(message.id, thread_id)
+
+        return thread_id
 
     def _get_session_context(self, session_key: str) -> SessionContext:
         if session_key not in self._session_contexts:
@@ -338,11 +391,15 @@ class TelegramMessageHandler:
                 )
                 return
 
+            # Resolve thread from reply chain for groups (before any processing)
+            thread_id = await self._resolve_reply_chain_thread(message)
+            if thread_id:
+                message.metadata["thread_id"] = thread_id
+
             if message.has_images:
                 await self._handle_image_message(message)
                 return
 
-            thread_id = message.metadata.get("thread_id")
             session_key = make_session_key(
                 self._provider.name, message.chat_id, message.user_id, thread_id
             )
@@ -413,8 +470,13 @@ class TelegramMessageHandler:
                 await self._handle_sync(message, session, ctx)
         finally:
             await self._provider.clear_reaction(message.chat_id, message.id)
-            for steered in ctx.take_steered():
-                await self._provider.clear_reaction(steered.chat_id, steered.id)
+            steered = ctx.take_steered()
+            # Persist steered messages with was_steering flag
+            if steered:
+                thread_id = message.metadata.get("thread_id")
+                await self._persist_steered_messages(steered, thread_id)
+            for msg in steered:
+                await self._provider.clear_reaction(msg.chat_id, msg.id)
 
     async def _handle_image_message(self, message: IncomingMessage) -> None:
         """Handle a message containing images."""
@@ -583,7 +645,6 @@ class TelegramMessageHandler:
         self, message: IncomingMessage, thread_id: str | None
     ) -> None:
         """Update chat state with participant and chat info."""
-        from ash.chats import ChatStateManager
 
         chat_state = ChatStateManager(
             provider=self._provider.name,
@@ -673,15 +734,14 @@ class TelegramMessageHandler:
         start_time = time.time()
         last_edit_time = 0.0
 
-        async def get_steering_messages() -> list[str]:
+        async def get_steering_messages() -> list[IncomingMessage]:
             pending = ctx.take_pending()
             if pending:
                 logger.info(
                     "Steering: %d new message(s) arrived during processing",
                     len(pending),
                 )
-                return [msg.text for msg in pending if msg.text]
-            return []
+            return pending
 
         async for chunk in self._agent.process_message_streaming(
             message.text,
@@ -769,15 +829,14 @@ class TelegramMessageHandler:
         """Handle message with synchronous response."""
         tracker = self._create_tool_tracker(message)
 
-        async def get_steering_messages() -> list[str]:
+        async def get_steering_messages() -> list[IncomingMessage]:
             pending = ctx.take_pending()
             if pending:
                 logger.info(
                     "Steering: %d new message(s) arrived during processing",
                     len(pending),
                 )
-                return [msg.text for msg in pending if msg.text]
-            return []
+            return pending
 
         typing_task = asyncio.create_task(self._typing_loop(message.chat_id))
         try:
@@ -903,6 +962,11 @@ class TelegramMessageHandler:
                 metadata=assistant_metadata,
             )
 
+        # Register bot response in thread index so replies to bot get routed correctly
+        if bot_response_id and thread_id:
+            thread_index = self._get_thread_index(chat_id)
+            thread_index.register_message(bot_response_id, thread_id)
+
         if compaction:
             await session_manager.add_compaction(
                 summary=compaction.summary,
@@ -912,6 +976,49 @@ class TelegramMessageHandler:
             )
             logger.info(
                 f"Recorded compaction: {compaction.tokens_before} -> {compaction.tokens_after} tokens"
+            )
+
+    async def _persist_steered_messages(
+        self,
+        steered: list[IncomingMessage],
+        thread_id: str | None = None,
+    ) -> None:
+        """Persist steered messages with metadata indicating they were queued."""
+        for msg in steered:
+            if not msg.text:
+                continue
+
+            # Resolve thread for this steered message (use provided or resolve from reply chain)
+            msg_thread_id = thread_id or await self._resolve_reply_chain_thread(msg)
+            if msg_thread_id and "thread_id" not in msg.metadata:
+                msg.metadata["thread_id"] = msg_thread_id
+
+            session_manager = self._get_session_manager(
+                msg.chat_id, msg.user_id, msg_thread_id
+            )
+
+            metadata: dict[str, Any] = {
+                "was_steering": True,
+                "external_id": msg.id,
+            }
+            if msg.timestamp:
+                metadata["queued_at"] = msg.timestamp.isoformat()
+            if msg.reply_to_message_id:
+                metadata["reply_to_external_id"] = msg.reply_to_message_id
+
+            await session_manager.add_user_message(
+                content=msg.text,
+                token_count=estimate_tokens(msg.text),
+                metadata=metadata,
+                user_id=msg.user_id,
+                username=msg.username,
+                display_name=msg.display_name,
+            )
+
+            logger.debug(
+                "Persisted steered message %s from %s",
+                msg.id,
+                msg.username or msg.user_id,
             )
 
     async def _send_error(self, chat_id: str) -> None:
