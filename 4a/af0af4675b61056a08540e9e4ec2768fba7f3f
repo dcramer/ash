@@ -1,0 +1,23 @@
+specs/sessions.md
+  5181a011cad17607 13,63-64,78-89,145-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "4aaf0af4675b61056a08540e9e4ec2768fba7f3f",
+  "prompts": {
+    "5181a011cad17607": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "421d0edb-fbbb-40c4-bfe1-ba3337ac369d",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 21,
+      "total_deletions": 0,
+      "accepted_lines": 21,
+      "overriden_lines": 0
+    }
+  }
+}
