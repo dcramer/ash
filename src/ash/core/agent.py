@@ -241,6 +241,7 @@ class Agent:
         sender_display_name: str | None = None,
         chat_title: str | None = None,
         chat_type: str | None = None,
+        chat_state_path: str | None = None,
     ) -> str:
         """Build system prompt with optional memory context.
 
@@ -274,6 +275,7 @@ class Agent:
             has_reply_context=has_reply_context,
             session_path=session_path,
             session_mode=session_mode,
+            chat_state_path=chat_state_path,
             sender_username=sender_username,
             sender_display_name=sender_display_name,
             chat_title=chat_title,
@@ -373,6 +375,17 @@ class Agent:
                 except Exception:
                     logger.warning("Failed to get known people", exc_info=True)
 
+        # Build chat state path for group chats
+        chat_state_path: str | None = None
+        if session.provider and session.chat_id:
+            thread_id = session.metadata.get("thread_id")
+            if thread_id:
+                chat_state_path = (
+                    f"/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
+                )
+            else:
+                chat_state_path = f"/chats/{session.provider}/{session.chat_id}"
+
         system_prompt = self._build_system_prompt(
             context=memory_context,
             known_people=known_people,
@@ -384,6 +397,7 @@ class Agent:
             sender_display_name=session.metadata.get("display_name"),
             chat_title=session.metadata.get("chat_title"),
             chat_type=session.metadata.get("chat_type"),
+            chat_state_path=chat_state_path,
         )
 
         system_tokens = estimate_tokens(system_prompt)

@@ -132,7 +132,6 @@ class TestChatStateModel:
                     id="user-1",
                     username="alice",
                     display_name="Alice",
-                    message_count=5,
                 )
             ],
         )
@@ -153,7 +152,6 @@ class TestChatStateModel:
         assert participant.id == "user-1"
         assert participant.username == "alice"
         assert participant.display_name == "Alice"
-        assert participant.message_count == 1
         assert participant.first_seen is not None
         assert participant.last_active is not None
         assert len(state.participants) == 1
@@ -167,7 +165,6 @@ class TestChatStateModel:
                     id="user-1",
                     username="alice",
                     display_name="Alice",
-                    message_count=5,
                     first_seen=now,
                     last_active=now,
                 )
@@ -182,7 +179,6 @@ class TestChatStateModel:
 
         assert participant.username == "alice_new"
         assert participant.display_name == "Alice Smith"
-        assert participant.message_count == 6
         assert participant.first_seen == now  # Should not change
         assert participant.last_active >= now  # Should be updated
         assert len(state.participants) == 1
@@ -195,7 +191,6 @@ class TestChatStateModel:
                     id="user-1",
                     username="alice",
                     display_name="Alice",
-                    message_count=5,
                 )
             ],
         )
@@ -353,7 +348,7 @@ class TestChatStateManager:
 
         state = manager.load()
         assert len(state.participants) == 1
-        assert state.participants[0].message_count == 5
+        assert state.participants[0].username == "alice"
 
 
 class TestTelegramChatStateIntegration:
@@ -535,9 +530,9 @@ class TestTelegramChatStateIntegration:
         assert len(data["participants"]) == 3
 
         by_username = {p["username"]: p for p in data["participants"]}
-        assert by_username["alice"]["message_count"] == 2
-        assert by_username["bob"]["message_count"] == 2
-        assert by_username["charlie"]["message_count"] == 1
+        assert "alice" in by_username
+        assert "bob" in by_username
+        assert "charlie" in by_username
 
 
 class TestChatStateFileFormat:
@@ -567,7 +562,6 @@ class TestChatStateFileFormat:
         assert participant["id"] == "user-1"
         assert participant["username"] == "alice"
         assert participant["display_name"] == "Alice Smith"
-        assert participant["message_count"] == 1
         assert "first_seen" in participant
         assert "last_active" in participant
 

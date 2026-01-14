@@ -14,7 +14,6 @@ class Participant(BaseModel):
     session_id: str | None = None  # Reference to session key
     first_seen: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_active: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    message_count: int = 0
 
 
 class ChatInfo(BaseModel):
@@ -49,7 +48,6 @@ class ChatState(BaseModel):
 
         if participant:
             participant.last_active = now
-            participant.message_count += 1
             if username is not None:
                 participant.username = username
             if display_name is not None:
@@ -64,7 +62,6 @@ class ChatState(BaseModel):
                 session_id=session_id,
                 first_seen=now,
                 last_active=now,
-                message_count=1,
             )
             self.participants.append(participant)
 

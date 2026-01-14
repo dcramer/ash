@@ -67,6 +67,8 @@ class PromptContext:
     # Session info
     session_path: str | None = None
     session_mode: str | None = None  # "persistent" or "fresh"
+    # Chat state info
+    chat_state_path: str | None = None  # Path to chat state.json
     # Sender context (for group chats)
     sender_username: str | None = None
     sender_display_name: str | None = None
@@ -239,23 +241,20 @@ class SystemPromptBuilder:
             "Commands execute in a sandboxed environment.",
             f"Network access is {network_status}.",
             "",
+            "### Mounted Directories",
+            "",
+            "- `/workspace` - User's workspace (read-write)",
+            "- `/sessions` - Conversation history (read-only)",
+            "- `/chats` - Chat participant info (read-only)",
+            "",
             "### ash-sb CLI",
             "",
-            "The `ash-sb` command is available in the sandbox for self-service operations:",
-            "",
-            "**Memory:**",
-            "- `ash-sb memory search 'query'` - Search memories (semantic search)",
-            "- `ash-sb memory list` - List recent memories",
+            "- `ash-sb memory search 'query'` - Search memories",
             "- `ash-sb memory add 'content'` - Store a memory",
+            "- `ash-sb schedule create 'msg' --at <time>` - Schedule task",
+            "- `ash-sb schedule list` - List scheduled tasks",
             "",
-            "**Scheduling:**",
-            "- `ash-sb schedule create 'message' --at 2026-01-12T09:00:00Z` - One-time task",
-            "- `ash-sb schedule create 'message' --cron '0 8 * * *'` - Recurring task",
-            "- `ash-sb schedule list` - List scheduled tasks (shows IDs)",
-            "- `ash-sb schedule cancel --id <ID>` - Cancel a task by ID",
-            "- `ash-sb schedule clear` - Clear all tasks",
-            "",
-            "Run `ash-sb --help` for all available commands.",
+            "Run `ash-sb --help` for all commands.",
         ]
 
         return "\n".join(lines)
@@ -369,16 +368,24 @@ class SystemPromptBuilder:
             else f"From: {sender}"
         )
 
-        return "\n".join(
-            [
-                "## Current Message",
-                "",
-                from_line,
-                "",
-                'When this user uses pronouns like "he", "she", "they", '
-                "they are referring to someone else - not themselves.",
-            ]
-        )
+        lines = [
+            "## Current Message",
+            "",
+            from_line,
+            "",
+            'When this user uses pronouns like "he", "she", "they", '
+            "they are referring to someone else - not themselves.",
+        ]
+
+        if context.chat_state_path:
+            lines.extend(
+                [
+                    "",
+                    f"Chat participants: `cat {context.chat_state_path}/state.json`",
+                ]
+            )
+
+        return "\n".join(lines)
 
     def _build_session_section(self, context: PromptContext) -> str:
         if not context.session_path:
