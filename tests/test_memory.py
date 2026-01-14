@@ -386,3 +386,90 @@ class TestMemoryDeletion:
         """Test that deleting nonexistent memory returns False."""
         result = await memory_store.delete_memory("nonexistent-id")
         assert result is False
+
+
+class TestMemoryAuthorization:
+    """Tests for best-effort authorization checks."""
+
+    async def test_delete_own_memory_succeeds(self, memory_store):
+        """Test that user can delete their own memory."""
+        memory = await memory_store.add_memory(
+            content="My secret", owner_user_id="user-1"
+        )
+
+        result = await memory_store.delete_memory(memory.id, owner_user_id="user-1")
+
+        assert result is True
+        assert await memory_store.get_memory(memory.id) is None
+
+    async def test_delete_other_user_memory_fails(self, memory_store):
+        """Test that user cannot delete another user's memory."""
+        memory = await memory_store.add_memory(
+            content="User 1 secret", owner_user_id="user-1"
+        )
+
+        result = await memory_store.delete_memory(memory.id, owner_user_id="user-2")
+
+        assert result is False
+        assert await memory_store.get_memory(memory.id) is not None
+
+    async def test_delete_group_memory_with_chat_context(self, memory_store):
+        """Test that chat member can delete group memory."""
+        memory = await memory_store.add_memory(
+            content="Group fact", owner_user_id=None, chat_id="chat-1"
+        )
+
+        result = await memory_store.delete_memory(memory.id, chat_id="chat-1")
+
+        assert result is True
+
+    async def test_delete_group_memory_wrong_chat_fails(self, memory_store):
+        """Test that user in different chat cannot delete group memory."""
+        memory = await memory_store.add_memory(
+            content="Group fact", owner_user_id=None, chat_id="chat-1"
+        )
+
+        result = await memory_store.delete_memory(memory.id, chat_id="chat-2")
+
+        assert result is False
+        assert await memory_store.get_memory(memory.id) is not None
+
+    async def test_get_person_with_wrong_owner_returns_none(self, memory_store):
+        """Test that get_person returns None for non-owner."""
+        person = await memory_store.create_person(owner_user_id="user-1", name="Sarah")
+
+        result = await memory_store.get_person(person.id, owner_user_id="user-2")
+
+        assert result is None
+
+    async def test_get_person_with_correct_owner_succeeds(self, memory_store):
+        """Test that get_person returns person for owner."""
+        person = await memory_store.create_person(owner_user_id="user-1", name="Sarah")
+
+        result = await memory_store.get_person(person.id, owner_user_id="user-1")
+
+        assert result is not None
+        assert result.name == "Sarah"
+
+    async def test_add_memory_rejects_other_user_person(self, memory_store):
+        """Test that memory cannot reference another user's person."""
+        person = await memory_store.create_person(owner_user_id="user-1", name="Sarah")
+
+        with pytest.raises(ValueError, match="Invalid subject person ID"):
+            await memory_store.add_memory(
+                content="Fact about Sarah",
+                owner_user_id="user-2",
+                subject_person_ids=[person.id],
+            )
+
+    async def test_add_memory_accepts_own_person(self, memory_store):
+        """Test that memory can reference owner's person."""
+        person = await memory_store.create_person(owner_user_id="user-1", name="Sarah")
+
+        memory = await memory_store.add_memory(
+            content="Sarah likes coffee",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+
+        assert memory.subject_person_ids == [person.id]

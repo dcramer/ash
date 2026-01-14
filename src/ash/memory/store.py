@@ -41,12 +41,21 @@ class MemoryStore:
         await self._session.flush()
         return person
 
-    async def get_person(self, person_id: str) -> Person | None:
-        """Get person by ID."""
+    async def get_person(
+        self,
+        person_id: str,
+        owner_user_id: str | None = None,
+    ) -> Person | None:
+        """Get person by ID, optionally filtering by owner."""
         result = await self._session.execute(
             select(Person).where(Person.id == person_id)
         )
-        return result.scalar_one_or_none()
+        person = result.scalar_one_or_none()
+
+        if person and owner_user_id and person.owner_user_id != owner_user_id:
+            return None
+
+        return person
 
     async def find_person_by_reference(
         self,
@@ -87,12 +96,13 @@ class MemoryStore:
     async def update_person(
         self,
         person_id: str,
+        owner_user_id: str,
         name: str | None = None,
         relationship: str | None = None,
         aliases: list[str] | None = None,
     ) -> Person | None:
         """Update person details."""
-        person = await self.get_person(person_id)
+        person = await self.get_person(person_id, owner_user_id=owner_user_id)
         if not person:
             return None
 
@@ -106,9 +116,14 @@ class MemoryStore:
         await self._session.flush()
         return person
 
-    async def add_person_alias(self, person_id: str, alias: str) -> Person | None:
+    async def add_person_alias(
+        self,
+        person_id: str,
+        alias: str,
+        owner_user_id: str,
+    ) -> Person | None:
         """Add an alias to a person."""
-        person = await self.get_person(person_id)
+        person = await self.get_person(person_id, owner_user_id=owner_user_id)
         if not person:
             return None
 
@@ -133,7 +148,9 @@ class MemoryStore:
         """Add a memory entry."""
         if subject_person_ids:
             for person_id in subject_person_ids:
-                if not await self.get_person(person_id):
+                # Verify person exists and belongs to the same owner
+                person = await self.get_person(person_id, owner_user_id=owner_user_id)
+                if not person:
                     raise ValueError(f"Invalid subject person ID: {person_id}")
 
         memory = Memory(
@@ -186,12 +203,14 @@ class MemoryStore:
     async def get_memories_about_person(
         self,
         person_id: str,
+        owner_user_id: str | None = None,
+        chat_id: str | None = None,
         limit: int = 50,
         include_expired: bool = False,
         include_superseded: bool = False,
     ) -> list[Memory]:
         """Get memory entries about a specific person."""
-        from sqlalchemy import text
+        from sqlalchemy import or_, text
 
         stmt = (
             select(Memory)
@@ -211,6 +230,16 @@ class MemoryStore:
 
         if not include_superseded:
             stmt = stmt.where(Memory.superseded_at.is_(None))
+
+        if owner_user_id or chat_id:
+            conditions = []
+            if owner_user_id:
+                conditions.append(Memory.owner_user_id == owner_user_id)
+            if chat_id:
+                conditions.append(
+                    (Memory.chat_id == chat_id) & (Memory.owner_user_id.is_(None))
+                )
+            stmt = stmt.where(or_(*conditions))
 
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
@@ -240,11 +269,24 @@ class MemoryStore:
         )
         return result.scalar_one_or_none()
 
-    async def delete_memory(self, memory_id: str) -> bool:
-        """Delete a memory by ID."""
+    async def delete_memory(
+        self,
+        memory_id: str,
+        owner_user_id: str | None = None,
+        chat_id: str | None = None,
+    ) -> bool:
+        """Delete a memory by ID, optionally verifying ownership."""
         memory = await self.get_memory(memory_id)
         if not memory:
             return False
+
+        if owner_user_id or chat_id:
+            is_owner = (
+                memory.owner_user_id == owner_user_id and owner_user_id is not None
+            )
+            is_group_member = memory.owner_user_id is None and memory.chat_id == chat_id
+            if not (is_owner or is_group_member):
+                return False
 
         await self._session.delete(memory)
         await self._session.flush()

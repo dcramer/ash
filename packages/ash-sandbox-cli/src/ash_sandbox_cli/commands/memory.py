@@ -131,9 +131,16 @@ def add_memory(
 def delete_memory(
     memory_id: Annotated[str, typer.Argument(help="Memory ID to delete")],
 ) -> None:
-    """Delete a memory by ID."""
+    """Delete a memory by ID.
+
+    Only memories owned by the current user (or group memories in the current chat)
+    can be deleted.
+    """
     try:
-        result = rpc_call("memory.delete", {"memory_id": memory_id})
+        result = rpc_call(
+            "memory.delete",
+            {"memory_id": memory_id, **get_context_params()},
+        )
     except ConnectionError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
@@ -144,5 +151,5 @@ def delete_memory(
     if result.get("deleted"):
         typer.echo(f"Memory deleted: {memory_id[:8]}")
     else:
-        typer.echo(f"Memory not found: {memory_id[:8]}", err=True)
+        typer.echo(f"Memory not found or not owned by you: {memory_id[:8]}", err=True)
         raise typer.Exit(1)

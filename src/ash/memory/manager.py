@@ -280,9 +280,18 @@ class MemoryManager:
             limit=limit,
         )
 
-    async def delete_memory(self, memory_id: str) -> bool:
+    async def delete_memory(
+        self,
+        memory_id: str,
+        owner_user_id: str | None = None,
+        chat_id: str | None = None,
+    ) -> bool:
         """Delete a memory and its embedding."""
-        deleted = await self._store.delete_memory(memory_id)
+        deleted = await self._store.delete_memory(
+            memory_id,
+            owner_user_id=owner_user_id,
+            chat_id=chat_id,
+        )
         if not deleted:
             return False
 

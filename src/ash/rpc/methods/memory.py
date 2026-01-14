@@ -153,12 +153,21 @@ def register_memory_methods(
 
         Params:
             memory_id: Memory ID to delete (required)
+            user_id: Requester's user ID (for ownership check)
+            chat_id: Requester's chat ID (for group memory check)
         """
         memory_id = params.get("memory_id")
         if not memory_id:
             raise ValueError("memory_id is required")
 
-        deleted = await memory_manager.delete_memory(memory_id)
+        user_id = params.get("user_id")
+        chat_id = params.get("chat_id")
+
+        deleted = await memory_manager.delete_memory(
+            memory_id,
+            owner_user_id=user_id,
+            chat_id=chat_id,
+        )
         return {"deleted": deleted}
 
     # Register handlers

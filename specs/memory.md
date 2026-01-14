@@ -88,6 +88,23 @@ Memories have visibility scope controlled by two fields:
 | Personal | Default - "I like coffee" |
 | Group | Team facts - "Our standup is at 9am" |
 
+## Authorization
+
+Best-effort authorization prevents accidental cross-user data access. When context is provided:
+
+| Operation | Rule |
+|-----------|------|
+| Delete memory | Must be owner (personal) or member of chat (group) |
+| Update person | Must be owner of the person entity |
+| Add person alias | Must be owner of the person entity |
+| Reference person in memory | Person must belong to memory owner |
+| Get memories about person | Filtered to accessible memories |
+
+**Design notes:**
+- Authorization is best-effort, not security boundary (sandbox can't be fully trusted)
+- Operations without context (e.g., internal GC) skip checks
+- Goal: prevent accidental mistakes, not malicious actors
+
 ## Background Extraction
 
 Optionally, facts are extracted automatically from conversations:
@@ -115,9 +132,9 @@ Tools running in the sandbox can access memory via RPC:
 | `memory.search` | Semantic search | `query` (required), `limit`, `user_id`, `chat_id` |
 | `memory.add` | Add a memory | `content` (required), `source`, `expires_days`, `user_id`, `chat_id`, `subjects` |
 | `memory.list` | List recent memories | `limit`, `include_expired`, `user_id`, `chat_id` |
-| `memory.delete` | Delete a memory | `memory_id` (required) |
+| `memory.delete` | Delete a memory | `memory_id` (required), `user_id`, `chat_id` |
 
-The sandbox CLI (`ash memory`) wraps these RPC calls with environment-provided `user_id` and `chat_id`.
+The sandbox CLI (`ash-sb memory`) wraps these RPC calls with environment-provided `ASH_USER_ID` and `ASH_CHAT_ID`. Authorization checks use these values to verify ownership before mutations.
 
 ## Verification
 
