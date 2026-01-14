@@ -42,6 +42,9 @@ This installs dependencies and configures git hooks via [prek](https://github.co
 # Install dev dependencies
 uv sync --all-groups
 
+# Install prek (if not already installed)
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/j178/prek/releases/download/v0.2.28/prek-installer.sh | sh
+
 # Install prek hooks
 prek install
 ```
