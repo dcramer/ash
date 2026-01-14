@@ -1,0 +1,37 @@
+tests/test_agent.py
+  666de07af89d8775 19,221,226-231
+src/ash/chats/models.py
+  666de07af89d8775 32
+tests/test_thread_index.py
+  666de07af89d8775 1-104
+src/ash/core/agent.py
+  666de07af89d8775 35,45-46,51-59,78-79,392,664-665,768-769
+src/ash/chats/__init__.py
+  666de07af89d8775 8,15
+src/ash/chats/thread_index.py
+  666de07af89d8775 1-101
+src/ash/providers/telegram/handlers.py
+  666de07af89d8775 10,263,267-316,394-398,473-479,737,832,965-969,981-1023
+src/ash/core/prompt.py
+  666de07af89d8775 358-359,361-362,366-368
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "d35b52526a91e6317f10b6aa5c2a76cb30547c7f",
+  "prompts": {
+    "666de07af89d8775": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "37c9d7aa-8599-40c0-b91c-50113164f49e",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 518,
+      "total_deletions": 198,
+      "accepted_lines": 358,
+      "overriden_lines": 0
+    }
+  }
+}
