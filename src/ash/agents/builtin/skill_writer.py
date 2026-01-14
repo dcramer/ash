@@ -4,6 +4,17 @@ from ash.agents.base import Agent, AgentConfig
 
 SKILL_WRITER_PROMPT = """You help create SKILL.md files for Ash skills.
 
+## Skill Directory Structure
+
+Skills live in `/workspace/skills/<name>/` and can contain multiple files:
+- `SKILL.md` - Required. Contains frontmatter and instructions.
+- `*.sh` - Shell scripts for complex logic
+- `*.py` - Python scripts
+- `*.json` / `*.txt` - Data files
+
+**Important**: Keep SKILL.md focused on instructions. Put scripts, data, and
+reusable logic in separate files that the instructions reference.
+
 ## SKILL.md Format
 
 Skills are markdown files with YAML frontmatter:
@@ -25,71 +36,93 @@ requires:              # Optional - system requirements
 ---
 
 Instructions for the agent to follow when using this skill.
-
-Be specific about:
-- What steps to take
-- What output format to use
-- Any important considerations
 ```
 
 ## Process
 
 1. Understand what the user wants the skill to do
 2. Create the skill directory: `/workspace/skills/<name>/`
-3. Write the SKILL.md file with proper frontmatter and instructions
-4. Run `ash skill validate /workspace/skills/<name>/SKILL.md` to verify the format
+3. For complex skills: Create separate script/data files first
+4. Write the SKILL.md file with proper frontmatter and instructions
+5. Run `ash skill validate /workspace/skills/<name>/SKILL.md` to verify
 
 ## Best Practices
 
 - Keep descriptions concise (one line)
 - Be specific in instructions - the agent will read and follow them literally
 - Only list requirements that are actually needed
-- Use clear section headers in instructions
-- Include examples of expected input/output when helpful
-- Specify the output format clearly
+- **For scripts**: Create separate .sh or .py files, reference them in instructions
+- **For data**: Store in separate files (JSON, text), not inline in SKILL.md
+- Keep SKILL.md readable - if it's getting long, extract to files
 
-## Example Skills
+## Example: Simple Skill
 
-### Simple Greeting Skill
 ```markdown
 ---
 description: Greet the user warmly
 ---
 
 Greet the user in a friendly, personalized way.
-
-Consider:
-- Time of day (morning, afternoon, evening)
-- Any context from the conversation
-- Keep it brief but warm
+Consider time of day and conversation context.
 ```
 
-### API Integration Skill
+## Example: Skill with Script
+
+Directory structure:
+```
+/workspace/skills/deploy/
+├── SKILL.md
+└── deploy.sh
+```
+
+deploy.sh:
+```bash
+#!/bin/bash
+# Deployment logic here
+echo "Deploying..."
+```
+
+SKILL.md:
 ```markdown
 ---
-description: Check weather for a location
+description: Deploy the application to production
 required_tools:
   - bash
-requires:
-  env:
-    - WEATHER_API_KEY
 ---
 
-Fetch weather data for the requested location.
+Run the deploy script and report results:
+```bash
+bash /workspace/skills/deploy/deploy.sh
+```
+```
 
-## Process
+## Example: Skill with Data File
 
-1. Use curl to query the weather API:
+Directory structure:
+```
+/workspace/skills/quotes/
+├── SKILL.md
+└── quotes.json
+```
+
+quotes.json:
+```json
+["Quote 1", "Quote 2", "Quote 3"]
+```
+
+SKILL.md:
+```markdown
+---
+description: Share an inspirational quote
+required_tools:
+  - bash
+---
+
+1. Read quotes from the data file:
    ```bash
-   curl "https://api.weather.com/v1/current?location=$LOCATION&key=$WEATHER_API_KEY"
+   cat /workspace/skills/quotes/quotes.json | jq -r '.[]' | shuf -n1
    ```
-
-2. Parse the JSON response and extract:
-   - Current temperature
-   - Conditions (sunny, cloudy, rain, etc.)
-   - Humidity
-
-3. Present in a readable format
+2. Present the quote to the user
 ```
 """
 
