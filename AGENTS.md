@@ -2,140 +2,25 @@
 
 Personal assistant agent with sandboxed tool execution.
 
-## Project Principles
-
-### Simplicity Wins
-
-**Removing code is always a win.** Code that has become redundant, adds unnecessary complexity, or duplicates functionality elsewhere should be removed. Every line of code is a liability - it needs to be maintained, tested, and understood. When we find dead code, unused abstractions, or over-engineered solutions, we delete them without hesitation.
-
-### Shell and Filesystem First
-
-**The shell is the agent's natural interface.** When designing tools and agentic behaviors, prefer shell commands and filesystem operations over custom implementations. The Unix toolchain - `grep`, `find`, `sed`, `awk`, `curl`, `jq` - represents decades of refinement. Wrap it, don't replace it.
-
-**Design principles for toolchain:**
-- **Prefer shell execution** over custom tool implementations. If `grep` can do it, use `grep`.
-- **Read/write files** rather than maintain in-memory state. Files are inspectable, debuggable, and survive restarts.
-- **Use standard formats** - JSONL, JSON, Markdown, TOML. Tools that work with text work with these.
-- **Sandbox execution** provides security without reinventing command execution.
-
-**When to use what:**
-- **Shell tools:** File operations, text processing, system commands, git, package managers
-- **Plain files:** Session transcripts (JSONL), configuration (TOML), identity (Markdown), skills, events
-- **SQLite:** Only for data needing vector search, complex queries, or transactions (memories, embeddings)
-- **Custom tools:** Only when shell commands genuinely can't do the job (LLM calls, structured API interactions)
-
-The filesystem is shared state that both agent and human can inspect. `cat`, `tail -f`, `grep` become debugging tools. No special clients needed.
-
-### Explicit Over Implicit
-
-**No magic.** Dependencies are explicit. Configuration is explicit. When something fails, the error should make the cause obvious. Avoid clever abstractions that hide what's actually happening.
-
-### Async All The Way
-
-Everything is async. No blocking calls. No sync wrappers around async code. This isn't just a convention - it's how the system stays responsive during LLM calls, tool execution, and I/O.
-
-### Types Are Documentation
-
-Type hints aren't optional. They document intent, catch bugs before runtime, and enable tooling. Pydantic for validation at boundaries. Abstract base classes define interfaces clearly.
-
-### Specs Before Code
-
-New features get a spec first. The spec lives in `specs/`, documents the design decisions, and serves as the verification checklist. Update the spec before implementing, not after.
-
-### Test What Matters
-
-Tests exist to catch regressions and document behavior, not to hit coverage metrics. Focus on testing the contracts between components, edge cases that are easy to break, and integration points.
-
-**What to test:**
-- Core business logic (supersession, scoping, conflict detection)
-- Error handling and graceful degradation
-- Input validation at API boundaries
-- Edge cases that are easy to break
-- Integration between components
-
-**What NOT to test:**
-- Trivial CRUD operations (if SQLAlchemy breaks, we have bigger problems)
-- Mock verification (testing that mocks return what you configured proves nothing)
-- Dataclass constructors (Python works)
-- Private methods (couples tests to implementation)
-- Language features (list operations, dict access)
-
-**Signs of bad tests:**
-- Test name describes implementation, not behavior
-- Test only verifies mock was called with expected args
-- Test duplicates another test through a different interface
-- Test would pass even if the feature was broken
-
 ## Package Manager
 
 Use **uv**: `uv sync --all-groups`
 
-## Quality
+## After Changes
 
-| Tool | Command | Purpose |
-|------|---------|---------|
-| ruff | `uv run ruff check --fix .` | Lint and auto-fix |
-| ruff | `uv run ruff format .` | Format code |
-| ty | `uv run ty check` | Type check |
-| pytest | `uv run pytest` | Run tests |
-| prek | `prek run --all-files` | Run all hooks |
-
-## Commands
-
-| Command | Purpose |
-|---------|---------|
-| `uv run ash init` | Initialize config file |
-| `uv run ash chat` | Interactive CLI chat |
-| `uv run ash serve` | Start server |
-| `uv run ash upgrade` | Run migrations, check sandbox |
-| `uv run ash sandbox build` | Build sandbox image |
-| `uv run ash memory <action>` | Manage memories (list, add, remove, clear) |
-| `uv run ash sessions <action>` | Manage sessions (list, view, search, clear) |
-| `uv run ash schedule <action>` | Manage scheduled tasks (list, cancel, clear) |
-| `uv run ash skill <action>` | Manage skills (validate, list) |
-| `uv run ash config <action>` | Configuration management (show, validate) |
+```bash
+uv run ruff check --fix .  # Lint
+uv run ruff format .       # Format
+uv run ty check            # Type check
+uv run pytest              # Tests
+```
 
 ## Conventions
 
-- Async everywhere (`async def`, `await`)
+- Async everywhere
 - Type hints required
-- Pydantic for validation
-- ABC for interfaces in `*/base.py`
+- Pydantic at boundaries
 - Tests in `tests/`
-
-## Logging
-
-| Level | Use For |
-|-------|---------|
-| DEBUG | Development tracing, cache hits, API internals |
-| INFO | User-visible operations, tool/skill summaries |
-| WARNING | Recoverable issues, retries, missing optional config |
-| ERROR | Failures that affect operation |
-
-**Rules:**
-1. Single source of truth - each operation logged in one place only
-2. Tools: logged in `executor.py` only (with timing)
-3. LLM API calls: DEBUG level (too noisy for INFO)
-4. Use `ASH_LOG_LEVEL=DEBUG` for development
-
-**Configuration:**
-- All entry points use `ash.logging.configure_logging()`
-- Server mode: Rich formatting with `use_rich=True`, JSONL logs to `~/.ash/logs/`
-- Chat mode: Suppressed to WARNING (TUI controls display)
-
-## Authorization
-
-Users interact with Ash through providers (Telegram, CLI). Authorization is provider-specific.
-
-**Telegram Authorization:**
-- `allowed_users` in config lists authorized user IDs or @usernames
-- `allowed_groups` lists group IDs where the bot responds
-- Empty lists = open access (not recommended for production)
-
-**Sandbox Security Model:**
-Environment variables (like `ASH_USER_ID`) are passed to sandbox commands for ownership checks. These can be faked by the agent, but we're not optimizing for security here - just preventing accidental mistakes. The real security boundary is who can talk to the bot at all.
-
-Dangerous bulk operations (like clearing all schedules or memories) are not exposed in the sandbox CLI to prevent accidents.
 
 ## Commit Attribution
 
@@ -144,54 +29,21 @@ AI commits MUST include:
 Co-Authored-By: (the agent model's name and attribution byline)
 ```
 
-## Specifications
+## Skills
 
-Use `/write-spec` skill for new features. See `.claude/skills/write-spec.md`
+| Skill | Purpose |
+|-------|---------|
+| `/write-spec` | New feature specs |
+| `/verify-spec` | Check implementation against spec |
+| `/create-migration` | Database schema changes |
+| `/write-docs` | Documentation pages |
 
-Use `/verify-spec` skill to check implementation. See `.claude/skills/verify-spec.md`
+## Specs
 
-- Specs live in `specs/<feature>.md`
-- Update spec BEFORE implementing
-- Format defined in `SPECS.md`
-
-### Spec Compliance
-
-Before merging changes to a system with a spec:
-- Verify changes comply with all MUST requirements
-- Update the spec if requirements change
-- Run `/verify-spec <feature>` for affected specs
-
-### Subsystem Patterns
-
-When modifying subsystems (memory, sessions, etc.):
-- Document public API in `__init__.py` with docstring listing what's public vs internal
-- Centralize types in `types.py`
-- Import from subsystem root (`from ash.memory import X`), not internal modules
-- Create factory functions for complex wiring (e.g., `create_memory_manager()`)
-
-## Database
-
-Use `/create-migration` skill for schema changes. See `.claude/skills/create-migration.md`
-
-- Run migrations: `uv run alembic upgrade head`
-- Check status: `uv run alembic current`
-
-## Documentation
-
-Use `/write-docs` skill for docs site pages. See `.claude/skills/write-docs.md`
-
-- Docs site: `docs/` (Astro Starlight)
-- Run locally: `cd docs && pnpm dev`
-
-## Other Skills
-
-| Skill | When to use |
-|-------|-------------|
-| `/commit` | Creating commits |
-| `/create-pr` | Opening pull requests |
-| `/find-bugs` | Pre-merge review |
-
-## Reference
-
-- `SPECS.md` - Spec format and index
-- `ARCHITECTURE.md` - Tech stack and roadmap
+| Spec | When to read |
+|------|--------------|
+| `specs/logging.md` | Adding/modifying logging |
+| `specs/sessions.md` | Session handling changes |
+| `specs/memory.md` | Memory system changes |
+| `specs/skills.md` | Creating or modifying skills |
+| `specs/subsystems.md` | Public API patterns |
