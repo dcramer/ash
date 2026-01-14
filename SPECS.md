@@ -91,6 +91,7 @@ Specs MUST be updated when:
 |------|-------------|
 | [subsystems](specs/subsystems.md) | Modular components with clear boundaries and interfaces |
 | [agent](specs/agent.md) | Agent orchestrator with agentic loop |
+| [agent-prompts](specs/agent-prompts.md) | Patterns for writing effective agent and skill prompts |
 | [config](specs/config.md) | Configuration loading and validation |
 | [conversation-context](specs/conversation-context.md) | Smart conversation context with reply chains and gap signals |
 | [llm](specs/llm.md) | LLM provider abstraction |

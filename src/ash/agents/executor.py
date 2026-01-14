@@ -104,6 +104,10 @@ class AgentExecutor:
                 )
                 return AgentResult.error(f"Invalid model alias: {model_alias}. {e}")
 
+        logger.info(
+            f"Agent '{agent_config.name}' using model: {resolved_model or 'default'}"
+        )
+
         # Build system prompt (may inject context)
         system_prompt = agent.build_system_prompt(context)
 

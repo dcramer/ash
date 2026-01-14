@@ -37,8 +37,11 @@ class TestSkillAgent:
 
         prompt = agent.build_system_prompt(context)
 
-        assert prompt.startswith("Base instructions")
+        # Wrapper is prepended, then skill instructions, then context
+        assert "Base instructions" in prompt
         assert "User wants X" in prompt
+        # Context should come after instructions
+        assert prompt.index("Base instructions") < prompt.index("User wants X")
 
     def test_passes_allowed_tools_to_config(self):
         """Should pass allowed_tools to agent config (filtering done by executor)."""

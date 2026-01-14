@@ -14,6 +14,42 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Wrapper guidance prepended to all skill system prompts
+SKILL_AGENT_WRAPPER = """You are a skill executor. Your job is to run the skill instructions below and report results.
+
+## How to Execute
+
+1. Follow the instructions in the skill definition
+2. Run any commands or tools specified
+3. Report what happened - include actual output
+
+## Handling Errors
+
+When a command fails or returns an error:
+- Report the error message to the user
+- STOP - do not attempt to fix, debug, or work around the problem
+- The user will decide whether to invoke the skill-writer to fix the skill
+
+**NEVER do any of the following when something fails:**
+- Read the script source to understand why it failed
+- Copy or modify script files
+- Use sed, awk, or other tools to edit files
+- Write inline scripts to diagnose the issue
+- Try alternative approaches not in the instructions
+
+If the skill is broken, say so and stop. That's useful information.
+
+## Output
+
+Your response goes back to the main agent, who relays it to the user.
+- Include actual command output, not just summaries
+- If something failed, include the error message
+- Be concise - the user wants results, not a narrative
+
+---
+
+"""
+
 
 class SkillAgent(Agent):
     """Ephemeral agent wrapper for a skill definition.
@@ -50,22 +86,23 @@ class SkillAgent(Agent):
         )
 
     def build_system_prompt(self, context: AgentContext) -> str:
-        """Build system prompt with optional context injection.
+        """Build system prompt with wrapper guidance and optional context injection.
 
         Args:
             context: Execution context with optional user-provided context.
 
         Returns:
-            System prompt string.
+            System prompt string with wrapper + skill instructions + context.
         """
-        base_prompt = self._skill.instructions
+        # Start with wrapper guidance + skill instructions
+        prompt = SKILL_AGENT_WRAPPER + self._skill.instructions
 
         # Inject user-provided context if available
         user_context = context.input_data.get("context", "")
         if user_context:
-            return f"{base_prompt}\n\n## Context\n\n{user_context}"
+            prompt += f"\n\n## Context\n\n{user_context}"
 
-        return base_prompt
+        return prompt
 
 
 class UseSkillTool(Tool):
