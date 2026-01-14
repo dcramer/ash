@@ -10,6 +10,7 @@ Files: src/ash/sessions/manager.py, src/ash/sessions/types.py, src/ash/sessions/
 
 - Store sessions as JSONL files in ~/.ash/sessions/{session_key}/
 - Generate session keys from provider, chat_id, user_id, thread_id
+- Maintain state.json with session metadata (provider, chat_id, user_id, thread_id)
 - Maintain two files per session: context.jsonl (full LLM context) and history.jsonl (human-readable)
 - Support entry types: session header, message, tool_use, tool_result, compaction
 - Track message metadata including external_id for deduplication
@@ -59,6 +60,8 @@ class SessionManager:
     def session_dir(self) -> Path
     @property
     def session_id(self) -> str
+    @property
+    def state_path(self) -> Path
 
     def exists(self) -> bool
     async def ensure_session(self) -> SessionHeader
@@ -70,6 +73,18 @@ class SessionManager:
     async def load_messages_for_llm(recency_window) -> list[Message]
     async def get_message_by_external_id(external_id) -> MessageEntry | None
     async def get_messages_around(message_id, window) -> list[Entry]
+```
+
+### Session Metadata
+
+```python
+class SessionState(BaseModel):
+    """Session metadata stored in state.json."""
+    provider: str
+    chat_id: str | None = None
+    user_id: str | None = None
+    thread_id: str | None = None
+    created_at: datetime
 ```
 
 ### Entry Types
@@ -126,6 +141,12 @@ class CompactionEntry:
 ```
 
 ## File Format
+
+### state.json
+Session metadata for quick lookup without parsing JSONL:
+```json
+{"provider": "telegram", "chat_id": "-123456", "user_id": "11111", "created_at": "2026-01-12T..."}
+```
 
 ### context.jsonl
 Full LLM context with all entry types:
