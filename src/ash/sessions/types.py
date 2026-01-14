@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from pydantic import BaseModel, Field
+
 SESSION_VERSION = "1"
 
 
@@ -334,3 +336,13 @@ def parse_entry(data: dict[str, Any]) -> Entry:
     if parser is None:
         raise ValueError(f"Unknown entry type: {entry_type}")
     return parser.from_dict(data)
+
+
+class SessionState(BaseModel):
+    """Session metadata stored in state.json for easy lookup."""
+
+    provider: str
+    chat_id: str | None = None
+    user_id: str | None = None
+    thread_id: str | None = None
+    created_at: datetime = Field(default_factory=now_utc)

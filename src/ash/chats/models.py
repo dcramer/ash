@@ -11,6 +11,7 @@ class Participant(BaseModel):
     id: str
     username: str | None = None
     display_name: str | None = None
+    session_id: str | None = None  # Reference to session key
     first_seen: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_active: datetime = Field(default_factory=lambda: datetime.now(UTC))
     message_count: int = 0
@@ -43,6 +44,7 @@ class ChatState(BaseModel):
         user_id: str,
         username: str | None = None,
         display_name: str | None = None,
+        session_id: str | None = None,
     ) -> Participant:
         """Update or add a participant, returns the participant."""
         now = datetime.now(UTC)
@@ -55,11 +57,14 @@ class ChatState(BaseModel):
                 participant.username = username
             if display_name is not None:
                 participant.display_name = display_name
+            if session_id is not None:
+                participant.session_id = session_id
         else:
             participant = Participant(
                 id=user_id,
                 username=username,
                 display_name=display_name,
+                session_id=session_id,
                 first_seen=now,
                 last_active=now,
                 message_count=1,

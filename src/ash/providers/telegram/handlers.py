@@ -597,11 +597,17 @@ class TelegramMessageHandler:
         if chat_type or chat_title:
             chat_state.update_chat_info(chat_type=chat_type, title=chat_title)
 
-        # Update participant
+        # Compute session_id for participant reference
+        session_id = make_session_key(
+            self._provider.name, message.chat_id, message.user_id, thread_id
+        )
+
+        # Update participant with session reference
         chat_state.update_participant(
             user_id=message.user_id,
             username=message.username,
             display_name=message.display_name,
+            session_id=session_id,
         )
 
     async def _load_persistent_session(

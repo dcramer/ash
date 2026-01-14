@@ -674,3 +674,153 @@ class TestChatStateFileFormat:
 
         first_seen = data["participants"][0]["first_seen"]
         assert "T" in first_seen
+
+
+# =============================================================================
+# Bidirectional Reference Tests
+# =============================================================================
+
+
+class TestBidirectionalReferences:
+    """Tests for bidirectional references between chat state and sessions."""
+
+    def test_participant_has_session_id(self, monkeypatch, mock_get_chat_dir):
+        """Test that participants store session_id reference."""
+        monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
+
+        manager = ChatStateManager(
+            provider="telegram",
+            chat_id="-123456",
+        )
+        manager.update_participant(
+            user_id="user-1",
+            username="alice",
+            display_name="Alice",
+            session_id="telegram_-123456_user-1",
+        )
+
+        state = manager.load()
+        participant = state.get_participant("user-1")
+        assert participant.session_id == "telegram_-123456_user-1"
+
+    def test_telegram_handler_sets_session_id(
+        self,
+        monkeypatch,
+        mock_get_chat_dir,
+        ash_home: Path,
+        telegram_group_message: IncomingMessage,
+    ):
+        """Test that Telegram handler sets session_id on participants."""
+        monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
+
+        from ash.providers.telegram.handlers import TelegramMessageHandler
+
+        handler = MagicMock(spec=TelegramMessageHandler)
+        handler._provider = MagicMock()
+        handler._provider.name = "telegram"
+
+        TelegramMessageHandler._update_chat_state(
+            handler, telegram_group_message, thread_id=None
+        )
+
+        state_path = (
+            ash_home
+            / "chats"
+            / "telegram"
+            / telegram_group_message.chat_id
+            / "state.json"
+        )
+        data = json.loads(state_path.read_text())
+
+        participant = data["participants"][0]
+        assert "session_id" in participant
+        # Session key follows pattern: provider_chatid (user_id only used for DMs)
+        assert participant["session_id"].startswith("telegram_")
+        assert telegram_group_message.chat_id.lstrip("-") in participant["session_id"]
+
+    async def test_session_state_has_chat_reference(self, tmp_path: Path):
+        """Test that session state.json contains chat reference."""
+        from ash.sessions import SessionManager
+
+        sessions_path = tmp_path / "sessions"
+
+        manager = SessionManager(
+            provider="telegram",
+            chat_id="-100123456789",
+            user_id="user-1",
+            sessions_path=sessions_path,
+        )
+
+        await manager.ensure_session()
+
+        state_path = manager.state_path
+        assert state_path.exists()
+
+        data = json.loads(state_path.read_text())
+        assert data["provider"] == "telegram"
+        assert data["chat_id"] == "-100123456789"
+        assert data["user_id"] == "user-1"
+        assert "created_at" in data
+
+    async def test_session_state_with_thread_id(self, tmp_path: Path):
+        """Test that session state.json includes thread_id when present."""
+        from ash.sessions import SessionManager
+
+        sessions_path = tmp_path / "sessions"
+
+        manager = SessionManager(
+            provider="telegram",
+            chat_id="-100123456789",
+            user_id="user-1",
+            thread_id="999",
+            sessions_path=sessions_path,
+        )
+
+        await manager.ensure_session()
+
+        data = json.loads(manager.state_path.read_text())
+        assert data["thread_id"] == "999"
+
+    async def test_round_trip_references(
+        self, monkeypatch, mock_get_chat_dir, ash_home: Path, tmp_path: Path
+    ):
+        """Test that chat state -> session -> chat state references work."""
+        monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
+
+        from ash.sessions import SessionManager, session_key
+
+        sessions_path = tmp_path / "sessions"
+        provider = "telegram"
+        chat_id = "-100123456789"
+        user_id = "user-1"
+
+        # Create session (this creates session state.json)
+        session_manager = SessionManager(
+            provider=provider,
+            chat_id=chat_id,
+            user_id=user_id,
+            sessions_path=sessions_path,
+        )
+        await session_manager.ensure_session()
+
+        # Create chat state with session reference
+        sess_id = session_key(provider, chat_id, user_id)
+        chat_state_manager = ChatStateManager(
+            provider=provider,
+            chat_id=chat_id,
+        )
+        chat_state_manager.update_participant(
+            user_id=user_id,
+            username="alice",
+            session_id=sess_id,
+        )
+
+        # Verify chat state has session_id
+        chat_state = chat_state_manager.load()
+        participant = chat_state.get_participant(user_id)
+        assert participant.session_id == sess_id
+
+        # Verify session state has chat reference
+        session_state_data = json.loads(session_manager.state_path.read_text())
+        assert session_state_data["chat_id"] == chat_id
+        assert session_state_data["provider"] == provider

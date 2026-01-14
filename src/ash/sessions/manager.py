@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from ash.sessions.types import (
     CompactionEntry,
     MessageEntry,
     SessionHeader,
+    SessionState,
     ToolResultEntry,
     ToolUseEntry,
     session_key,
@@ -22,6 +24,8 @@ from ash.sessions.utils import content_block_to_dict
 from ash.sessions.writer import SessionWriter
 
 logger = logging.getLogger(__name__)
+
+STATE_FILENAME = "state.json"
 
 
 def get_sessions_path() -> Path:
@@ -60,6 +64,10 @@ class SessionManager:
     def session_id(self) -> str:
         return self._header.id if self._header else ""
 
+    @property
+    def state_path(self) -> Path:
+        return self._session_dir / STATE_FILENAME
+
     def exists(self) -> bool:
         return self._reader.exists()
 
@@ -69,6 +77,7 @@ class SessionManager:
 
         self._header = await self._reader.load_header()
         if self._header is not None:
+            self._ensure_state_file()
             return self._header
 
         self._header = SessionHeader.create(
@@ -77,8 +86,24 @@ class SessionManager:
             chat_id=self.chat_id,
         )
         await self._writer.write_header(self._header)
+        self._ensure_state_file()
         logger.info("Created new session: %s", self._key)
         return self._header
+
+    def _ensure_state_file(self) -> None:
+        """Write state.json if it doesn't exist."""
+        if self.state_path.exists():
+            return
+
+        state = SessionState(
+            provider=self.provider,
+            chat_id=self.chat_id,
+            user_id=self.user_id,
+            thread_id=self.thread_id,
+        )
+        self._session_dir.mkdir(parents=True, exist_ok=True)
+        data = state.model_dump(mode="json")
+        self.state_path.write_text(json.dumps(data, indent=2, default=str))
 
     async def add_user_message(
         self,

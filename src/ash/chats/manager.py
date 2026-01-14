@@ -71,10 +71,11 @@ class ChatStateManager:
         user_id: str,
         username: str | None = None,
         display_name: str | None = None,
+        session_id: str | None = None,
     ) -> None:
         """Update participant info and save."""
         state = self.load()
-        state.update_participant(user_id, username, display_name)
+        state.update_participant(user_id, username, display_name, session_id)
         self.save()
 
     def update_chat_info(
