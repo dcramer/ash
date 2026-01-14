@@ -69,6 +69,11 @@ def get_skill_state_path() -> Path:
     return get_ash_home() / "data" / "skills"
 
 
+def get_uv_cache_path() -> Path:
+    """Get the uv package cache directory path for sandbox."""
+    return get_ash_home() / "cache" / "uv"
+
+
 def get_pid_path() -> Path:
     """Get the service PID file path."""
     return get_run_path() / "ash.pid"
@@ -110,6 +115,7 @@ def get_all_paths() -> dict[str, Path]:
         "run": get_run_path(),
         "sessions": get_sessions_path(),
         "skill_state": get_skill_state_path(),
+        "uv_cache": get_uv_cache_path(),
         "pid": get_pid_path(),
         "service_log": get_service_log_path(),
     }

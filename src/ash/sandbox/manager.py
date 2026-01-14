@@ -96,6 +96,9 @@ class SandboxConfig:
     # RPC socket mounting (for sandbox to communicate with host)
     rpc_socket_path: Path | None = None  # Host path to RPC socket
 
+    # UV cache mounting (for persistent package cache across sandbox runs)
+    uv_cache_path: Path | None = None  # Host path to uv cache directory
+
 
 class SandboxManager:
     """Manage Docker containers for sandboxed code execution.
@@ -253,6 +256,15 @@ class SandboxManager:
             }
             # Set environment variable for the client
             env["ASH_RPC_SOCKET"] = "/run/ash/rpc.sock"
+
+        # Mount uv cache for persistent package downloads across sandbox runs
+        if self._config.uv_cache_path:
+            # Create the cache directory if it doesn't exist
+            self._config.uv_cache_path.mkdir(parents=True, exist_ok=True)
+            volumes[str(self._config.uv_cache_path)] = {
+                "bind": "/home/sandbox/.cache/uv",
+                "mode": "rw",
+            }
 
         # Security-hardened container configuration
         container_config: dict[str, Any] = {

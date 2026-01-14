@@ -116,7 +116,7 @@ def build_sandbox_manager_config(
     Returns:
         SandboxManagerConfig dataclass for the sandbox executor.
     """
-    from ash.config.paths import get_logs_path, get_rpc_socket_path
+    from ash.config.paths import get_logs_path, get_rpc_socket_path, get_uv_cache_path
     from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
     from ash.sessions.manager import get_sessions_path
 
@@ -129,6 +129,9 @@ def build_sandbox_manager_config(
     # Get RPC socket path for sandbox-to-host communication
     rpc_socket_path = get_rpc_socket_path()
 
+    # Get uv cache path for persistent package downloads
+    uv_cache_path = get_uv_cache_path()
+
     if config is None:
         return SandboxManagerConfig(
             workspace_path=workspace_path,
@@ -136,6 +139,7 @@ def build_sandbox_manager_config(
             sessions_path=sessions_path,
             logs_path=logs_path,
             rpc_socket_path=rpc_socket_path,
+            uv_cache_path=uv_cache_path,
         )
 
     return SandboxManagerConfig(
@@ -153,4 +157,5 @@ def build_sandbox_manager_config(
         sessions_access=config.sessions_access,
         logs_path=logs_path,
         rpc_socket_path=rpc_socket_path,
+        uv_cache_path=uv_cache_path,
     )
