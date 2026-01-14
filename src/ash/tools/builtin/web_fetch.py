@@ -360,20 +360,10 @@ class WebFetchTool(Tool):
         input_data: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
-        """Fetch and extract content from URL.
-
-        Args:
-            input_data: Must contain 'url' key.
-            context: Execution context.
-
-        Returns:
-            Tool result with extracted content.
-        """
         url = input_data.get("url", "").strip()
         if not url:
             return ToolResult.error("Missing required parameter: url")
 
-        # Validate URL scheme
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
             return ToolResult.error("Invalid URL: must be http or https")
@@ -381,83 +371,53 @@ class WebFetchTool(Tool):
         extract_mode = input_data.get("extract_mode", "markdown")
         max_length = input_data.get("max_length", self._max_length)
 
-        # Check cache first
         if self._cache:
             cached = self._cache.get(url)
             if cached is not None and isinstance(cached, str):
                 logger.debug(f"Cache hit for URL: {url}")
-                return ToolResult.success(
-                    cached,
-                    cached=True,
-                    url=url,
-                )
+                return ToolResult.success(cached, cached=True, url=url)
 
         try:
-            result = await self._fetch_url(url, extract_mode, max_length)
+            escaped_url = shlex.quote(url)
+            escaped_mode = shlex.quote(extract_mode)
+            command = (
+                f"python3 -c {shlex.quote(FETCH_SCRIPT)} "
+                f"{escaped_url} {escaped_mode} {max_length}"
+            )
 
-            # Cache the content
-            if self._cache and "content" in result:
-                self._cache.set(url, result["content"])
+            result = await self._executor.execute(
+                command,
+                timeout=self._timeout,
+                reuse_container=True,
+            )
+
+            if result.timed_out:
+                raise TimeoutError(f"Request timed out after {self._timeout}s")
+
+            output = result.stdout.strip() if result.stdout else ""
+            if not output:
+                raise ValueError("Empty response from fetch")
+
+            data = json.loads(output)
+            if "error" in data:
+                raise Exception(data["error"])
+
+            if self._cache and "content" in data:
+                self._cache.set(url, data["content"])
 
             return ToolResult.success(
-                result.get("content", ""),
+                data.get("content", ""),
                 cached=False,
-                url=result.get("url", url),
-                final_url=result.get("final_url", url),
-                title=result.get("title"),
-                content_type=result.get("content_type"),
-                truncated=result.get("truncated", False),
+                url=data.get("url", url),
+                final_url=data.get("final_url", url),
+                title=data.get("title"),
+                content_type=data.get("content_type"),
+                truncated=data.get("truncated", False),
             )
 
         except Exception as e:
             logger.exception(f"Fetch error for URL: {url}")
             return ToolResult.error(f"Fetch error: {e}")
-
-    async def _fetch_url(
-        self, url: str, extract_mode: str, max_length: int
-    ) -> dict[str, Any]:
-        """Fetch URL in sandbox and parse response.
-
-        Args:
-            url: URL to fetch.
-            extract_mode: Content extraction mode.
-            max_length: Maximum content length.
-
-        Returns:
-            Parsed response dict.
-
-        Raises:
-            Exception: On fetch failure.
-        """
-        escaped_url = shlex.quote(url)
-        escaped_mode = shlex.quote(extract_mode)
-        command = (
-            f"python3 -c {shlex.quote(FETCH_SCRIPT)} "
-            f"{escaped_url} {escaped_mode} {max_length}"
-        )
-
-        result = await self._executor.execute(
-            command,
-            timeout=self._timeout,
-            reuse_container=True,
-        )
-
-        if result.timed_out:
-            raise TimeoutError(f"Request timed out after {self._timeout}s")
-
-        output = result.stdout.strip() if result.stdout else ""
-        if not output:
-            raise ValueError("Empty response from fetch")
-
-        try:
-            data = json.loads(output)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON response: {e}") from e
-
-        if "error" in data:
-            raise Exception(data["error"])
-
-        return data
 
     async def cleanup(self) -> None:
         """Clean up sandbox resources."""

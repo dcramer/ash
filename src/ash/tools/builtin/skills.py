@@ -131,12 +131,10 @@ class UseSkillTool(Tool):
 
     @property
     def name(self) -> str:
-        """Tool name."""
         return "use_skill"
 
     @property
     def description(self) -> str:
-        """Tool description."""
         skills = self._registry.list_available()
         if not skills:
             return "Invoke a skill (none available)"
@@ -145,7 +143,6 @@ class UseSkillTool(Tool):
 
     @property
     def input_schema(self) -> dict[str, Any]:
-        """Input schema for the tool."""
         return {
             "type": "object",
             "properties": {
@@ -165,20 +162,31 @@ class UseSkillTool(Tool):
             "required": ["skill", "message"],
         }
 
+    def _build_skill_environment(
+        self,
+        skill: SkillDefinition,
+        skill_config: Any,
+    ) -> dict[str, str]:
+        """Build environment dict for skill execution."""
+        if not skill_config:
+            return {}
+        config_env = skill_config.get_env_vars()
+        env: dict[str, str] = {}
+        for var_name in skill.env:
+            if var_name in config_env:
+                env[var_name] = config_env[var_name]
+            else:
+                logger.warning(
+                    f"Skill '{skill.name}' needs {var_name} but not found in "
+                    f"[skills.{skill.name}] config"
+                )
+        return env
+
     async def execute(
         self,
         input_data: dict[str, Any],
         context: ToolContext | None = None,
     ) -> ToolResult:
-        """Execute the tool.
-
-        Args:
-            input_data: Tool input with skill name, message, and optional context.
-            context: Optional tool execution context.
-
-        Returns:
-            ToolResult with skill output.
-        """
         skill_name = input_data.get("skill")
         message = input_data.get("message")
         user_context = input_data.get("context", "")
@@ -189,11 +197,8 @@ class UseSkillTool(Tool):
         if not message:
             return ToolResult.error("Missing required field: message")
 
-        # Look up skill
         if not self._registry.has(skill_name):
-            # Try reloading in case skill was just created
             self._registry.reload_workspace(self._config.workspace)
-
             if not self._registry.has(skill_name):
                 available = ", ".join(self._registry.list_names())
                 return ToolResult.error(
@@ -201,13 +206,11 @@ class UseSkillTool(Tool):
                 )
 
         skill = self._registry.get(skill_name)
-
-        # Check if skill is enabled in config
         skill_config = self._config.skills.get(skill_name)
+
         if skill_config and not skill_config.enabled:
             return ToolResult.error(f"Skill '{skill_name}' is disabled in config")
 
-        # Check if skill has required env vars that aren't configured
         if skill.env:
             config_env = skill_config.get_env_vars() if skill_config else {}
             missing = [var for var in skill.env if var not in config_env]
@@ -219,16 +222,16 @@ class UseSkillTool(Tool):
                     + "\n".join(f'{var} = "your-value-here"' for var in missing)
                 )
 
-        # Build scoped environment from config
         env = self._build_skill_environment(skill, skill_config)
+        if not skill_config and skill.env:
+            logger.warning(
+                f"Skill '{skill.name}' needs env vars {skill.env} "
+                f"but no [skills.{skill.name}] config section found"
+            )
 
-        # Determine model override from config
         model_override = skill_config.model if skill_config else None
-
-        # Create ephemeral agent from skill
         agent = SkillAgent(skill, model_override=model_override)
 
-        # Build agent context with user-provided context
         agent_context = AgentContext(
             session_id=context.session_id if context else None,
             user_id=context.user_id if context else None,
@@ -238,7 +241,6 @@ class UseSkillTool(Tool):
 
         logger.info(f"Invoking skill '{skill_name}' with message: {message[:100]}...")
 
-        # Execute with scoped environment
         result = await self._executor.execute(
             agent, message, agent_context, environment=env
         )
@@ -249,43 +251,3 @@ class UseSkillTool(Tool):
         return ToolResult.success(
             result.content, iterations=result.iterations, skill=skill_name
         )
-
-    def _build_skill_environment(
-        self,
-        skill: SkillDefinition,
-        skill_config: Any | None,
-    ) -> dict[str, str]:
-        """Build scoped environment for skill execution.
-
-        Args:
-            skill: Skill definition with env requirements.
-            skill_config: Optional config for the skill.
-
-        Returns:
-            Dict of env var name to value.
-        """
-        env: dict[str, str] = {}
-
-        if not skill_config:
-            # No config for this skill - warn if skill needs env vars
-            if skill.env:
-                logger.warning(
-                    f"Skill '{skill.name}' needs env vars {skill.env} "
-                    f"but no [skills.{skill.name}] config section found"
-                )
-            return env
-
-        # Get env vars from config
-        config_env = skill_config.get_env_vars()
-
-        # Only inject env vars that the skill declared it needs
-        for var_name in skill.env:
-            if var_name in config_env:
-                env[var_name] = config_env[var_name]
-            else:
-                logger.warning(
-                    f"Skill '{skill.name}' needs {var_name} but not found in "
-                    f"[skills.{skill.name}] config"
-                )
-
-        return env

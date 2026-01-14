@@ -1,11 +1,4 @@
-"""Memory store for memories, people, and user profiles.
-
-Note: Session and message storage has been moved to ash.sessions module.
-This module now only handles SQLite-based storage for:
-- Memories (with embeddings for semantic search)
-- People (relationship tracking)
-- User profiles
-"""
+"""Memory store for memories, people, and user profiles."""
 
 import uuid
 from datetime import UTC, datetime
@@ -24,15 +17,8 @@ from ash.db.models import (
 class MemoryStore:
     """Store and retrieve memories, people, and user profiles."""
 
-    def __init__(self, session: AsyncSession):
-        """Initialize memory store.
-
-        Args:
-            session: Database session.
-        """
+    def __init__(self, session: AsyncSession) -> None:
         self._session = session
-
-    # Person operations
 
     async def create_person(
         self,
@@ -42,18 +28,7 @@ class MemoryStore:
         aliases: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Person:
-        """Create a new person entity.
-
-        Args:
-            owner_user_id: User who owns this person relationship.
-            name: Person's primary name.
-            relationship: Relationship type (wife, boss, friend, etc.).
-            aliases: Alternative names or references.
-            metadata: Optional metadata.
-
-        Returns:
-            Created person.
-        """
+        """Create a new person entity."""
         person = Person(
             id=str(uuid.uuid4()),
             owner_user_id=owner_user_id,
@@ -67,16 +42,10 @@ class MemoryStore:
         return person
 
     async def get_person(self, person_id: str) -> Person | None:
-        """Get person by ID.
-
-        Args:
-            person_id: Person ID.
-
-        Returns:
-            Person or None if not found.
-        """
-        stmt = select(Person).where(Person.id == person_id)
-        result = await self._session.execute(stmt)
+        """Get person by ID."""
+        result = await self._session.execute(
+            select(Person).where(Person.id == person_id)
+        )
         return result.scalar_one_or_none()
 
     async def find_person_by_reference(
@@ -84,56 +53,35 @@ class MemoryStore:
         owner_user_id: str,
         reference: str,
     ) -> Person | None:
-        """Find person by name, relationship, or alias.
-
-        Args:
-            owner_user_id: The user who owns this person reference.
-            reference: Name like "Sarah", relationship like "wife", or alias.
-
-        Returns:
-            Person if found, None otherwise.
-        """
-        reference_lower = reference.lower().strip()
-
-        # Remove common prefixes
+        """Find person by name, relationship, or alias."""
+        ref = reference.lower().strip()
         for prefix in ["my ", "the ", "@"]:
-            if reference_lower.startswith(prefix):
-                reference_lower = reference_lower[len(prefix) :]
+            if ref.startswith(prefix):
+                ref = ref[len(prefix) :]
 
-        stmt = select(Person).where(Person.owner_user_id == owner_user_id)
-        result = await self._session.execute(stmt)
-        people = result.scalars().all()
+        result = await self._session.execute(
+            select(Person).where(Person.owner_user_id == owner_user_id)
+        )
 
-        for person in people:
-            # Check name
-            if person.name.lower() == reference_lower:
+        for person in result.scalars().all():
+            if person.name.lower() == ref:
                 return person
-            # Check relationship
-            if person.relation and person.relation.lower() == reference_lower:
+            if person.relation and person.relation.lower() == ref:
                 return person
-            # Check aliases
             if person.aliases:
                 for alias in person.aliases:
-                    if alias.lower() == reference_lower:
+                    if alias.lower() == ref:
                         return person
 
         return None
 
     async def get_people_for_user(self, owner_user_id: str) -> list[Person]:
-        """Get all people for a user.
-
-        Args:
-            owner_user_id: User ID.
-
-        Returns:
-            List of people.
-        """
-        stmt = (
+        """Get all people for a user."""
+        result = await self._session.execute(
             select(Person)
             .where(Person.owner_user_id == owner_user_id)
             .order_by(Person.name)
         )
-        result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
     async def update_person(
@@ -143,17 +91,7 @@ class MemoryStore:
         relationship: str | None = None,
         aliases: list[str] | None = None,
     ) -> Person | None:
-        """Update person details.
-
-        Args:
-            person_id: Person ID.
-            name: New name (or None to keep current).
-            relationship: New relationship (or None to keep current).
-            aliases: New aliases (or None to keep current).
-
-        Returns:
-            Updated person or None if not found.
-        """
+        """Update person details."""
         person = await self.get_person(person_id)
         if not person:
             return None
@@ -169,15 +107,7 @@ class MemoryStore:
         return person
 
     async def add_person_alias(self, person_id: str, alias: str) -> Person | None:
-        """Add an alias to a person.
-
-        Args:
-            person_id: Person ID.
-            alias: Alias to add.
-
-        Returns:
-            Updated person or None if not found.
-        """
+        """Add an alias to a person."""
         person = await self.get_person(person_id)
         if not person:
             return None
@@ -190,8 +120,6 @@ class MemoryStore:
 
         return person
 
-    # Memory operations
-
     async def add_memory(
         self,
         content: str,
@@ -202,32 +130,10 @@ class MemoryStore:
         chat_id: str | None = None,
         subject_person_ids: list[str] | None = None,
     ) -> Memory:
-        """Add a memory entry.
-
-        Memory scoping:
-        - Personal: owner_user_id set, chat_id NULL - only visible to that user
-        - Group: owner_user_id NULL, chat_id set - visible to everyone in that chat
-
-        Args:
-            content: Memory content.
-            source: Source of memory.
-            expires_at: When this memory expires.
-            metadata: Optional metadata.
-            owner_user_id: User who added this memory (NULL for group memories).
-            chat_id: Chat this memory belongs to (NULL for personal memories).
-            subject_person_ids: List of person IDs this memory is about.
-
-        Returns:
-            Created memory entry.
-
-        Raises:
-            ValueError: If any subject_person_ids don't exist in the database.
-        """
-        # Validate subject_person_ids exist
+        """Add a memory entry."""
         if subject_person_ids:
             for person_id in subject_person_ids:
-                person = await self.get_person(person_id)
-                if not person:
+                if not await self.get_person(person_id):
                     raise ValueError(f"Invalid subject person ID: {person_id}")
 
         memory = Memory(
@@ -252,18 +158,7 @@ class MemoryStore:
         owner_user_id: str | None = None,
         chat_id: str | None = None,
     ) -> list[Memory]:
-        """Get memory entries.
-
-        Args:
-            limit: Maximum number of entries.
-            include_expired: Include expired entries.
-            include_superseded: Include superseded entries.
-            owner_user_id: Filter to user's personal memories.
-            chat_id: Filter to group memories for this chat.
-
-        Returns:
-            List of memory entries.
-        """
+        """Get memory entries."""
         from sqlalchemy import or_
 
         stmt = select(Memory).order_by(Memory.created_at.desc()).limit(limit)
@@ -275,14 +170,11 @@ class MemoryStore:
         if not include_superseded:
             stmt = stmt.where(Memory.superseded_at.is_(None))
 
-        # Apply scope filtering at database level
         if owner_user_id or chat_id:
             conditions = []
             if owner_user_id:
-                # Personal memories for this user
                 conditions.append(Memory.owner_user_id == owner_user_id)
             if chat_id:
-                # Group memories for this chat (no owner)
                 conditions.append(
                     (Memory.chat_id == chat_id) & (Memory.owner_user_id.is_(None))
                 )
@@ -298,21 +190,9 @@ class MemoryStore:
         include_expired: bool = False,
         include_superseded: bool = False,
     ) -> list[Memory]:
-        """Get memory entries about a specific person.
-
-        Args:
-            person_id: Person ID.
-            limit: Maximum number of entries.
-            include_expired: Include expired entries.
-            include_superseded: Include superseded entries.
-
-        Returns:
-            List of memory entries about this person.
-        """
+        """Get memory entries about a specific person."""
         from sqlalchemy import text
 
-        # Use SQLite JSON function to check if person_id is in the array
-        # json_each unpacks the array so we can search for the value
         stmt = (
             select(Memory)
             .where(
@@ -340,19 +220,11 @@ class MemoryStore:
         memory_id: str,
         superseded_by_id: str,
     ) -> bool:
-        """Mark a memory as superseded by another memory.
-
-        Args:
-            memory_id: ID of the memory to mark as superseded.
-            superseded_by_id: ID of the newer memory that supersedes this one.
-
-        Returns:
-            True if updated, False if memory not found.
-        """
-        stmt = select(Memory).where(Memory.id == memory_id)
-        result = await self._session.execute(stmt)
+        """Mark a memory as superseded by another memory."""
+        result = await self._session.execute(
+            select(Memory).where(Memory.id == memory_id)
+        )
         memory = result.scalar_one_or_none()
-
         if not memory:
             return False
 
@@ -362,30 +234,14 @@ class MemoryStore:
         return True
 
     async def get_memory(self, memory_id: str) -> Memory | None:
-        """Get memory by ID.
-
-        Args:
-            memory_id: Memory ID.
-
-        Returns:
-            Memory or None if not found.
-        """
-        stmt = select(Memory).where(Memory.id == memory_id)
-        result = await self._session.execute(stmt)
+        """Get memory by ID."""
+        result = await self._session.execute(
+            select(Memory).where(Memory.id == memory_id)
+        )
         return result.scalar_one_or_none()
 
     async def delete_memory(self, memory_id: str) -> bool:
-        """Delete a memory by ID.
-
-        Note: This only deletes the memory record. The caller is responsible
-        for deleting the associated embedding via SemanticRetriever.
-
-        Args:
-            memory_id: Memory ID.
-
-        Returns:
-            True if deleted, False if not found.
-        """
+        """Delete a memory by ID."""
         memory = await self.get_memory(memory_id)
         if not memory:
             return False
@@ -394,8 +250,6 @@ class MemoryStore:
         await self._session.flush()
         return True
 
-    # User profile operations
-
     async def get_or_create_user_profile(
         self,
         user_id: str,
@@ -403,19 +257,10 @@ class MemoryStore:
         username: str | None = None,
         display_name: str | None = None,
     ) -> UserProfile:
-        """Get or create user profile.
-
-        Args:
-            user_id: User ID from provider.
-            provider: Provider name.
-            username: Username.
-            display_name: Display name.
-
-        Returns:
-            User profile.
-        """
-        stmt = select(UserProfile).where(UserProfile.user_id == user_id)
-        result = await self._session.execute(stmt)
+        """Get or create user profile."""
+        result = await self._session.execute(
+            select(UserProfile).where(UserProfile.user_id == user_id)
+        )
         profile = result.scalar_one_or_none()
 
         if profile is None:
@@ -426,13 +271,11 @@ class MemoryStore:
                 display_name=display_name,
             )
             self._session.add(profile)
-            await self._session.flush()
         else:
-            # Update if new info provided
             if username and profile.username != username:
                 profile.username = username
             if display_name and profile.display_name != display_name:
                 profile.display_name = display_name
-            await self._session.flush()
 
+        await self._session.flush()
         return profile

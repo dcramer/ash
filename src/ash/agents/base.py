@@ -7,19 +7,15 @@ from typing import Any
 
 @dataclass
 class AgentConfig:
-    """Configuration for a built-in agent.
-
-    Agents are code-defined subagents that run in isolated LLM loops
-    with their own system prompts and tool restrictions.
-    """
+    """Configuration for a built-in agent."""
 
     name: str
     description: str
     system_prompt: str
-    allowed_tools: list[str] = field(default_factory=list)  # Empty = all tools
+    allowed_tools: list[str] = field(default_factory=list)
     max_iterations: int = 10
-    model: str | None = None  # None = use session model
-    is_skill_agent: bool = False  # True = block use_skill to prevent recursion
+    model: str | None = None
+    is_skill_agent: bool = False
 
 
 @dataclass
@@ -42,45 +38,19 @@ class AgentResult:
 
     @classmethod
     def success(cls, content: str, iterations: int = 0) -> "AgentResult":
-        """Create a successful result."""
         return cls(content=content, iterations=iterations)
 
     @classmethod
     def error(cls, message: str) -> "AgentResult":
-        """Create an error result."""
         return cls(content=message, is_error=True)
 
 
 class Agent(ABC):
-    """Base class for built-in agents.
-
-    Agents are autonomous subprocesses that run isolated LLM loops
-    for complex multi-step tasks. They have their own:
-    - System prompt
-    - Tool restrictions (can whitelist specific tools)
-    - Max iterations limit
-    - Optional model override
-
-    Unlike skills (which are markdown files the main agent reads),
-    agents execute in their own context and return results.
-    """
+    """Base class for built-in agents."""
 
     @property
     @abstractmethod
-    def config(self) -> AgentConfig:
-        """Return agent configuration."""
-        ...
+    def config(self) -> AgentConfig: ...
 
     def build_system_prompt(self, context: AgentContext) -> str:
-        """Build system prompt, optionally injecting context.
-
-        Override this method to customize the system prompt
-        based on the execution context.
-
-        Args:
-            context: Execution context with session info and input data.
-
-        Returns:
-            System prompt string.
-        """
         return self.config.system_prompt

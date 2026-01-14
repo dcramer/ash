@@ -34,17 +34,10 @@ DEFAULT_MODEL = "claude-sonnet-4-20250514"
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude provider."""
 
-    # Shared semaphore for rate limiting across all instances
     _semaphore: asyncio.Semaphore | None = None
-    _max_concurrent: int = 2  # Max concurrent API requests
+    _max_concurrent: int = 2
 
     def __init__(self, api_key: str | None = None, max_concurrent: int | None = None):
-        """Initialize provider.
-
-        Args:
-            api_key: Anthropic API key. If None, uses ANTHROPIC_API_KEY env var.
-            max_concurrent: Max concurrent API requests (default: 2).
-        """
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         if max_concurrent is not None:
             AnthropicProvider._max_concurrent = max_concurrent
@@ -62,11 +55,10 @@ class AnthropicProvider(LLMProvider):
         return DEFAULT_MODEL
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
-        """Convert internal messages to Anthropic format."""
         result = []
         for msg in messages:
             if msg.role == Role.SYSTEM:
-                continue  # System handled separately
+                continue
 
             content: str | list[dict[str, Any]]
             if isinstance(msg.content, str):
@@ -95,18 +87,12 @@ class AnthropicProvider(LLMProvider):
                             }
                         )
 
-            result.append(
-                {
-                    "role": msg.role.value,
-                    "content": content,
-                }
-            )
+            result.append({"role": msg.role.value, "content": content})
         return result
 
     def _convert_tools(
         self, tools: list[ToolDefinition] | None
     ) -> list[dict[str, Any]] | None:
-        """Convert tool definitions to Anthropic format."""
         if not tools:
             return None
         return [
@@ -127,15 +113,9 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int,
         temperature: float | None,
         thinking: "ThinkingConfig | None",
-    ) -> tuple[str, dict[str, Any]]:
-        """Build common request kwargs for complete and stream methods.
-
-        Returns:
-            Tuple of (model_name, kwargs dict).
-        """
-        model_name = model or self.default_model
+    ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
-            "model": model_name,
+            "model": model or self.default_model,
             "messages": self._convert_messages(messages),
             "max_tokens": max_tokens,
         }
@@ -158,10 +138,9 @@ class AnthropicProvider(LLMProvider):
                     f"Extended thinking enabled with budget={thinking.effective_budget}"
                 )
 
-        return model_name, kwargs
+        return kwargs
 
     def _parse_response(self, response: anthropic.types.Message) -> CompletionResponse:
-        """Parse Anthropic response to internal format."""
         content: list[ContentBlock] = []
 
         for block in response.content:
@@ -198,20 +177,10 @@ class AnthropicProvider(LLMProvider):
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
     ) -> CompletionResponse:
-        """Generate a completion.
-
-        Args:
-            messages: List of messages.
-            model: Model to use.
-            tools: Tool definitions.
-            system: System prompt.
-            max_tokens: Maximum tokens.
-            temperature: Sampling temperature. None = use API default (omit for reasoning models).
-            thinking: Extended thinking configuration.
-        """
-        model_name, kwargs = self._build_request_kwargs(
+        kwargs = self._build_request_kwargs(
             messages, model, tools, system, max_tokens, temperature, thinking
         )
+        model_name = kwargs["model"]
 
         assert self._semaphore is not None
         semaphore = self._semaphore
@@ -245,23 +214,11 @@ class AnthropicProvider(LLMProvider):
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
     ) -> AsyncGenerator[StreamChunk, None]:
-        """Generate a streaming completion.
-
-        Args:
-            messages: List of messages.
-            model: Model to use.
-            tools: Tool definitions.
-            system: System prompt.
-            max_tokens: Maximum tokens.
-            temperature: Sampling temperature. None = use API default (omit for reasoning models).
-            thinking: Extended thinking configuration.
-        """
-        model_name, kwargs = self._build_request_kwargs(
+        kwargs = self._build_request_kwargs(
             messages, model, tools, system, max_tokens, temperature, thinking
         )
-
+        model_name = kwargs["model"]
         current_tool_id: str | None = None
-        current_tool_name: str | None = None
 
         assert self._semaphore is not None
         logger.debug(f"Waiting for API slot (stream, model={model_name})")
@@ -275,11 +232,10 @@ class AnthropicProvider(LLMProvider):
                     elif event.type == "content_block_start":
                         if event.content_block.type == "tool_use":
                             current_tool_id = event.content_block.id
-                            current_tool_name = event.content_block.name
                             yield StreamChunk(
                                 type=StreamEventType.TOOL_USE_START,
                                 tool_use_id=current_tool_id,
-                                tool_name=current_tool_name,
+                                tool_name=event.content_block.name,
                             )
 
                     elif event.type == "content_block_delta":
@@ -302,7 +258,6 @@ class AnthropicProvider(LLMProvider):
                                 tool_use_id=current_tool_id,
                             )
                             current_tool_id = None
-                            current_tool_name = None
 
                     elif event.type == "message_stop":
                         yield StreamChunk(type=StreamEventType.MESSAGE_END)
@@ -314,11 +269,6 @@ class AnthropicProvider(LLMProvider):
         *,
         model: str | None = None,
     ) -> list[list[float]]:
-        """Generate embeddings.
-
-        Note: Anthropic doesn't have an embeddings API.
-        This raises NotImplementedError - use OpenAI for embeddings.
-        """
         raise NotImplementedError(
             "Anthropic does not provide an embeddings API. Use OpenAI for embeddings."
         )

@@ -104,32 +104,13 @@ def build_sandbox_manager_config(
     workspace_path: Path | None,
     default_network_mode: Literal["none", "bridge"] = "none",
 ) -> "SandboxManagerConfig":
-    """Convert pydantic SandboxConfig to manager's dataclass config.
-
-    Shared utility for sandbox-based tools (bash, web_fetch, web_search).
-
-    Args:
-        config: Pydantic SandboxConfig from application config, or None.
-        workspace_path: Path to workspace to mount in sandbox.
-        default_network_mode: Network mode when config is None (default: "none").
-
-    Returns:
-        SandboxManagerConfig dataclass for the sandbox executor.
-    """
     from ash.config.paths import get_logs_path, get_rpc_socket_path, get_uv_cache_path
     from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
     from ash.sessions.manager import get_sessions_path
 
-    # Get sessions path for mounting chat history in sandbox
     sessions_path = get_sessions_path()
-
-    # Get logs path for mounting server logs in sandbox
     logs_path = get_logs_path()
-
-    # Get RPC socket path for sandbox-to-host communication
     rpc_socket_path = get_rpc_socket_path()
-
-    # Get uv cache path for persistent package downloads
     uv_cache_path = get_uv_cache_path()
 
     if config is None:

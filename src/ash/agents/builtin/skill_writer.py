@@ -350,18 +350,10 @@ bash /workspace/skills/json-stats/analyze.sh "$FILE"
 
 
 class SkillWriterAgent(Agent):
-    """Help create or update well-structured SKILL.md files.
-
-    This agent guides the user through creating or updating a skill:
-    1. Understanding what the skill should do
-    2. Creating the skill directory structure
-    3. Writing proper SKILL.md with frontmatter
-    4. Validating the result
-    """
+    """Help create or update well-structured SKILL.md files."""
 
     @property
     def config(self) -> AgentConfig:
-        """Return agent configuration."""
         return AgentConfig(
             name="skill-writer",
             description="Create, update, or rewrite a skill with proper SKILL.md format",

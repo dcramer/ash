@@ -44,19 +44,16 @@ class UseAgentTool(Tool):
 
     @property
     def name(self) -> str:
-        """Tool name."""
         return "use_agent"
 
     @property
     def description(self) -> str:
-        """Tool description."""
-        agents = self._registry.list_available()
+        agents = self._registry.list_agents()
         agent_list = ", ".join(a.config.name for a in agents)
         return f"Run a specialized agent for complex tasks. Available: {agent_list}"
 
     @property
     def input_schema(self) -> dict[str, Any]:
-        """Input schema for the tool."""
         return {
             "type": "object",
             "properties": {
@@ -81,15 +78,6 @@ class UseAgentTool(Tool):
         input_data: dict[str, Any],
         context: ToolContext | None = None,
     ) -> ToolResult:
-        """Execute the tool.
-
-        Args:
-            input_data: Tool input with agent name and message.
-            context: Optional tool execution context.
-
-        Returns:
-            ToolResult with agent output.
-        """
         agent_name = input_data.get("agent")
         message = input_data.get("message")
         extra_input = input_data.get("input", {})
@@ -100,16 +88,14 @@ class UseAgentTool(Tool):
         if not message:
             return ToolResult.error("Missing required field: message")
 
-        # Look up agent
-        if not self._registry.has(agent_name):
-            available = ", ".join(self._registry.list_names())
+        if agent_name not in self._registry:
+            available = ", ".join(a.config.name for a in self._registry.list_agents())
             return ToolResult.error(
                 f"Agent '{agent_name}' not found. Available: {available}"
             )
 
         agent = self._registry.get(agent_name)
 
-        # Build context
         agent_context = AgentContext(
             session_id=context.session_id if context else None,
             user_id=context.user_id if context else None,
@@ -117,10 +103,8 @@ class UseAgentTool(Tool):
             input_data=extra_input,
         )
 
-        # Execute agent
         result = await self._executor.execute(agent, message, agent_context)
 
-        # Reload skills after skill-writer completes successfully
         if agent_name == "skill-writer" and not result.is_error:
             if self._skill_registry and self._config:
                 count = self._skill_registry.reload_workspace(self._config.workspace)

@@ -349,20 +349,12 @@ You are a terse, extremely online assistant with late millennial/zoomer sensibil
 
 @dataclass
 class SoulConfig:
-    """Configuration parsed from SOUL.md frontmatter."""
-
     extends: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class Workspace:
-    """Loaded workspace configuration.
-
-    Contains the SOUL (personality) that defines how the assistant
-    behaves and interacts.
-    """
-
     path: Path
     soul: str = ""
     soul_config: SoulConfig = field(default_factory=SoulConfig)
@@ -370,45 +362,28 @@ class Workspace:
 
 
 class WorkspaceLoader:
-    """Load workspace configuration from directory."""
-
     SOUL_FILENAME = "SOUL.md"
 
     def __init__(self, workspace_path: Path):
-        """Initialize loader.
-
-        Args:
-            workspace_path: Path to workspace directory.
-        """
         self._path = workspace_path.expanduser().resolve()
 
     @property
     def path(self) -> Path:
-        """Get workspace path."""
         return self._path
 
     def load(self) -> Workspace:
-        """Load workspace from directory.
-
-        Returns:
-            Loaded workspace.
-
-        Raises:
-            FileNotFoundError: If workspace directory doesn't exist.
-        """
         if not self._path.exists():
             raise FileNotFoundError(f"Workspace directory not found: {self._path}")
 
         workspace = Workspace(path=self._path)
-
-        # Load SOUL.md (personality)
         soul_path = self._path / self.SOUL_FILENAME
+
         if soul_path.exists():
-            raw_content = soul_path.read_text(encoding="utf-8").strip()
-            workspace.soul, workspace.soul_config = self._parse_soul(raw_content)
+            workspace.soul, workspace.soul_config = self._parse_soul(
+                soul_path.read_text(encoding="utf-8").strip()
+            )
             logger.debug(f"Loaded SOUL.md ({len(workspace.soul)} chars)")
         else:
-            # Use default personality
             workspace.soul = PERSONALITIES["ash"]
             workspace.soul_config = SoulConfig(extends="ash")
             logger.info("No SOUL.md found, using default Ash personality")
@@ -416,38 +391,29 @@ class WorkspaceLoader:
         return workspace
 
     def _parse_soul(self, content: str) -> tuple[str, SoulConfig]:
-        """Parse SOUL.md with optional frontmatter and inheritance."""
         config = SoulConfig()
         body = content
 
-        # Extract frontmatter if present
-        match = FRONTMATTER_PATTERN.match(content)
-        if match:
+        if match := FRONTMATTER_PATTERN.match(content):
             body = content[match.end() :].strip()
             try:
-                data = yaml.safe_load(match.group(1))
-                if isinstance(data, dict):
+                if isinstance(data := yaml.safe_load(match.group(1)), dict):
                     config.extends = data.get("extends")
                     config.extra = {k: v for k, v in data.items() if k != "extends"}
             except yaml.YAMLError as e:
                 logger.warning(f"Failed to parse SOUL.md frontmatter: {e}")
 
-        # Resolve base personality if extending
         if config.extends:
             base_name = config.extends.lower().replace("-", "_").replace(" ", "_")
-            base = PERSONALITIES.get(base_name)
-            if base:
-                soul = f"{base}\n\n{body}" if body else base
-                return soul, config
+            if base := PERSONALITIES.get(base_name):
+                return (f"{base}\n\n{body}" if body else base), config
             logger.warning(
-                f"Unknown personality '{config.extends}', "
-                f"available: {', '.join(PERSONALITIES.keys())}"
+                f"Unknown personality '{config.extends}', available: {', '.join(PERSONALITIES.keys())}"
             )
 
         return body or PERSONALITIES["ash"], config
 
     def load_custom_file(self, filename: str, workspace: Workspace) -> str | None:
-        """Load a custom file from workspace, returning None if not found."""
         file_path = self._path / filename
         if not file_path.exists():
             return None
@@ -456,19 +422,14 @@ class WorkspaceLoader:
         return content
 
     def ensure_workspace(self) -> None:
-        """Ensure workspace directory exists with default files."""
         self._path.mkdir(parents=True, exist_ok=True)
-
-        # Create default SOUL.md if not exists
         soul_path = self._path / self.SOUL_FILENAME
         if not soul_path.exists():
-            soul_path.write_text(self._default_soul(), encoding="utf-8")
+            soul_path.write_text(DEFAULT_SOUL, encoding="utf-8")
             logger.info(f"Created default {self.SOUL_FILENAME}")
 
-    @staticmethod
-    def _default_soul() -> str:
-        """Generate default SOUL.md content."""
-        return """---
+
+DEFAULT_SOUL = """---
 extends: ash
 ---
 

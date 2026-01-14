@@ -248,38 +248,38 @@ async def _run_server(
         else:
             await server.serve()
     finally:
-        # Stop schedule watcher
-        try:
-            await schedule_watcher.stop()
-        except Exception as e:
-            logger.warning(f"Error stopping schedule watcher: {e}")
+        await _cleanup_server(
+            schedule_watcher,
+            telegram_provider,
+            rpc_server,
+            components.sandbox_executor,
+            memory_session,
+            pid_path,
+            remove_pid_file,
+        )
 
-        # Stop telegram provider gracefully
-        if telegram_provider:
+
+async def _cleanup_server(
+    schedule_watcher,
+    telegram_provider,
+    rpc_server,
+    sandbox_executor,
+    memory_session,
+    pid_path,
+    remove_pid_file,
+) -> None:
+    """Clean up server resources."""
+    for resource, method in [
+        (schedule_watcher, "stop"),
+        (telegram_provider, "stop"),
+        (rpc_server, "stop"),
+        (sandbox_executor, "cleanup"),
+        (memory_session, "close"),
+    ]:
+        if resource:
             try:
-                await telegram_provider.stop()
+                await getattr(resource, method)()
             except Exception as e:
-                logger.warning(f"Error stopping Telegram provider: {e}")
+                logger.warning(f"Error during {method}: {e}")
 
-        # Stop RPC server
-        if rpc_server:
-            try:
-                await rpc_server.stop()
-            except Exception as e:
-                logger.warning(f"Error stopping RPC server: {e}")
-
-        # Clean up sandbox container
-        if components.sandbox_executor:
-            try:
-                await components.sandbox_executor.cleanup()
-            except Exception as e:
-                logger.warning(f"Error cleaning up sandbox: {e}")
-
-        # Close the persistent memory session
-        try:
-            await memory_session.close()
-        except Exception as e:
-            logger.warning(f"Error closing memory session: {e}")
-
-        # Clean up PID file on exit
-        remove_pid_file(pid_path)
+    remove_pid_file(pid_path)

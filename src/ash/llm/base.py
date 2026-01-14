@@ -42,24 +42,11 @@ class LLMProvider(ABC):
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
     ) -> CompletionResponse:
-        """Generate a completion (non-streaming).
-
-        Args:
-            messages: Conversation history.
-            model: Model to use (defaults to provider's default).
-            tools: Available tools for the model.
-            system: System prompt.
-            max_tokens: Maximum tokens to generate.
-            temperature: Sampling temperature. None = use API default (omit for reasoning models).
-            thinking: Extended thinking configuration (Anthropic only).
-
-        Returns:
-            Complete response with message and metadata.
-        """
+        """Generate a completion (non-streaming)."""
         ...
 
     @abstractmethod
-    async def stream(
+    def stream(
         self,
         messages: list[Message],
         *,
@@ -70,23 +57,8 @@ class LLMProvider(ABC):
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
     ) -> AsyncGenerator[StreamChunk, None]:
-        """Generate a streaming completion.
-
-        Args:
-            messages: Conversation history.
-            model: Model to use (defaults to provider's default).
-            tools: Available tools for the model.
-            system: System prompt.
-            max_tokens: Maximum tokens to generate.
-            temperature: Sampling temperature. None = use API default (omit for reasoning models).
-            thinking: Extended thinking configuration (Anthropic only).
-
-        Yields:
-            Stream chunks as they arrive.
-        """
-        # Make this explicitly an async generator for type checkers
-        yield
-        raise NotImplementedError
+        """Generate a streaming completion."""
+        ...
 
     @abstractmethod
     async def embed(
@@ -95,13 +67,5 @@ class LLMProvider(ABC):
         *,
         model: str | None = None,
     ) -> list[list[float]]:
-        """Generate embeddings for texts.
-
-        Args:
-            texts: Texts to embed.
-            model: Embedding model to use.
-
-        Returns:
-            List of embedding vectors.
-        """
+        """Generate embeddings for texts."""
         ...

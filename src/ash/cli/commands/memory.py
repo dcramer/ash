@@ -169,43 +169,53 @@ async def _run_memory_action(
     scope: str | None,
 ) -> None:
     """Run memory action asynchronously."""
+    if scope and scope not in ("personal", "shared", "global"):
+        error("--scope must be: personal, shared, or global")
+        raise typer.Exit(1)
 
     config = get_config(config_path)
     database = await get_database(config)
 
     try:
         async with database.session() as session:
-            # Validate scope option
-            if scope and scope not in ("personal", "shared", "global"):
-                error("--scope must be: personal, shared, or global")
-                raise typer.Exit(1)
-
             if action == "list":
                 await _memory_list(
                     session, query, limit, include_expired, user_id, chat_id, scope
                 )
-
             elif action == "add":
                 if not query:
                     error("--query is required to specify content to add")
                     raise typer.Exit(1)
                 await _memory_add(session, query, source, expires_days)
-
             elif action == "remove":
                 await _memory_remove(
                     session, entry_id, all_entries, force, user_id, chat_id, scope
                 )
-
             elif action == "clear":
                 await _memory_clear(session, force)
-
             else:
                 error(f"Unknown action: {action}")
                 console.print("Valid actions: list, add, remove, clear")
                 raise typer.Exit(1)
-
     finally:
         await database.disconnect()
+
+
+def _apply_scope_filters(
+    stmt, model, user_id: str | None, chat_id: str | None, scope: str | None
+):
+    """Apply user/chat/scope filters to a query."""
+    if user_id:
+        stmt = stmt.where(model.owner_user_id == user_id)
+    if chat_id:
+        stmt = stmt.where(model.chat_id == chat_id)
+    if scope == "personal":
+        stmt = stmt.where(model.owner_user_id.isnot(None))
+    elif scope == "shared":
+        stmt = stmt.where(model.owner_user_id.is_(None), model.chat_id.isnot(None))
+    elif scope == "global":
+        stmt = stmt.where(model.owner_user_id.is_(None), model.chat_id.is_(None))
+    return stmt
 
 
 async def _memory_list(
@@ -225,7 +235,6 @@ async def _memory_list(
 
     stmt = select(MemoryModel).order_by(MemoryModel.created_at.desc()).limit(limit)
 
-    # Filter by content if query provided
     if query:
         stmt = stmt.where(MemoryModel.content.ilike(f"%{query}%"))
 
@@ -235,23 +244,7 @@ async def _memory_list(
             (MemoryModel.expires_at.is_(None)) | (MemoryModel.expires_at > now)
         )
 
-    # Apply filters
-    if user_id:
-        stmt = stmt.where(MemoryModel.owner_user_id == user_id)
-    if chat_id:
-        stmt = stmt.where(MemoryModel.chat_id == chat_id)
-    if scope == "personal":
-        stmt = stmt.where(MemoryModel.owner_user_id.isnot(None))
-    elif scope == "shared":
-        stmt = stmt.where(
-            MemoryModel.owner_user_id.is_(None),
-            MemoryModel.chat_id.isnot(None),
-        )
-    elif scope == "global":
-        stmt = stmt.where(
-            MemoryModel.owner_user_id.is_(None),
-            MemoryModel.chat_id.is_(None),
-        )
+    stmt = _apply_scope_filters(stmt, MemoryModel, user_id, chat_id, scope)
 
     result = await session.execute(stmt)
     entries = result.scalars().all()
@@ -351,44 +344,23 @@ async def _memory_remove(
         raise typer.Exit(1)
 
     if all_entries:
-        # Build filter description for confirmation
-        filter_desc = []
-        if user_id:
-            filter_desc.append(f"user={user_id}")
-        if chat_id:
-            filter_desc.append(f"chat={chat_id}")
-        if scope:
-            filter_desc.append(f"scope={scope}")
-
+        filter_desc = [
+            f"{k}={v}"
+            for k, v in [("user", user_id), ("chat", chat_id), ("scope", scope)]
+            if v
+        ]
         scope_msg = f" matching [{', '.join(filter_desc)}]" if filter_desc else ""
 
         if not force:
             warning(f"This will remove ALL memory entries{scope_msg}.")
-            confirm = typer.confirm("Are you sure?")
-            if not confirm:
+            if not typer.confirm("Are you sure?"):
                 dim("Cancelled")
                 return
 
-        # Build delete statement with filters
-        delete_stmt = delete(MemoryModel)
-        if user_id:
-            delete_stmt = delete_stmt.where(MemoryModel.owner_user_id == user_id)
-        if chat_id:
-            delete_stmt = delete_stmt.where(MemoryModel.chat_id == chat_id)
-        if scope == "personal":
-            delete_stmt = delete_stmt.where(MemoryModel.owner_user_id.isnot(None))
-        elif scope == "shared":
-            delete_stmt = delete_stmt.where(
-                MemoryModel.owner_user_id.is_(None),
-                MemoryModel.chat_id.isnot(None),
-            )
-        elif scope == "global":
-            delete_stmt = delete_stmt.where(
-                MemoryModel.owner_user_id.is_(None),
-                MemoryModel.chat_id.is_(None),
-            )
+        delete_stmt = _apply_scope_filters(
+            delete(MemoryModel), MemoryModel, user_id, chat_id, scope
+        )
 
-        # Clear embeddings (table may not exist)
         if not (user_id or chat_id or scope):
             try:
                 await session.execute(text("DELETE FROM memory_embeddings"))

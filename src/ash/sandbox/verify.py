@@ -1,19 +1,4 @@
-"""Sandbox verification tests.
-
-This module provides automated verification of sandbox security and functionality.
-It tests that the sandbox properly restricts dangerous operations while allowing
-legitimate use cases.
-
-Run verification:
-    uv run pytest tests/test_sandbox_verify.py -v
-
-Test Categories:
-    SECURITY: Privilege escalation, filesystem restrictions, container isolation
-    RESOURCES: Fork bomb protection, memory limits, timeouts
-    NETWORK: Connectivity, DNS resolution (when enabled)
-    FUNCTIONAL: Commands work, output correct, utilities available
-    EDGE_CASES: Special characters, long output, binary data
-"""
+"""Sandbox verification tests."""
 
 from dataclasses import dataclass
 from enum import Enum
@@ -23,8 +8,6 @@ from ash.sandbox.manager import SandboxConfig
 
 
 class TestCategory(Enum):
-    """Categories of verification tests."""
-
     SECURITY = "security"
     RESOURCES = "resources"
     NETWORK = "network"
@@ -33,8 +16,6 @@ class TestCategory(Enum):
 
 
 class TestResult(Enum):
-    """Result of a verification test."""
-
     PASS = "pass"  # noqa: S105
     FAIL = "fail"
     SKIP = "skip"
@@ -42,24 +23,20 @@ class TestResult(Enum):
 
 @dataclass
 class VerificationTest:
-    """A single verification test case."""
-
     name: str
     description: str
     category: TestCategory
     command: str
-    expect_success: bool  # Whether command should exit 0
-    expect_output_contains: str | None = None  # Output should contain this
-    expect_output_not_contains: str | None = None  # Output should NOT contain this
-    expect_error_contains: str | None = None  # For expected failures
+    expect_success: bool
+    expect_output_contains: str | None = None
+    expect_output_not_contains: str | None = None
+    expect_error_contains: str | None = None
     timeout: int = 30
     requires_network: bool = False
 
 
 @dataclass
 class TestOutput:
-    """Output from running a verification test."""
-
     test: VerificationTest
     result: TestResult
     actual_exit_code: int
@@ -67,7 +44,6 @@ class TestOutput:
     message: str
 
 
-# Define all verification tests
 VERIFICATION_TESTS: list[VerificationTest] = [
     # ===================
     # SECURITY TESTS
@@ -335,19 +311,11 @@ VERIFICATION_TESTS: list[VerificationTest] = [
 
 
 class SandboxVerifier:
-    """Runs verification tests against the sandbox."""
-
     def __init__(
         self,
         config: SandboxConfig | None = None,
         network_enabled: bool = True,
     ):
-        """Initialize verifier.
-
-        Args:
-            config: Sandbox configuration.
-            network_enabled: Whether network tests should run.
-        """
         self._config = config or SandboxConfig(
             network_mode="bridge" if network_enabled else "none"
         )
@@ -355,21 +323,46 @@ class SandboxVerifier:
         self._executor: SandboxExecutor | None = None
 
     async def _get_executor(self) -> SandboxExecutor:
-        """Get or create executor."""
         if self._executor is None:
             self._executor = SandboxExecutor(config=self._config)
         return self._executor
 
+    def _check_failure(
+        self,
+        test: VerificationTest,
+        result_exit_code: int,
+        result_success: bool,
+        output: str,
+    ) -> str | None:
+        if test.expect_success and not result_success:
+            return f"Expected success but got exit code {result_exit_code}"
+
+        if not test.expect_success and result_success:
+            if test.expect_error_contains:
+                if test.expect_error_contains.lower() not in output.lower():
+                    return f"Expected failure with '{test.expect_error_contains}' but command succeeded"
+            else:
+                return "Expected failure but command succeeded"
+
+        if test.expect_output_contains and test.expect_output_contains not in output:
+            return f"Expected output to contain '{test.expect_output_contains}'"
+
+        if (
+            test.expect_output_not_contains
+            and test.expect_output_not_contains in output
+        ):
+            return f"Expected output NOT to contain '{test.expect_output_not_contains}'"
+
+        if (
+            not test.expect_success
+            and test.expect_error_contains
+            and test.expect_error_contains.lower() not in output.lower()
+        ):
+            return f"Expected error containing '{test.expect_error_contains}'"
+
+        return None
+
     async def run_test(self, test: VerificationTest) -> TestOutput:
-        """Run a single verification test.
-
-        Args:
-            test: Test to run.
-
-        Returns:
-            Test output with result.
-        """
-        # Skip network tests if network disabled
         if test.requires_network and not self._network_enabled:
             return TestOutput(
                 test=test,
@@ -396,71 +389,19 @@ class SandboxVerifier:
                 message=f"Execution error: {e}",
             )
 
-        # Combine stdout and check results
         output = result.output
+        failure_message = self._check_failure(
+            test, result.exit_code, result.success, output
+        )
 
-        # Check exit code expectation
-        if test.expect_success and not result.success:
+        if failure_message:
             return TestOutput(
                 test=test,
                 result=TestResult.FAIL,
                 actual_exit_code=result.exit_code,
                 actual_output=output,
-                message=f"Expected success but got exit code {result.exit_code}",
+                message=failure_message,
             )
-
-        if not test.expect_success and result.success:
-            # For expected failures, check if error message matches
-            if test.expect_error_contains:
-                if test.expect_error_contains.lower() not in output.lower():
-                    return TestOutput(
-                        test=test,
-                        result=TestResult.FAIL,
-                        actual_exit_code=result.exit_code,
-                        actual_output=output,
-                        message=f"Expected failure with '{test.expect_error_contains}' but command succeeded",
-                    )
-            else:
-                return TestOutput(
-                    test=test,
-                    result=TestResult.FAIL,
-                    actual_exit_code=result.exit_code,
-                    actual_output=output,
-                    message="Expected failure but command succeeded",
-                )
-
-        # Check output contains expected string
-        if test.expect_output_contains:
-            if test.expect_output_contains not in output:
-                return TestOutput(
-                    test=test,
-                    result=TestResult.FAIL,
-                    actual_exit_code=result.exit_code,
-                    actual_output=output,
-                    message=f"Expected output to contain '{test.expect_output_contains}'",
-                )
-
-        # Check output does NOT contain forbidden string
-        if test.expect_output_not_contains:
-            if test.expect_output_not_contains in output:
-                return TestOutput(
-                    test=test,
-                    result=TestResult.FAIL,
-                    actual_exit_code=result.exit_code,
-                    actual_output=output,
-                    message=f"Expected output NOT to contain '{test.expect_output_not_contains}'",
-                )
-
-        # Check error message for expected failures
-        if not test.expect_success and test.expect_error_contains:
-            if test.expect_error_contains.lower() not in output.lower():
-                return TestOutput(
-                    test=test,
-                    result=TestResult.FAIL,
-                    actual_exit_code=result.exit_code,
-                    actual_output=output,
-                    message=f"Expected error containing '{test.expect_error_contains}'",
-                )
 
         return TestOutput(
             test=test,
@@ -474,27 +415,12 @@ class SandboxVerifier:
         self,
         categories: list[TestCategory] | None = None,
     ) -> list[TestOutput]:
-        """Run all verification tests.
-
-        Args:
-            categories: Filter to specific categories (None = all).
-
-        Returns:
-            List of test outputs.
-        """
         tests = VERIFICATION_TESTS
         if categories:
             tests = [t for t in tests if t.category in categories]
-
-        results = []
-        for test in tests:
-            result = await self.run_test(test)
-            results.append(result)
-
-        return results
+        return [await self.run_test(test) for test in tests]
 
     async def cleanup(self) -> None:
-        """Clean up resources."""
         if self._executor:
             await self._executor.cleanup()
             self._executor = None
@@ -595,5 +521,4 @@ Use these prompts with `ash chat` to manually verify agent behavior:
 
 
 def get_prompt_test_cases() -> str:
-    """Get the prompt evaluation test cases documentation."""
     return PROMPT_TEST_CASES

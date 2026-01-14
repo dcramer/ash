@@ -119,39 +119,27 @@ class _MessageSetup:
 
 @dataclass
 class _StreamToolAccumulator:
-    """Accumulates tool use data from stream events.
-
-    Handles the state machine for reconstructing ToolUse objects
-    from streaming events with proper validation and error handling.
-    """
+    """Accumulates tool use data from stream events."""
 
     _tool_id: str | None = field(default=None, repr=False)
     _tool_name: str | None = field(default=None, repr=False)
     _tool_args: str = field(default="", repr=False)
 
     def start(self, tool_use_id: str, tool_name: str) -> None:
-        """Start accumulating a new tool use."""
         self._tool_id = tool_use_id
         self._tool_name = tool_name
         self._tool_args = ""
 
     def add_delta(self, content: str) -> None:
-        """Add argument delta content."""
         self._tool_args += content
 
     def finish(self) -> ToolUse | None:
-        """Finish and return the accumulated ToolUse, or None if invalid.
-
-        Returns:
-            ToolUse if valid state, None otherwise (logs warning).
-        """
         if not self._tool_id or not self._tool_name:
             logger.warning(
                 "Tool use end without start: id=%s, name=%s",
                 self._tool_id,
                 self._tool_name,
             )
-            self._reset()
             return None
 
         try:
@@ -165,14 +153,10 @@ class _StreamToolAccumulator:
             name=self._tool_name,
             input=args,
         )
-        self._reset()
-        return tool_use
-
-    def _reset(self) -> None:
-        """Reset accumulator state."""
         self._tool_id = None
         self._tool_name = None
         self._tool_args = ""
+        return tool_use
 
 
 @dataclass
@@ -286,29 +270,12 @@ class Agent:
         return self._prompt_builder.build(prompt_context)
 
     def _get_tool_definitions(self) -> list[ToolDefinition]:
-        """Get tool definitions for LLM.
-
-        Returns:
-            List of tool definitions.
-        """
         return self._tools.get_definitions()
 
     async def _maybe_compact(self, session: SessionState) -> CompactionInfo | None:
-        """Check if compaction is needed and run it if so.
-
-        Compaction summarizes old messages when context gets too large,
-        preserving important information while staying within token limits.
-
-        Args:
-            session: Session state to potentially compact.
-
-        Returns:
-            CompactionInfo if compaction was performed, None otherwise.
-        """
         if not self._config.compaction_enabled:
             return None
 
-        # Estimate current context tokens
         token_counts = session._get_token_counts()
         total_tokens = sum(token_counts)
 
@@ -329,7 +296,6 @@ class Agent:
             "running compaction"
         )
 
-        # Run compaction with timing
         start_time = time.monotonic()
         new_messages, new_token_counts, result = await compact_messages(
             messages=session.messages,
@@ -344,7 +310,6 @@ class Agent:
             logger.debug("Compaction skipped - not enough messages to summarize")
             return None
 
-        # Update session state
         session.messages = new_messages
         session._token_counts = new_token_counts
 
@@ -367,23 +332,8 @@ class Agent:
         user_id: str | None,
         session_path: str | None = None,
     ) -> _MessageSetup:
-        """Prepare context needed before processing a message.
-
-        Retrieves memory context, known people, builds system prompt,
-        and calculates token budget.
-
-        Args:
-            user_message: The user's message.
-            session: Session state.
-            user_id: Optional user ID override.
-            session_path: Optional path to session file for agent self-inspection.
-
-        Returns:
-            Setup data for message processing.
-        """
         effective_user_id = user_id or session.user_id
 
-        # Retrieve memory context and known people
         memory_context: RetrievedContext | None = None
         known_people: list[Person] | None = None
 
@@ -411,7 +361,6 @@ class Agent:
                 except Exception:
                     logger.warning("Failed to get known people", exc_info=True)
 
-        # Build system prompt with all context
         system_prompt = self._build_system_prompt(
             context=memory_context,
             known_people=known_people,
@@ -425,7 +374,6 @@ class Agent:
             chat_type=session.metadata.get("chat_type"),
         )
 
-        # Calculate message token budget
         system_tokens = estimate_tokens(system_prompt)
         message_budget = (
             self._config.context_token_budget
@@ -440,31 +388,15 @@ class Agent:
         )
 
     def _should_extract_memories(self, user_message: str) -> bool:
-        """Check if memory extraction should run for this message.
-
-        Uses lightweight heuristics to skip obviously non-memorable exchanges.
-
-        Args:
-            user_message: The user's message.
-
-        Returns:
-            True if extraction should proceed.
-        """
-        import time
-
-        # Check if extraction is enabled
         if not self._config.extraction_enabled:
             return False
 
-        # Check if extractor and memory manager are available
         if not self._extractor or not self._memory:
             return False
 
-        # Skip very short messages
         if len(user_message) < self._config.extraction_min_message_length:
             return False
 
-        # Debounce - skip if recent extraction
         if self._last_extraction_time is not None:
             elapsed = time.time() - self._last_extraction_time
             if elapsed < self._config.extraction_debounce_seconds:
@@ -478,67 +410,48 @@ class Agent:
         user_id: str,
         chat_id: str | None = None,
     ) -> None:
-        """Background task to extract and store memories from conversation.
-
-        Args:
-            session: Session with conversation messages.
-            user_id: User ID for memory ownership.
-            chat_id: Optional chat ID for group memory scoping.
-        """
-        import time
-
         from ash.llm.types import Message as LLMMessage
         from ash.llm.types import Role
 
-        # Guard: should not be called without extractor and memory
         if not self._extractor or not self._memory:
             return
 
         try:
-            # Update extraction time
             self._last_extraction_time = time.time()
 
-            # Get existing memories to help extractor avoid duplicates
             existing_memories: list[str] = []
-            if self._memory:
-                try:
-                    # Get recent memories without semantic search
-                    existing_memories = await self._memory.get_recent_memories(
-                        user_id=user_id,
-                        chat_id=chat_id,
-                        limit=20,
-                    )
-                except Exception:
-                    logger.debug(
-                        "Failed to get existing memories for extraction", exc_info=True
-                    )
+            try:
+                existing_memories = await self._memory.get_recent_memories(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    limit=20,
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to get existing memories for extraction", exc_info=True
+                )
 
-            # Convert session messages to LLM Message format
-            llm_messages: list[LLMMessage] = []
-            for msg in session.messages:
-                if msg.role == Role.USER or msg.role == Role.ASSISTANT:
-                    text = msg.get_text()
-                    if text.strip():
-                        llm_messages.append(msg)
+            llm_messages: list[LLMMessage] = [
+                msg
+                for msg in session.messages
+                if msg.role in (Role.USER, Role.ASSISTANT) and msg.get_text().strip()
+            ]
 
             if not llm_messages:
                 return
 
-            # Run extraction
             facts = await self._extractor.extract_from_conversation(
                 messages=llm_messages,
                 existing_memories=existing_memories,
             )
 
-            # Store extracted facts
             for fact in facts:
                 if fact.confidence < self._config.extraction_confidence_threshold:
                     continue
 
                 try:
-                    # Resolve subjects to person IDs if needed
                     subject_person_ids: list[str] | None = None
-                    if fact.subjects:  # self._memory guaranteed non-None by guard above
+                    if fact.subjects:
                         subject_person_ids = []
                         for subject in fact.subjects:
                             try:
@@ -551,7 +464,6 @@ class Agent:
                             except Exception:
                                 logger.debug("Failed to resolve subject: %s", subject)
 
-                    # Store the memory
                     await self._memory.add_memory(
                         content=fact.content,
                         source="background_extraction",
@@ -581,28 +493,17 @@ class Agent:
         user_id: str,
         chat_id: str | None = None,
     ) -> None:
-        """Spawn a background task to extract memories (non-blocking).
-
-        Args:
-            session: Session with conversation messages.
-            user_id: User ID for memory ownership.
-            chat_id: Optional chat ID for group memory scoping.
-        """
         import asyncio
 
-        def _handle_extraction_error(task: asyncio.Task[None]) -> None:
-            """Log any unhandled exceptions from the extraction task."""
-            if task.cancelled():
-                return
-            exc = task.exception()
-            if exc:
+        def handle_error(task: asyncio.Task[None]) -> None:
+            if not task.cancelled() and (exc := task.exception()):
                 logger.warning("Memory extraction task failed: %s", exc)
 
         task = asyncio.create_task(
             self._extract_memories_background(session, user_id, chat_id),
             name="memory_extraction",
         )
-        task.add_done_callback(_handle_extraction_error)
+        task.add_done_callback(handle_error)
 
     def _maybe_spawn_memory_extraction(
         self,
@@ -610,16 +511,6 @@ class Agent:
         effective_user_id: str,
         session: SessionState,
     ) -> None:
-        """Spawn memory extraction if conditions are met.
-
-        Convenience method combining the should-extract check with spawning.
-        Call at natural exit points from message processing.
-
-        Args:
-            user_message: The original user message.
-            effective_user_id: User ID for memory ownership.
-            session: Session for extraction context.
-        """
         if self._should_extract_memories(user_message):
             self._spawn_memory_extraction(session, effective_user_id, session.chat_id)
 
@@ -631,22 +522,6 @@ class Agent:
         on_tool_start: OnToolStartCallback | None,
         get_steering_messages: GetSteeringMessagesCallback | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Execute pending tool uses and add results to session.
-
-        Checks for steering messages after each tool execution. If steering
-        messages are received, remaining tools are skipped and the messages
-        are returned for injection into the conversation.
-
-        Args:
-            pending_tools: List of tool use requests.
-            session: Session to add results to.
-            tool_context: Context for tool execution.
-            on_tool_start: Optional callback before each tool.
-            get_steering_messages: Optional callback to check for user interruptions.
-
-        Returns:
-            Tuple of (tool_calls, steering_messages).
-        """
         tool_calls: list[dict[str, Any]] = []
 
         for i, tool_use in enumerate(pending_tools):
@@ -675,11 +550,9 @@ class Agent:
                 is_error=result.is_error,
             )
 
-            # Check for steering messages after each tool (except last)
             if get_steering_messages and i < len(pending_tools) - 1:
                 steering = await get_steering_messages()
                 if steering:
-                    # Skip remaining tools - user wants to redirect
                     for remaining in pending_tools[i + 1 :]:
                         tool_calls.append(
                             {
@@ -711,46 +584,18 @@ class Agent:
         get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_path: str | None = None,
     ) -> AgentResponse:
-        """Process a user message and return response.
-
-        This runs the full agentic loop: calling LLM, executing tools,
-        and repeating until the LLM returns a text response.
-
-        Args:
-            user_message: User's message.
-            session: Session state.
-            user_id: Optional user ID for the current message sender.
-                In group chats, this should be the actual sender, not session.user_id.
-                When provided, this is used for memory retrieval and known_people lookup.
-            on_tool_start: Optional callback invoked before each tool execution.
-                Receives tool name and input dict.
-            get_steering_messages: Optional callback to check for user interruptions
-                during tool execution. If messages are returned, remaining tools are
-                skipped and the messages are injected before the next LLM call.
-            session_path: Optional path to session file for agent self-inspection.
-
-        Returns:
-            Agent response.
-        """
-        # Prepare context (memory, known people, system prompt, token budget)
         setup = await self._prepare_message_context(
             user_message, session, user_id, session_path
         )
-
-        # Add user message to session
         session.add_user_message(user_message)
-
-        # Check if compaction is needed (summarize old messages)
         compaction_info = await self._maybe_compact(session)
 
         tool_calls: list[dict[str, Any]] = []
         iterations = 0
-        final_text = ""
 
         while iterations < self._config.max_tool_iterations:
             iterations += 1
 
-            # Call LLM with pruned messages
             response = await self._llm.complete(
                 messages=session.get_messages_for_llm(
                     token_budget=setup.message_budget,
@@ -764,27 +609,20 @@ class Agent:
                 thinking=self._config.thinking,
             )
 
-            # Add assistant response to session
             session.add_assistant_message(response.message.content)
 
-            # Check for tool uses
             pending_tools = session.get_pending_tool_uses()
             if not pending_tools:
-                # No tool calls, return text response
-                final_text = response.message.get_text() or ""
                 self._maybe_spawn_memory_extraction(
                     user_message, setup.effective_user_id, session
                 )
                 return AgentResponse(
-                    text=final_text,
+                    text=response.message.get_text() or "",
                     tool_calls=tool_calls,
                     iterations=iterations,
                     compaction=compaction_info,
                 )
 
-            # Execute tools with effective user_id (supports group chats)
-            # Note: env vars can be faked by the agent, but we're not optimizing
-            # for security here - just preventing accidental mistakes
             tool_context = ToolContext(
                 session_id=session.session_id,
                 user_id=setup.effective_user_id,
@@ -803,22 +641,18 @@ class Agent:
             )
             tool_calls.extend(new_calls)
 
-            # If steering messages received, inject them before next LLM call
             if steering:
                 for msg in steering:
                     session.add_user_message(msg)
-                # Continue loop - next iteration will see the new user messages
 
-        # Max iterations reached
         logger.warning(
             f"Max tool iterations ({self._config.max_tool_iterations}) reached"
         )
-        final_text = "I've reached the maximum number of tool calls. Please try again with a simpler request."
         self._maybe_spawn_memory_extraction(
             user_message, setup.effective_user_id, session
         )
         return AgentResponse(
-            text=final_text,
+            text="I've reached the maximum number of tool calls. Please try again with a simpler request.",
             tool_calls=tool_calls,
             iterations=iterations,
             compaction=compaction_info,
@@ -833,45 +667,17 @@ class Agent:
         get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_path: str | None = None,
     ) -> AsyncIterator[str]:
-        """Process a user message with streaming response.
-
-        Yields text chunks as they arrive. Tool execution happens
-        between streaming chunks.
-
-        Args:
-            user_message: User's message.
-            session: Session state.
-            user_id: Optional user ID for the current message sender.
-                In group chats, this should be the actual sender, not session.user_id.
-                When provided, this is used for memory retrieval and known_people lookup.
-            on_tool_start: Optional callback invoked before each tool execution.
-                Receives tool name and input dict.
-            get_steering_messages: Optional callback to check for user interruptions
-                during tool execution. If messages are returned, remaining tools are
-                skipped and the messages are injected before the next LLM call.
-            session_path: Optional path to session file for agent self-inspection.
-
-        Yields:
-            Text chunks.
-        """
-        # Prepare context (memory, known people, system prompt, token budget)
         setup = await self._prepare_message_context(
             user_message, session, user_id, session_path
         )
-
-        # Add user message to session
         session.add_user_message(user_message)
-
-        # Check if compaction is needed (summarize old messages)
         await self._maybe_compact(session)
 
         iterations = 0
-        accumulated_response = ""
 
         while iterations < self._config.max_tool_iterations:
             iterations += 1
 
-            # Stream LLM response
             content_blocks: list[ContentBlock] = []
             current_text = ""
             tool_accumulator = _StreamToolAccumulator()
@@ -891,48 +697,36 @@ class Agent:
                 if chunk.type == StreamEventType.TEXT_DELTA:
                     text = chunk.content if isinstance(chunk.content, str) else ""
                     current_text += text
-                    accumulated_response += text
                     yield text
-
                 elif chunk.type == StreamEventType.TOOL_USE_START:
                     if chunk.tool_use_id and chunk.tool_name:
                         tool_accumulator.start(chunk.tool_use_id, chunk.tool_name)
-
                 elif chunk.type == StreamEventType.TOOL_USE_DELTA:
                     tool_accumulator.add_delta(
                         chunk.content if isinstance(chunk.content, str) else ""
                     )
-
                 elif chunk.type == StreamEventType.TOOL_USE_END:
                     if tool_use := tool_accumulator.finish():
                         content_blocks.append(tool_use)
 
-            # Add any accumulated text
             if current_text:
                 content_blocks.insert(0, TextContent(text=current_text))
 
-            # Build message content
-            if content_blocks:
-                session.add_assistant_message(content_blocks)
-            else:
-                # Empty response
+            if not content_blocks:
                 self._maybe_spawn_memory_extraction(
                     user_message, setup.effective_user_id, session
                 )
                 return
 
-            # Get tool uses from what we just added
+            session.add_assistant_message(content_blocks)
+
             pending_tools = [b for b in content_blocks if isinstance(b, ToolUse)]
             if not pending_tools:
-                # No tool calls
                 self._maybe_spawn_memory_extraction(
                     user_message, setup.effective_user_id, session
                 )
                 return
 
-            # Execute tools (non-streaming) with effective user_id (supports group chats)
-            # Note: env vars can be faked by the agent, but we're not optimizing
-            # for security here - just preventing accidental mistakes
             tool_context = ToolContext(
                 session_id=session.session_id,
                 user_id=setup.effective_user_id,
@@ -950,13 +744,10 @@ class Agent:
                 get_steering_messages,
             )
 
-            # If steering messages received, inject them before next LLM call
             if steering:
                 for msg in steering:
                     session.add_user_message(msg)
-                # Continue loop - next iteration will see the new user messages
 
-        # Max iterations reached
         self._maybe_spawn_memory_extraction(
             user_message, setup.effective_user_id, session
         )
@@ -988,91 +779,56 @@ async def create_agent(
     db_session: AsyncSession | None = None,
     model_alias: str = "default",
 ) -> AgentComponents:
-    """Create a fully-configured agent with all dependencies.
-
-    This is the main entry point for creating agents. It wires up:
-    - LLM provider based on model configuration
-    - Tool registry with all available tools
-    - Skill registry with workspace skills
-    - Memory manager (if database session provided)
-    - Agent with all components
-
-    Args:
-        config: Application configuration.
-        workspace: Loaded workspace with personality.
-        db_session: Optional database session for memory features.
-        model_alias: Model alias to use (default: "default").
-
-    Returns:
-        AgentComponents with the agent and all its dependencies.
-    """
-    # Import here to avoid circular imports
+    from ash.agents import AgentExecutor, AgentRegistry
+    from ash.agents.builtin import register_builtin_agents
     from ash.core.prompt import RuntimeInfo
-    from ash.llm import create_llm_provider
-    from ash.memory import create_memory_manager
+    from ash.llm import create_llm_provider, create_registry
+    from ash.memory import MemoryExtractor, create_memory_manager
+    from ash.sandbox import SandboxExecutor
+    from ash.sandbox.packages import build_setup_command, collect_skill_packages
     from ash.skills import SkillRegistry
+    from ash.tools.base import build_sandbox_manager_config
     from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
+    from ash.tools.builtin.agents import UseAgentTool
     from ash.tools.builtin.files import ReadFileTool, WriteFileTool
     from ash.tools.builtin.search_cache import SearchCache
+    from ash.tools.builtin.skills import UseSkillTool
 
-    # Resolve model configuration
     model_config = config.get_model(model_alias)
     api_key = config.resolve_api_key(model_alias)
 
-    # Create LLM provider
     llm = create_llm_provider(
         model_config.provider,
         api_key=api_key.get_secret_value() if api_key else None,
     )
 
-    # Create tool registry with core tools
     tool_registry = ToolRegistry()
 
-    # Discover skills early (needed for package requirements)
     skill_registry = SkillRegistry()
     skill_registry.discover(config.workspace)
     logger.info(f"Discovered {len(skill_registry)} skills from workspace")
 
-    # Create shared sandbox executor for all sandbox-based tools
-    from ash.sandbox import SandboxExecutor
-    from ash.sandbox.packages import (
-        build_setup_command,
-        collect_skill_packages,
-    )
-    from ash.tools.base import build_sandbox_manager_config
-
     sandbox_manager_config = build_sandbox_manager_config(
         config.sandbox, config.workspace
     )
-
-    # Collect package requirements from skills and build setup command
-    # Note: apt_packages are handled at image build time via `ash sandbox build`
     _, python_packages, python_tools = collect_skill_packages(skill_registry)
-
     setup_command = build_setup_command(
         python_packages=python_packages,
         python_tools=python_tools,
         base_setup_command=config.sandbox.setup_command,
     )
-
     shared_executor = SandboxExecutor(
         config=sandbox_manager_config,
         setup_command=setup_command,
     )
 
-    # Register bash tool (uses shared executor)
     tool_registry.register(BashTool(executor=shared_executor))
-
-    # Register file tools (use shared executor)
     tool_registry.register(ReadFileTool(executor=shared_executor))
     tool_registry.register(WriteFileTool(executor=shared_executor))
 
-    # Register web tools if brave search is configured
     if config.brave_search and config.brave_search.api_key:
-        # Create shared caches
-        search_cache = SearchCache(maxsize=100, ttl=900)  # 15 min for searches
-        fetch_cache = SearchCache(maxsize=50, ttl=1800)  # 30 min for pages
-
+        search_cache = SearchCache(maxsize=100, ttl=900)
+        fetch_cache = SearchCache(maxsize=50, ttl=1800)
         tool_registry.register(
             WebSearchTool(
                 api_key=config.brave_search.api_key.get_secret_value(),
@@ -1081,26 +837,16 @@ async def create_agent(
             )
         )
         tool_registry.register(
-            WebFetchTool(
-                executor=shared_executor,
-                cache=fetch_cache,
-            )
+            WebFetchTool(executor=shared_executor, cache=fetch_cache)
         )
 
-    # Set up memory manager if database available and embeddings configured
     memory_manager: MemoryManager | None = None
     if not db_session:
         logger.info("Memory tools disabled: no database session")
     elif not config.embeddings:
-        logger.info(
-            "Memory tools disabled: [embeddings] not configured. "
-            "Add [embeddings] section to config for remember/recall tools."
-        )
-    if db_session and config.embeddings:
+        logger.info("Memory tools disabled: [embeddings] not configured")
+    else:
         try:
-            from ash.llm import create_registry
-
-            # Get API key for embeddings
             embeddings_key = config.resolve_embeddings_api_key()
             if not embeddings_key:
                 logger.info(
@@ -1114,8 +860,6 @@ async def create_agent(
                 if config.embeddings.provider == "openai"
                 else None,
             )
-
-            # Create memory manager using factory (handles internal wiring)
             memory_manager = await create_memory_manager(
                 db_session=db_session,
                 llm_registry=llm_registry,
@@ -1123,34 +867,24 @@ async def create_agent(
                 embedding_provider=config.embeddings.provider,
                 max_entries=config.memory.max_entries,
             )
-
-            # Memory tools available via sandbox CLI: ash memory add/search/list
             logger.debug("Memory manager initialized")
         except ValueError as e:
-            # Expected when embeddings not configured or no API key
             logger.debug(f"Memory disabled: {e}")
         except Exception:
             logger.warning("Failed to initialize memory", exc_info=True)
 
-    # Create memory extractor for background extraction (if memory and extraction enabled)
-    from ash.memory import MemoryExtractor
-
     memory_extractor: MemoryExtractor | None = None
     if memory_manager and config.memory.extraction_enabled:
-        # Resolve extraction model - use configured model or fallback to default
         extraction_model_alias = config.memory.extraction_model or model_alias
         try:
             extraction_model_config = config.get_model(extraction_model_alias)
             extraction_api_key = config.resolve_api_key(extraction_model_alias)
-
-            # Create a separate LLM provider for extraction
             extraction_llm = create_llm_provider(
                 extraction_model_config.provider,
                 api_key=extraction_api_key.get_secret_value()
                 if extraction_api_key
                 else None,
             )
-
             memory_extractor = MemoryExtractor(
                 llm=extraction_llm,
                 model=extraction_model_config.model,
@@ -1163,39 +897,24 @@ async def create_agent(
         except Exception:
             logger.warning("Failed to initialize memory extractor", exc_info=True)
 
-    # Create tool executor
     tool_executor = ToolExecutor(tool_registry)
     logger.info(f"Registered {len(tool_registry)} tools")
-
-    # Set up agents (built-in subagents for complex tasks)
-    from ash.agents import AgentExecutor, AgentRegistry
-    from ash.agents.builtin import register_builtin_agents
-    from ash.tools.builtin.agents import UseAgentTool
 
     agent_registry = AgentRegistry()
     register_builtin_agents(agent_registry)
     logger.info(f"Registered {len(agent_registry)} built-in agents")
 
-    # Create agent executor
     agent_executor = AgentExecutor(llm, tool_executor, config)
-
-    # Register use_agent tool
     tool_registry.register(
         UseAgentTool(agent_registry, agent_executor, skill_registry, config)
     )
-
-    # Register use_skill tool
-    from ash.tools.builtin.skills import UseSkillTool
-
     tool_registry.register(UseSkillTool(skill_registry, agent_executor, config))
 
-    # Create runtime info
     runtime = RuntimeInfo.from_environment(
         model=model_config.model,
         provider=model_config.provider,
     )
 
-    # Create prompt builder
     prompt_builder = SystemPromptBuilder(
         workspace=workspace,
         tool_registry=tool_registry,
@@ -1204,12 +923,10 @@ async def create_agent(
         agent_registry=agent_registry,
     )
 
-    # Resolve thinking configuration from model config
-    thinking_config = None
-    if model_config.thinking:
-        thinking_config = resolve_thinking(model_config.thinking)
+    thinking_config = (
+        resolve_thinking(model_config.thinking) if model_config.thinking else None
+    )
 
-    # Create agent
     agent = Agent(
         llm=llm,
         tool_executor=tool_executor,

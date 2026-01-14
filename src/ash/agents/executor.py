@@ -17,11 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentExecutor:
-    """Execute agents in isolated subagent loops.
-
-    Runs an agent's LLM loop separately from the main conversation,
-    with its own session state and optionally restricted tools.
-    """
+    """Execute agents in isolated subagent loops."""
 
     def __init__(
         self,
@@ -29,32 +25,24 @@ class AgentExecutor:
         tool_executor: "ToolExecutor",
         config: "AshConfig",
     ) -> None:
-        """Initialize agent executor.
-
-        Args:
-            llm_provider: LLM provider for completions.
-            tool_executor: Tool executor for tool calls.
-            config: Application configuration.
-        """
         self._llm = llm_provider
         self._tools = tool_executor
         self._config = config
 
-    def _filter_tools(self, allowed_tools: list[str]) -> list[ToolDefinition]:
-        """Filter tool definitions to allowed list.
-
-        Args:
-            allowed_tools: List of allowed tool names. Empty = all tools.
-
-        Returns:
-            Filtered list of tool definitions.
-        """
+    def _get_tool_definitions(
+        self, allowed_tools: list[str], is_skill_agent: bool
+    ) -> list[ToolDefinition]:
         all_defs = self._tools.get_definitions()
 
         if allowed_tools:
-            return [d for d in all_defs if d.name in allowed_tools]
+            defs = [d for d in all_defs if d.name in allowed_tools]
+        else:
+            defs = all_defs
 
-        return all_defs
+        if is_skill_agent:
+            defs = [t for t in defs if t.name != "use_skill"]
+
+        return defs
 
     async def execute(
         self,
@@ -63,23 +51,11 @@ class AgentExecutor:
         context: AgentContext,
         environment: dict[str, str] | None = None,
     ) -> AgentResult:
-        """Execute agent in isolated loop.
-
-        Args:
-            agent: Agent to execute.
-            input_message: User message to start the agent.
-            context: Execution context.
-            environment: Optional env vars to pass to tools.
-
-        Returns:
-            AgentResult with content and metadata.
-        """
         agent_config = agent.config
         logger.info(
             f"Executing agent '{agent_config.name}' with input: {input_message[:100]}..."
         )
 
-        # Apply config overrides from [agents.<name>] section
         overrides = self._config.agents.get(agent_config.name)
         model_alias = (
             overrides.model if overrides and overrides.model else agent_config.model
@@ -90,12 +66,10 @@ class AgentExecutor:
             else agent_config.max_iterations
         )
 
-        # Resolve model alias to full model ID (None = use default)
         resolved_model: str | None = None
         if model_alias:
             try:
-                model_config = self._config.get_model(model_alias)
-                resolved_model = model_config.model
+                resolved_model = self._config.get_model(model_alias).model
             except Exception as e:
                 available = ", ".join(sorted(self._config.models.keys()))
                 logger.error(
@@ -108,17 +82,11 @@ class AgentExecutor:
             f"Agent '{agent_config.name}' using model: {resolved_model or 'default'}"
         )
 
-        # Build system prompt (may inject context)
         system_prompt = agent.build_system_prompt(context)
+        tool_definitions = self._get_tool_definitions(
+            agent_config.allowed_tools, agent_config.is_skill_agent
+        )
 
-        # Get filtered tool definitions
-        tool_definitions = self._filter_tools(agent_config.allowed_tools)
-
-        # Block use_skill for skill agents to prevent recursive invocation
-        if agent_config.is_skill_agent:
-            tool_definitions = [t for t in tool_definitions if t.name != "use_skill"]
-
-        # Create isolated session for this agent
         session = SessionState(
             session_id=f"agent-{agent_config.name}-{context.session_id or 'unknown'}",
             provider=self._config.default_model.provider,
@@ -127,14 +95,16 @@ class AgentExecutor:
         )
         session.add_user_message(input_message)
 
-        iterations = 0
-        consecutive_failures = 0
-        max_consecutive_failures = 3
+        tool_context = ToolContext(
+            session_id=context.session_id,
+            user_id=context.user_id,
+            chat_id=context.chat_id,
+            env=environment or {},
+        )
 
-        while iterations < max_iterations:
-            iterations += 1
+        for iteration in range(1, max_iterations + 1):
             logger.debug(
-                f"Agent '{agent_config.name}' iteration {iterations}/{max_iterations}"
+                f"Agent '{agent_config.name}' iteration {iteration}/{max_iterations}"
             )
 
             try:
@@ -142,7 +112,7 @@ class AgentExecutor:
                     messages=session.get_messages_for_llm(),
                     model=resolved_model,
                     system=system_prompt,
-                    tools=tool_definitions if tool_definitions else None,
+                    tools=tool_definitions or None,
                     max_tokens=4096,
                 )
             except Exception as e:
@@ -150,33 +120,17 @@ class AgentExecutor:
                 return AgentResult.error(f"LLM error: {e}")
 
             message = response.message
-
-            # Add assistant message to session
             session.add_assistant_message(message.content)
 
-            # Check for tool uses
             tool_uses = message.get_tool_uses()
-
             if not tool_uses:
-                # No tools = agent is done, return text response
                 text = message.get_text()
                 logger.info(
-                    f"Agent '{agent_config.name}' completed in {iterations} iterations"
+                    f"Agent '{agent_config.name}' completed in {iteration} iterations"
                 )
-                return AgentResult.success(text, iterations=iterations)
+                return AgentResult.success(text, iterations=iteration)
 
-            # Build tool context with environment
-            tool_context = ToolContext(
-                session_id=context.session_id,
-                user_id=context.user_id,
-                chat_id=context.chat_id,
-                env=environment or {},
-            )
-
-            # Execute tools
-            all_failed = True
             for tool_use in tool_uses:
-                # Check if tool is allowed
                 if (
                     agent_config.allowed_tools
                     and tool_use.name not in agent_config.allowed_tools
@@ -199,8 +153,6 @@ class AgentExecutor:
                         result.content,
                         is_error=result.is_error,
                     )
-                    if not result.is_error:
-                        all_failed = False
                 except Exception as e:
                     logger.error(f"Agent tool execution error: {e}")
                     session.add_tool_result(
@@ -209,29 +161,10 @@ class AgentExecutor:
                         is_error=True,
                     )
 
-            # Track consecutive failures
-            if all_failed:
-                consecutive_failures += 1
-                if consecutive_failures >= max_consecutive_failures:
-                    logger.warning(
-                        f"Agent '{agent_config.name}' stopped after "
-                        f"{consecutive_failures} consecutive failed iterations"
-                    )
-                    return AgentResult(
-                        content=f"Stopped: {consecutive_failures} consecutive iterations "
-                        "with all tools failing",
-                        is_error=True,
-                        iterations=iterations,
-                    )
-            else:
-                consecutive_failures = 0
-
-        # Hit max iterations
         logger.warning(
             f"Agent '{agent_config.name}' hit max iterations ({max_iterations})"
         )
 
-        # Try to get any text from the last message
         last_text = ""
         if session.messages:
             last_msg = session.messages[-1]
@@ -241,5 +174,5 @@ class AgentExecutor:
         return AgentResult(
             content=last_text or f"Agent reached iteration limit ({max_iterations})",
             is_error=True,
-            iterations=iterations,
+            iterations=max_iterations,
         )

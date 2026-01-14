@@ -196,35 +196,16 @@ class AgentOverrideConfig(BaseModel):
 
 
 class SkillConfig(BaseModel):
-    """Per-skill configuration.
+    model_config = ConfigDict(extra="allow")
 
-    Used to configure skill behavior via [skills.<name>] sections.
-    Environment variables are stored as extra fields with UPPER_CASE names.
-
-    Example:
-        [skills.research]
-        PERPLEXITY_API_KEY = "pplx-..."
-        model = "haiku"
-        enabled = true
-    """
-
-    model_config = ConfigDict(extra="allow")  # Allow UPPER_CASE env var fields
-
-    model: str | None = None  # Model alias override (None = skill default)
-    enabled: bool = True  # Can disable without removing file
+    model: str | None = None
+    enabled: bool = True
 
     def get_env_vars(self) -> dict[str, str]:
-        """Get env vars (extra fields with UPPER_CASE names).
-
-        Returns:
-            Dict of env var name to value.
-        """
-        # Get all extra fields (not model or enabled)
-        known_fields = {"model", "enabled"}
         return {
             k: str(v)
             for k, v in self.model_dump().items()
-            if k not in known_fields and k.isupper()
+            if k not in {"model", "enabled"} and k.isupper()
         }
 
 
@@ -296,21 +277,14 @@ class AshConfig(BaseModel):
         return self
 
     def _set_provider_api_key(self, provider: str, api_key: SecretStr) -> None:
-        """Set API key on provider config, creating it if needed."""
-        if provider == "anthropic":
-            if self.anthropic is None:
-                self.anthropic = ProviderConfig(api_key=api_key)
-            elif self.anthropic.api_key is None:
-                self.anthropic.api_key = api_key
-        elif provider == "openai":
-            if self.openai is None:
-                self.openai = ProviderConfig(api_key=api_key)
-            elif self.openai.api_key is None:
-                self.openai.api_key = api_key
+        provider_config = getattr(self, provider, None)
+        if provider_config is None:
+            setattr(self, provider, ProviderConfig(api_key=api_key))
+        elif provider_config.api_key is None:
+            provider_config.api_key = api_key
 
     @model_validator(mode="after")
     def _validate_default_model(self) -> "AshConfig":
-        """Validate that a default model is configured."""
         if "default" not in self.models and self.default_llm is None:
             raise ValueError(
                 "No default model configured. Add [models.default] or [default_llm]"
@@ -318,89 +292,42 @@ class AshConfig(BaseModel):
         return self
 
     def get_model(self, alias: str) -> ModelConfig:
-        """Get model config by alias.
-
-        Args:
-            alias: The model alias to look up.
-
-        Returns:
-            The ModelConfig for the alias.
-
-        Raises:
-            ConfigError: If the alias is not found.
-        """
         if alias not in self.models:
-            available = ", ".join(sorted(self.models.keys()))
-            raise ConfigError(f"Unknown model alias '{alias}'. Available: {available}")
+            raise ConfigError(
+                f"Unknown model alias '{alias}'. Available: {', '.join(sorted(self.models.keys()))}"
+            )
         return self.models[alias]
 
     def list_models(self) -> list[str]:
-        """List available model aliases.
-
-        Returns:
-            Sorted list of model alias names.
-        """
         return sorted(self.models.keys())
 
     @property
     def default_model(self) -> ModelConfig:
-        """Get the default model (alias 'default').
-
-        Returns:
-            The default ModelConfig.
-
-        Raises:
-            ConfigError: If no default model is configured.
-        """
         return self.get_model("default")
 
     def _resolve_provider_api_key(
         self, provider: Literal["anthropic", "openai"]
     ) -> SecretStr | None:
-        """Resolve API key for a provider.
-
-        Resolution order:
-        1. Provider-level config api_key
-        2. Environment variable (ANTHROPIC_API_KEY or OPENAI_API_KEY)
-        """
-        # Check provider-level config
-        provider_config = self.anthropic if provider == "anthropic" else self.openai
+        provider_config = getattr(self, provider, None)
         if provider_config and provider_config.api_key:
             return provider_config.api_key
-
-        # Check environment variable
-        env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
-        env_value = os.environ.get(env_var)
-        if env_value:
+        env_var = f"{provider.upper()}_API_KEY"
+        if env_value := os.environ.get(env_var):
             return SecretStr(env_value)
-
         return None
 
     def resolve_api_key(self, alias: str) -> SecretStr | None:
-        """Resolve API key for a model alias."""
-        model = self.get_model(alias)
-        return self._resolve_provider_api_key(model.provider)
+        return self._resolve_provider_api_key(self.get_model(alias).provider)
 
     def resolve_embeddings_api_key(self) -> SecretStr | None:
-        """Resolve API key for embeddings."""
-        if self.embeddings is None:
-            return None
-        return self._resolve_provider_api_key(self.embeddings.provider)
+        return (
+            self._resolve_provider_api_key(self.embeddings.provider)
+            if self.embeddings
+            else None
+        )
 
     def get_resolved_env(self) -> dict[str, str]:
-        """Get env vars from [env] section with $VAR references resolved.
-
-        Values starting with $ are resolved from environment variables.
-
-        Returns:
-            Dict of env var name to resolved value.
-        """
-        resolved = {}
-        for name, value in self.env.items():
-            if value.startswith("$"):
-                # Resolve from environment
-                env_var = value[1:]
-                resolved[name] = os.environ.get(env_var, "")
-            else:
-                resolved[name] = value
-        return resolved
+        return {
+            name: os.environ.get(value[1:], "") if value.startswith("$") else value
+            for name, value in self.env.items()
+        }

@@ -28,20 +28,10 @@ EDIT_INTERVAL = 1.0
 
 
 def _get_parse_mode(mode: str | None) -> ParseMode:
-    """Convert a parse mode string to ParseMode enum.
-
-    Args:
-        mode: Parse mode string (e.g., "markdown", "markdown_v2", "html").
-
-    Returns:
-        ParseMode enum value, defaults to MARKDOWN.
-    """
+    """Convert a parse mode string to ParseMode enum."""
     if not mode:
         return ParseMode.MARKDOWN
-
-    # Normalize: "markdown_v2" -> "MARKDOWN_V2"
     normalized = mode.upper().replace("-", "_")
-
     try:
         return ParseMode[normalized]
     except KeyError:
@@ -51,16 +41,11 @@ def _get_parse_mode(mode: str | None) -> ParseMode:
 
 def _truncate(text: str, max_len: int = 40) -> str:
     """Truncate text for logging."""
-    if len(text) <= max_len:
-        return text
-    return text[:max_len] + "..."
+    return text[:max_len] + "..." if len(text) > max_len else text
 
 
 class TelegramProvider(Provider):
-    """Telegram provider using aiogram 3.x.
-
-    Supports both polling and webhook modes.
-    """
+    """Telegram provider using aiogram 3.x."""
 
     def __init__(
         self,
@@ -71,16 +56,6 @@ class TelegramProvider(Provider):
         allowed_groups: list[str] | None = None,
         group_mode: str = "mention",
     ):
-        """Initialize Telegram provider.
-
-        Args:
-            bot_token: Telegram bot token from BotFather.
-            allowed_users: List of allowed usernames or user IDs.
-            webhook_url: Base URL for webhooks (uses polling if None).
-            webhook_path: Path for webhook endpoint.
-            allowed_groups: List of allowed group IDs (empty = all groups allowed).
-            group_mode: How to respond in groups ("mention" or "always").
-        """
         self._token = bot_token
         self._allowed_users = set(allowed_users or [])
         self._webhook_url = webhook_url
@@ -103,69 +78,39 @@ class TelegramProvider(Provider):
 
     @property
     def bot(self) -> Bot:
-        """Get the aiogram Bot instance."""
         return self._bot
 
     @property
     def dispatcher(self) -> Dispatcher:
-        """Get the aiogram Dispatcher instance."""
         return self._dp
 
     @property
     def bot_username(self) -> str | None:
-        """Get the bot's username."""
         return self._bot_username
 
     def _is_user_allowed(self, user_id: int, username: str | None) -> bool:
-        """Check if a user is allowed to interact with the bot.
-
-        Args:
-            user_id: Telegram user ID.
-            username: Telegram username (without @).
-
-        Returns:
-            True if user is allowed.
-        """
         if not self._allowed_users:
             return True
-
         return str(user_id) in self._allowed_users or (
             username is not None and f"@{username}" in self._allowed_users
         )
 
     def _is_group_allowed(self, chat_id: int) -> bool:
-        """Check if a group is allowed.
-
-        Args:
-            chat_id: Telegram chat ID.
-
-        Returns:
-            True if group is allowed (or if no restrictions set).
-        """
         if not self._allowed_groups:
             return True
         return str(chat_id) in self._allowed_groups
 
     def _is_mentioned(self, message: TelegramMessage) -> bool:
-        """Check if bot is mentioned in the message.
-
-        Args:
-            message: Telegram message to check.
-
-        Returns:
-            True if bot username is mentioned.
-        """
+        """Check if bot is mentioned in the message."""
         if not self._bot_username:
             return False
 
         text = message.text or message.caption or ""
         mention = f"@{self._bot_username}"
 
-        # Check for direct text mention
         if mention.lower() in text.lower():
             return True
 
-        # Check entities for mention type
         entities = message.entities or message.caption_entities or []
         for entity in entities:
             if entity.type == "mention":
@@ -176,35 +121,13 @@ class TelegramProvider(Provider):
         return False
 
     def _is_reply(self, message: TelegramMessage) -> bool:
-        """Check if this message is a reply to any message.
-
-        Used to allow replies in a conversation thread even without explicit
-        mention. The handler will verify the reply target is part of an
-        existing conversation.
-
-        Args:
-            message: Telegram message to check.
-
-        Returns:
-            True if message is a reply to another message.
-        """
         return message.reply_to_message is not None
 
     def _strip_mention(self, text: str) -> str:
-        """Remove bot mention from text.
-
-        Args:
-            text: Message text.
-
-        Returns:
-            Text with bot mention removed.
-        """
         if not self._bot_username:
             return text
         pattern = rf"@{re.escape(self._bot_username)}\b"
         return re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
-
-    # --- Message sending helpers ---
 
     async def _send_with_fallback(
         self,
@@ -213,17 +136,7 @@ class TelegramProvider(Provider):
         reply_to: int | None = None,
         parse_mode: ParseMode | None = ParseMode.MARKDOWN,
     ) -> TelegramMessage:
-        """Send a message with automatic plain-text fallback on parse errors.
-
-        Args:
-            chat_id: Telegram chat ID.
-            text: Message text.
-            reply_to: Message ID to reply to.
-            parse_mode: Parse mode (falls back to None on error).
-
-        Returns:
-            Sent Telegram message.
-        """
+        """Send a message with automatic plain-text fallback on parse errors."""
         try:
             return await self._bot.send_message(
                 chat_id=chat_id,
@@ -257,17 +170,7 @@ class TelegramProvider(Provider):
         text: str,
         parse_mode: ParseMode | None = ParseMode.MARKDOWN,
     ) -> bool:
-        """Edit a message with automatic plain-text fallback on parse errors.
-
-        Args:
-            chat_id: Telegram chat ID.
-            message_id: Message ID to edit.
-            text: New message text.
-            parse_mode: Parse mode (falls back to None on error).
-
-        Returns:
-            True if edit succeeded, False if it failed (e.g., rate limit).
-        """
+        """Edit a message with automatic plain-text fallback on parse errors."""
         try:
             await self._bot.edit_message_text(
                 chat_id=chat_id,
@@ -299,22 +202,10 @@ class TelegramProvider(Provider):
             logger.debug(f"Edit failed: {e}")
             return False
 
-    # --- Message processing helpers ---
-
     def _should_process_message(
         self, message: TelegramMessage
     ) -> tuple[int, str | None] | None:
-        """Check if a message should be processed (user + group access).
-
-        Group authorization implies user authorization within that group context.
-        DMs still require explicit user authorization.
-
-        Args:
-            message: Telegram message to check.
-
-        Returns:
-            (user_id, username) tuple if should process, None otherwise.
-        """
+        """Check if a message should be processed (user + group access)."""
         if not message.from_user:
             return None
 
@@ -349,19 +240,7 @@ class TelegramProvider(Provider):
         *,
         was_mentioned: bool = False,
     ) -> IncomingMessage:
-        """Convert a Telegram message to an IncomingMessage.
-
-        Args:
-            message: Source Telegram message.
-            user_id: User ID (already validated).
-            username: Username (already validated).
-            text: Processed text (with mentions stripped if needed).
-            images: Optional image attachments.
-            was_mentioned: Whether the bot was explicitly @-mentioned.
-
-        Returns:
-            IncomingMessage for handler processing.
-        """
+        """Convert a Telegram message to an IncomingMessage."""
         metadata = {
             "chat_type": message.chat.type,
             "chat_title": message.chat.title,
@@ -387,11 +266,7 @@ class TelegramProvider(Provider):
         )
 
     async def start(self, handler: MessageHandler) -> None:
-        """Start the Telegram bot.
-
-        Args:
-            handler: Callback to handle incoming messages.
-        """
+        """Start the Telegram bot."""
         self._handler = handler
         self._setup_handlers()
 
@@ -562,14 +437,7 @@ class TelegramProvider(Provider):
                     logger.exception("Error handling message")
 
     async def send(self, message: OutgoingMessage) -> str:
-        """Send a message via Telegram.
-
-        Args:
-            message: Message to send.
-
-        Returns:
-            Sent message ID.
-        """
+        """Send a message via Telegram."""
         parse_mode = _get_parse_mode(message.parse_mode)
         sent = await self._send_with_fallback(
             chat_id=int(message.chat_id),
@@ -585,17 +453,7 @@ class TelegramProvider(Provider):
         return str(sent.message_id)
 
     async def send_message(self, chat_id: str, text: str) -> str:
-        """Send a simple text message to a chat.
-
-        Convenience method for scheduled tasks and other simple sends.
-
-        Args:
-            chat_id: Chat ID to send to.
-            text: Message text.
-
-        Returns:
-            Sent message ID.
-        """
+        """Send a simple text message to a chat."""
         sent = await self._send_with_fallback(
             chat_id=int(chat_id),
             text=text,
@@ -610,18 +468,7 @@ class TelegramProvider(Provider):
         *,
         reply_to: str | None = None,
     ) -> str:
-        """Send a message with streaming updates.
-
-        Edits the message as new content arrives, respecting rate limits.
-
-        Args:
-            chat_id: Chat to send to.
-            stream: Async iterator of text chunks.
-            reply_to: Message to reply to.
-
-        Returns:
-            Final message ID.
-        """
+        """Send a message with streaming updates."""
         content = ""
         message_id: str | None = None
         last_edit = 0.0
@@ -686,50 +533,18 @@ class TelegramProvider(Provider):
         *,
         parse_mode: str | None = None,
     ) -> None:
-        """Edit an existing message.
-
-        Args:
-            chat_id: Chat containing the message.
-            message_id: Message to edit.
-            text: New text content.
-            parse_mode: Text parsing mode.
-        """
         pm = _get_parse_mode(parse_mode)
         await self._edit_with_fallback(int(chat_id), int(message_id), text, pm)
 
     async def delete(self, chat_id: str, message_id: str) -> None:
-        """Delete a message.
-
-        Args:
-            chat_id: Chat containing the message.
-            message_id: Message to delete.
-        """
-        await self._bot.delete_message(
-            chat_id=int(chat_id),
-            message_id=int(message_id),
-        )
+        await self._bot.delete_message(chat_id=int(chat_id), message_id=int(message_id))
 
     async def send_typing(self, chat_id: str) -> None:
-        """Send typing indicator to a chat.
-
-        Args:
-            chat_id: Chat to show typing indicator in.
-        """
-        await self._bot.send_chat_action(
-            chat_id=int(chat_id),
-            action="typing",
-        )
+        await self._bot.send_chat_action(chat_id=int(chat_id), action="typing")
 
     async def set_reaction(
         self, chat_id: str, message_id: str, emoji: str = "👀"
     ) -> None:
-        """Set a reaction on a message.
-
-        Args:
-            chat_id: Chat containing the message.
-            message_id: Message to react to.
-            emoji: Emoji to use for reaction (default: eyes - "looking at it").
-        """
         try:
             await self._bot.set_message_reaction(
                 chat_id=int(chat_id),
@@ -737,33 +552,18 @@ class TelegramProvider(Provider):
                 reaction=[ReactionTypeEmoji(emoji=emoji)],
             )
         except Exception as e:
-            # Reactions may not be available in all chats
             logger.warning(f"Failed to set reaction: {e}")
 
     async def clear_reaction(self, chat_id: str, message_id: str) -> None:
-        """Clear reactions from a message.
-
-        Args:
-            chat_id: Chat containing the message.
-            message_id: Message to clear reactions from.
-        """
         try:
             await self._bot.set_message_reaction(
-                chat_id=int(chat_id),
-                message_id=int(message_id),
-                reaction=[],
+                chat_id=int(chat_id), message_id=int(message_id), reaction=[]
             )
         except Exception as e:
             logger.debug(f"Failed to clear reaction: {e}")
 
     async def process_webhook_update(self, update_data: dict) -> None:
-        """Process a webhook update.
-
-        Used when running in webhook mode with an external HTTP server.
-
-        Args:
-            update_data: Raw update data from Telegram.
-        """
+        """Process a webhook update from Telegram."""
         from aiogram.types import Update
 
         update = Update(**update_data)

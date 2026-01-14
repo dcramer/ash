@@ -28,17 +28,10 @@ Provide a structured response with:
 
 
 class ResearchAgent(Agent):
-    """Deep research with web search and synthesis.
-
-    This agent performs multi-step research:
-    1. Generates multiple search queries
-    2. Fetches and reads authoritative sources
-    3. Synthesizes findings with citations
-    """
+    """Deep research with web search and synthesis."""
 
     @property
     def config(self) -> AgentConfig:
-        """Return agent configuration."""
         return AgentConfig(
             name="research",
             description="Research a topic using web search to find authoritative sources",
@@ -48,19 +41,8 @@ class ResearchAgent(Agent):
         )
 
     def build_system_prompt(self, context: AgentContext) -> str:
-        """Build system prompt with optional focus area.
-
-        Args:
-            context: Execution context (may contain 'focus' in input_data).
-
-        Returns:
-            System prompt string.
-        """
-        base_prompt = self.config.system_prompt
-
-        # Check for focus area in input data
+        prompt = self.config.system_prompt
         focus = context.input_data.get("focus")
         if focus:
-            base_prompt += f"\n\n## Focus Area\n\nPay special attention to: {focus}"
-
-        return base_prompt
+            prompt += f"\n\n## Focus Area\n\nPay special attention to: {focus}"
+        return prompt

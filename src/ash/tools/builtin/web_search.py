@@ -214,22 +214,12 @@ class WebSearchTool(Tool):
         input_data: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
-        """Execute web search in sandbox.
-
-        Args:
-            input_data: Must contain 'query' key.
-            context: Execution context.
-
-        Returns:
-            Tool result with search results.
-        """
         query = input_data.get("query", "").strip()
         if not query:
             return ToolResult.error("Missing required parameter: query")
 
         count = min(input_data.get("count", 5), self._max_results)
 
-        # Check cache first
         if self._cache:
             cached = self._cache.get(query)
             if cached is not None and isinstance(cached, SearchResponse):
@@ -241,10 +231,33 @@ class WebSearchTool(Tool):
                     search_time_ms=cached.search_time_ms,
                 )
 
+        async def do_search() -> SearchResponse:
+            escaped_query = shlex.quote(query)
+            command = f"python3 -c {shlex.quote(SEARCH_SCRIPT)} {escaped_query} {count}"
+
+            result = await self._executor.execute(
+                command,
+                timeout=30,
+                reuse_container=True,
+                environment={"BRAVE_API_KEY": self._api_key},
+            )
+
+            if result.timed_out:
+                raise TimeoutError("Search request timed out")
+
+            output = result.stdout.strip() if result.stdout else ""
+            if not output:
+                raise ValueError("Empty response from search")
+
+            data = json.loads(output)
+            if "error" in data:
+                raise Exception(f"{data['error']} (code: {data.get('code', 0)})")
+
+            return SearchResponse.from_json(output)
+
         try:
-            # Use retry wrapper for transient errors
             response = await with_retry(
-                lambda: self._execute_search(query, count),
+                do_search,
                 config=self._retry_config,
                 on_retry=lambda attempt, err, delay: logger.warning(
                     f"Search retry {attempt}/{self._retry_config.max_attempts}: "
@@ -252,7 +265,6 @@ class WebSearchTool(Tool):
                 ),
             )
 
-            # Cache the response
             if self._cache and not response.cached:
                 self._cache.set(query, response)
 
@@ -266,53 +278,6 @@ class WebSearchTool(Tool):
         except Exception as e:
             logger.exception(f"Search error for query: {query}")
             return ToolResult.error(f"Search error: {e}")
-
-    async def _execute_search(self, query: str, count: int) -> SearchResponse:
-        """Execute search in sandbox and parse response.
-
-        Args:
-            query: Search query.
-            count: Number of results.
-
-        Returns:
-            Parsed SearchResponse.
-
-        Raises:
-            Exception: On search failure.
-        """
-        # Build command to execute Python search script
-        # Query is passed as argument, properly escaped
-        escaped_query = shlex.quote(query)
-        command = f"python3 -c {shlex.quote(SEARCH_SCRIPT)} {escaped_query} {count}"
-
-        result = await self._executor.execute(
-            command,
-            timeout=30,
-            reuse_container=True,
-            environment={"BRAVE_API_KEY": self._api_key},
-        )
-
-        if result.timed_out:
-            raise TimeoutError("Search request timed out")
-
-        # Parse JSON output
-        output = result.stdout.strip() if result.stdout else ""
-        if not output:
-            raise ValueError("Empty response from search")
-
-        try:
-            data = json.loads(output)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON response: {e}") from e
-
-        # Check for error response
-        if "error" in data:
-            error_code = data.get("code", 0)
-            error_msg = data["error"]
-            raise Exception(f"{error_msg} (code: {error_code})")
-
-        # Parse into SearchResponse
-        return SearchResponse.from_json(output)
 
     async def cleanup(self) -> None:
         """Clean up sandbox resources."""

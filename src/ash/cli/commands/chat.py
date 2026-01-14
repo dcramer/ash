@@ -209,34 +209,42 @@ async def _run_chat(
             if messages:
                 logger.info(f"Loaded {len(messages)} messages from previous session")
 
-            async def process_single_message(user_input: str) -> None:
-                """Process a single message and print the response."""
-                # Persist user message to JSONL
+            async def process_message(
+                user_input: str, show_prefix: bool = False, show_meta: bool = False
+            ) -> None:
                 await session_manager.add_user_message(user_input)
 
                 if streaming:
-                    # Track response for JSONL persistence
+                    if show_prefix:
+                        console.print("[bold green]Ash:[/bold green] ", end="")
                     response_text = ""
                     async for chunk in agent.process_message_streaming(
                         user_input, session
                     ):
                         console.print(chunk, end="")
                         response_text += chunk
-                    console.print()
-
-                    # Persist assistant response to JSONL
+                    console.print("\n" if show_prefix else "")
                     if response_text:
                         await session_manager.add_assistant_message(response_text)
                 else:
                     with console.status("[dim]Thinking...[/dim]"):
                         response = await agent.process_message(user_input, session)
-                    console.print(response.text)
 
-                    # Persist assistant response to JSONL
+                    if show_prefix:
+                        console.print("[bold green]Ash:[/bold green]")
+                        console.print(Markdown(response.text))
+                        if show_meta and response.tool_calls:
+                            console.print(
+                                f"[dim]({len(response.tool_calls)} tool calls, "
+                                f"{response.iterations} iterations)[/dim]"
+                            )
+                        console.print()
+                    else:
+                        console.print(response.text)
+
                     if response.text:
                         await session_manager.add_assistant_message(response.text)
 
-                    # Persist tool uses and results to JSONL
                     for tool_call in response.tool_calls:
                         await session_manager.add_tool_use(
                             tool_use_id=tool_call["id"],
@@ -249,15 +257,12 @@ async def _run_chat(
                             success=not tool_call.get("is_error", False),
                         )
 
-                # Commit after each message to persist memory changes
                 await db_session.commit()
 
-            # Non-interactive mode: single prompt
             if prompt:
-                await process_single_message(prompt)
+                await process_message(prompt)
                 return
 
-            # Interactive mode
             console.print(
                 Panel(
                     "[bold]Ash Chat[/bold]\n\n"
@@ -272,72 +277,14 @@ async def _run_chat(
 
             while True:
                 try:
-                    # Get user input
                     user_input = console.input("[bold cyan]You:[/bold cyan] ").strip()
-
                     if not user_input:
                         continue
-
                     if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
                         console.print("\n[dim]Goodbye![/dim]")
                         break
-
                     console.print()
-
-                    # Persist user message to JSONL
-                    await session_manager.add_user_message(user_input)
-
-                    # Process message
-                    if streaming:
-                        console.print("[bold green]Ash:[/bold green] ", end="")
-                        response_text = ""
-                        async for chunk in agent.process_message_streaming(
-                            user_input, session
-                        ):
-                            console.print(chunk, end="")
-                            response_text += chunk
-                        console.print("\n")
-
-                        # Persist assistant response to JSONL
-                        if response_text:
-                            await session_manager.add_assistant_message(response_text)
-
-                        # Commit after each message to persist memory changes
-                        await db_session.commit()
-                    else:
-                        with console.status("[dim]Thinking...[/dim]"):
-                            response = await agent.process_message(user_input, session)
-
-                        console.print("[bold green]Ash:[/bold green]")
-                        console.print(Markdown(response.text))
-
-                        if response.tool_calls:
-                            console.print(
-                                f"[dim]({len(response.tool_calls)} tool calls, "
-                                f"{response.iterations} iterations)[/dim]"
-                            )
-                        console.print()
-
-                        # Persist assistant response to JSONL
-                        if response.text:
-                            await session_manager.add_assistant_message(response.text)
-
-                        # Persist tool uses and results to JSONL
-                        for tool_call in response.tool_calls:
-                            await session_manager.add_tool_use(
-                                tool_use_id=tool_call["id"],
-                                name=tool_call["name"],
-                                input_data=tool_call["input"],
-                            )
-                            await session_manager.add_tool_result(
-                                tool_use_id=tool_call["id"],
-                                output=tool_call["result"],
-                                success=not tool_call.get("is_error", False),
-                            )
-
-                        # Commit after each message to persist memory changes
-                        await db_session.commit()
-
+                    await process_message(user_input, show_prefix=True, show_meta=True)
                 except KeyboardInterrupt:
                     console.print("\n[dim]Cancelled[/dim]\n")
                     continue

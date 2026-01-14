@@ -305,30 +305,10 @@ async def _sessions_view(query: str, verbose: bool) -> None:
             console.print()
 
         elif isinstance(entry, ToolResultEntry):
-            # Show orphaned tool results (when tool_use wasn't persisted in message)
             if entry.tool_use_id not in tool_uses:
                 status = "[green]✓[/green]" if entry.success else "[red]✗ failed[/red]"
                 console.print(f"  [bold magenta]🔧 tool call[/bold magenta] {status}")
-                output_lines = entry.output.strip().split("\n")
-                if verbose or len(output_lines) <= 5:
-                    for line in output_lines[:50]:
-                        if len(line) > 200:
-                            line = line[:200] + "..."
-                        console.print(f"     [dim]│[/dim] {line}")
-                    if len(output_lines) > 50:
-                        console.print(
-                            f"     [dim]│ ... ({len(output_lines) - 50} more lines)[/dim]"
-                        )
-                else:
-                    for line in output_lines[:3]:
-                        if len(line) > 200:
-                            line = line[:200] + "..."
-                        console.print(f"     [dim]│[/dim] {line}")
-                    if len(output_lines) > 3:
-                        console.print(
-                            f"     [dim]│ ... ({len(output_lines) - 3} more lines, "
-                            f"use -v for full)[/dim]"
-                        )
+                _print_output_lines(entry.output, verbose)
                 console.print()
 
         elif isinstance(entry, CompactionEntry):
@@ -341,6 +321,23 @@ async def _sessions_view(query: str, verbose: bool) -> None:
     dim(f"\nTotal entries: {len(entries)}")
 
 
+def _print_output_lines(output_text: str, verbose: bool) -> None:
+    """Print output lines with truncation."""
+    lines = output_text.strip().split("\n")
+    show_all = verbose or len(lines) <= 5
+    limit = 50 if show_all else 3
+
+    for line in lines[:limit]:
+        console.print(
+            f"     [dim]│[/dim] {line[:200] + '...' if len(line) > 200 else line}"
+        )
+
+    remaining = len(lines) - limit
+    if remaining > 0:
+        hint = "" if show_all else ", use -v for full"
+        console.print(f"     [dim]│ ... ({remaining} more lines{hint})[/dim]")
+
+
 def _print_tool_call(
     name: str,
     input_data: dict[str, Any],
@@ -348,11 +345,8 @@ def _print_tool_call(
     verbose: bool,
 ) -> None:
     """Print a tool call with its result."""
-
-    # Format tool input summary
     input_summary = _format_tool_input(name, input_data, verbose)
 
-    # Determine result status
     if result is None:
         status = "[yellow]⏳ pending[/yellow]"
         output_text = None
@@ -363,79 +357,45 @@ def _print_tool_call(
         status = "[red]✗ failed[/red]"
         output_text = result.output
 
-    # Build tool header
-    tool_header = f"  [bold magenta]🔧 {name}[/bold magenta] {status}"
-    console.print(tool_header)
+    console.print(f"  [bold magenta]🔧 {name}[/bold magenta] {status}")
 
-    # Show input
     if input_summary:
         console.print(f"     [dim]{input_summary}[/dim]")
 
-    # Show output
     if output_text:
-        output_lines = output_text.strip().split("\n")
-        if verbose or len(output_lines) <= 5:
-            # Show full output
-            for line in output_lines[:50]:  # Cap at 50 lines even in verbose
-                if len(line) > 200:
-                    line = line[:200] + "..."
-                console.print(f"     [dim]│[/dim] {line}")
-            if len(output_lines) > 50:
-                console.print(
-                    f"     [dim]│ ... ({len(output_lines) - 50} more lines)[/dim]"
-                )
-        else:
-            # Show truncated output
-            for line in output_lines[:3]:
-                if len(line) > 200:
-                    line = line[:200] + "..."
-                console.print(f"     [dim]│[/dim] {line}")
-            if len(output_lines) > 3:
-                console.print(
-                    f"     [dim]│ ... ({len(output_lines) - 3} more lines, use -v for full)[/dim]"
-                )
+        _print_output_lines(output_text, verbose)
 
 
 def _format_tool_input(name: str, input_data: dict[str, Any], verbose: bool) -> str:
     """Format tool input for display."""
-    match name:
-        case "bash" | "bash_tool":
-            cmd = input_data.get("command", "")
-            if not verbose and len(cmd) > 100:
-                cmd = cmd[:100] + "..."
-            return f"$ {cmd}"
-        case "read_file":
-            return input_data.get("path", "")
-        case "write_file":
-            path = input_data.get("path", "")
-            content = input_data.get("content", "")
-            lines = len(content.split("\n"))
-            return f"{path} ({lines} lines)"
-        case "web_search":
-            return f"query: {input_data.get('query', '')}"
-        case "web_fetch":
-            return input_data.get("url", "")
-        case "recall":
-            return f"query: {input_data.get('query', '')}"
-        case "remember":
-            facts = input_data.get("facts", [])
-            if facts:
-                return f"{len(facts)} facts"
-            content = input_data.get("content", "")
-            if len(content) > 50:
-                content = content[:50] + "..."
-            return content
-        case "use_agent":
-            return input_data.get("agent", "")
-        case _:
-            if verbose:
-                return json.dumps(input_data, indent=2)[:500]
-            # Show first key-value pair
-            if input_data:
-                key = next(iter(input_data))
-                val = str(input_data[key])[:50]
-                return f"{key}: {val}"
-            return ""
+    if name in ("bash", "bash_tool"):
+        cmd = input_data.get("command", "")
+        return f"$ {cmd[:100] + '...' if not verbose and len(cmd) > 100 else cmd}"
+    if name == "read_file":
+        return input_data.get("path", "")
+    if name == "write_file":
+        path = input_data.get("path", "")
+        lines = len(input_data.get("content", "").split("\n"))
+        return f"{path} ({lines} lines)"
+    if name in ("web_search", "recall"):
+        return f"query: {input_data.get('query', '')}"
+    if name == "web_fetch":
+        return input_data.get("url", "")
+    if name == "remember":
+        facts = input_data.get("facts", [])
+        if facts:
+            return f"{len(facts)} facts"
+        content = input_data.get("content", "")
+        return content[:50] + "..." if len(content) > 50 else content
+    if name == "use_agent":
+        return input_data.get("agent", "")
+
+    if verbose:
+        return json.dumps(input_data, indent=2)[:500]
+    if input_data:
+        key = next(iter(input_data))
+        return f"{key}: {str(input_data[key])[:50]}"
+    return ""
 
 
 async def _sessions_search(query: str, limit: int) -> None:

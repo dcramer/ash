@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -16,25 +16,13 @@ if TYPE_CHECKING:
 
 
 def format_gap_duration(minutes: float) -> str:
-    """Format a time gap in human-readable form.
-
-    Args:
-        minutes: Gap duration in minutes.
-
-    Returns:
-        Human-readable duration string.
-    """
     if minutes < 60:
         return f"{int(minutes)} minutes"
     hours = minutes / 60
     if hours < 24:
-        if hours < 2:
-            return "about an hour"
-        return f"{int(hours)} hours"
+        return "about an hour" if hours < 2 else f"{int(hours)} hours"
     days = hours / 24
-    if days < 2:
-        return "about a day"
-    return f"{int(days)} days"
+    return "about a day" if days < 2 else f"{int(days)} days"
 
 
 @dataclass
@@ -57,18 +45,6 @@ class RuntimeInfo:
         provider: str | None = None,
         timezone: str | None = None,
     ) -> RuntimeInfo:
-        """Create RuntimeInfo from current environment.
-
-        Args:
-            model: Current model name.
-            provider: Current provider name.
-            timezone: User's timezone.
-
-        Returns:
-            RuntimeInfo with environment details.
-        """
-        from datetime import UTC
-
         return cls(
             model=model,
             provider=provider,
@@ -99,19 +75,6 @@ class PromptContext:
 
 
 class SystemPromptBuilder:
-    """Build system prompts with full context.
-
-    Constructs system prompts with:
-    - Base identity (SOUL.md)
-    - Available tools with descriptions
-    - Available skills with descriptions
-    - Model aliases
-    - Workspace info
-    - Sandbox configuration
-    - Runtime info (OS, model, time, etc.)
-    - Memory context (memories, past conversations)
-    """
-
     def __init__(
         self,
         workspace: Workspace,
@@ -120,15 +83,6 @@ class SystemPromptBuilder:
         config: AshConfig,
         agent_registry: AgentRegistry | None = None,
     ):
-        """Initialize prompt builder.
-
-        Args:
-            workspace: Loaded workspace with personality.
-            tool_registry: Registry of available tools.
-            skill_registry: Registry of available skills.
-            config: Application configuration.
-            agent_registry: Optional registry of built-in agents.
-        """
         self._workspace = workspace
         self._tools = tool_registry
         self._skills = skill_registry
@@ -136,92 +90,36 @@ class SystemPromptBuilder:
         self._agents = agent_registry
 
     def build(self, context: PromptContext | None = None) -> str:
-        """Build complete system prompt.
-
-        Args:
-            context: Optional context with runtime info and memory.
-
-        Returns:
-            Complete system prompt string.
-        """
         context = context or PromptContext()
         parts: list[str] = []
 
-        # 1. Base identity (SOUL.md)
         if self._workspace.soul:
             parts.append(self._workspace.soul)
 
-        # 2. Tools section
-        tools_section = self._build_tools_section()
-        if tools_section:
-            parts.append(f"\n\n{tools_section}")
+        sections = [
+            self._build_tools_section(),
+            self._build_skills_section(),
+            self._build_agents_section(),
+            self._build_model_aliases_section(),
+            self._build_workspace_section(),
+            self._build_sandbox_section(),
+            self._build_runtime_section(context.runtime) if context.runtime else "",
+            self._build_sender_section(context),
+            self._build_people_section(context.known_people)
+            if context.known_people
+            else "",
+            self._build_memory_section(context.memory) if context.memory else "",
+            self._build_conversation_context_section(context),
+            self._build_session_section(context),
+        ]
 
-        # 3. Skills section
-        skills_section = self._build_skills_section()
-        if skills_section:
-            parts.append(f"\n\n{skills_section}")
-
-        # 3.5. Agents section
-        agents_section = self._build_agents_section()
-        if agents_section:
-            parts.append(f"\n\n{agents_section}")
-
-        # 4. Model aliases
-        aliases_section = self._build_model_aliases_section()
-        if aliases_section:
-            parts.append(f"\n\n{aliases_section}")
-
-        # 5. Workspace info
-        workspace_section = self._build_workspace_section()
-        if workspace_section:
-            parts.append(f"\n\n{workspace_section}")
-
-        # 6. Sandbox info
-        sandbox_section = self._build_sandbox_section()
-        if sandbox_section:
-            parts.append(f"\n\n{sandbox_section}")
-
-        # 7. Runtime info
-        if context.runtime:
-            runtime_section = self._build_runtime_section(context.runtime)
-            if runtime_section:
-                parts.append(f"\n\n{runtime_section}")
-
-        # 8. Sender context (for group chats)
-        sender_section = self._build_sender_section(context)
-        if sender_section:
-            parts.append(f"\n\n{sender_section}")
-
-        # 9. Known people context
-        if context.known_people:
-            people_section = self._build_people_section(context.known_people)
-            if people_section:
-                parts.append(f"\n\n{people_section}")
-
-        # 10. Memory context
-        if context.memory:
-            memory_section = self._build_memory_section(context.memory)
-            if memory_section:
-                parts.append(f"\n\n{memory_section}")
-
-        # 11. Conversation context (gap signal)
-        conversation_section = self._build_conversation_context_section(context)
-        if conversation_section:
-            parts.append(f"\n\n{conversation_section}")
-
-        # 12. Session info
-        session_section = self._build_session_section(context)
-        if session_section:
-            parts.append(f"\n\n{session_section}")
+        for section in sections:
+            if section:
+                parts.append(f"\n\n{section}")
 
         return "".join(parts)
 
     def _build_tools_section(self) -> str:
-        """Build tools documentation section.
-
-        Returns:
-            Tools section string or empty if no tools.
-        """
         tool_defs = self._tools.get_definitions()
         if not tool_defs:
             return ""
@@ -236,7 +134,6 @@ class SystemPromptBuilder:
         for tool_def in tool_defs:
             lines.append(f"- **{tool_def.name}**: {tool_def.description}")
 
-        # Add guidance on tool usage and presenting results
         lines.extend(
             [
                 "",
@@ -271,14 +168,6 @@ class SystemPromptBuilder:
         return "\n".join(lines)
 
     def _build_skills_section(self) -> str:
-        """Build skills listing section.
-
-        Skills are invoked via the use_skill tool and run as subagents
-        with isolated sessions and scoped environments.
-
-        Returns:
-            Skills section string or empty if no skills.
-        """
         available_skills = list(self._skills)
         if not available_skills:
             return ""
@@ -299,18 +188,10 @@ class SystemPromptBuilder:
         return "\n".join(lines)
 
     def _build_agents_section(self) -> str:
-        """Build agents listing section.
-
-        Agents are built-in subagents that handle complex multi-step tasks
-        in isolated execution contexts.
-
-        Returns:
-            Agents section string or empty if no agents.
-        """
         if not self._agents:
             return ""
 
-        available_agents = list(self._agents.list_available())
+        available_agents = list(self._agents.list_agents())
         if not available_agents:
             return ""
 
@@ -328,11 +209,6 @@ class SystemPromptBuilder:
         return "\n".join(lines)
 
     def _build_model_aliases_section(self) -> str:
-        """Build model aliases section.
-
-        Returns:
-            Model aliases section or empty if only default model.
-        """
         aliases = self._config.list_models()
         if len(aliases) <= 1:
             return ""
@@ -351,100 +227,58 @@ class SystemPromptBuilder:
         return "\n".join(lines)
 
     def _build_workspace_section(self) -> str:
-        """Build workspace info section.
-
-        Returns:
-            Workspace section string.
-        """
-        lines = [
-            "## Workspace",
-            "",
-            "Working directory: /workspace",
-        ]
-        return "\n".join(lines)
+        return "## Workspace\n\nWorking directory: /workspace"
 
     def _build_sandbox_section(self) -> str:
-        """Build sandbox configuration section.
-
-        Returns:
-            Sandbox section string.
-        """
         sandbox = self._config.sandbox
+        network_status = "disabled" if sandbox.network_mode == "none" else "enabled"
 
         lines = [
             "## Sandbox",
             "",
             "Commands execute in a sandboxed environment.",
+            f"Network access is {network_status}.",
+            "",
+            "### ash-sb CLI",
+            "",
+            "The `ash-sb` command is available in the sandbox for self-service operations:",
+            "",
+            "**Memory:**",
+            "- `ash-sb memory search 'query'` - Search memories (semantic search)",
+            "- `ash-sb memory list` - List recent memories",
+            "- `ash-sb memory add 'content'` - Store a memory",
+            "",
+            "**Scheduling:**",
+            "- `ash-sb schedule create 'message' --at 2026-01-12T09:00:00Z` - One-time task",
+            "- `ash-sb schedule create 'message' --cron '0 8 * * *'` - Recurring task",
+            "- `ash-sb schedule list` - List scheduled tasks (shows IDs)",
+            "- `ash-sb schedule cancel --id <ID>` - Cancel a task by ID",
+            "- `ash-sb schedule clear` - Clear all tasks",
+            "",
+            "Run `ash-sb --help` for all available commands.",
         ]
-
-        if sandbox.network_mode == "none":
-            lines.append("Network access is disabled.")
-        else:
-            lines.append("Network access is enabled.")
-
-        # Add ash CLI documentation
-        lines.extend(
-            [
-                "",
-                "### ash-sb CLI",
-                "",
-                "The `ash-sb` command is available in the sandbox for self-service operations:",
-                "",
-                "**Memory:**",
-                "- `ash-sb memory search 'query'` - Search memories (semantic search)",
-                "- `ash-sb memory list` - List recent memories",
-                "- `ash-sb memory add 'content'` - Store a memory",
-                "",
-                "**Scheduling:**",
-                "- `ash-sb schedule create 'message' --at 2026-01-12T09:00:00Z` - One-time task",
-                "- `ash-sb schedule create 'message' --cron '0 8 * * *'` - Recurring task",
-                "- `ash-sb schedule list` - List scheduled tasks (shows IDs)",
-                "- `ash-sb schedule cancel --id <ID>` - Cancel a task by ID",
-                "- `ash-sb schedule clear` - Clear all tasks",
-                "",
-                "Run `ash-sb --help` for all available commands.",
-            ]
-        )
 
         return "\n".join(lines)
 
     def _build_runtime_section(self, runtime: RuntimeInfo) -> str:
-        """Build runtime information section.
+        lines = ["## Runtime", ""]
 
-        Args:
-            runtime: Runtime information.
-
-        Returns:
-            Runtime section string.
-        """
-        # Only expose model/provider info, not host system details (os, arch, python)
         info_parts = []
         if runtime.model:
             info_parts.append(f"model={runtime.model}")
         if runtime.provider:
             info_parts.append(f"provider={runtime.provider}")
-
-        lines = ["## Runtime", ""]
-
         if info_parts:
             lines.append(f"Runtime: {' | '.join(info_parts)}")
 
         if runtime.timezone or runtime.time:
-            tz = runtime.timezone or "UTC"
-            time = runtime.time or "unknown"
-            lines.append(f"Timezone: {tz}, Current time: {time}")
+            lines.append(
+                f"Timezone: {runtime.timezone or 'UTC'}, Current time: {runtime.time or 'unknown'}"
+            )
 
         return "\n".join(lines)
 
     def _build_people_section(self, people: list[Person]) -> str:
-        """Build known people section.
-
-        Args:
-            people: List of Person objects.
-
-        Returns:
-            People section string or empty if no people.
-        """
         if not people:
             return ""
 
@@ -456,10 +290,10 @@ class SystemPromptBuilder:
         ]
 
         for person in people:
-            desc_parts = [f"**{person.name}**"]
+            entry = f"**{person.name}**"
             if person.relation:
-                desc_parts.append(f"({person.relation})")
-            lines.append(f"- {' '.join(desc_parts)}")
+                entry = f"{entry} ({person.relation})"
+            lines.append(f"- {entry}")
 
         lines.append("")
         lines.append(
@@ -469,17 +303,6 @@ class SystemPromptBuilder:
         return "\n".join(lines)
 
     def _build_memory_section(self, memory: RetrievedContext) -> str:
-        """Build memory context section with subject attribution.
-
-        Args:
-            memory: Retrieved memory context.
-
-        Returns:
-            Memory section string or empty if no context.
-        """
-        parts: list[str] = []
-
-        # Always include memory system guidance
         guidance = (
             "## Memory\n\n"
             "Your memory works automatically. Facts about users, their preferences, "
@@ -490,79 +313,49 @@ class SystemPromptBuilder:
             "store it (use --subject for facts about specific people), then confirm. "
             "For everything else, trust the automatic extraction."
         )
-        parts.append(guidance)
 
-        # Add retrieved memories if any
-        context_items: list[str] = []
+        if not memory.memories:
+            return guidance
+
+        context_items = []
         for item in memory.memories:
             subject_attr = ""
             if item.metadata and item.metadata.get("subject_name"):
                 subject_attr = f" (about {item.metadata['subject_name']})"
             context_items.append(f"- [Memory{subject_attr}] {item.content}")
 
-        if context_items:
-            retrieved_header = (
-                "\n\n### Relevant Context from Memory\n\n"
-                "The following has been automatically retrieved. "
-                "Use it directly. For additional searches, use `ash-sb memory search`.\n\n"
-            )
-            parts.append(retrieved_header + "\n".join(context_items))
+        retrieved_header = (
+            "\n\n### Relevant Context from Memory\n\n"
+            "The following has been automatically retrieved. "
+            "Use it directly. For additional searches, use `ash-sb memory search`.\n\n"
+        )
 
-        return "".join(parts)
+        return guidance + retrieved_header + "\n".join(context_items)
 
     def _build_conversation_context_section(self, context: PromptContext) -> str:
-        """Build conversation context section with gap signaling.
-
-        Signals to the LLM when there has been a significant gap since the
-        last message, helping it understand conversation boundaries.
-
-        Args:
-            context: Prompt context with conversation gap info.
-
-        Returns:
-            Conversation context section string or empty if no signal needed.
-        """
         gap_threshold = self._config.conversation.gap_threshold_minutes
         gap_minutes = context.conversation_gap_minutes
 
-        # Only signal if gap exceeds threshold
         if gap_minutes is None or gap_minutes <= gap_threshold:
             return ""
 
-        lines = ["## Conversation Context", ""]
-
-        # Format the gap duration
         gap_str = format_gap_duration(gap_minutes)
-        lines.append(f"Note: The last message in this conversation was {gap_str} ago.")
-        lines.append(
-            "The user may be starting a new topic or continuing a previous discussion."
+        return "\n".join(
+            [
+                "## Conversation Context",
+                "",
+                f"Note: The last message in this conversation was {gap_str} ago.",
+                "The user may be starting a new topic or continuing a previous discussion.",
+            ]
         )
 
-        return "\n".join(lines)
-
     def _build_sender_section(self, context: PromptContext) -> str:
-        """Build sender context section for group chats.
-
-        Tells the agent who sent the current message, helping with
-        pronoun resolution and context understanding.
-
-        Args:
-            context: Prompt context with sender info.
-
-        Returns:
-            Sender section string or empty if not applicable.
-        """
-        # Only for group chats
         if context.chat_type not in ("group", "supergroup"):
             return ""
 
-        # Need at least username or display name
         if not context.sender_username and not context.sender_display_name:
             return ""
 
-        lines = ["## Current Message", ""]
-
-        # Format sender identity
         if context.sender_username and context.sender_display_name:
             sender = f"**@{context.sender_username}** ({context.sender_display_name})"
         elif context.sender_username:
@@ -570,35 +363,29 @@ class SystemPromptBuilder:
         else:
             sender = f"**{context.sender_display_name}**"
 
-        # Include chat title if available
-        if context.chat_title:
-            lines.append(f'From: {sender} in the group "{context.chat_title}"')
-        else:
-            lines.append(f"From: {sender}")
-
-        lines.append("")
-        lines.append(
-            'When this user uses pronouns like "he", "she", "they", '
-            "they are referring to someone else - not themselves."
+        from_line = (
+            f'From: {sender} in the group "{context.chat_title}"'
+            if context.chat_title
+            else f"From: {sender}"
         )
 
-        return "\n".join(lines)
+        return "\n".join(
+            [
+                "## Current Message",
+                "",
+                from_line,
+                "",
+                'When this user uses pronouns like "he", "she", "they", '
+                "they are referring to someone else - not themselves.",
+            ]
+        )
 
     def _build_session_section(self, context: PromptContext) -> str:
-        """Build session information section.
-
-        Args:
-            context: Prompt context with session path.
-
-        Returns:
-            Session section string or empty if no path.
-        """
         if not context.session_path:
             return ""
 
         lines = ["## Session", ""]
 
-        # Fresh mode: emphasize that this is a new conversation
         if context.session_mode == "fresh":
             lines.extend(
                 [

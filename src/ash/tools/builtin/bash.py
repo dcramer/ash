@@ -85,47 +85,24 @@ class BashTool(Tool):
         input_data: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
-        """Execute the bash command in the sandbox.
-
-        Args:
-            input_data: Must contain 'command' key.
-            context: Execution context.
-
-        Returns:
-            Tool result with command output.
-        """
         command = input_data.get("command")
         if not command:
             return ToolResult.error("Missing required parameter: command")
 
         timeout = input_data.get("timeout", 60)
 
-        try:
-            return await self._execute_sandboxed(command, timeout, context.env)
-        except Exception as e:
-            return ToolResult.error(f"Execution error: {e}")
-
-    async def _execute_sandboxed(
-        self,
-        command: str,
-        timeout: int,  # noqa: ASYNC109
-        environment: dict[str, str] | None = None,
-    ) -> ToolResult:
-        """Execute command in Docker sandbox."""
         result = await self._executor.execute(
             command,
             timeout=timeout,
             reuse_container=True,
-            environment=environment,
+            environment=context.env,
         )
 
-        # Check for sandbox initialization failure
         if result.exit_code == -1 and "not initialized" in result.stderr.lower():
             return ToolResult.error(
                 "Sandbox not available. Run 'ash sandbox build' to create the sandbox image."
             )
 
-        # Apply tail truncation (keep last N lines/bytes, save full to temp)
         truncation = truncate_tail(result.output, prefix="bash")
 
         if result.timed_out:
@@ -138,14 +115,13 @@ class BashTool(Tool):
             )
 
         if result.success:
-            content = truncation.content if truncation.content else "(no output)"
+            content = truncation.content or "(no output)"
             return ToolResult.success(
                 content,
                 exit_code=result.exit_code,
                 **truncation.to_metadata(),
             )
 
-        # Command failed but didn't error - non-zero exit is a result, not an error
         return ToolResult(
             content=f"Exit code {result.exit_code}:\n{truncation.content}",
             is_error=False,
