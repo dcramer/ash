@@ -3,6 +3,8 @@
 import logging
 from typing import TYPE_CHECKING
 
+__all__ = ["init_sentry"]
+
 if TYPE_CHECKING:
     from ash.config import SentryConfig
 
