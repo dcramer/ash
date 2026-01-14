@@ -1,0 +1,38 @@
+.claude/hooks/post-edit.sh
+  1443ffc5a2ee10fd 1-22
+.claude/settings.json
+  1443ffc5a2ee10fd 2-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "6838ab907d6863e240313e7cf1114c8652ba6e1b",
+  "prompts": {
+    "1443ffc5a2ee10fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76fbc8e5-1db6-4b82-8be9-8056ac2b34b5",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 44,
+      "total_deletions": 0,
+      "accepted_lines": 44,
+      "overriden_lines": 0
+    },
+    "5181a011cad17607": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "421d0edb-fbbb-40c4-bfe1-ba3337ac369d",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 421,
+      "total_deletions": 7,
+      "accepted_lines": 417,
+      "overriden_lines": 1
+    }
+  }
+}
