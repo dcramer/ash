@@ -291,6 +291,9 @@ class SystemPromptBuilder:
             "Skills provide task-specific instructions.",
             "Read a skill's file when the task matches its description.",
             "",
+            "**Creating or modifying skills**: Use the `skill-writer` agent via `use_agent`.",
+            "It handles proper SKILL.md formatting and validation.",
+            "",
             "### Available Skills",
             "",
         ]
