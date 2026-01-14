@@ -1,16 +1,18 @@
 # Skills
 
-> Reusable instructions that the agent reads and follows
+> User-defined subagents invoked via the `use_skill` tool
 
-Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/cli/commands/skill.py
+Files: src/ash/skills/base.py, src/ash/skills/registry.py, src/ash/tools/builtin/skills.py
 
 ## Overview
 
-Skills are markdown files with YAML frontmatter containing instructions the agent reads and follows. There is no execution machinery - the agent reads the SKILL.md file directly and uses its available tools to follow the instructions.
+Skills are markdown files that define specialized subagents. Unlike the current model where the main agent reads skill files, skills are now **invoked explicitly** via the `use_skill` tool and run in **isolated LLM loops** with scoped environments.
 
-This is the "pi-mono model" of skills: knowledge packages that augment the agent's capabilities without separate execution contexts.
-
-**Note:** For complex multi-step tasks like research, use Agents instead (see specs/agents.md).
+This enables:
+- **API key isolation**: Skills declare needed env vars, config provides values
+- **Tool restrictions**: Skills can limit which tools the subagent uses
+- **Context compression**: Main agent passes relevant context, not full history
+- **Model flexibility**: Skills can specify different models (e.g., haiku for simple tasks)
 
 ## Requirements
 
@@ -19,120 +21,123 @@ This is the "pi-mono model" of skills: knowledge packages that augment the agent
 - Load workspace skills from `workspace/skills/`
 - Support directory format: `skills/<name>/SKILL.md` (preferred)
 - Support flat markdown: `skills/<name>.md` (convenience)
-- Support pure YAML: `skills/<name>.yaml` (backward compatibility)
+- Support YAML format: `skills/<name>.yaml` or `.yml` (backward compatibility)
 - Each skill defines: name, description, instructions
-- Support skill requirements: bins, env, os filtering
-- Filter unavailable skills from system prompt and iteration
-- List skills in system prompt with file paths
+- Invoke skills via `use_skill` tool (not by reading files)
+- Run skill as subagent with isolated session
+- Inject env vars from config into skill execution
+- Support `allowed_tools` to restrict subagent's tools
+- Support `model` override per skill
+- Support `max_iterations` limit per skill
+- Filter unavailable skills (bins/os requirements not met)
 - Provide CLI commands for skill management
-- Default skill name to directory/filename if not specified
 
 ### SHOULD
 
-- Support optional `required_tools` field (documentation only)
-- Support optional `input_schema` field (documentation only)
-- Log skill discovery with count
+- List available skills in system prompt (name + description only)
+- Log skill invocations with iteration count
+- Support `enabled` flag in config to disable skills
 
 ### MAY
 
-- Watch workspace/skills/ for changes and hot-reload
 - Track skill usage statistics
+- Support skill chaining (one skill invoking another)
 
 ## Interface
 
-### Directory Skill Format (Preferred)
+### Skill Definition Format
 
 ```
 workspace/skills/
-  summarize/
+  research/
     SKILL.md
-    scripts/              # Optional: referenced scripts
-      main.py
-  explain/
+  code-review/
     SKILL.md
 ```
 
-```markdown
-<!-- workspace/skills/summarize/SKILL.md -->
+```yaml
+# workspace/skills/research/SKILL.md
 ---
-description: Summarize text or documents concisely
-required_tools:
+description: Research topics using Perplexity AI
+env:                           # Env vars to inject from config
+  - PERPLEXITY_API_KEY
+allowed_tools:                 # Tool whitelist (empty = all tools)
   - bash
-requires:
-  bins:
-    - pandoc
-  os:
-    - linux
-    - darwin
-input_schema:
-  type: object
-  properties:
-    content:
-      type: string
-      description: Text or file path to summarize
-  required:
-    - content
+  - web_search
+  - web_fetch
+model: haiku                   # Optional model override
+max_iterations: 10             # Iteration limit (default: 10)
+requires:                      # Availability filtering
+  bins: [curl]
+  os: [linux, darwin]
 ---
 
-You are a summarization assistant. Create clear, concise summaries.
+You are a research assistant with access to Perplexity AI.
 
-Extract key points only. Maintain factual accuracy.
+Given a research query, search for accurate, up-to-date information
+and return a structured summary with sources.
+
+Use the PERPLEXITY_API_KEY environment variable for API calls.
 ```
 
-### System Prompt Format
+### Config Section
 
-Skills are listed in the system prompt with their file paths:
+```toml
+# ~/.ash/config.toml
+
+[skills.research]
+PERPLEXITY_API_KEY = "pplx-..."  # Direct match - injected as $PERPLEXITY_API_KEY
+model = "haiku"                   # Override skill's default model
+enabled = true                    # Can disable without removing file
+
+[skills.code-review]
+enabled = false                   # Disabled
+```
+
+Config keys match env var names exactly (UPPER_CASE). No case conversion.
+
+### System Prompt Listing
+
+Skills are listed with name and description only:
 
 ```markdown
 ## Skills
 
-Skills provide task-specific instructions.
-Read a skill's file when the task matches its description.
+Use the `use_skill` tool to invoke a skill with context.
 
-### Available Skills
-
-- **summarize**: Summarize text or documents concisely
-  File: /workspace/skills/summarize/SKILL.md
+- **research**: Research topics using Perplexity AI
+- **code-review**: Review code for issues and improvements
 ```
 
-The agent reads the SKILL.md file using `read_file` when a task matches the skill description.
+### Tool Interface
+
+```python
+# use_skill tool
+{
+    "name": "use_skill",
+    "input": {
+        "skill": "research",
+        "message": "Find the latest Python 3.13 async features",
+        "context": "User is upgrading a Django app from 3.11"
+    }
+}
+
+# Returns
+{
+    "content": "Python 3.13 introduces several async improvements...",
+    "iterations": 3
+}
+```
 
 ### CLI Commands
 
 ```bash
-# Scaffold new skill
-ash skill init <name> [--resources scripts,references,assets]
-
 # Validate skill format
 ash skill validate <path>
 
 # List skills (with availability status)
 ash skill list [--all]
-
-# Reload skills (after manual creation)
-ash skill reload
 ```
-
-### Environment Variables
-
-Skills that need environment variables should reference vars from the central `[env]` section in `~/.ash/config.toml`:
-
-```toml
-# ~/.ash/config.toml
-[env]
-MUNI_API_KEY = "abc123"
-BRAVE_API_KEY = "xyz789"
-GITHUB_TOKEN = "$GITHUB_TOKEN"  # Reference actual env var
-```
-
-Skills reference these directly in their instructions:
-
-```bash
-# In SKILL.md
-curl "https://api.example.com?key=$MUNI_API_KEY"
-```
-
-No `SKILL_*` prefix needed - variables are loaded into the session environment at startup.
 
 ### Python Classes
 
@@ -141,7 +146,6 @@ No `SKILL_*` prefix needed - variables are loaded into the session environment a
 class SkillRequirements:
     """Requirements for a skill to be available."""
     bins: list[str] = field(default_factory=list)  # Required binaries in PATH
-    env: list[str] = field(default_factory=list)   # Required environment variables
     os: list[str] = field(default_factory=list)    # Supported OS (darwin, linux, windows)
 
     def check(self) -> tuple[bool, str | None]:
@@ -154,14 +158,34 @@ class SkillDefinition:
     name: str
     description: str
     instructions: str
-    required_tools: list[str] = field(default_factory=list)
-    input_schema: dict[str, Any] = field(default_factory=dict)
+
+    # Availability filtering
     requires: SkillRequirements = field(default_factory=SkillRequirements)
-    skill_path: Path | None = None  # Path to skill directory
+    skill_path: Path | None = None
+
+    # Subagent execution
+    env: list[str] = field(default_factory=list)           # Env vars to inject
+    allowed_tools: list[str] = field(default_factory=list) # Tool whitelist
+    model: str | None = None                                # Model override
+    max_iterations: int = 10                                # Iteration limit
 
     def is_available(self) -> tuple[bool, str | None]:
         """Check if skill is available on current system."""
         return self.requires.check()
+```
+
+```python
+class SkillConfig(BaseModel):
+    """Per-skill configuration."""
+    model: str | None = None
+    enabled: bool = True
+
+    class Config:
+        extra = "allow"  # Allow UPPER_CASE env var fields
+
+    def get_env_vars(self) -> dict[str, str]:
+        """Get env vars (extra fields with UPPER_CASE names)."""
+        ...
 ```
 
 ### Registry
@@ -189,80 +213,68 @@ class SkillRegistry:
     def validate_skill_file(self, path: Path) -> tuple[bool, str | None]:
         """Validate a skill file format without loading."""
         ...
-
-    def __iter__(self) -> Iterator[SkillDefinition]:
-        """Iterate over available skills only."""
-        ...
-
-    def __len__(self) -> int: ...
 ```
 
 ## Behaviors
 
 | Input | Output | Notes |
 |-------|--------|-------|
-| Registry.discover() called | Workspace skills loaded | From workspace/skills/ |
-| Skills discovered | Listed in system prompt with paths | Agent reads file to follow |
-| Task matches skill description | Agent reads SKILL.md | Follows instructions directly |
-| Empty workspace/skills/ | No skills | No error |
-| Skill without `name` in frontmatter | Uses directory/filename | e.g., `summarize/SKILL.md` → `summarize` |
-| Skill with `requires.bins` not in PATH | Filtered from prompt/iteration | Still registered |
-| Skill with `requires.env` not set | Filtered from prompt/iteration | Still registered |
-| Skill with `requires.os` not matching | Filtered from prompt/iteration | Still registered |
-| `ash skill init foo` | Creates skills/foo/SKILL.md template | Scaffolding |
-| `ash skill validate path` | Validates format | Returns errors if invalid |
+| `use_skill("research", ...)` | Spawns subagent, returns result | Isolated LLM loop |
+| Skill with `env: [FOO]` | FOO injected from config | `[skills.x].FOO = "..."` |
+| Skill with `allowed_tools` | Subagent restricted to those tools | Empty = all tools |
+| Skill with `model: haiku` | Uses haiku model | Config can override |
+| Skill with `requires.bins` not in PATH | Filtered from prompt | Not invocable |
+| Skill with config `enabled = false` | Filtered from prompt | Not invocable |
 | `ash skill list` | Shows available skills | With availability status |
 
 ## Errors
 
 | Condition | Response |
 |-----------|----------|
-| Skill not found | KeyError from registry.get() |
-| Missing frontmatter | Logged warning, skill skipped during discovery |
-| Missing description | Logged warning, skill skipped |
-| Empty instructions | Logged warning, skill skipped |
-| Invalid YAML frontmatter | Logged warning, skill skipped |
+| Skill not found | `use_skill` returns error |
+| Skill disabled | `use_skill` returns error |
+| Missing env var in config | Skill runs without that var (warning logged) |
+| Max iterations exceeded | Returns partial result with error flag |
+| Tool not in allowed_tools | Subagent tool call blocked with error |
 
 ## Verification
 
 ```bash
 uv run pytest tests/test_skills.py -v
+uv run pytest tests/test_skill_execution.py -v
 
-# Test skill creation via CLI
-uv run ash skill init greeting --description "Greet the user warmly"
-# Creates workspace/skills/greeting/SKILL.md
-
-# Test skill validation
-uv run ash skill validate workspace/skills/greeting/SKILL.md
-# Should report valid or list errors
-
-# Test skill list
-uv run ash skill list
-# Shows available skills
-
-# Test skill with requirements
-mkdir -p workspace/skills/darwin-only
-cat > workspace/skills/darwin-only/SKILL.md << 'EOF'
+# Manual testing
+# 1. Create a skill that needs an env var
+mkdir -p workspace/skills/test-api
+cat > workspace/skills/test-api/SKILL.md << 'EOF'
 ---
-description: macOS-only skill
-requires:
-  os:
-    - darwin
+description: Test API key injection
+env:
+  - TEST_API_KEY
+allowed_tools: [bash]
 ---
 
-This skill only works on macOS.
+Echo the TEST_API_KEY environment variable to verify injection.
+Run: echo "Key: $TEST_API_KEY"
 EOF
 
-# Verify filtering (skill should not appear on Linux)
-uv run ash skill list
+# 2. Configure the env var
+# Add to config.toml:
+# [skills.test-api]
+# TEST_API_KEY = "test-secret-123"
+
+# 3. Test invocation via chat
+uv run ash chat
+> use the test-api skill to check if API key is available
+
+# Should see "Key: test-secret-123" in output
 ```
 
-- Workspace skills loaded from workspace/skills/
-- Skills listed in system prompt with file paths
-- Agent reads SKILL.md directly to follow instructions
-- Directory format `<name>/SKILL.md` loads correctly
-- Flat markdown files still supported
-- YAML files still supported (backward compatibility)
-- Invalid files skipped with warning
-- Skills with unmet requirements filtered from prompt
-- CLI commands work for init/validate/list/reload
+- Skills loaded from workspace/skills/
+- Skills listed in system prompt (name + description only)
+- `use_skill` tool invokes skill as subagent
+- Env vars injected from config
+- Tool restrictions enforced
+- Model override works
+- Unavailable skills filtered
+- CLI commands work

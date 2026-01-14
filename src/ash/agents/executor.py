@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from ash.agents.base import Agent, AgentContext, AgentResult
 from ash.core.session import SessionState
 from ash.llm.types import Message, Role, ToolDefinition
+from ash.tools.base import ToolContext
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
@@ -67,6 +68,7 @@ class AgentExecutor:
         agent: Agent,
         input_message: str,
         context: AgentContext,
+        environment: dict[str, str] | None = None,
     ) -> AgentResult:
         """Execute agent in isolated loop.
 
@@ -74,6 +76,7 @@ class AgentExecutor:
             agent: Agent to execute.
             input_message: User message to start the agent.
             context: Execution context.
+            environment: Optional env vars to pass to tools.
 
         Returns:
             AgentResult with content and metadata.
@@ -124,6 +127,8 @@ class AgentExecutor:
         session.add_user_message(input_message)
 
         iterations = 0
+        consecutive_failures = 0
+        max_consecutive_failures = 3
 
         while iterations < max_iterations:
             iterations += 1
@@ -159,7 +164,16 @@ class AgentExecutor:
                 )
                 return AgentResult.success(text, iterations=iterations)
 
+            # Build tool context with environment
+            tool_context = ToolContext(
+                session_id=context.session_id,
+                user_id=context.user_id,
+                chat_id=context.chat_id,
+                env=environment or {},
+            )
+
             # Execute tools
+            all_failed = True
             for tool_use in tool_uses:
                 # Check if tool is allowed
                 if (
@@ -177,13 +191,15 @@ class AgentExecutor:
                     result = await self._tools.execute(
                         tool_use.name,
                         tool_use.input,
-                        context=None,  # Agents don't have tool context
+                        context=tool_context,
                     )
                     session.add_tool_result(
                         tool_use.id,
                         result.content,
                         is_error=result.is_error,
                     )
+                    if not result.is_error:
+                        all_failed = False
                 except Exception as e:
                     logger.error(f"Agent tool execution error: {e}")
                     session.add_tool_result(
@@ -191,6 +207,23 @@ class AgentExecutor:
                         f"Tool error: {e}",
                         is_error=True,
                     )
+
+            # Track consecutive failures
+            if all_failed:
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.warning(
+                        f"Agent '{agent_config.name}' stopped after "
+                        f"{consecutive_failures} consecutive failed iterations"
+                    )
+                    return AgentResult(
+                        content=f"Stopped: {consecutive_failures} consecutive iterations "
+                        "with all tools failing",
+                        is_error=True,
+                        iterations=iterations,
+                    )
+            else:
+                consecutive_failures = 0
 
         # Hit max iterations
         logger.warning(

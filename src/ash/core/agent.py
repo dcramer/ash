@@ -1072,6 +1072,11 @@ async def create_agent(
     # Register use_agent tool
     tool_registry.register(UseAgentTool(agent_registry, agent_executor))
 
+    # Register use_skill tool
+    from ash.tools.builtin.skills import UseSkillTool
+
+    tool_registry.register(UseSkillTool(skill_registry, agent_executor, config))
+
     # Create runtime info
     runtime = RuntimeInfo.from_environment(
         model=model_config.model,

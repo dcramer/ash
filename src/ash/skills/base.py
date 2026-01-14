@@ -1,11 +1,9 @@
 """Skill definitions and data types."""
 
-import os
 import platform
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 
 @dataclass
@@ -17,9 +15,6 @@ class SkillRequirements:
 
     # Required binaries (all must exist in PATH)
     bins: list[str] = field(default_factory=list)
-
-    # Required environment variables (all must be set)
-    env: list[str] = field(default_factory=list)
 
     # Supported operating systems (empty = all)
     # Values: "darwin", "linux", "windows"
@@ -54,11 +49,6 @@ class SkillRequirements:
             if not shutil.which(bin_name):
                 return False, f"Requires binary: {bin_name}"
 
-        # Check environment variables
-        for env_var in self.env:
-            if not os.environ.get(env_var):
-                return False, f"Requires environment variable: {env_var}"
-
         return True, None
 
 
@@ -66,19 +56,25 @@ class SkillRequirements:
 class SkillDefinition:
     """Skill definition - loaded from SKILL.md files.
 
-    Skills are reusable instructions that the agent reads and follows.
-    No execution happens - the agent just reads the file.
+    Skills are invoked via the use_skill tool and run as subagents
+    with isolated sessions and scoped environments.
     """
 
     name: str
     description: str
     instructions: str
-    required_tools: list[str] = field(default_factory=list)
-    input_schema: dict[str, Any] = field(default_factory=dict)
-    requires: SkillRequirements = field(default_factory=SkillRequirements)
 
-    # Path to skill directory (for {baseDir} substitution)
-    skill_path: Path | None = None
+    # Availability filtering
+    requires: SkillRequirements = field(default_factory=SkillRequirements)
+    skill_path: Path | None = None  # Path to skill directory
+
+    # Subagent execution settings
+    env: list[str] = field(default_factory=list)  # Env vars to inject from config
+    allowed_tools: list[str] = field(
+        default_factory=list
+    )  # Tool whitelist (empty = all)
+    model: str | None = None  # Model alias override
+    max_iterations: int = 10  # Iteration limit
 
     def is_available(self) -> tuple[bool, str | None]:
         """Check if this skill is available on the current system.

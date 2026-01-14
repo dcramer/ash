@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from ash.agents import AgentRegistry
     from ash.config import AshConfig
     from ash.providers.telegram.provider import TelegramProvider
+    from ash.skills import SkillRegistry
 
 logger = logging.getLogger("telegram")
 
@@ -53,14 +54,16 @@ def format_tool_brief(
     tool_input: dict[str, Any],
     config: "AshConfig | None" = None,
     agent_registry: "AgentRegistry | None" = None,
+    skill_registry: "SkillRegistry | None" = None,
 ) -> str:
     """Format tool execution into a brief status message.
 
     Args:
         tool_name: Name of the tool being executed.
         tool_input: Input parameters for the tool.
-        config: Optional app config for resolving agent models.
+        config: Optional app config for resolving agent/skill models.
         agent_registry: Optional agent registry for looking up agents.
+        skill_registry: Optional skill registry for looking up skills.
 
     Returns:
         A brief, user-friendly message describing what's happening.
@@ -122,6 +125,28 @@ def format_tool_brief(
             if len(query) > 30:
                 query = query[:30] + "..."
             return f"Searching memories: {query}" if query else "Searching memories"
+        case "use_skill":
+            skill_name = tool_input.get("skill", "unknown")
+            message = tool_input.get("message", "")
+
+            # Resolve model if we have context (same pattern as use_agent)
+            model_name = None
+            if skill_registry and config and skill_registry.has(skill_name):
+                skill = skill_registry.get(skill_name)
+                # Check for config override first
+                skill_config = config.skills.get(skill_name)
+                model_alias = (
+                    skill_config.model
+                    if skill_config and skill_config.model
+                    else skill.model
+                )
+                if model_alias:
+                    model_name = model_alias
+
+            # Build display string
+            model_suffix = f" ({model_name})" if model_name else ""
+            msg_preview = message[:40] + "..." if len(message) > 40 else message
+            return f"{skill_name}{model_suffix}: {msg_preview}"
         case _:
             # Clean up tool name: bash_tool -> bash, some_tool -> some
             display_name = tool_name.replace("_tool", "").replace("_", " ")
@@ -175,6 +200,7 @@ class TelegramMessageHandler:
         conversation_config: ConversationConfig | None = None,
         config: "AshConfig | None" = None,
         agent_registry: "AgentRegistry | None" = None,
+        skill_registry: "SkillRegistry | None" = None,
     ):
         """Initialize handler.
 
@@ -186,6 +212,7 @@ class TelegramMessageHandler:
             conversation_config: Optional conversation context config.
             config: Optional app config for tool brief formatting.
             agent_registry: Optional agent registry for tool brief formatting.
+            skill_registry: Optional skill registry for tool brief formatting.
         """
         self._provider = provider
         self._agent = agent
@@ -194,6 +221,7 @@ class TelegramMessageHandler:
         self._conversation_config = conversation_config or ConversationConfig()
         self._config = config
         self._agent_registry = agent_registry
+        self._skill_registry = skill_registry
         # Use OrderedDict for LRU-style eviction of cached sessions
         self._sessions: OrderedDict[str, SessionState] = OrderedDict()
         # Session managers keyed by session_key
@@ -389,6 +417,7 @@ class TelegramMessageHandler:
                     tool_input,
                     config=self._config,
                     agent_registry=self._agent_registry,
+                    skill_registry=self._skill_registry,
                 )
                 if not brief:
                     return
@@ -798,6 +827,7 @@ class TelegramMessageHandler:
                 tool_input,
                 config=self._config,
                 agent_registry=self._agent_registry,
+                skill_registry=self._skill_registry,
             )
             if not brief:
                 return
@@ -958,6 +988,7 @@ class TelegramMessageHandler:
                 tool_input,
                 config=self._config,
                 agent_registry=self._agent_registry,
+                skill_registry=self._skill_registry,
             )
             if not brief:
                 return

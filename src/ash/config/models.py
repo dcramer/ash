@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from ash.config.paths import get_database_path, get_workspace_path
 
@@ -189,6 +189,39 @@ class AgentOverrideConfig(BaseModel):
     max_iterations: int | None = None  # Override max iterations
 
 
+class SkillConfig(BaseModel):
+    """Per-skill configuration.
+
+    Used to configure skill behavior via [skills.<name>] sections.
+    Environment variables are stored as extra fields with UPPER_CASE names.
+
+    Example:
+        [skills.research]
+        PERPLEXITY_API_KEY = "pplx-..."
+        model = "haiku"
+        enabled = true
+    """
+
+    model_config = ConfigDict(extra="allow")  # Allow UPPER_CASE env var fields
+
+    model: str | None = None  # Model alias override (None = skill default)
+    enabled: bool = True  # Can disable without removing file
+
+    def get_env_vars(self) -> dict[str, str]:
+        """Get env vars (extra fields with UPPER_CASE names).
+
+        Returns:
+            Dict of env var name to value.
+        """
+        # Get all extra fields (not model or enabled)
+        known_fields = {"model", "enabled"}
+        return {
+            k: str(v)
+            for k, v in self.model_dump().items()
+            if k not in known_fields and k.isupper()
+        }
+
+
 class ConfigError(Exception):
     """Configuration error."""
 
@@ -219,6 +252,9 @@ class AshConfig(BaseModel):
     # Agent-specific configuration: [agents.<name>] sections
     # Allows overriding model, max_iterations per agent
     agents: dict[str, AgentOverrideConfig] = Field(default_factory=dict)
+    # Skill-specific configuration: [skills.<name>] sections
+    # Allows setting API keys, model override, and enabled flag per skill
+    skills: dict[str, SkillConfig] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _migrate_default_llm(self) -> "AshConfig":

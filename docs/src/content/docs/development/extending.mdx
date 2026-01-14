@@ -88,7 +88,7 @@ requires:
     - curl
   env:
     - API_KEY
-required_tools:
+allowed_tools:
   - bash
   - web_fetch
 ---
@@ -121,7 +121,7 @@ Instructions the agent will follow...
 |-------|------|----------|-------------|
 | `description` | string | Yes | One-line description |
 | `requires` | object | No | System requirements |
-| `required_tools` | list | No | Tools the skill needs |
+| `allowed_tools` | list | No | Tools the skill needs |
 | `input_schema` | object | No | JSON Schema for inputs |
 
 ### Requirements

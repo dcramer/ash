@@ -275,8 +275,8 @@ class SystemPromptBuilder:
     def _build_skills_section(self) -> str:
         """Build skills listing section.
 
-        Skills are reusable instructions. When a task matches a skill's
-        description, read the SKILL.md file and follow the instructions.
+        Skills are invoked via the use_skill tool and run as subagents
+        with isolated sessions and scoped environments.
 
         Returns:
             Skills section string or empty if no skills.
@@ -288,20 +288,15 @@ class SystemPromptBuilder:
         lines = [
             "## Skills",
             "",
-            "Skills provide task-specific instructions.",
-            "Read a skill's file when the task matches its description.",
-            "",
-            "**Creating or modifying skills**: Use the `skill-writer` agent via `use_agent`.",
-            "It handles proper SKILL.md formatting and validation.",
+            "Use the `use_skill` tool to invoke a skill with context.",
+            "Skills run as subagents with isolated execution.",
             "",
             "### Available Skills",
             "",
         ]
 
         for skill in sorted(available_skills, key=lambda s: s.name):
-            path = skill.skill_path / "SKILL.md" if skill.skill_path else "N/A"
             lines.append(f"- **{skill.name}**: {skill.description}")
-            lines.append(f"  File: {path}")
 
         return "\n".join(lines)
 

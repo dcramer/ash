@@ -2,7 +2,6 @@
 
 import platform
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -51,29 +50,14 @@ class TestSkillRequirements:
         assert is_met is False
         assert reason is not None and "Requires binary" in reason
 
-    def test_env_requirement_existing_var_passes(self):
-        with patch.dict("os.environ", {"TEST_VAR_123": "value"}):
-            req = SkillRequirements(env=["TEST_VAR_123"])
-            is_met, reason = req.check()
-            assert is_met is True
-            assert reason is None
-
-    def test_env_requirement_missing_var_fails(self):
-        req = SkillRequirements(env=["NONEXISTENT_VAR_XYZ123"])
-        is_met, reason = req.check()
-        assert is_met is False
-        assert reason is not None and "Requires environment variable" in reason
-
     def test_multiple_requirements_all_pass(self):
-        with patch.dict("os.environ", {"TEST_VAR": "value"}):
-            current_os = platform.system().lower()
-            req = SkillRequirements(
-                bins=["python"],
-                env=["TEST_VAR"],
-                os=[current_os],
-            )
-            is_met, reason = req.check()
-            assert is_met is True
+        current_os = platform.system().lower()
+        req = SkillRequirements(
+            bins=["python"],
+            os=[current_os],
+        )
+        is_met, reason = req.check()
+        assert is_met is True
 
     def test_multiple_requirements_one_fails(self):
         current_os = platform.system().lower()
@@ -164,34 +148,34 @@ Do something useful.
 
     def test_discover_skill_directory_with_all_fields(self, tmp_path: Path):
         skills_dir = tmp_path / "skills"
-        skill_dir = skills_dir / "summarize"
+        skill_dir = skills_dir / "research"
         skill_dir.mkdir(parents=True)
 
         (skill_dir / "SKILL.md").write_text(
             """---
-description: Summarize text
-required_tools:
+description: Research topics
+env:
+  - PERPLEXITY_API_KEY
+allowed_tools:
   - bash
-input_schema:
-  type: object
-  properties:
-    content:
-      type: string
-  required:
-    - content
+  - web_search
+model: haiku
+max_iterations: 15
 ---
 
-Create summaries. Be concise.
+Research and summarize topics.
 """
         )
 
         registry = SkillRegistry()
         registry.discover(tmp_path, include_bundled=False)
 
-        skill = registry.get("summarize")
-        assert skill.required_tools == ["bash"]
-        assert "content" in skill.input_schema.get("properties", {})
-        assert skill.instructions == "Create summaries. Be concise."
+        skill = registry.get("research")
+        assert skill.env == ["PERPLEXITY_API_KEY"]
+        assert skill.allowed_tools == ["bash", "web_search"]
+        assert skill.model == "haiku"
+        assert skill.max_iterations == 15
+        assert skill.instructions == "Research and summarize topics."
 
     def test_discover_flat_markdown(self, tmp_path: Path):
         """Flat markdown files also supported."""
@@ -279,7 +263,7 @@ Do something.
 
         (skill_dir / "SKILL.md").write_text(
             """---
-required_tools:
+allowed_tools:
   - bash
 ---
 
@@ -385,7 +369,7 @@ Instructions.
         skill_file = tmp_path / "test.md"
         skill_file.write_text(
             """---
-required_tools:
+allowed_tools:
   - bash
 ---
 

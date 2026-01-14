@@ -162,10 +162,20 @@ When the agent uses tools, show progress via a single "Thinking..." message:
 2. Subsequent tool calls → Edit thinking message with new tool status
 3. Response ready → Delete/replace thinking message with final response
 
-Tool briefs format: `format_tool_brief()` returns human-readable status like:
-- `Running: \`{command}\`` for bash
-- `Searching memory for '{query}'...` for recall
-- `Searching the web for '{query}'...` for web_search
+Tool briefs format: `format_tool_brief()` returns human-readable status:
+
+| Tool | Format | Example |
+|------|--------|---------|
+| bash | `Running: \`{cmd}\`` | `Running: \`git status\`` |
+| web_search | `Searching: {query}` | `Searching: python async` |
+| web_fetch | `Reading: {domain}` | `Reading: docs.python.org` |
+| use_agent | `{agent} ({model}): {msg}` | `research (haiku): Find...` |
+| use_skill | `{skill} ({model}): {msg}` | `research (haiku): Find...` |
+| read_file | `Reading: {filename}` | `Reading: config.py` |
+| write_file | `Writing: {filename}` | `Writing: output.txt` |
+| remember | `Saving to memory` | `Saving to memory` |
+| recall | `Searching memories: {query}` | `Searching memories: tips` |
+| (default) | `Running: {tool_name}` | `Running: some tool` |
 
 **No tools used**: Skip thinking message, send response directly.
 

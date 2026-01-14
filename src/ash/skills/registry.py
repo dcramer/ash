@@ -113,7 +113,6 @@ class SkillRegistry:
 
         return SkillRequirements(
             bins=requires.get("bins", []),
-            env=requires.get("env", []),
             os=requires.get("os", []),
             apt_packages=requires.get("apt_packages", []),
             python_packages=requires.get("python_packages", []),
@@ -146,10 +145,13 @@ class SkillRegistry:
             name=name,
             description=description,
             instructions=instructions,
-            required_tools=data.get("required_tools", []),
-            input_schema=data.get("input_schema", {}),
             requires=requirements,
             skill_path=skill_path,
+            # Subagent execution settings
+            env=data.get("env", []),
+            allowed_tools=data.get("allowed_tools", []),
+            model=data.get("model"),
+            max_iterations=data.get("max_iterations", 10),
         )
 
     def _register_skill(self, skill: SkillDefinition, source_path: Path) -> None:
@@ -305,21 +307,20 @@ class SkillRegistry:
 
     def get_definitions(
         self, include_unavailable: bool = False
-    ) -> list[dict[str, Any]]:
-        """Get skill definitions for LLM.
+    ) -> list[dict[str, str]]:
+        """Get skill definitions for system prompt.
 
         Args:
             include_unavailable: If True, include skills that don't meet requirements.
 
         Returns:
-            List of skill definitions with name, description, and input_schema.
+            List of skill definitions with name and description.
         """
         skills = self._skills.values() if include_unavailable else self.list_available()
         return [
             {
                 "name": skill.name,
                 "description": skill.description,
-                "input_schema": skill.input_schema,
             }
             for skill in skills
         ]

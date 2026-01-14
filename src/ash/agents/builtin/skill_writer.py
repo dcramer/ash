@@ -22,7 +22,7 @@ Skills are markdown files with YAML frontmatter:
 ```markdown
 ---
 description: One-line description of what the skill does
-required_tools:        # Optional - tools the skill needs
+allowed_tools:        # Optional - tools the skill needs
   - bash
   - web_search
 requires:              # Optional - system requirements
@@ -86,7 +86,7 @@ SKILL.md:
 ```markdown
 ---
 description: Deploy the application to production
-required_tools:
+allowed_tools:
   - bash
 ---
 
@@ -114,7 +114,7 @@ SKILL.md:
 ```markdown
 ---
 description: Share an inspirational quote
-required_tools:
+allowed_tools:
   - bash
 ---
 
