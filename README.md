@@ -36,7 +36,7 @@ Install required plugins:
 
 ```bash
 claude plugin add getsentry/sentry-skills
-claude plugin add anthropics/claude-code
+claude plugin add anthropics/code-simplifier
 ```
 
 **Skills from [getsentry/sentry-skills](https://github.com/getsentry/sentry-skills)**:
@@ -47,6 +47,12 @@ claude plugin add anthropics/claude-code
 | `/create-pr` | Open pull requests |
 | `/find-bugs` | Audit local changes before merging |
 | `/deslop` | Remove AI-generated code slop |
+
+**From [anthropics/code-simplifier](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-simplifier)**:
+
+| Agent | Purpose |
+|-------|---------|
+| `code-simplifier` | Reduce code complexity and remove over-engineering |
 
 **Project-specific skills** (in `.claude/skills/`):
 
