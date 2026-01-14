@@ -1,0 +1,33 @@
+src/ash/memory/store.py
+  5181a011cad17607 46-47,49,53-58,99,105,122-123,126,151-153,206-207,213,234-242,274-276,278,283,285,287-289
+src/ash/memory/manager.py
+  5181a011cad17607 285-287,291-293
+specs/memory.md
+  5181a011cad17607 91-107,135,137
+packages/ash-sandbox-cli/src/ash_sandbox_cli/commands/memory.py
+  5181a011cad17607 134-138,142,154
+tests/test_memory.py
+  5181a011cad17607 389-475
+src/ash/rpc/methods/memory.py
+  5181a011cad17607 156-157,163-165,167-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "840b38bff32b2b40d07bde375b6ded733fe77c7d",
+  "prompts": {
+    "5181a011cad17607": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "421d0edb-fbbb-40c4-bfe1-ba3337ac369d",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 248,
+      "total_deletions": 63,
+      "accepted_lines": 172,
+      "overriden_lines": 1
+    }
+  }
+}
