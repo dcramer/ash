@@ -241,10 +241,9 @@ async def _run_server(
                     logger.error("Failed to get Telegram handler after timeout")
 
             telegram_task = asyncio.create_task(start_telegram())
-            try:
-                await asyncio.gather(server.serve(), telegram_task)
-            except asyncio.CancelledError:
-                pass
+            # return_exceptions=True ensures we wait for server to finish graceful
+            # shutdown after telegram is cancelled, avoiding double Ctrl+C
+            await asyncio.gather(server.serve(), telegram_task, return_exceptions=True)
         else:
             await server.serve()
     finally:

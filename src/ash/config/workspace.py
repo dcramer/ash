@@ -384,9 +384,9 @@ class WorkspaceLoader:
             )
             logger.debug(f"Loaded SOUL.md ({len(workspace.soul)} chars)")
         else:
-            workspace.soul = PERSONALITIES["ash"]
-            workspace.soul_config = SoulConfig(extends="ash")
-            logger.info("No SOUL.md found, using default Ash personality")
+            workspace.soul = PERSONALITIES["zoomer"]
+            workspace.soul_config = SoulConfig(extends="zoomer")
+            logger.info("No SOUL.md found, using default zoomer personality")
 
         return workspace
 
@@ -411,7 +411,7 @@ class WorkspaceLoader:
                 f"Unknown personality '{config.extends}', available: {', '.join(PERSONALITIES.keys())}"
             )
 
-        return body or PERSONALITIES["ash"], config
+        return body or PERSONALITIES["zoomer"], config
 
     def load_custom_file(self, filename: str, workspace: Workspace) -> str | None:
         file_path = self._path / filename
@@ -430,11 +430,11 @@ class WorkspaceLoader:
 
 
 DEFAULT_SOUL = """---
-extends: ash
+extends: zoomer
 ---
 
 # Customizations
 
 Add your personality customizations here. They will be appended
-to the base Ash personality.
+to the base zoomer personality.
 """
