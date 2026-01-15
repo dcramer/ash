@@ -1,0 +1,124 @@
+src/ash/core/agent.py
+  589e6cd872143f97 69-77,246,261-262,283,395-404
+src/ash/cli/commands/upgrade.py
+  ef1c3cb9a51dc679 8,14-15,23,66,68-77
+src/ash/rpc/methods/__init__.py
+  dad7b7a2778fa05e 3,6
+src/ash/providers/telegram/provider.py
+  c5a10a52e91d7252 304-305
+  ef1c3cb9a51dc679 43-46
+src/ash/cli/commands/init.py
+  ef1c3cb9a51dc679 8-10,12,14-16,35-36,38-42,55-61
+src/ash/config/models.py
+  dad7b7a2778fa05e 209-212,214,216
+src/ash/cli/commands/sandbox.py
+  ef1c3cb9a51dc679 13-27,29-36,70-75,89-100,102-105,109,168,172,179-181
+src/ash/core/prompt.py
+  589e6cd872143f97 71,74,405-407,409-412
+  dad7b7a2778fa05e 214-223,273
+  058b386cebb2fd5d 263-267
+packages/ash-sandbox-cli/src/ash_sandbox_cli/app.py
+  dad7b7a2778fa05e 5,14
+src/ash/providers/telegram/handlers.py
+  ef1c3cb9a51dc679 43-46
+  589e6cd872143f97 644,646-649,653,661-663,669,672-687
+src/ash/agents/builtin/skill_writer.py
+  dad7b7a2778fa05e 32-57,122-123,127,196,198,209
+  dfc91fcb620e1ac8 7-12,19,89-104,109,113,260
+src/ash/rpc/__init__.py
+  dad7b7a2778fa05e 25,32
+packages/ash-sandbox-cli/src/ash_sandbox_cli/commands/config.py
+  dad7b7a2778fa05e 1-33
+src/ash/rpc/methods/config.py
+  dad7b7a2778fa05e 1-73
+src/ash/cli/commands/serve.py
+  c5a10a52e91d7252 216-220
+  dad7b7a2778fa05e 79,138
+src/ash/cli/console.py
+  ef1c3cb9a51dc679 3-5,9-34,66-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "c44c32997e992e50f0f6fdd351cfab5a723d7916",
+  "prompts": {
+    "058b386cebb2fd5d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98d2299e-fd9e-4252-b523-e778e6158d91",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 1,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    },
+    "589e6cd872143f97": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6eddf20c-b172-4f27-b671-4b2a3239f7bc",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 61,
+      "total_deletions": 23,
+      "accepted_lines": 59,
+      "overriden_lines": 2
+    },
+    "c5a10a52e91d7252": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7d79a17a-9df1-409c-a0dd-a6ebc0820156",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 1,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    },
+    "dad7b7a2778fa05e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47fa2a8a-1089-4b84-8634-2f35e597a450",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 167,
+      "total_deletions": 165,
+      "accepted_lines": 164,
+      "overriden_lines": 0
+    },
+    "dfc91fcb620e1ac8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21c5d428-5a32-436f-88ba-0ad55708b281",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 26,
+      "total_deletions": 4,
+      "accepted_lines": 26,
+      "overriden_lines": 0
+    },
+    "ef1c3cb9a51dc679": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "12ff85d7-18aa-498b-8458-0b682db0f9c0",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 188,
+      "total_deletions": 108,
+      "accepted_lines": 140,
+      "overriden_lines": 0
+    }
+  }
+}
