@@ -167,6 +167,10 @@ class SystemPromptBuilder:
                 "- If a command returns empty output, state that clearly",
                 "- If an agent reaches its iteration limit, explain what was attempted",
                 "- NEVER say 'Done!' or 'I've completed X' unless you verified success",
+                "",
+                "**When an agent fails, DO NOT attempt the task yourself.**",
+                "Report the failure and ask the user how to proceed.",
+                "Trying to work around agent failures usually makes things worse.",
             ]
         )
 
@@ -218,6 +222,13 @@ class SystemPromptBuilder:
                 "",
                 "- **Creating tools, scripts, or reusable functionality** → use `skill-writer`",
                 "- After an agent completes, relay critical details (config paths, files created) to the user",
+                "",
+                "### When Agents Fail",
+                "",
+                "If an agent hits its iteration limit or reports failure:",
+                "- **DO NOT** attempt to do the agent's job yourself",
+                "- Report what the agent tried and why it failed",
+                "- Ask the user how they want to proceed",
             ]
         )
 

@@ -14,9 +14,10 @@ Your job is to create working skills, not debug external services.
 
 Create skills that work reliably:
 1. Understand what the user wants
-2. Create the skill directory and files
-3. Validate the result
-4. Report what was created (or report the failure and abort)
+2. Verify external dependencies work (pre-flight checks)
+3. Create the skill directory and files
+4. Validate the result
+5. Report what was created (or report the failure and abort)
 
 ## Skill Directory Structure
 
@@ -78,11 +79,23 @@ Instructions for the agent to follow when using this skill.
 ## Process
 
 1. Understand what the user wants the skill to do
-2. Create the skill directory: `/workspace/skills/<name>/`
-3. For complex skills: Create separate script/data files first
-4. Write the SKILL.md file with proper frontmatter and instructions
-5. Run `ash-sb skill validate /workspace/skills/<name>/SKILL.md` to verify
-6. Report to the user what was created (see Output section)
+2. **Pre-flight checks** (BEFORE writing any files):
+   - If the skill uses external APIs: use `web_search` to find official documentation
+   - Use `web_fetch` to test that endpoints actually work and return expected data
+   - NEVER guess at API endpoints or URLs - always verify them first
+   - If any external check fails: ABORT and report the issue immediately
+
+   Example: For a meme generator using imgflip, you would:
+   1. `web_search` for "imgflip API documentation"
+   2. `web_fetch` the API endpoint to verify it works
+   3. Only then start writing files
+3. Create the skill directory: `/workspace/skills/<name>/`
+4. For complex skills: Create separate script/data files first
+5. Write the SKILL.md file with proper frontmatter and instructions
+6. Run `ash-sb skill validate /workspace/skills/<name>/SKILL.md` to verify
+7. Report to the user what was created (see Output section)
+
+**Do not skip pre-flight checks.** Building a skill around broken dependencies wastes everyone's time.
 
 ## Handling Failures
 
@@ -256,6 +269,12 @@ class SkillWriterAgent(Agent):
             name="skill-writer",
             description="Create, update, or rewrite a skill with proper SKILL.md format",
             system_prompt=SKILL_WRITER_PROMPT,
-            allowed_tools=["read_file", "write_file", "bash"],
-            max_iterations=12,
+            allowed_tools=[
+                "read_file",
+                "write_file",
+                "bash",
+                "web_search",
+                "web_fetch",
+            ],
+            max_iterations=20,
         )
