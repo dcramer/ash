@@ -388,7 +388,7 @@ class TelegramMessageHandler:
                 logger.debug("Skipping duplicate message %s", message.id)
                 return
 
-            if self._should_skip_reply(message):
+            if await self._should_skip_reply(message):
                 logger.debug(
                     f"Skipping reply {message.id} - target not in conversation"
                 )
@@ -567,7 +567,7 @@ class TelegramMessageHandler:
         )
         return await session_manager.has_message_with_external_id(message.id)
 
-    def _should_skip_reply(self, message: IncomingMessage) -> bool:
+    async def _should_skip_reply(self, message: IncomingMessage) -> bool:
         """Check if a group reply should be skipped (target not in known thread)."""
         chat_type = message.metadata.get("chat_type", "")
         if chat_type not in ("group", "supergroup"):
@@ -577,8 +577,21 @@ class TelegramMessageHandler:
         if message.metadata.get("was_mentioned", False):
             return False
 
+        # Check thread index first
         thread_index = self._get_thread_index(message.chat_id)
-        return thread_index.get_thread_id(message.reply_to_message_id) is None
+        if thread_index.get_thread_id(message.reply_to_message_id) is not None:
+            return False  # Found in thread index, don't skip
+
+        # Also check legacy session (pre-thread-indexing messages)
+        legacy_manager = self._get_session_manager(
+            message.chat_id, message.user_id, thread_id=None
+        )
+        if await legacy_manager.has_message_with_external_id(
+            message.reply_to_message_id
+        ):
+            return False  # Found in legacy session, don't skip
+
+        return True  # Not found anywhere, skip
 
     async def _get_or_create_session(self, message: IncomingMessage) -> SessionState:
         """Get existing session or create a new one."""
