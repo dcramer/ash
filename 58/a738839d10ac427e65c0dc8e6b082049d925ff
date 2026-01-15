@@ -1,0 +1,25 @@
+src/ash/core/prompt.py
+  dfc91fcb620e1ac8 170-173,225-231
+src/ash/agents/builtin/skill_writer.py
+  dfc91fcb620e1ac8 17-20,82-98,275-276,279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "58a738839d10ac427e65c0dc8e6b082049d925ff",
+  "prompts": {
+    "dfc91fcb620e1ac8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21c5d428-5a32-436f-88ba-0ad55708b281",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 40,
+      "total_deletions": 16,
+      "accepted_lines": 35,
+      "overriden_lines": 1
+    }
+  }
+}
