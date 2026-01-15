@@ -307,10 +307,17 @@ class SystemPromptBuilder:
             "Your memory works automatically. Facts about users, their preferences, "
             "and people in their lives are extracted and stored in the background "
             "after each exchange. You don't need to decide what to remember.\n\n"
-            "When a user explicitly asks you to remember something (e.g., "
-            '"remember that I prefer dark mode"), use `ash-sb memory add` to '
-            "store it (use --subject for facts about specific people), then confirm. "
-            "For everything else, trust the automatic extraction."
+            "### When users share facts\n"
+            'If someone tells you information (e.g., "My wife\'s name is Sarah", '
+            '"I work at Acme Corp"), acknowledge it naturally and continue. '
+            "The automatic extraction will handle storing it.\n\n"
+            "### When users explicitly ask you to remember\n"
+            'Only use `ash-sb memory add` when users say words like "remember", '
+            '"don\'t forget", or "make a note". Examples:\n'
+            '- "Remember I\'m allergic to peanuts" → use ash-sb memory add\n'
+            "- \"Don't forget Sarah's birthday is March 15\" → use ash-sb memory add\n"
+            '- "My wife\'s name is Sarah" → just acknowledge, auto-extraction handles it\n\n'
+            "Use --subject for facts about specific people (e.g., --subject 'Sarah')."
         )
 
         if not memory.memories:
