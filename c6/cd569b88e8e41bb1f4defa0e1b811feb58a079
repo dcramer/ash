@@ -1,0 +1,23 @@
+src/ash/providers/telegram/handlers.py
+  21dfb6cf4fe14d0d 568,577-578
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "c6cd569b88e8e41bb1f4defa0e1b811feb58a079",
+  "prompts": {
+    "21dfb6cf4fe14d0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b325e82c-bb53-439e-84d3-0883fcca1892",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 16,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
