@@ -1,0 +1,25 @@
+src/ash/config/workspace.py
+  3eed1d091833b2f9 387-389,414,433,439
+src/ash/cli/commands/serve.py
+  3eed1d091833b2f9 244-246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "d3de78e08d7f32988826e3fcbbf9931cf19b2586",
+  "prompts": {
+    "3eed1d091833b2f9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a2ee717-1074-46a8-9c58-1adc9f1107a5",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 10,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
