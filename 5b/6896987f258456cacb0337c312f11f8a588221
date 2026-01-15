@@ -1,0 +1,23 @@
+src/ash/core/prompt.py
+  80412bcf96a72c53 310-317,319-320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.31",
+  "base_commit_sha": "5b6896987f258456cacb0337c312f11f8a588221",
+  "prompts": {
+    "80412bcf96a72c53": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "064510f7-3bf1-4a95-bc6c-67613844b5a2",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "David Cramer <dcramer@gmail.com>",
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 4,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    }
+  }
+}
