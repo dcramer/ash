@@ -21,20 +21,35 @@ BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 
 # Python script to execute inside sandbox
 # Outputs JSON for reliable parsing and accurate result counting
+# Supports: query, count, freshness, country, search_type
 SEARCH_SCRIPT = '''
 import json, os, sys, urllib.request, urllib.parse, time
 from urllib.parse import urlparse
 
+# Parse arguments: query count freshness country search_type
 query = sys.argv[1]
 count = int(sys.argv[2]) if len(sys.argv) > 2 else 5
+freshness = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "none" else None
+country = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] != "none" else None
+search_type = sys.argv[5] if len(sys.argv) > 5 else "web"
 
 api_key = os.environ.get("BRAVE_API_KEY", "")
 if not api_key:
     print(json.dumps({"error": "BRAVE_API_KEY not set", "code": 500}))
     sys.exit(1)
 
+# Build URL with parameters
 q = urllib.parse.quote(query)
-url = f"https://api.search.brave.com/res/v1/web/search?q={q}&count={count}"
+if search_type == "news":
+    base_url = "https://api.search.brave.com/res/v1/news/search"
+else:
+    base_url = "https://api.search.brave.com/res/v1/web/search"
+
+url = f"{base_url}?q={q}&count={count}"
+if freshness:
+    url += f"&freshness={freshness}"
+if country:
+    url += f"&country={urllib.parse.quote(country)}"
 
 start_time = time.time()
 
@@ -90,7 +105,12 @@ def extract_site_name(url_str):
     except Exception:
         return None
 
-raw_results = data.get("web", {}).get("results", [])
+# Handle both web and news result formats
+if search_type == "news":
+    raw_results = data.get("results", [])
+else:
+    raw_results = data.get("web", {}).get("results", [])
+
 results = []
 
 for r in raw_results:
@@ -107,7 +127,7 @@ for r in raw_results:
         "url": result_url,
         "description": desc,
         "site_name": extract_site_name(result_url),
-        "published_date": r.get("page_age"),  # Brave API field
+        "published_date": r.get("page_age") or r.get("age"),  # Brave API fields
     })
 
 output = {
@@ -115,6 +135,7 @@ output = {
     "results": results,
     "total_count": len(results),
     "search_time_ms": search_time_ms,
+    "search_type": search_type,
 }
 
 print(json.dumps(output))
@@ -141,7 +162,7 @@ class WebSearchTool(Tool):
         workspace_path: Path | None = None,
         cache: SearchCache | None = None,
         retry_config: RetryConfig | None = None,
-        max_results: int = 10,
+        max_results: int = 20,
     ):
         """Initialize web search tool.
 
@@ -152,7 +173,7 @@ class WebSearchTool(Tool):
             workspace_path: Path to workspace (for sandbox config).
             cache: Optional search cache for result caching.
             retry_config: Optional retry configuration for transient errors.
-            max_results: Maximum results to return per search.
+            max_results: Maximum results to return per search (max 20).
         """
         self._api_key = api_key
         self._max_results = max_results
@@ -205,9 +226,34 @@ class WebSearchTool(Tool):
                     "description": f"Number of results (max {self._max_results}).",
                     "default": 5,
                 },
+                "freshness": {
+                    "type": "string",
+                    "enum": ["pd", "pw", "pm", "py"],
+                    "description": (
+                        "Filter by content freshness: "
+                        "'pd' (past day), 'pw' (past week), "
+                        "'pm' (past month), 'py' (past year)."
+                    ),
+                },
+                "country": {
+                    "type": "string",
+                    "description": (
+                        "Two-letter country code for localized results (e.g., 'US', 'GB', 'DE')."
+                    ),
+                },
+                "search_type": {
+                    "type": "string",
+                    "enum": ["web", "news"],
+                    "description": "Type of search: 'web' (default) or 'news' for news articles.",
+                    "default": "web",
+                },
             },
             "required": ["query"],
         }
+
+    # Valid parameter values
+    VALID_FRESHNESS = {"pd", "pw", "pm", "py"}
+    VALID_SEARCH_TYPES = {"web", "news"}
 
     async def execute(
         self,
@@ -219,9 +265,29 @@ class WebSearchTool(Tool):
             return ToolResult.error("Missing required parameter: query")
 
         count = min(input_data.get("count", 5), self._max_results)
+        freshness = input_data.get("freshness")
+        country = input_data.get("country")
+        search_type = input_data.get("search_type", "web")
+
+        # Validate optional parameters
+        if freshness and freshness not in self.VALID_FRESHNESS:
+            return ToolResult.error(
+                f"Invalid freshness: {freshness}. Must be one of: pd, pw, pm, py"
+            )
+        if search_type not in self.VALID_SEARCH_TYPES:
+            return ToolResult.error(
+                f"Invalid search_type: {search_type}. Must be 'web' or 'news'"
+            )
+        if country and (len(country) != 2 or not country.isalpha()):
+            return ToolResult.error(
+                f"Invalid country: {country}. Must be a 2-letter code (e.g., 'US', 'GB')"
+            )
+
+        # Build cache key including parameters
+        cache_key = f"{query}|{count}|{freshness}|{country}|{search_type}"
 
         if self._cache:
-            cached = self._cache.get(query)
+            cached = self._cache.get(cache_key)
             if cached is not None and isinstance(cached, SearchResponse):
                 logger.debug(f"Cache hit for query: {query}")
                 return ToolResult.success(
@@ -229,11 +295,20 @@ class WebSearchTool(Tool):
                     result_count=len(cached.results),
                     cached=True,
                     search_time_ms=cached.search_time_ms,
+                    search_type=search_type,
                 )
 
         async def do_search() -> SearchResponse:
             escaped_query = shlex.quote(query)
-            command = f"python3 -c {shlex.quote(SEARCH_SCRIPT)} {escaped_query} {count}"
+            # Pass all parameters: query count freshness country search_type
+            freshness_arg = shlex.quote(freshness) if freshness else "none"
+            country_arg = shlex.quote(country) if country else "none"
+            search_type_arg = shlex.quote(search_type)
+
+            command = (
+                f"python3 -c {shlex.quote(SEARCH_SCRIPT)} "
+                f"{escaped_query} {count} {freshness_arg} {country_arg} {search_type_arg}"
+            )
 
             result = await self._executor.execute(
                 command,
@@ -266,13 +341,14 @@ class WebSearchTool(Tool):
             )
 
             if self._cache and not response.cached:
-                self._cache.set(query, response)
+                self._cache.set(cache_key, response)
 
             return ToolResult.success(
                 response.to_formatted_text(),
                 result_count=len(response.results),
                 cached=response.cached,
                 search_time_ms=response.search_time_ms,
+                search_type=search_type,
             )
 
         except Exception as e:

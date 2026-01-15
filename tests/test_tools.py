@@ -477,3 +477,251 @@ class TestWebSearchTool:
             call_kwargs = mock_cls.call_args[1]
             assert "environment" in call_kwargs
             assert call_kwargs["environment"]["BRAVE_API_KEY"] == "secret-key-123"
+
+    async def test_freshness_parameter(self, mock_sandbox_config, mock_executor):
+        """Test that freshness parameter is passed to Brave API."""
+        import json
+
+        mock_executor.execute.return_value = ExecutionResult(
+            exit_code=0,
+            stdout=json.dumps(
+                {
+                    "query": "python news",
+                    "results": [
+                        {
+                            "title": "Latest Python Update",
+                            "url": "https://example.com",
+                            "description": "Recent news",
+                        }
+                    ],
+                    "total_count": 1,
+                    "search_type": "web",
+                }
+            ),
+            stderr="",
+            timed_out=False,
+        )
+
+        tool = WebSearchTool(
+            api_key="test-key",
+            sandbox_config=mock_sandbox_config,
+        )
+        await tool.execute({"query": "python news", "freshness": "pw"}, ToolContext())
+
+        # Check that freshness was passed in command
+        call_args = mock_executor.execute.call_args
+        assert "pw" in call_args[0][0]
+
+    async def test_country_parameter(self, mock_sandbox_config, mock_executor):
+        """Test that country parameter is passed to Brave API."""
+        import json
+
+        mock_executor.execute.return_value = ExecutionResult(
+            exit_code=0,
+            stdout=json.dumps(
+                {
+                    "query": "weather",
+                    "results": [
+                        {
+                            "title": "UK Weather",
+                            "url": "https://example.co.uk",
+                            "description": "Weather forecast",
+                        }
+                    ],
+                    "total_count": 1,
+                    "search_type": "web",
+                }
+            ),
+            stderr="",
+            timed_out=False,
+        )
+
+        tool = WebSearchTool(
+            api_key="test-key",
+            sandbox_config=mock_sandbox_config,
+        )
+        await tool.execute({"query": "weather", "country": "GB"}, ToolContext())
+
+        # Check that country was passed in command
+        call_args = mock_executor.execute.call_args
+        assert "GB" in call_args[0][0]
+
+    async def test_news_search_type(self, mock_sandbox_config, mock_executor):
+        """Test that search_type=news uses news endpoint."""
+        import json
+
+        mock_executor.execute.return_value = ExecutionResult(
+            exit_code=0,
+            stdout=json.dumps(
+                {
+                    "query": "AI regulations",
+                    "results": [
+                        {
+                            "title": "New AI Laws",
+                            "url": "https://news.example.com",
+                            "description": "Breaking news",
+                        }
+                    ],
+                    "total_count": 1,
+                    "search_type": "news",
+                }
+            ),
+            stderr="",
+            timed_out=False,
+        )
+
+        tool = WebSearchTool(
+            api_key="test-key",
+            sandbox_config=mock_sandbox_config,
+        )
+        result = await tool.execute(
+            {"query": "AI regulations", "search_type": "news"}, ToolContext()
+        )
+
+        # Check that search_type was passed in command
+        call_args = mock_executor.execute.call_args
+        assert "news" in call_args[0][0]
+        assert result.metadata.get("search_type") == "news"
+
+    async def test_max_results_increased_to_20(
+        self, mock_sandbox_config, mock_executor
+    ):
+        """Test that max_results default is now 20."""
+        import json
+
+        mock_executor.execute.return_value = ExecutionResult(
+            exit_code=0,
+            stdout=json.dumps(
+                {
+                    "query": "test",
+                    "results": [
+                        {
+                            "title": f"Result {i}",
+                            "url": f"http://example.com/{i}",
+                            "description": "",
+                        }
+                        for i in range(20)
+                    ],
+                    "total_count": 20,
+                    "search_type": "web",
+                }
+            ),
+            stderr="",
+            timed_out=False,
+        )
+
+        tool = WebSearchTool(
+            api_key="test-key",
+            sandbox_config=mock_sandbox_config,
+        )
+        await tool.execute({"query": "test", "count": 20}, ToolContext())
+
+        # Count should be 20, not capped to 10
+        call_args = mock_executor.execute.call_args
+        assert "20" in call_args[0][0]
+
+    async def test_cache_key_includes_all_parameters(
+        self, mock_sandbox_config, mock_executor
+    ):
+        """Test that cache key includes freshness, country, and search_type."""
+        import json
+
+        from ash.tools.builtin.search_cache import SearchCache
+
+        cache = SearchCache(maxsize=10, ttl=300)
+
+        mock_executor.execute.return_value = ExecutionResult(
+            exit_code=0,
+            stdout=json.dumps(
+                {
+                    "query": "python",
+                    "results": [
+                        {
+                            "title": "Python",
+                            "url": "https://python.org",
+                            "description": "Python programming",
+                        }
+                    ],
+                    "total_count": 1,
+                    "search_type": "web",
+                }
+            ),
+            stderr="",
+            timed_out=False,
+        )
+
+        tool = WebSearchTool(
+            api_key="test-key",
+            sandbox_config=mock_sandbox_config,
+            cache=cache,
+        )
+
+        # First request
+        await tool.execute(
+            {"query": "python", "freshness": "pw", "country": "US"},
+            ToolContext(),
+        )
+
+        # Same query but different parameters - should not hit cache
+        await tool.execute(
+            {"query": "python", "freshness": "pm", "country": "US"},
+            ToolContext(),
+        )
+
+        # Should have been called twice (cache miss for different params)
+        assert mock_executor.execute.call_count == 2
+
+    async def test_invalid_freshness_returns_error(
+        self, mock_sandbox_config, mock_executor
+    ):
+        """Test that invalid freshness value returns error."""
+        tool = WebSearchTool(
+            api_key="test-key",
+            sandbox_config=mock_sandbox_config,
+        )
+        result = await tool.execute(
+            {"query": "test", "freshness": "invalid"},
+            ToolContext(),
+        )
+        assert result.is_error
+        assert "Invalid freshness" in result.content
+
+    async def test_invalid_search_type_returns_error(
+        self, mock_sandbox_config, mock_executor
+    ):
+        """Test that invalid search_type value returns error."""
+        tool = WebSearchTool(
+            api_key="test-key",
+            sandbox_config=mock_sandbox_config,
+        )
+        result = await tool.execute(
+            {"query": "test", "search_type": "images"},
+            ToolContext(),
+        )
+        assert result.is_error
+        assert "Invalid search_type" in result.content
+
+    async def test_invalid_country_format_returns_error(
+        self, mock_sandbox_config, mock_executor
+    ):
+        """Test that invalid country format returns error."""
+        tool = WebSearchTool(
+            api_key="test-key",
+            sandbox_config=mock_sandbox_config,
+        )
+
+        # Too long
+        result = await tool.execute(
+            {"query": "test", "country": "USA"},
+            ToolContext(),
+        )
+        assert result.is_error
+        assert "Invalid country" in result.content
+
+        # Non-alpha
+        result = await tool.execute(
+            {"query": "test", "country": "U1"},
+            ToolContext(),
+        )
+        assert result.is_error
+        assert "Invalid country" in result.content

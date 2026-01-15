@@ -41,6 +41,7 @@ class SearchResponse:
     total_results: int = 0
     search_time_ms: int = 0
     cached: bool = False
+    search_type: str = "web"
 
     @classmethod
     def from_json(cls, json_str: str) -> "SearchResponse":
@@ -52,6 +53,7 @@ class SearchResponse:
             results=results,
             total_results=data.get("total_count", len(results)),
             search_time_ms=data.get("search_time_ms", 0),
+            search_type=data.get("search_type", "web"),
         )
 
     def to_json(self) -> str:
@@ -72,6 +74,7 @@ class SearchResponse:
                 "total_count": self.total_results,
                 "search_time_ms": self.search_time_ms,
                 "cached": self.cached,
+                "search_type": self.search_type,
             },
             indent=2,
         )
