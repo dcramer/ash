@@ -76,7 +76,7 @@ async def _run_server(
     from ash.core import create_agent
     from ash.db import init_database
     from ash.providers.telegram import TelegramProvider
-    from ash.rpc import RPCServer, register_memory_methods
+    from ash.rpc import RPCServer, register_config_methods, register_memory_methods
     from ash.server.app import create_app
     from ash.service.pid import remove_pid_file, write_pid_file
 
@@ -135,6 +135,7 @@ async def _run_server(
         rpc_socket_path = get_rpc_socket_path()
         rpc_server = RPCServer(rpc_socket_path)
         register_memory_methods(rpc_server, components.memory_manager)
+        register_config_methods(rpc_server, ash_config, components.skill_registry)
         await rpc_server.start()
         logger.info(f"RPC server started at {rpc_socket_path}")
 
@@ -212,7 +213,11 @@ async def _run_server(
         def handle_signal():
             server.should_exit = True
             shutdown_event.set()
-            # Cancel telegram polling if running
+            # Stop telegram polling properly before cancelling task
+            # This ensures aiogram's internal retry loop stops cleanly
+            if telegram_provider:
+                loop.call_soon(lambda: asyncio.create_task(telegram_provider.stop()))
+            # Cancel telegram task after stop is scheduled
             if telegram_task and not telegram_task.done():
                 telegram_task.cancel()
 

@@ -2,7 +2,7 @@
 
 import typer
 
-from ash_sandbox_cli.commands import memory, schedule, skill
+from ash_sandbox_cli.commands import config, memory, schedule, skill
 
 app = typer.Typer(
     name="ash",
@@ -11,6 +11,7 @@ app = typer.Typer(
 )
 
 # Register command groups
+app.add_typer(config.app, name="config")
 app.add_typer(memory.app, name="memory")
 app.add_typer(schedule.app, name="schedule")
 app.add_typer(skill.app, name="skill")

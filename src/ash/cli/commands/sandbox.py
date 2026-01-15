@@ -10,6 +10,30 @@ import typer
 from ash.cli.console import console, dim, error, success, warning
 
 
+def _get_dockerfile_path() -> Path | None:
+    """Find the Dockerfile.sandbox path.
+
+    Returns:
+        Path to Dockerfile.sandbox, or None if not found.
+    """
+    # Try relative to this file: cli/commands/sandbox.py -> project root
+    project_root = Path(__file__).parents[4]
+    dockerfile_path = project_root / "docker" / "Dockerfile.sandbox"
+    if dockerfile_path.exists():
+        return dockerfile_path
+
+    # Try relative to ash package
+    import ash
+
+    if ash.__file__:
+        package_root = Path(ash.__file__).parents[2]
+        dockerfile_path = package_root / "docker" / "Dockerfile.sandbox"
+        if dockerfile_path.exists():
+            return dockerfile_path
+
+    return None
+
+
 def register(app: typer.Typer) -> None:
     """Register the sandbox command."""
 
@@ -42,22 +66,13 @@ def register(app: typer.Typer) -> None:
             click.echo(ctx.get_help())
             raise typer.Exit(0)
 
-        # Find Dockerfile.sandbox
-        dockerfile_path = (
-            Path(__file__).parent.parent.parent.parent.parent
-            / "docker"
-            / "Dockerfile.sandbox"
-        )
-        if not dockerfile_path.exists():
-            # Try relative to package
-            import ash
-
-            if ash.__file__:
-                package_dir = Path(ash.__file__).parent.parent.parent
-                dockerfile_path = package_dir / "docker" / "Dockerfile.sandbox"
-
         if action == "build":
-            _sandbox_build(dockerfile_path, config)
+            dockerfile_path = _get_dockerfile_path()
+            if not dockerfile_path:
+                error("Dockerfile.sandbox not found")
+                raise typer.Exit(1)
+            if not _sandbox_build(dockerfile_path, config):
+                raise typer.Exit(1)
 
         elif action == "status":
             _sandbox_status()
@@ -71,27 +86,27 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
 
-def _sandbox_build(dockerfile_path: Path, config_path: Path | None = None) -> None:
-    """Build the sandbox Docker image."""
+def _sandbox_build(dockerfile_path: Path, config_path: Path | None = None) -> bool:
+    """Build the sandbox Docker image.
+
+    Args:
+        dockerfile_path: Path to Dockerfile.sandbox.
+        config_path: Optional config file path for build-time packages.
+
+    Returns:
+        True if build succeeded, False otherwise.
+    """
+    from ash.cli.console import DockerStatus, check_docker, warn_docker_unavailable
+
     # Check if Docker is available
-    try:
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            error("Docker is not running or not accessible")
-            console.print("Please start Docker and try again")
-            raise typer.Exit(1)
-    except FileNotFoundError:
-        error("Docker is not installed")
-        console.print("Install Docker from https://docs.docker.com/get-docker/")
-        raise typer.Exit(1) from None
+    docker_status = check_docker()
+    if docker_status != DockerStatus.AVAILABLE:
+        warn_docker_unavailable(docker_status)
+        return False
 
     if not dockerfile_path.exists():
         error(f"Dockerfile not found: {dockerfile_path}")
-        raise typer.Exit(1)
+        return False
 
     # Load config for build-time packages
     build_args: list[str] = []
@@ -113,21 +128,17 @@ def _sandbox_build(dockerfile_path: Path, config_path: Path | None = None) -> No
 
         # Merge config + skill packages
         all_apt = sorted(set(cfg.sandbox.apt_packages + skill_apt))
-        if all_apt:
-            valid_apt = _validate_package_names(all_apt)
-            if valid_apt:
-                apt_str = " ".join(valid_apt)
-                build_args.extend(["--build-arg", f"EXTRA_APT_PACKAGES={apt_str}"])
-                dim(f"apt packages: {apt_str}")
+        valid_apt = _validate_package_names(all_apt)
+        if valid_apt:
+            apt_str = " ".join(valid_apt)
+            build_args.extend(["--build-arg", f"EXTRA_APT_PACKAGES={apt_str}"])
+            dim(f"apt packages: {apt_str}")
 
-        if cfg.sandbox.python_packages:
-            valid_python = _validate_package_names(cfg.sandbox.python_packages)
-            if valid_python:
-                python_str = " ".join(valid_python)
-                build_args.extend(
-                    ["--build-arg", f"EXTRA_PYTHON_PACKAGES={python_str}"]
-                )
-                dim(f"python packages: {python_str}")
+        valid_python = _validate_package_names(cfg.sandbox.python_packages)
+        if valid_python:
+            python_str = " ".join(valid_python)
+            build_args.extend(["--build-arg", f"EXTRA_PYTHON_PACKAGES={python_str}"])
+            dim(f"python packages: {python_str}")
     except Exception as e:
         warning(f"Could not load config: {e}")
 
@@ -154,26 +165,20 @@ def _sandbox_build(dockerfile_path: Path, config_path: Path | None = None) -> No
         console.print()
         success("Sandbox image built successfully!")
         console.print("You can now use the sandbox with [cyan]ash chat[/cyan]")
+        return True
     else:
         console.print()
         error("Failed to build sandbox image")
-        raise typer.Exit(1)
+        return False
 
 
 def _sandbox_status() -> None:
     """Show sandbox status."""
     from rich.table import Table
 
-    # Check Docker
-    try:
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            text=True,
-        )
-        docker_running = result.returncode == 0
-    except FileNotFoundError:
-        docker_running = False
+    from ash.cli.console import DockerStatus, check_docker
+
+    docker_running = check_docker() == DockerStatus.AVAILABLE
 
     # Check image
     image_exists = False

@@ -40,8 +40,10 @@ def _get_parse_mode(mode: str | None) -> ParseMode:
 
 
 def _truncate(text: str, max_len: int = 40) -> str:
-    """Truncate text for logging."""
-    return text[:max_len] + "..." if len(text) > max_len else text
+    """Truncate text for logging (first line only, max length)."""
+    first_line, *rest = text.split("\n", 1)
+    truncated = len(first_line) > max_len or bool(rest)
+    return first_line[:max_len] + "..." if truncated else first_line
 
 
 class TelegramProvider(Provider):
@@ -299,6 +301,8 @@ class TelegramProvider(Provider):
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
+        if not self._running:
+            return  # Already stopped
         self._running = False
 
         # Stop the dispatcher polling

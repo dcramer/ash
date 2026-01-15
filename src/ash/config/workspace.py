@@ -432,9 +432,4 @@ class WorkspaceLoader:
 DEFAULT_SOUL = """---
 extends: zoomer
 ---
-
-# Customizations
-
-Add your personality customizations here. They will be appended
-to the base zoomer personality.
 """

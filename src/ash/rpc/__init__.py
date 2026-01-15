@@ -22,13 +22,14 @@ from ash_rpc_protocol import (
     read_message_sync,
 )
 
-from ash.rpc.methods import register_memory_methods
+from ash.rpc.methods import register_config_methods, register_memory_methods
 from ash.rpc.server import RPCServer
 
 __all__ = [
     # Server
     "RPCServer",
     # Methods
+    "register_config_methods",
     "register_memory_methods",
     # Protocol
     "RPCRequest",

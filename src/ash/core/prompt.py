@@ -68,7 +68,10 @@ class PromptContext:
     session_path: str | None = None
     session_mode: str | None = None  # "persistent" or "fresh"
     # Chat state info
-    chat_state_path: str | None = None  # Path to chat state.json
+    chat_state_path: str | None = None  # Path to chat-level state.json
+    thread_state_path: str | None = (
+        None  # Path to thread-specific state.json (when in thread)
+    )
     # Sender context (for group chats)
     sender_username: str | None = None
     sender_display_name: str | None = None
@@ -208,6 +211,16 @@ class SystemPromptBuilder:
         for agent in sorted(available_agents, key=lambda a: a.config.name):
             lines.append(f"- **{agent.config.name}**: {agent.config.description}")
 
+        lines.extend(
+            [
+                "",
+                "### When to Delegate",
+                "",
+                "- **Creating tools, scripts, or reusable functionality** → use `skill-writer`",
+                "- After an agent completes, relay critical details (config paths, files created) to the user",
+            ]
+        )
+
         return "\n".join(lines)
 
     def _build_model_aliases_section(self) -> str:
@@ -247,12 +260,17 @@ class SystemPromptBuilder:
             "- `/sessions` - Conversation history (read-only)",
             "- `/chats` - Chat participant info (read-only)",
             "",
-            "### ash-sb CLI",
+            "### ash-sb CLI (Agent Only)",
+            "",
+            "These commands are only available to you in the sandbox.",
+            "The user cannot run them - when they ask to reload config, search memory,",
+            "etc., you must run these commands yourself:",
             "",
             "- `ash-sb memory search 'query'` - Search memories",
             "- `ash-sb memory add 'content'` - Store a memory",
             "- `ash-sb schedule create 'msg' --at <time>` - Schedule task",
             "- `ash-sb schedule list` - List scheduled tasks",
+            "- `ash-sb config reload` - Reload config after changes",
             "",
             "Run `ash-sb --help` for all commands.",
         ]
@@ -384,12 +402,14 @@ class SystemPromptBuilder:
         ]
 
         if context.chat_state_path:
-            lines.extend(
-                [
-                    "",
-                    f"Chat participants: `cat {context.chat_state_path}/state.json`",
-                ]
+            lines.append("")
+            lines.append(
+                f"Chat participants: `cat {context.chat_state_path}/state.json`"
             )
+            if context.thread_state_path:
+                lines.append(
+                    f"Thread participants: `cat {context.thread_state_path}/state.json`"
+                )
 
         return "\n".join(lines)
 

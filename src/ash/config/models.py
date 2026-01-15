@@ -206,10 +206,14 @@ class SkillConfig(BaseModel):
     enabled: bool = True
 
     def get_env_vars(self) -> dict[str, str]:
+        """Get environment variables from config, auto-uppercasing keys.
+
+        Config like `ha_token = "xyz"` becomes env var `HA_TOKEN=xyz`.
+        """
         return {
-            k: str(v)
+            k.upper(): str(v)
             for k, v in self.model_dump().items()
-            if k not in {"model", "enabled"} and k.isupper()
+            if k.lower() not in {"model", "enabled"}
         }
 
 

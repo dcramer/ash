@@ -40,7 +40,10 @@ def escape_markdown_v2(text: str) -> str:
 
 
 def _truncate_str(s: str, max_len: int) -> str:
-    return s[:max_len] + "..." if len(s) > max_len else s
+    """Truncate string (first line only, max length)."""
+    first_line, *rest = s.split("\n", 1)
+    truncated = len(first_line) > max_len or bool(rest)
+    return first_line[:max_len] + "..." if truncated else first_line
 
 
 def _get_filename(path: str) -> str:
@@ -638,12 +641,16 @@ class TelegramMessageHandler:
     def _update_chat_state(
         self, message: IncomingMessage, thread_id: str | None
     ) -> None:
-        """Update chat state with participant and chat info."""
+        """Update chat state with participant and chat info.
 
+        Always updates chat-level state so all participants are tracked at the
+        chat level. Additionally updates thread-specific state when in a thread.
+        """
+        # Always update chat-level state (no thread_id)
         chat_state = ChatStateManager(
             provider=self._provider.name,
             chat_id=message.chat_id,
-            thread_id=thread_id,
+            thread_id=None,
         )
 
         chat_type = message.metadata.get("chat_type")
@@ -651,15 +658,33 @@ class TelegramMessageHandler:
         if chat_type or chat_title:
             chat_state.update_chat_info(chat_type=chat_type, title=chat_title)
 
-        session_id = make_session_key(
-            self._provider.name, message.chat_id, message.user_id, thread_id
+        # Use chat-level session ID for participant reference
+        chat_session_id = make_session_key(
+            self._provider.name, message.chat_id, message.user_id, None
         )
         chat_state.update_participant(
             user_id=message.user_id,
             username=message.username,
             display_name=message.display_name,
-            session_id=session_id,
+            session_id=chat_session_id,
         )
+
+        # Additionally update thread-specific state when in a thread
+        if thread_id:
+            thread_state = ChatStateManager(
+                provider=self._provider.name,
+                chat_id=message.chat_id,
+                thread_id=thread_id,
+            )
+            thread_session_id = make_session_key(
+                self._provider.name, message.chat_id, message.user_id, thread_id
+            )
+            thread_state.update_participant(
+                user_id=message.user_id,
+                username=message.username,
+                display_name=message.display_name,
+                session_id=thread_session_id,
+            )
 
     async def _load_persistent_session(
         self,

@@ -5,7 +5,14 @@ from pathlib import Path
 
 import typer
 
-from ash.cli.console import console, dim, error, info, success, warning
+from ash.cli.console import (
+    console,
+    dim,
+    error,
+    info,
+    success,
+    warning,
+)
 
 
 def register(app: typer.Typer) -> None:
@@ -13,7 +20,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def upgrade() -> None:
-        """Upgrade Ash (run database migrations, rebuild sandbox if needed)."""
+        """Upgrade Ash (run database migrations, build sandbox)."""
         console.print("[bold]Upgrading Ash...[/bold]\n")
 
         # Ensure data directory exists (for SQLite database)
@@ -56,18 +63,17 @@ def register(app: typer.Typer) -> None:
         except FileNotFoundError:
             warning("Alembic not available, skipping migrations")
 
-        # Check if sandbox needs rebuild
-        console.print("\n[cyan]Checking sandbox...[/cyan]")
-        result = subprocess.run(
-            ["docker", "images", "-q", "ash-sandbox:latest"],
-            capture_output=True,
-            text=True,
-        )
-        if result.stdout.strip():
-            success("Sandbox image exists")
-            dim("Run 'ash sandbox build --force' to rebuild")
-        else:
-            warning("Sandbox image not found")
-            console.print("Run 'ash sandbox build' to create it")
+        # Build sandbox
+        console.print()
+        info("Building sandbox...")
+
+        from ash.cli.commands.sandbox import _get_dockerfile_path, _sandbox_build
+
+        dockerfile_path = _get_dockerfile_path()
+        if not dockerfile_path:
+            error("Dockerfile.sandbox not found")
+            dim("Sandbox build skipped")
+        elif not _sandbox_build(dockerfile_path):
+            warning("Sandbox build failed (retry with 'ash sandbox build')")
 
         console.print("\n[bold green]Upgrade complete![/bold green]")

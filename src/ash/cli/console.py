@@ -1,7 +1,38 @@
 """Shared console utilities for CLI commands."""
 
+import subprocess
+from enum import Enum
+
 from rich.console import Console
 from rich.table import Table
+
+
+class DockerStatus(Enum):
+    """Docker availability status."""
+
+    AVAILABLE = "available"
+    NOT_INSTALLED = "not_installed"
+    NOT_RUNNING = "not_running"
+
+
+def check_docker() -> DockerStatus:
+    """Check if Docker is installed and running.
+
+    Returns:
+        DockerStatus indicating the state of Docker.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return DockerStatus.AVAILABLE
+        return DockerStatus.NOT_RUNNING
+    except FileNotFoundError:
+        return DockerStatus.NOT_INSTALLED
+
 
 # Shared console instance for all CLI commands
 console = Console()
@@ -30,6 +61,20 @@ def info(msg: str) -> None:
 def dim(msg: str) -> None:
     """Print a dimmed message."""
     console.print(f"[dim]{msg}[/dim]")
+
+
+def warn_docker_unavailable(status: DockerStatus) -> None:
+    """Print a warning about Docker not being available.
+
+    Args:
+        status: The Docker status to warn about.
+    """
+    if status == DockerStatus.NOT_INSTALLED:
+        warning("Docker is not installed")
+        dim("Install Docker from https://docs.docker.com/get-docker/")
+    elif status == DockerStatus.NOT_RUNNING:
+        warning("Docker is not running")
+        dim("Start Docker to enable sandbox functionality")
 
 
 def create_table(

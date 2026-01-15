@@ -48,15 +48,6 @@ GetSteeringMessagesCallback = Callable[[], Awaitable[list["IncomingMessage"]]]
 MAX_TOOL_ITERATIONS = 25
 
 
-def _build_chat_state_path(session: SessionState) -> str | None:
-    """Build the chat state path for a session."""
-    if not (session.provider and session.chat_id):
-        return None
-    base = f"/chats/{session.provider}/{session.chat_id}"
-    thread_id = session.metadata.get("thread_id")
-    return f"{base}/threads/{thread_id}" if thread_id else base
-
-
 def _build_routing_env(
     session: SessionState,
     effective_user_id: str | None,
@@ -75,8 +66,15 @@ def _build_routing_env(
         "ASH_USERNAME": session.metadata.get("username", ""),
     }
 
-    if chat_path := _build_chat_state_path(session):
-        env["ASH_CHAT_PATH"] = chat_path
+    # Provide chat state paths for sandbox access
+    # ASH_CHAT_PATH: always points to chat-level state
+    # ASH_THREAD_PATH: points to thread-specific state when in a thread
+    if session.provider and session.chat_id:
+        env["ASH_CHAT_PATH"] = f"/chats/{session.provider}/{session.chat_id}"
+        if thread_id := session.metadata.get("thread_id"):
+            env["ASH_THREAD_PATH"] = (
+                f"/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
+            )
 
     return env
 
@@ -245,6 +243,7 @@ class Agent:
         chat_title: str | None = None,
         chat_type: str | None = None,
         chat_state_path: str | None = None,
+        thread_state_path: str | None = None,
     ) -> str:
         """Build system prompt with optional memory context.
 
@@ -259,6 +258,8 @@ class Agent:
             sender_display_name: Display name of the current message sender.
             chat_title: Title of the chat (for group chats).
             chat_type: Type of chat ("group", "supergroup", "private").
+            chat_state_path: Path to chat-level state.json.
+            thread_state_path: Path to thread-specific state.json (when in thread).
 
         Returns:
             Complete system prompt.
@@ -279,6 +280,7 @@ class Agent:
             session_path=session_path,
             session_mode=session_mode,
             chat_state_path=chat_state_path,
+            thread_state_path=thread_state_path,
             sender_username=sender_username,
             sender_display_name=sender_display_name,
             chat_title=chat_title,
@@ -389,7 +391,18 @@ class Agent:
             sender_display_name=session.metadata.get("display_name"),
             chat_title=session.metadata.get("chat_title"),
             chat_type=session.metadata.get("chat_type"),
-            chat_state_path=_build_chat_state_path(session),
+            chat_state_path=(
+                f"/chats/{session.provider}/{session.chat_id}"
+                if session.provider and session.chat_id
+                else None
+            ),
+            thread_state_path=(
+                f"/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
+                if session.provider
+                and session.chat_id
+                and (thread_id := session.metadata.get("thread_id"))
+                else None
+            ),
         )
 
         system_tokens = estimate_tokens(system_prompt)
