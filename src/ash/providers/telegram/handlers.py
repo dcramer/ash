@@ -385,7 +385,7 @@ class TelegramMessageHandler:
                 logger.debug("Skipping duplicate message %s", message.id)
                 return
 
-            if await self._should_skip_reply(message):
+            if self._should_skip_reply(message):
                 logger.debug(
                     f"Skipping reply {message.id} - target not in conversation"
                 )
@@ -564,8 +564,8 @@ class TelegramMessageHandler:
         )
         return await session_manager.has_message_with_external_id(message.id)
 
-    async def _should_skip_reply(self, message: IncomingMessage) -> bool:
-        """Check if a group reply should be skipped (target not in conversation)."""
+    def _should_skip_reply(self, message: IncomingMessage) -> bool:
+        """Check if a group reply should be skipped (target not in known thread)."""
         chat_type = message.metadata.get("chat_type", "")
         if chat_type not in ("group", "supergroup"):
             return False
@@ -574,14 +574,8 @@ class TelegramMessageHandler:
         if message.metadata.get("was_mentioned", False):
             return False
 
-        thread_id = message.metadata.get("thread_id")
-        session_manager = self._get_session_manager(
-            message.chat_id, message.user_id, thread_id
-        )
-        target = await session_manager.get_message_by_external_id(
-            message.reply_to_message_id
-        )
-        return target is None
+        thread_index = self._get_thread_index(message.chat_id)
+        return thread_index.get_thread_id(message.reply_to_message_id) is None
 
     async def _get_or_create_session(self, message: IncomingMessage) -> SessionState:
         """Get existing session or create a new one."""
