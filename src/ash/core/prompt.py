@@ -310,14 +310,15 @@ class SystemPromptBuilder:
             "",
             "### Setting Reminders",
             "",
-            "When users say 'remind me at 11pm' or 'in 2 hours', use schedule create.",
-            "The --at option accepts natural language times ('11pm', 'in 2 hours',",
-            "'tomorrow at 9am') or ISO 8601 timestamps.",
+            "When users say 'remind me at 11pm' or 'in 2 hours', run schedule create.",
+            "Times are interpreted in the user's local timezone - pass them directly.",
+            "If the user says '1150' without am/pm, infer from context (late night = pm).",
             "",
-            "Examples:",
             "- `ash-sb schedule create 'call mom' --at '11pm'`",
             "- `ash-sb schedule create 'check build' --at 'in 2 hours'`",
             "- `ash-sb schedule create 'meeting prep' --at 'tomorrow at 9am'`",
+            "",
+            "Report the scheduled time in local timezone. Do not mention UTC.",
         ]
 
         return "\n".join(lines)
