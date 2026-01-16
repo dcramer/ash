@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from ash.chats import ChatStateManager, ThreadIndex
+from ash.chats import (
+    ChatStateManager,
+    ThreadIndex,
+)
 from ash.config.models import ConversationConfig
 from ash.core import Agent, SessionState
 from ash.core.agent import CompactionInfo
@@ -568,7 +571,23 @@ class TelegramMessageHandler:
         return await session_manager.has_message_with_external_id(message.id)
 
     async def _should_skip_reply(self, message: IncomingMessage) -> bool:
-        """Check if a group reply should be skipped (target not in known thread)."""
+        """Check if a group reply should be skipped (target not in known conversation).
+
+        In group chats, we only respond to:
+        1. Messages that @mention the bot
+        2. Replies to messages in an existing conversation thread
+
+        For replies, we check if the reply target exists in:
+        - thread_index: Tracks all messages in threaded conversations
+        - legacy session: Pre-thread-indexing messages (via has_message_with_external_id)
+
+        IMPORTANT: has_message_with_external_id must check BOTH external_id AND
+        bot_response_id, because users often reply to the bot's messages (which
+        are stored with bot_response_id, not external_id).
+
+        Returns:
+            True if the reply should be skipped (target not found).
+        """
         chat_type = message.metadata.get("chat_type", "")
         if chat_type not in ("group", "supergroup"):
             return False

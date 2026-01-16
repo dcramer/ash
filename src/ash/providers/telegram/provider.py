@@ -207,30 +207,73 @@ class TelegramProvider(Provider):
     def _should_process_message(
         self, message: TelegramMessage
     ) -> tuple[int, str | None] | None:
-        """Check if a message should be processed (user + group access)."""
+        """Check if a message should be processed, log and record all incoming messages.
+
+        This method:
+        1. Evaluates whether the message should trigger a bot response
+        2. Logs ALL incoming messages with metadata about the processing decision
+        3. Records ALL incoming messages to per-chat JSONL files for observability
+
+        Returns:
+            (user_id, username) if message should be processed, None otherwise
+        """
+        from ash.chats import IncomingMessageRecord, IncomingMessageWriter
+
+        skip_reason: str | None = None
+        user_id = message.from_user.id if message.from_user else None
+        username = message.from_user.username if message.from_user else None
+        display_name = message.from_user.full_name if message.from_user else None
+
         if not message.from_user:
-            return None
-
-        user_id = message.from_user.id
-        username = message.from_user.username
-
-        is_group = message.chat.type in ("group", "supergroup")
-
-        if is_group:
-            # Group authorization implies user authorization within that group
-            if not self._is_group_allowed(message.chat.id):
-                logger.debug(f"Group not allowed: {message.chat.id}")
-                return None
-            if self._group_mode == "mention":
-                if not self._is_mentioned(message) and not self._is_reply(message):
-                    return None
+            skip_reason = "no_user"
         else:
-            # DMs require explicit user authorization
-            if not self._is_user_allowed(user_id, username):
-                logger.warning(f"Unauthorized user: {user_id} (@{username})")
-                return None
+            is_group = message.chat.type in ("group", "supergroup")
+            if is_group:
+                if not self._is_group_allowed(message.chat.id):
+                    skip_reason = "group_not_allowed"
+                elif self._group_mode == "mention":
+                    if not self._is_mentioned(message) and not self._is_reply(message):
+                        skip_reason = "not_mentioned_or_reply"
+            else:
+                if not self._is_user_allowed(user_id, username):  # type: ignore[arg-type]
+                    skip_reason = "user_not_allowed"
 
-        return user_id, username
+        # Log ALL incoming messages with processing decision
+        logger.info(
+            "[dim]%s:[/dim] %s",
+            username or user_id,
+            _truncate(message.text or message.caption or "", 40),
+            extra={
+                "event": "incoming_message",
+                "external_id": str(message.message_id),
+                "chat_id": str(message.chat.id),
+                "user_id": str(user_id) if user_id else None,
+                "username": username,
+                "chat_type": message.chat.type,
+                "was_processed": skip_reason is None,
+                "skip_reason": skip_reason,
+            },
+        )
+
+        # Record ALL incoming messages to per-chat JSONL file
+        writer = IncomingMessageWriter(provider=self.name, chat_id=str(message.chat.id))
+        record = IncomingMessageRecord(
+            external_id=str(message.message_id),
+            chat_id=str(message.chat.id),
+            user_id=str(user_id) if user_id else None,
+            username=username,
+            display_name=display_name,
+            text=message.text or message.caption,
+            timestamp=message.date.isoformat() if message.date else "",
+            was_processed=skip_reason is None,
+            skip_reason=skip_reason,
+            metadata={"chat_type": message.chat.type},
+        )
+        writer.record(record)
+
+        if skip_reason:
+            return None
+        return user_id, username  # type: ignore[return-value]
 
     def _to_incoming_message(
         self,
