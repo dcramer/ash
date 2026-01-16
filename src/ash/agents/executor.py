@@ -1,9 +1,10 @@
 """Agent executor for running isolated subagent loops."""
 
 import logging
+import uuid
 from typing import TYPE_CHECKING
 
-from ash.agents.base import Agent, AgentContext, AgentResult
+from ash.agents.base import Agent, AgentContext, AgentResult, CheckpointState
 from ash.core.session import SessionState
 from ash.llm.types import Role, ToolDefinition
 from ash.tools.base import ToolContext
@@ -14,6 +15,14 @@ if TYPE_CHECKING:
     from ash.tools import ToolExecutor
 
 logger = logging.getLogger(__name__)
+
+# Keywords that indicate user wants to cancel rather than continue
+CANCEL_KEYWORDS = {"cancel", "abort", "nevermind", "never mind", "stop", "quit"}
+
+
+def is_cancel_message(message: str) -> bool:
+    """Check if a message indicates cancellation intent."""
+    return message.lower().strip() in CANCEL_KEYWORDS
 
 
 class AgentExecutor:
@@ -30,19 +39,28 @@ class AgentExecutor:
         self._config = config
 
     def _get_tool_definitions(
-        self, allowed_tools: list[str], is_skill_agent: bool
+        self,
+        allowed_tools: list[str],
+        is_skill_agent: bool,
+        supports_checkpointing: bool,
     ) -> list[ToolDefinition]:
         all_defs = self._tools.get_definitions()
 
-        if allowed_tools:
-            defs = [d for d in all_defs if d.name in allowed_tools]
-        else:
-            defs = all_defs
-
+        # Build set of excluded tools
+        excluded = set()
         if is_skill_agent:
-            defs = [t for t in defs if t.name != "use_skill"]
+            excluded.add("use_skill")
+        if not supports_checkpointing:
+            excluded.add("interrupt")
 
-        return defs
+        # Filter by allowed tools and exclusions in a single pass
+        if allowed_tools:
+            allowed_set = set(allowed_tools)
+            return [
+                d for d in all_defs if d.name in allowed_set and d.name not in excluded
+            ]
+
+        return [d for d in all_defs if d.name not in excluded]
 
     async def execute(
         self,
@@ -50,21 +68,77 @@ class AgentExecutor:
         input_message: str,
         context: AgentContext,
         environment: dict[str, str] | None = None,
+        resume_from: CheckpointState | None = None,
+        user_response: str | None = None,
     ) -> AgentResult:
+        """Execute an agent.
+
+        Args:
+            agent: The agent to execute.
+            input_message: Initial message/task for the agent.
+            context: Execution context.
+            environment: Optional environment variables for tools.
+            resume_from: Optional checkpoint to resume from.
+            user_response: User's response when resuming from checkpoint.
+
+        Returns:
+            AgentResult with content, or interrupted result with checkpoint.
+        """
         agent_config = agent.config
-        logger.info(
-            f"Executing agent '{agent_config.name}' with input: {input_message[:100]}..."
-        )
+
+        # Handle resume from checkpoint
+        if resume_from is not None:
+            if user_response is None:
+                return AgentResult.error("user_response required when resuming")
+
+            if resume_from.is_expired():
+                return AgentResult.error("Checkpoint has expired. Please start over.")
+
+            # Validate checkpoint belongs to this agent
+            if resume_from.agent_name != agent_config.name:
+                return AgentResult.error(
+                    f"Checkpoint belongs to '{resume_from.agent_name}', "
+                    f"not '{agent_config.name}'"
+                )
+
+            logger.info(
+                f"Resuming agent '{agent_config.name}' from checkpoint "
+                f"{resume_from.checkpoint_id}"
+            )
+
+            # Restore session from checkpoint
+            try:
+                session = SessionState.from_json(resume_from.session_json)
+            except Exception as e:
+                logger.error(f"Failed to restore checkpoint session: {e}")
+                return AgentResult.error(f"Checkpoint session corrupted: {e}")
+            start_iteration = resume_from.iteration
+
+            # Inject user response as the tool result for the interrupt call
+            session.add_tool_result(
+                tool_use_id=resume_from.tool_use_id,
+                content=user_response,
+                is_error=False,
+            )
+        else:
+            logger.info(
+                f"Executing agent '{agent_config.name}' with input: "
+                f"{input_message[:100]}..."
+            )
+            start_iteration = 1
+            session = SessionState(
+                session_id=f"agent-{agent_config.name}-{context.session_id or 'unknown'}",
+                provider=self._config.default_model.provider,
+                chat_id=context.chat_id or "",
+                user_id=context.user_id or "",
+            )
+            session.add_user_message(input_message)
 
         overrides = self._config.agents.get(agent_config.name)
-        model_alias = (
-            overrides.model if overrides and overrides.model else agent_config.model
-        )
+        model_alias = (overrides.model if overrides else None) or agent_config.model
         max_iterations = (
-            overrides.max_iterations
-            if overrides and overrides.max_iterations
-            else agent_config.max_iterations
-        )
+            overrides.max_iterations if overrides else None
+        ) or agent_config.max_iterations
 
         resolved_model: str | None = None
         if model_alias:
@@ -84,16 +158,10 @@ class AgentExecutor:
 
         system_prompt = agent.build_system_prompt(context)
         tool_definitions = self._get_tool_definitions(
-            agent_config.allowed_tools, agent_config.is_skill_agent
+            agent_config.allowed_tools,
+            agent_config.is_skill_agent,
+            agent_config.supports_checkpointing,
         )
-
-        session = SessionState(
-            session_id=f"agent-{agent_config.name}-{context.session_id or 'unknown'}",
-            provider=self._config.default_model.provider,
-            chat_id=context.chat_id or "",
-            user_id=context.user_id or "",
-        )
-        session.add_user_message(input_message)
 
         tool_context = ToolContext(
             session_id=context.session_id,
@@ -102,7 +170,7 @@ class AgentExecutor:
             env=environment or {},
         )
 
-        for iteration in range(1, max_iterations + 1):
+        for iteration in range(start_iteration, max_iterations + 1):
             logger.debug(
                 f"Agent '{agent_config.name}' iteration {iteration}/{max_iterations}"
             )
@@ -129,6 +197,38 @@ class AgentExecutor:
                     f"Agent '{agent_config.name}' completed in {iteration} iterations"
                 )
                 return AgentResult.success(text, iterations=iteration)
+
+            # Check for interrupt tool first - it takes priority over other tools
+            interrupt_tool = next((t for t in tool_uses if t.name == "interrupt"), None)
+            if interrupt_tool:
+                # Add error results for any other tools that were called
+                for tool_use in tool_uses:
+                    if tool_use.name != "interrupt":
+                        session.add_tool_result(
+                            tool_use.id,
+                            "Skipped: agent interrupted for user input",
+                            is_error=True,
+                        )
+
+                prompt = interrupt_tool.input.get("prompt", "Checkpoint reached")
+                options = interrupt_tool.input.get("options")
+
+                checkpoint = CheckpointState(
+                    checkpoint_id=str(uuid.uuid4()),
+                    agent_name=agent_config.name,
+                    session_json=session.to_json(),
+                    iteration=iteration,
+                    prompt=prompt,
+                    options=options,
+                    tool_use_id=interrupt_tool.id,
+                )
+
+                logger.info(
+                    f"Agent '{agent_config.name}' interrupted at iteration "
+                    f"{iteration}: {prompt[:100]}..."
+                )
+
+                return AgentResult.interrupted(checkpoint, iterations=iteration)
 
             for tool_use in tool_uses:
                 # Prevent agents from invoking themselves via use_agent

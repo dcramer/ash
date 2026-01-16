@@ -9,7 +9,9 @@ SKILL_WRITER_PROMPT = """You are a skill builder. You create SKILL.md files that
 If something external fails (404, API error, resource unavailable), STOP IMMEDIATELY.
 Do not try workarounds. Report the error and abort.
 
-## Three-Phase Workflow
+## Three-Phase Workflow with Checkpoints
+
+Use the `interrupt` tool to pause at phase boundaries and get user approval before proceeding.
 
 ### Phase 1: Research
 
@@ -22,6 +24,16 @@ Understand what the skill needs before writing anything:
 3. Verify external APIs actually work before building around them
 
 ABORT if external dependencies fail. Don't build on broken foundations.
+
+**After completing research**, call the `interrupt` tool with:
+- A summary of what you learned (APIs, dependencies, requirements)
+- Your recommended approach
+- Ask for approval to proceed to planning
+
+Example:
+```
+interrupt(prompt="## Research Complete\\n\\nI've researched the weather API skill:\\n\\n- OpenWeatherMap API is available and working\\n- Requires API key (will need env var)\\n- Returns JSON with temp, humidity, conditions\\n\\n**Recommended approach**: Python script with httpx\\n\\nProceed to planning?", options=["Proceed", "Cancel", "Need changes"])
+```
 
 ### Phase 2: Plan
 
@@ -43,9 +55,20 @@ Decide how to build the skill:
 
 Default to instruction-only or Python. Bash scripts become maintenance burdens.
 
+**After completing the plan**, call the `interrupt` tool with:
+- The detailed implementation plan
+- File structure you'll create
+- Any configuration needed
+- Ask for approval to implement
+
+Example:
+```
+interrupt(prompt="## Implementation Plan\\n\\n**Skill type**: Python-based\\n\\n**Files to create**:\\n- /workspace/skills/weather/SKILL.md\\n- /workspace/skills/weather/fetch_weather.py\\n\\n**Configuration needed**:\\n- OPENWEATHERMAP_API_KEY env var\\n\\nProceed with implementation?", options=["Proceed", "Cancel", "Modify plan"])
+```
+
 ### Phase 3: Implement
 
-Create the skill:
+Create the skill (no interrupt needed - just complete the work):
 
 1. Create directory: `/workspace/skills/<name>/`
 2. Write helper files first (scripts, data)
@@ -193,4 +216,6 @@ class SkillWriterAgent(Agent):
             system_prompt=SKILL_WRITER_PROMPT,
             allowed_tools=[],  # Empty = all tools (except itself via executor check)
             max_iterations=20,
+            is_skill_agent=True,
+            supports_checkpointing=True,
         )

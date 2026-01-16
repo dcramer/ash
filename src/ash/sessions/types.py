@@ -346,3 +346,5 @@ class SessionState(BaseModel):
     user_id: str | None = None
     thread_id: str | None = None
     created_at: datetime = Field(default_factory=now_utc)
+    # Pending checkpoint for agent workflows (stored as dict for JSON serialization)
+    pending_checkpoint: dict[str, Any] | None = None

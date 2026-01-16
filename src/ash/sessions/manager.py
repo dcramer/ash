@@ -295,3 +295,55 @@ class SessionManager:
             user_id=header.user_id,
             sessions_path=base_path,
         )
+
+    def _load_state(self) -> SessionState | None:
+        """Load the session state from state.json."""
+        if not self.state_path.exists():
+            return None
+        try:
+            data = json.loads(self.state_path.read_text())
+            return SessionState.model_validate(data)
+        except Exception as e:
+            logger.warning(f"Failed to load session state: {e}")
+            return None
+
+    def _save_state(self, state: SessionState) -> None:
+        """Save the session state to state.json."""
+        self._session_dir.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(state.model_dump(mode="json"), indent=2, default=str)
+        )
+
+    def save_checkpoint(self, checkpoint_dict: dict[str, Any]) -> None:
+        """Save a checkpoint to the session state.
+
+        Args:
+            checkpoint_dict: Checkpoint data (from CheckpointState.to_dict()).
+        """
+        state = self._load_state()
+        if state is None:
+            state = SessionState(
+                provider=self.provider,
+                chat_id=self.chat_id,
+                user_id=self.user_id,
+                thread_id=self.thread_id,
+            )
+        state.pending_checkpoint = checkpoint_dict
+        self._save_state(state)
+        logger.debug(
+            f"Saved checkpoint {checkpoint_dict.get('checkpoint_id')} to session"
+        )
+
+    def get_pending_checkpoint(self) -> dict[str, Any] | None:
+        """Get the pending checkpoint from the session state, if any."""
+        state = self._load_state()
+        return state.pending_checkpoint if state else None
+
+    def clear_checkpoint(self) -> None:
+        """Clear any pending checkpoint from the session state."""
+        state = self._load_state()
+        if state is None or state.pending_checkpoint is None:
+            return
+        state.pending_checkpoint = None
+        self._save_state(state)
+        logger.debug("Cleared checkpoint from session")

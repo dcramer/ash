@@ -872,6 +872,11 @@ async def create_agent(
     tool_registry.register(ReadFileTool(executor=shared_executor))
     tool_registry.register(WriteFileTool(executor=shared_executor))
 
+    # Register interrupt tool for agent checkpointing
+    from ash.tools.builtin.interrupt import InterruptTool
+
+    tool_registry.register(InterruptTool())
+
     if config.brave_search and config.brave_search.api_key:
         search_cache = SearchCache(maxsize=100, ttl=900)
         fetch_cache = SearchCache(maxsize=50, ttl=1800)
