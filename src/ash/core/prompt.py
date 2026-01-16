@@ -169,12 +169,9 @@ class SystemPromptBuilder:
                 "",
                 "### Presenting Results",
                 "",
-                "**CRITICAL**: The user CANNOT see tool results directly - only YOUR response.",
-                "When tools return content, you MUST include it in your response:",
-                "- If asked to 'show', 'read', 'display', or 'what is in' something: PASTE THE CONTENT",
-                "- Use ``` code blocks for file contents, command output, and data",
-                "- NEVER say 'here it is', 'there it is', or 'done' without the actual content",
-                "- For large outputs (>100 lines), show first 50 lines and offer to show more",
+                "The user cannot see tool/skill/agent results - only your response.",
+                "After tool use, summarize what happened and include relevant output.",
+                "Do not react to content without showing it (e.g., don't say 'that's funny!' without the joke).",
                 "",
                 "### Handling Failures",
                 "",
@@ -211,6 +208,13 @@ class SystemPromptBuilder:
         for skill in sorted(available_skills, key=lambda s: s.name):
             lines.append(f"- **{skill.name}**: {skill.description}")
 
+        lines.extend(
+            [
+                "",
+                "Skill results are not visible to the user - include them in your response.",
+            ]
+        )
+
         return "\n".join(lines)
 
     def _build_agents_section(self) -> str:
@@ -238,7 +242,7 @@ class SystemPromptBuilder:
                 "### When to Delegate",
                 "",
                 "- **Creating tools, scripts, or reusable functionality** → use `skill-writer`",
-                "- After an agent completes, relay critical details (config paths, files created) to the user",
+                "- Agent results are not visible to the user - include them in your response",
                 "",
                 "### When Agents Fail",
                 "",

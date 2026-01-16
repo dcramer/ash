@@ -135,3 +135,51 @@ grep -A 30 "SKILL_AGENT_WRAPPER" src/ash/tools/builtin/skills.py
 - All agents have NEVER rules for common bad behaviors
 - All agents specify output format
 - SKILL_AGENT_WRAPPER covers execution, errors, and output
+
+## Result Visibility
+
+### MUST
+
+- State "Results are not visible to the user" in Tools, Skills, and Agents sections
+- After tool/skill/agent use, summarize what happened (Claude 4.x default is to skip this)
+- Include the actual content when the user asked for content (jokes, searches, file reads)
+
+### MUST NOT
+
+- React to content without showing it ("that's funny!" without the joke)
+- Say "done", "here it is", or "I ran the skill" without actual output
+- Assume the user saw what you saw
+
+## Prompt Structure
+
+### MUST
+
+- Place critical rules near the top (high attention zone)
+- Repeat key rules in each relevant section (Tools, Skills, Agents) - don't cross-reference
+- Keep rules concise - one sentence > verbose paragraph
+
+### SHOULD
+
+- Explain WHY a rule exists (helps model generalize)
+- Use normal language with Claude 4.x (not "CRITICAL", "MUST" everywhere)
+- Match prompt style to desired output style
+
+### MUST NOT
+
+- Bury critical rules in nested sub-sections
+- Use cross-references ("see Tools section for result handling")
+- Add more words to fix a problem - simplify first
+
+## Claude 4.x Considerations
+
+### Behaviors to Know
+
+- Skips verbal summaries after tool calls by default
+- More responsive to instructions - dial back aggressive language
+- Pays close attention to examples - ensure they match desired behavior
+
+### Recommended Patterns
+
+- "After completing a task that involves tool use, provide a quick summary"
+- Explicit action instructions ("Change X" not "Can you suggest changes to X")
+- State tool/skill results are invisible in each section that uses them
