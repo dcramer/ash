@@ -209,17 +209,31 @@ async def _run_server(
 
         # Set up signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()
+        shutdown_count = 0
 
         def handle_signal():
-            server.should_exit = True
-            shutdown_event.set()
-            # Stop telegram polling properly before cancelling task
-            # This ensures aiogram's internal retry loop stops cleanly
-            if telegram_provider:
-                loop.call_soon(lambda: asyncio.create_task(telegram_provider.stop()))
-            # Cancel telegram task after stop is scheduled
-            if telegram_task and not telegram_task.done():
-                telegram_task.cancel()
+            nonlocal shutdown_count
+            shutdown_count += 1
+
+            if shutdown_count == 1:
+                # First signal: graceful shutdown
+                logger.info("Shutting down gracefully...")
+                server.should_exit = True
+                shutdown_event.set()
+                # Stop telegram polling before cancelling task
+                if telegram_provider:
+                    loop.call_soon(
+                        lambda: asyncio.create_task(telegram_provider.stop())
+                    )
+                # Cancel telegram task after stop is scheduled
+                if telegram_task and not telegram_task.done():
+                    telegram_task.cancel()
+            else:
+                # Second signal: force immediate exit
+                logger.warning("Forcing immediate shutdown...")
+                import os
+
+                os._exit(1)
 
         for sig in (signal_module.SIGTERM, signal_module.SIGINT):
             loop.add_signal_handler(sig, handle_signal)
@@ -273,6 +287,8 @@ async def _cleanup_server(
     remove_pid_file,
 ) -> None:
     """Clean up server resources."""
+    cleanup_timeout = 5.0  # Max seconds per cleanup operation
+
     for resource, method in [
         (schedule_watcher, "stop"),
         (telegram_provider, "stop"),
@@ -282,7 +298,11 @@ async def _cleanup_server(
     ]:
         if resource:
             try:
-                await getattr(resource, method)()
+                await asyncio.wait_for(
+                    getattr(resource, method)(), timeout=cleanup_timeout
+                )
+            except TimeoutError:
+                logger.warning(f"Cleanup {method} timed out after {cleanup_timeout}s")
             except Exception as e:
                 logger.warning(f"Error during {method}: {e}")
 
