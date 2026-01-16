@@ -29,6 +29,16 @@ make setup  # Install deps + prek hooks
 | `make test` | Run pytest |
 | `make check` | Run all hooks |
 
+### Evals
+
+Behavior evaluations use LLM-as-judge to test agent responses. They require `ANTHROPIC_API_KEY`:
+
+```bash
+uv run pytest evals/ -m eval -v
+```
+
+Eval cases live in `evals/cases/*.yaml`. See `evals/types.py` for the schema.
+
 ## Claude Code
 
 This project is built with [Claude Code](https://claude.com/code). Agent instructions live in `CLAUDE.md`.
