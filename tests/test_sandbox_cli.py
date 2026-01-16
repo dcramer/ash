@@ -46,7 +46,7 @@ class TestScheduleCreate:
         result = cli_runner.invoke(app, ["create", "Test reminder", "--at", future])
 
         assert result.exit_code == 0
-        assert "Scheduled one-time task" in result.stdout
+        assert "Scheduled reminder" in result.stdout
         assert "id=" in result.stdout
 
         # Verify file contents
@@ -55,7 +55,8 @@ class TestScheduleCreate:
         ]
         assert len(entries) == 1
         assert entries[0]["message"] == "Test reminder"
-        assert entries[0]["trigger_at"] == future
+        # Stored time normalizes to Z suffix
+        assert entries[0]["trigger_at"] == future.replace("+00:00", "Z")
         assert entries[0]["chat_id"] == "chat456"
         assert entries[0]["provider"] == "telegram"
         assert "id" in entries[0]
@@ -207,3 +208,76 @@ class TestScheduleCancel:
         result = cli_runner.invoke(app, ["cancel"])
 
         assert result.exit_code != 0
+
+
+class TestNaturalLanguageTime:
+    """Tests for natural language time parsing in schedule create."""
+
+    @pytest.fixture
+    def cli_runner_with_tz(self, cli_runner):
+        """CLI runner with timezone set (extends base cli_runner)."""
+        cli_runner.env["ASH_TIMEZONE"] = "America/Los_Angeles"
+        return cli_runner
+
+    def test_create_with_natural_language_time(self, cli_runner_with_tz, schedule_file):
+        """Test creating a task with 'in 2 hours'."""
+        result = cli_runner_with_tz.invoke(
+            app, ["create", "Test reminder", "--at", "in 2 hours"]
+        )
+
+        assert result.exit_code == 0
+        assert "Scheduled reminder" in result.stdout
+        assert "Time:" in result.stdout
+        assert "UTC:" in result.stdout
+        assert "Task:" in result.stdout
+
+        # Verify file contents
+        entries = [
+            json.loads(line) for line in schedule_file.read_text().strip().split("\n")
+        ]
+        assert len(entries) == 1
+        assert entries[0]["message"] == "Test reminder"
+        assert "trigger_at" in entries[0]
+        # Should be in ISO 8601 format with Z suffix
+        assert entries[0]["trigger_at"].endswith("Z")
+
+    def test_create_with_clock_time(self, cli_runner_with_tz, schedule_file):
+        """Test creating a task with 'tomorrow at 9am'."""
+        result = cli_runner_with_tz.invoke(
+            app, ["create", "Morning meeting", "--at", "tomorrow at 9am"]
+        )
+
+        assert result.exit_code == 0
+        assert "Scheduled reminder" in result.stdout
+        assert "America/Los_Angeles" in result.stdout
+
+    def test_create_with_iso8601_still_works(self, cli_runner_with_tz, schedule_file):
+        """Test that ISO 8601 timestamps still work."""
+        future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        result = cli_runner_with_tz.invoke(
+            app, ["create", "ISO reminder", "--at", future]
+        )
+
+        assert result.exit_code == 0
+        assert "Scheduled reminder" in result.stdout
+
+    def test_create_rejects_invalid_time(self, cli_runner_with_tz, schedule_file):
+        """Test that invalid time strings are rejected."""
+        result = cli_runner_with_tz.invoke(
+            app, ["create", "Bad time", "--at", "not a valid time string xyz123"]
+        )
+
+        assert result.exit_code == 1
+        assert "Could not parse time" in result.output
+
+    def test_output_shows_local_time(self, cli_runner_with_tz, schedule_file):
+        """Test that output shows time in local timezone."""
+        result = cli_runner_with_tz.invoke(
+            app, ["create", "Local time test", "--at", "in 1 hour"]
+        )
+
+        assert result.exit_code == 0
+        # Should show timezone in output
+        assert "America/Los_Angeles" in result.stdout
+        # Should show UTC time too
+        assert "UTC:" in result.stdout

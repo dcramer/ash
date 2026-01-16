@@ -48,6 +48,43 @@ def _generate_id() -> str:
     return uuid.uuid4().hex[:8]
 
 
+def _truncate(text: str, max_len: int = 50) -> str:
+    """Truncate text with ellipsis if it exceeds max length."""
+    return f"{text[:max_len]}..." if len(text) > max_len else text
+
+
+def _parse_time(time_str: str, timezone: str) -> datetime | None:
+    """Parse time string to UTC datetime.
+
+    Accepts ISO 8601 or natural language ('11pm', 'in 2 hours').
+
+    Args:
+        time_str: Time string to parse.
+        timezone: User's IANA timezone for interpreting local times.
+
+    Returns:
+        UTC datetime if parsing succeeds, None otherwise.
+    """
+    # Fast path: ISO 8601
+    try:
+        return datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+
+    # Natural language fallback
+    import dateparser
+
+    settings: dict = {
+        "TIMEZONE": timezone,
+        "RETURN_AS_TIMEZONE_AWARE": True,
+        "PREFER_DATES_FROM": "future",
+    }
+    parsed = dateparser.parse(time_str, settings=settings)
+    if parsed:
+        return parsed.astimezone(UTC)
+    return None
+
+
 def _read_entries() -> list[dict]:
     """Read all entries from schedule file."""
     if not SCHEDULE_FILE.exists():
@@ -113,16 +150,16 @@ def create(
         typer.echo("Error: Cannot specify both --at and --cron. Choose one.", err=True)
         raise typer.Exit(1)
 
-    # Validate --at format and ensure it's in the future
+    # Parse and validate --at time (supports ISO 8601 and natural language)
+    trigger_time: datetime | None = None
     if at:
-        try:
-            trigger_time = datetime.fromisoformat(at.replace("Z", "+00:00"))
-            if trigger_time <= datetime.now(UTC):
-                typer.echo(f"Error: --at must be in the future. Got: {at}", err=True)
-                raise typer.Exit(1)
-        except ValueError as e:
-            typer.echo(f"Error: Invalid --at format: {e}", err=True)
-            raise typer.Exit(1) from None
+        trigger_time = _parse_time(at, ctx["timezone"])
+        if trigger_time is None:
+            typer.echo(f"Error: Could not parse time: {at}", err=True)
+            raise typer.Exit(1)
+        if trigger_time <= datetime.now(UTC):
+            typer.echo(f"Error: --at must be in the future. Got: {at}", err=True)
+            raise typer.Exit(1)
 
     # Validate cron format
     if cron:
@@ -144,20 +181,18 @@ def create(
         "message": message,
     }
 
-    if at:
-        entry["trigger_at"] = at
+    if trigger_time:
+        entry["trigger_at"] = trigger_time.isoformat().replace("+00:00", "Z")
     if cron:
         entry["cron"] = cron
 
-    # Add routing context
-    if ctx["chat_id"]:
-        entry["chat_id"] = ctx["chat_id"]
+    # Add routing context (chat_id and provider guaranteed by _require_routing_context)
+    entry["chat_id"] = ctx["chat_id"]
+    entry["provider"] = ctx["provider"]
     if ctx["user_id"]:
         entry["user_id"] = ctx["user_id"]
     if ctx["username"]:
         entry["username"] = ctx["username"]
-    if ctx["provider"]:
-        entry["provider"] = ctx["provider"]
 
     entry["created_at"] = datetime.now(UTC).isoformat()
 
@@ -171,9 +206,13 @@ def create(
         raise typer.Exit(1) from None
 
     # Confirmation with ID
-    preview = f"{message[:50]}..." if len(message) > 50 else message
-    if at:
-        typer.echo(f"Scheduled one-time task (id={entry_id}) for {at}: {preview}")
+    preview = _truncate(message)
+    if trigger_time:
+        local_time = _format_time_local(entry["trigger_at"], ctx["timezone"])
+        typer.echo(f"Scheduled reminder (id={entry_id})")
+        typer.echo(f"  Time: {local_time} ({ctx['timezone']})")
+        typer.echo(f"  UTC:  {entry['trigger_at']}")
+        typer.echo(f"  Task: {preview}")
     else:
         typer.echo(f"Scheduled recurring task (id={entry_id}) ({cron}): {preview}")
 
@@ -232,13 +271,11 @@ def list_tasks() -> None:
     for entry in entries:
         entry_id = entry.get("id", "?")
         task_type = "periodic" if "cron" in entry else "one-shot"
-        message = entry.get("message", "")
-        message_preview = f"{message[:35]}..." if len(message) > 35 else message
+        message_preview = _truncate(entry.get("message", ""), max_len=35)
 
         if "cron" in entry:
             schedule = entry["cron"]
         elif "trigger_at" in entry:
-            # Convert one-shot time to user's timezone for display
             schedule = _format_time_local(entry["trigger_at"], timezone)
         else:
             schedule = "?"
@@ -279,6 +316,4 @@ def cancel(
     # Rewrite file without the cancelled entry
     _write_entries(remaining)
 
-    message = found.get("message", "")
-    preview = f"{message[:50]}..." if len(message) > 50 else message
-    typer.echo(f"Cancelled: {preview}")
+    typer.echo(f"Cancelled: {_truncate(found.get('message', ''))}")
