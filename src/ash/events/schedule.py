@@ -56,34 +56,55 @@ class ScheduleEntry:
     def is_periodic(self) -> bool:
         return self.cron is not None
 
-    def is_due(self) -> bool:
-        """Check if this entry is due for execution."""
+    def is_due(self, timezone: str = "UTC") -> bool:
+        """Check if this entry is due for execution.
+
+        Args:
+            timezone: IANA timezone name for evaluating cron expressions.
+        """
         now = datetime.now(UTC)
 
         if self.trigger_at:
             return now >= self.trigger_at
 
         if self.cron:
-            next_run = self._next_run_time()
+            next_run = self._next_run_time(timezone)
             if next_run is None:
                 return False
             return now >= next_run
 
         return False
 
-    def _next_run_time(self) -> datetime | None:
-        """Calculate next run time from cron and last_run."""
+    def _next_run_time(self, timezone: str = "UTC") -> datetime | None:
+        """Calculate next run time from cron and last_run.
+
+        Cron expressions are evaluated in the user's timezone so that
+        "0 8 * * *" means 8am local time, not 8am UTC.
+
+        Args:
+            timezone: IANA timezone name for evaluating cron expressions.
+        """
         if not self.cron:
             return None
         try:
+            from zoneinfo import ZoneInfo
+
             from croniter import croniter
+
+            tz = ZoneInfo(timezone)
 
             if self.last_run:
                 # Normal case: get next run after last_run
-                return croniter(self.cron, self.last_run).get_next(datetime)
+                # Convert last_run to user timezone for cron evaluation
+                base_time = self.last_run.astimezone(tz)
             else:
                 # New task: wait for the next scheduled occurrence
-                return croniter(self.cron, datetime.now(UTC)).get_next(datetime)
+                base_time = datetime.now(UTC).astimezone(tz)
+
+            # croniter evaluates in the timezone of base_time
+            next_local = croniter(self.cron, base_time).get_next(datetime)
+            # Convert back to UTC for comparison
+            return next_local.astimezone(UTC)
         except Exception as e:
             logger.warning(
                 f"Failed to parse cron expression '{self.cron}' for entry {self.id}: {e}"
@@ -201,9 +222,22 @@ class ScheduleWatcher:
         Periodic: {"cron": "0 8 * * *", "message": "Daily task", "chat_id": "..."}
     """
 
-    def __init__(self, schedule_file: Path, poll_interval: float = 5.0):
+    def __init__(
+        self,
+        schedule_file: Path,
+        poll_interval: float = 5.0,
+        timezone: str = "UTC",
+    ):
+        """Initialize schedule watcher.
+
+        Args:
+            schedule_file: Path to the schedule.jsonl file.
+            poll_interval: Seconds between schedule checks.
+            timezone: IANA timezone name for evaluating cron expressions.
+        """
         self._schedule_file = schedule_file
         self._poll_interval = poll_interval
+        self._timezone = timezone
         self._handlers: list[ScheduleHandler] = []
         self._running = False
         self._task: asyncio.Task | None = None
@@ -280,7 +314,7 @@ class ScheduleWatcher:
             if entry:
                 entries.append(entry)
 
-        due = [e for e in entries if e.is_due()]
+        due = [e for e in entries if e.is_due(self._timezone)]
         if not due:
             return
 

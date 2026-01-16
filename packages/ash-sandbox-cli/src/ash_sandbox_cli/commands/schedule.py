@@ -26,6 +26,7 @@ def _get_context() -> dict[str, str]:
         "chat_id": os.environ.get("ASH_CHAT_ID", ""),
         "provider": os.environ.get("ASH_PROVIDER", ""),
         "username": os.environ.get("ASH_USERNAME", ""),
+        "timezone": os.environ.get("ASH_TIMEZONE", "UTC"),
     }
 
 
@@ -185,14 +186,44 @@ def _filter_by_user(entries: list[dict]) -> list[dict]:
     return [e for e in entries if e.get("user_id") == user_id]
 
 
+def _format_time_local(iso_time: str, timezone: str) -> str:
+    """Format an ISO timestamp in the user's local timezone.
+
+    Args:
+        iso_time: ISO 8601 timestamp string.
+        timezone: IANA timezone name.
+
+    Returns:
+        Formatted local time string.
+    """
+    from zoneinfo import ZoneInfo
+
+    try:
+        # Parse the ISO timestamp
+        dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+        # Convert to user's timezone
+        tz = ZoneInfo(timezone)
+        local_dt = dt.astimezone(tz)
+        # Format for display (without timezone info, since we show it in header)
+        return local_dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        # Fall back to original format if parsing fails
+        return iso_time[:16]
+
+
 @app.command("list")
 def list_tasks() -> None:
     """List scheduled tasks for the current user."""
+    ctx = _get_context()
+    timezone = ctx["timezone"]
     entries = _filter_by_user(_read_entries())
 
     if not entries:
         typer.echo("No scheduled tasks found.")
         return
+
+    # Show timezone in header
+    typer.echo(f"Scheduled tasks (times shown in {timezone}):\n")
 
     # Simple table output
     typer.echo(f"{'ID':<10} {'Type':<10} {'Schedule':<25} {'Message'}")
@@ -207,7 +238,8 @@ def list_tasks() -> None:
         if "cron" in entry:
             schedule = entry["cron"]
         elif "trigger_at" in entry:
-            schedule = entry["trigger_at"][:19]
+            # Convert one-shot time to user's timezone for display
+            schedule = _format_time_local(entry["trigger_at"], timezone)
         else:
             schedule = "?"
 

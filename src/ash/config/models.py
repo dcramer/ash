@@ -5,7 +5,14 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from ash.config.paths import get_database_path, get_workspace_path
 
@@ -225,8 +232,27 @@ class AshConfig(BaseModel):
     """Root configuration model."""
 
     workspace: Path = Field(default_factory=get_workspace_path)
+    # User's timezone (IANA timezone name, e.g., "America/New_York")
+    # Used for displaying times and evaluating cron schedules
+    timezone: str = "UTC"
     # Named model configurations (new style)
     models: dict[str, ModelConfig] = Field(default_factory=dict)
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, v: str) -> str:
+        """Validate that timezone is a valid IANA timezone name."""
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(v)
+            return v
+        except ZoneInfoNotFoundError:
+            raise ValueError(
+                f"Invalid timezone '{v}'. Use an IANA timezone name like "
+                "'America/New_York', 'Europe/London', or 'UTC'."
+            ) from None
+
     # Provider-level API keys
     anthropic: ProviderConfig | None = None
     openai: ProviderConfig | None = None

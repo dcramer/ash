@@ -51,6 +51,7 @@ MAX_TOOL_ITERATIONS = 25
 def _build_routing_env(
     session: SessionState,
     effective_user_id: str | None,
+    timezone: str = "UTC",
 ) -> dict[str, str]:
     """Build environment variables for routing context in sandbox.
 
@@ -64,6 +65,7 @@ def _build_routing_env(
         "ASH_CHAT_ID": session.chat_id or "",
         "ASH_PROVIDER": session.provider or "",
         "ASH_USERNAME": session.metadata.get("username", ""),
+        "ASH_TIMEZONE": timezone,
     }
 
     # Provide chat state paths for sandbox access
@@ -222,13 +224,27 @@ class Agent:
     @property
     def system_prompt(self) -> str:
         """Get the base system prompt (without memory context)."""
-        # Refresh runtime time to avoid stale timestamps
-        runtime = self._runtime
-        if runtime:
-            runtime = replace(
-                runtime, time=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-            )
+        runtime = self._refresh_runtime_time()
         return self._prompt_builder.build(PromptContext(runtime=runtime))
+
+    def _refresh_runtime_time(self) -> RuntimeInfo | None:
+        """Return runtime with refreshed current time, or None if no runtime."""
+        if not self._runtime:
+            return None
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(self._timezone)
+        local_time = datetime.now(UTC).astimezone(tz)
+        return replace(self._runtime, time=local_time.strftime("%Y-%m-%d %H:%M:%S"))
+
+    @property
+    def _timezone(self) -> str:
+        """Get the configured timezone, defaulting to UTC."""
+        return (
+            self._runtime.timezone
+            if self._runtime and self._runtime.timezone
+            else "UTC"
+        )
 
     def _build_system_prompt(
         self,
@@ -264,15 +280,8 @@ class Agent:
         Returns:
             Complete system prompt.
         """
-        # Refresh runtime time to avoid stale timestamps
-        runtime = self._runtime
-        if runtime:
-            runtime = replace(
-                runtime, time=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-            )
-
         prompt_context = PromptContext(
-            runtime=runtime,
+            runtime=self._refresh_runtime_time(),
             memory=context,
             known_people=known_people,
             conversation_gap_minutes=conversation_gap_minutes,
@@ -660,7 +669,9 @@ class Agent:
                 chat_id=session.chat_id,
                 provider=session.provider,
                 metadata=dict(session.metadata),
-                env=_build_routing_env(session, setup.effective_user_id),
+                env=_build_routing_env(
+                    session, setup.effective_user_id, timezone=self._timezone
+                ),
             )
 
             new_calls, steering = await self._execute_pending_tools(
@@ -765,7 +776,9 @@ class Agent:
                 chat_id=session.chat_id,
                 provider=session.provider,
                 metadata=dict(session.metadata),
-                env=_build_routing_env(session, setup.effective_user_id),
+                env=_build_routing_env(
+                    session, setup.effective_user_id, timezone=self._timezone
+                ),
             )
 
             _, steering = await self._execute_pending_tools(
@@ -946,6 +959,7 @@ async def create_agent(
     runtime = RuntimeInfo.from_environment(
         model=model_config.model,
         provider=model_config.provider,
+        timezone=config.timezone,
     )
 
     prompt_builder = SystemPromptBuilder(

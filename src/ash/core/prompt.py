@@ -45,11 +45,28 @@ class RuntimeInfo:
         provider: str | None = None,
         timezone: str | None = None,
     ) -> RuntimeInfo:
+        """Create RuntimeInfo from current environment.
+
+        Args:
+            model: Current model name.
+            provider: Current provider name.
+            timezone: User's timezone (IANA name like "America/New_York").
+
+        Returns:
+            RuntimeInfo with environment details.
+        """
+        from zoneinfo import ZoneInfo
+
+        tz_name = timezone or "UTC"
+        tz = ZoneInfo(tz_name)
+        # Convert UTC to configured timezone (not relying on system clock)
+        local_time = datetime.now(UTC).astimezone(tz)
+
         return cls(
             model=model,
             provider=provider,
-            timezone=timezone or "UTC",
-            time=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+            timezone=tz_name,
+            time=local_time.strftime("%Y-%m-%d %H:%M:%S"),
         )
 
 
@@ -300,9 +317,14 @@ class SystemPromptBuilder:
             lines.append(f"Runtime: {' | '.join(info_parts)}")
 
         if runtime.timezone or runtime.time:
+            tz = runtime.timezone or "UTC"
+            time = runtime.time or "unknown"
+            lines.append(f"Timezone: {tz}, Current time: {time}")
+            lines.append("")
             lines.append(
-                f"Timezone: {runtime.timezone or 'UTC'}, Current time: {runtime.time or 'unknown'}"
+                "IMPORTANT: When discussing times with the user, use this timezone."
             )
+            lines.append("Convert any UTC times to local time before presenting them.")
 
         return "\n".join(lines)
 
