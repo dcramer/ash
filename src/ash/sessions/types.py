@@ -232,6 +232,7 @@ class ToolResultEntry:
     output: str
     success: bool
     duration_ms: int | None = None
+    metadata: dict[str, Any] | None = None
     type: Literal["tool_result"] = "tool_result"
 
     def to_dict(self) -> dict[str, Any]:
@@ -243,6 +244,8 @@ class ToolResultEntry:
         }
         if self.duration_ms is not None:
             result["duration_ms"] = self.duration_ms
+        if self.metadata is not None:
+            result["metadata"] = self.metadata
         return result
 
     @classmethod
@@ -252,6 +255,7 @@ class ToolResultEntry:
             output=data["output"],
             success=data["success"],
             duration_ms=data.get("duration_ms"),
+            metadata=data.get("metadata"),
         )
 
     @classmethod
@@ -261,12 +265,14 @@ class ToolResultEntry:
         output: str,
         success: bool,
         duration_ms: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ToolResultEntry:
         return cls(
             tool_use_id=tool_use_id,
             output=output,
             success=success,
             duration_ms=duration_ms,
+            metadata=metadata,
         )
 
 
@@ -346,5 +352,3 @@ class SessionState(BaseModel):
     user_id: str | None = None
     thread_id: str | None = None
     created_at: datetime = Field(default_factory=now_utc)
-    # Pending checkpoint for agent workflows (stored as dict for JSON serialization)
-    pending_checkpoint: dict[str, Any] | None = None

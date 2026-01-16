@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -25,10 +26,13 @@ from ash.sessions import MessageEntry, SessionManager
 from ash.sessions.types import session_key as make_session_key
 
 if TYPE_CHECKING:
+    from aiogram.types import CallbackQuery
+
     from ash.agents import AgentRegistry
     from ash.config import AshConfig
     from ash.providers.telegram.provider import TelegramProvider
     from ash.skills import SkillRegistry
+    from ash.tools.registry import ToolRegistry
 
 logger = logging.getLogger("telegram")
 
@@ -255,6 +259,7 @@ class TelegramMessageHandler:
         config: "AshConfig | None" = None,
         agent_registry: "AgentRegistry | None" = None,
         skill_registry: "SkillRegistry | None" = None,
+        tool_registry: "ToolRegistry | None" = None,
     ):
         self._provider = provider
         self._agent = agent
@@ -264,11 +269,14 @@ class TelegramMessageHandler:
         self._config = config
         self._agent_registry = agent_registry
         self._skill_registry = skill_registry
+        self._tool_registry = tool_registry
         self._session_managers: dict[str, SessionManager] = {}
         self._session_contexts: dict[str, SessionContext] = {}
         self._thread_indexes: dict[str, ThreadIndex] = {}
         max_concurrent = config.sessions.max_concurrent if config else 2
         self._concurrency_semaphore = asyncio.Semaphore(max_concurrent)
+        # Pending checkpoints keyed by truncated checkpoint_id
+        self._pending_checkpoints: dict[str, dict[str, Any]] = {}
 
     def _get_thread_index(self, chat_id: str) -> ThreadIndex:
         """Get or create a ThreadIndex for a chat."""
@@ -871,6 +879,88 @@ class TelegramMessageHandler:
         )
         self._log_response(response_content)
 
+    def _store_checkpoint(
+        self,
+        checkpoint: dict[str, Any],
+        message: IncomingMessage,
+        *,
+        agent_name: str | None = None,
+        original_message: str | None = None,
+        tool_use_id: str | None = None,
+    ) -> str:
+        """Store checkpoint routing info for callback lookup and return its truncated ID.
+
+        Stores routing info in-memory for fast lookup. Full checkpoint data is
+        persisted in tool_result metadata in the session log.
+        """
+        truncated_id = checkpoint.get("checkpoint_id", "")[:55]
+        thread_id = message.metadata.get("thread_id")
+        session_key = make_session_key(
+            self._provider.name, message.chat_id, message.user_id, thread_id
+        )
+
+        # Store routing info in memory for fast lookup
+        # Full checkpoint data is in session log via tool_result metadata
+        self._pending_checkpoints[truncated_id] = {
+            "session_key": session_key,
+            "chat_id": message.chat_id,
+            "user_id": message.user_id,
+            "thread_id": thread_id,
+            "chat_type": message.metadata.get("chat_type"),
+            "chat_title": message.metadata.get("chat_title"),
+            "username": message.username,
+            "display_name": message.display_name,
+            "agent_name": agent_name,
+            "original_message": original_message,
+        }
+
+        return truncated_id
+
+    async def _get_checkpoint(
+        self, truncated_id: str, bot_response_id: str | None = None
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Get checkpoint, using cache or falling back to session log lookup.
+
+        Returns (routing_info, checkpoint_data) or (None, None).
+        routing_info contains session routing info, checkpoint_data contains the full checkpoint.
+        """
+        # Fast path: check in-memory cache for routing info
+        if truncated_id in self._pending_checkpoints:
+            routing = self._pending_checkpoints[truncated_id]
+            session_manager = self._get_session_manager(
+                routing["chat_id"], routing["user_id"], routing.get("thread_id")
+            )
+            result = await session_manager.get_pending_checkpoint_from_log(truncated_id)
+            if result:
+                _, _, checkpoint = result
+                return routing, checkpoint
+
+        # Slow path (recovery): find session by bot_response_id
+        if bot_response_id:
+            for sm in self._session_managers.values():
+                if await sm.has_bot_response_id(bot_response_id):
+                    result = await sm.get_pending_checkpoint_from_log(truncated_id)
+                    if result:
+                        _, _, checkpoint = result
+                        # Build routing info from checkpoint
+                        routing = {
+                            "session_key": sm.session_key,
+                            "chat_id": sm.chat_id,
+                            "user_id": sm.user_id,
+                            "thread_id": sm.thread_id,
+                        }
+                        logger.info(
+                            "Recovered checkpoint %s from session log",
+                            truncated_id[:20],
+                        )
+                        return routing, checkpoint
+
+        return None, None
+
+    def _clear_checkpoint(self, truncated_id: str) -> None:
+        """Clear checkpoint routing info from memory cache."""
+        self._pending_checkpoints.pop(truncated_id, None)
+
     async def _handle_sync(
         self,
         message: IncomingMessage,
@@ -908,11 +998,63 @@ class TelegramMessageHandler:
 
         final_content = tracker.get_summary_prefix() + (response.text or "")
 
+        # Check for checkpoint in response and create inline keyboard if present
+        reply_markup = None
+        if response.checkpoint:
+            from ash.providers.telegram.checkpoint_ui import (
+                create_checkpoint_keyboard,
+                format_checkpoint_message,
+            )
+
+            checkpoint = response.checkpoint
+
+            # Extract agent context from the use_agent call that triggered the checkpoint
+            agent_name: str | None = None
+            original_message: str | None = None
+            tool_use_id: str | None = None
+            for call in reversed(response.tool_calls):
+                if call.get("name") == "use_agent" and call.get("metadata", {}).get(
+                    "checkpoint"
+                ):
+                    agent_name = call["input"].get("agent")
+                    original_message = call["input"].get("message")
+                    tool_use_id = call["id"]
+                    break
+
+            truncated_id = self._store_checkpoint(
+                checkpoint,
+                message,
+                agent_name=agent_name,
+                original_message=original_message,
+                tool_use_id=tool_use_id,
+            )
+            reply_markup = create_checkpoint_keyboard(checkpoint)
+            final_content = tracker.get_summary_prefix() + format_checkpoint_message(
+                checkpoint
+            )
+            logger.info(
+                "Checkpoint detected, showing inline keyboard (id=%s, agent=%s)",
+                truncated_id,
+                agent_name,
+            )
+
         if tracker.thinking_msg_id and final_content.strip():
             await self._provider.edit(
                 message.chat_id, tracker.thinking_msg_id, final_content
             )
             sent_message_id = tracker.thinking_msg_id
+            # If we have reply_markup, send a new message since we can't add keyboard to edited message
+            if reply_markup:
+                sent_message_id = await self._provider.send(
+                    OutgoingMessage(
+                        chat_id=message.chat_id,
+                        text=final_content,
+                        reply_to_message_id=message.id,
+                        reply_markup=reply_markup,
+                    )
+                )
+                # Delete the thinking message since we sent a new one
+                await self._provider.delete(message.chat_id, tracker.thinking_msg_id)
         elif tracker.thinking_msg_id:
             await self._provider.delete(message.chat_id, str(tracker.thinking_msg_id))
             sent_message_id = None
@@ -922,6 +1064,7 @@ class TelegramMessageHandler:
                     chat_id=message.chat_id,
                     text=final_content,
                     reply_to_message_id=message.id,
+                    reply_markup=reply_markup,
                 )
             )
         else:
@@ -956,6 +1099,7 @@ class TelegramMessageHandler:
                 tool_use_id=tool_call["id"],
                 output=tool_call["result"],
                 success=not tool_call.get("is_error", False),
+                metadata=tool_call.get("metadata"),
             )
 
     async def _typing_loop(self, chat_id: str) -> None:
@@ -1080,6 +1224,293 @@ class TelegramMessageHandler:
             )
         )
 
+    async def handle_callback_query(self, callback_query: "CallbackQuery") -> None:
+        """Handle callback queries from checkpoint inline keyboards.
+
+        When a user clicks a button on a checkpoint keyboard, this method:
+        1. Parses the callback data to get checkpoint info
+        2. Retrieves the stored checkpoint with agent context
+        3. Calls the use_agent tool directly with resume parameters
+        4. Formats and sends the result to the user
+        5. Handles nested checkpoints if the resumed agent pauses again
+        """
+        from aiogram.types import CallbackQuery as CQ
+
+        from ash.providers.telegram.checkpoint_ui import (
+            create_checkpoint_keyboard,
+            format_checkpoint_message,
+            parse_callback_data,
+        )
+        from ash.tools.base import ToolContext
+        from ash.tools.builtin.agents import CHECKPOINT_METADATA_KEY
+
+        if not isinstance(callback_query, CQ):
+            logger.warning("Invalid callback query type")
+            return
+
+        if not callback_query.data:
+            logger.warning("Callback query has no data")
+            await callback_query.answer("Invalid callback data")
+            return
+
+        parsed = parse_callback_data(callback_query.data)
+        if parsed is None:
+            logger.warning("Failed to parse callback data: %s", callback_query.data)
+            await callback_query.answer("Invalid callback format")
+            return
+
+        truncated_id, option_index = parsed
+
+        # Get bot_response_id from the message for recovery lookup
+        bot_response_id = (
+            str(callback_query.message.message_id) if callback_query.message else None
+        )
+
+        # Use _get_checkpoint to check both memory and session log (for recovery)
+        routing, checkpoint = await self._get_checkpoint(truncated_id, bot_response_id)
+        if checkpoint is None or routing is None:
+            logger.warning("Checkpoint not found: %s", truncated_id)
+            await callback_query.answer(
+                "This checkpoint has expired. Please try again.", show_alert=True
+            )
+            return
+
+        options = checkpoint.get("options") or ["Proceed", "Cancel"]
+        if option_index < 0 or option_index >= len(options):
+            logger.warning("Invalid option index: %d", option_index)
+            await callback_query.answer("Invalid option selected")
+            return
+
+        selected_option = options[option_index]
+        chat_id = routing.get("chat_id", "")
+        user_id = routing.get("user_id", "")
+        thread_id = routing.get("thread_id")
+        agent_name = routing.get("agent_name")
+        original_message = routing.get("original_message")
+        checkpoint_id = checkpoint.get("checkpoint_id")
+
+        # Don't clear checkpoint yet - wait until processing succeeds
+        await callback_query.answer(f"Selected: {selected_option}")
+
+        # Remove the inline keyboard from the message
+        if callback_query.message:
+            try:
+                message_text = (
+                    getattr(callback_query.message, "text", None)
+                    or "Checkpoint response received"
+                )
+                await self._provider.edit(
+                    chat_id,
+                    str(callback_query.message.message_id),
+                    message_text,
+                )
+            except Exception as e:
+                logger.debug("Failed to remove keyboard: %s", e)
+
+        # Check if we can use direct tool invocation
+        has_agent_context = agent_name and original_message and checkpoint_id
+        has_tool_registry = self._tool_registry and self._tool_registry.has("use_agent")
+
+        if not has_agent_context or not has_tool_registry:
+            reason = "agent context" if not has_agent_context else "tool registry"
+            logger.warning(
+                "Missing %s for checkpoint %s, falling back to message flow",
+                reason,
+                truncated_id,
+            )
+            # Clear checkpoint before fallback (fallback will create new session context)
+            self._clear_checkpoint(truncated_id)
+            await self._handle_checkpoint_via_message(
+                callback_query, routing, checkpoint, selected_option
+            )
+            return
+
+        session_key = routing.get("session_key", "")
+
+        logger.info(
+            "Resuming checkpoint via direct tool call: agent=%s, checkpoint=%s, response='%s'",
+            agent_name,
+            truncated_id[:20],
+            selected_option,
+        )
+
+        await self._provider.send_typing(chat_id)
+
+        assert self._tool_registry is not None  # Checked above via has_tool_registry
+        use_agent_tool = self._tool_registry.get("use_agent")
+        tool_context = ToolContext(
+            session_id=session_key,
+            user_id=user_id,
+            chat_id=chat_id,
+            provider=self._provider.name,
+        )
+
+        # Generate a tool_use_id for persistence
+
+        tool_use_id = f"callback_{uuid.uuid4().hex[:12]}"
+        tool_input = {
+            "agent": agent_name,
+            "message": original_message,
+            "resume_checkpoint_id": checkpoint_id,
+            "checkpoint_response": selected_option,
+        }
+
+        try:
+            result = await use_agent_tool.execute(tool_input, tool_context)
+        except Exception as e:
+            logger.exception("Error calling use_agent tool directly")
+            # Don't clear checkpoint on error - user can retry
+            await self._provider.send(
+                OutgoingMessage(
+                    chat_id=chat_id,
+                    text=f"Error resuming agent: {e}. You can try clicking the button again.",
+                )
+            )
+            return
+
+        # Clear the checkpoint now that processing succeeded
+        self._clear_checkpoint(truncated_id)
+
+        # Check for nested checkpoint in the result
+        reply_markup = None
+        response_text = result.content
+        if CHECKPOINT_METADATA_KEY in result.metadata:
+            new_checkpoint = result.metadata[CHECKPOINT_METADATA_KEY]
+
+            # Create a synthetic message to reuse _store_checkpoint
+            # This preserves the metadata from the original routing info
+            synthetic_msg = IncomingMessage(
+                id="",
+                chat_id=chat_id,
+                user_id=user_id,
+                text="",
+                username=routing.get("username"),
+                display_name=routing.get("display_name"),
+                metadata={
+                    "thread_id": thread_id,
+                    "chat_type": routing.get("chat_type"),
+                    "chat_title": routing.get("chat_title"),
+                },
+            )
+            new_truncated_id = self._store_checkpoint(
+                new_checkpoint,
+                synthetic_msg,
+                agent_name=agent_name,
+                original_message=original_message,
+            )
+
+            reply_markup = create_checkpoint_keyboard(new_checkpoint)
+            response_text = format_checkpoint_message(new_checkpoint)
+            logger.info(
+                "Nested checkpoint detected, showing new keyboard (id=%s)",
+                new_truncated_id,
+            )
+
+        # Send the response
+        if response_text.strip():
+            sent_message_id = await self._provider.send(
+                OutgoingMessage(
+                    chat_id=chat_id,
+                    text=response_text,
+                    reply_markup=reply_markup,
+                )
+            )
+
+            # Persist the interaction to session
+            session_manager = self._get_session_manager(chat_id, user_id, thread_id)
+            await session_manager.add_user_message(
+                content=f"[Checkpoint response: {selected_option}]",
+                token_count=estimate_tokens(selected_option),
+                metadata={
+                    "is_checkpoint_response": True,
+                    "checkpoint_id": checkpoint_id,
+                },
+                user_id=user_id,
+                username=routing.get("username"),
+                display_name=routing.get("display_name"),
+            )
+            await session_manager.add_assistant_message(
+                content=response_text,
+                token_count=estimate_tokens(response_text),
+                metadata={"bot_response_id": sent_message_id}
+                if sent_message_id
+                else None,
+            )
+
+            # Persist tool_use and tool_result for session consistency
+            await session_manager.add_tool_use(
+                tool_use_id=tool_use_id,
+                name="use_agent",
+                input_data=tool_input,
+            )
+            await session_manager.add_tool_result(
+                tool_use_id=tool_use_id,
+                output=result.content,
+                success=not result.is_error,
+            )
+
+            # Register bot response in thread index for reply routing
+            if sent_message_id and thread_id:
+                thread_index = self._get_thread_index(chat_id)
+                thread_index.register_message(sent_message_id, thread_id)
+
+            self._log_response(response_text)
+        else:
+            # Still persist tool_use/result even for empty responses
+            session_manager = self._get_session_manager(chat_id, user_id, thread_id)
+            await session_manager.add_tool_use(
+                tool_use_id=tool_use_id,
+                name="use_agent",
+                input_data=tool_input,
+            )
+            await session_manager.add_tool_result(
+                tool_use_id=tool_use_id,
+                output=result.content,
+                success=not result.is_error,
+            )
+            logger.debug("Empty response from resumed agent")
+
+    async def _handle_checkpoint_via_message(
+        self,
+        callback_query: "CallbackQuery",
+        routing: dict[str, Any],
+        checkpoint: dict[str, Any],
+        selected_option: str,
+    ) -> None:
+        """Fall back to synthetic message flow for checkpoint handling.
+
+        Used when agent context is not available for direct tool invocation.
+        """
+        from_user = callback_query.from_user
+        username = from_user.username if from_user else routing.get("username")
+        display_name = from_user.full_name if from_user else routing.get("display_name")
+
+        metadata: dict[str, Any] = {
+            "is_checkpoint_response": True,
+            "checkpoint_id": checkpoint.get("checkpoint_id"),
+        }
+        for key in ("thread_id", "chat_type", "chat_title"):
+            if value := routing.get(key):
+                metadata[key] = value
+
+        synthetic_message = IncomingMessage(
+            id=f"callback_{callback_query.id}",
+            chat_id=routing.get("chat_id", ""),
+            user_id=routing.get("user_id", ""),
+            text=selected_option,
+            username=username,
+            display_name=display_name,
+            metadata=metadata,
+        )
+
+        logger.info(
+            "Processing checkpoint callback via message flow: '%s' (session=%s)",
+            selected_option,
+            routing.get("session_key", ""),
+        )
+
+        await self.handle_message(synthetic_message)
+
     def clear_session(self, chat_id: str) -> None:
         session_key = f"{self._provider.name}_{chat_id}"
         self._session_managers.pop(session_key, None)
@@ -1088,6 +1519,7 @@ class TelegramMessageHandler:
     def clear_all_sessions(self) -> None:
         self._session_managers.clear()
         self._session_contexts.clear()
+        self._pending_checkpoints.clear()
 
 
 def _extract_text_content(content: list[dict[str, Any]]) -> str:

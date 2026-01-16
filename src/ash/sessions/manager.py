@@ -183,6 +183,7 @@ class SessionManager:
         output: str,
         success: bool = True,
         duration_ms: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         await self.ensure_session()
         entry = ToolResultEntry.create(
@@ -190,6 +191,7 @@ class SessionManager:
             output=output,
             success=success,
             duration_ms=duration_ms,
+            metadata=metadata,
         )
         await self._writer.write_tool_result(entry)
 
@@ -314,36 +316,44 @@ class SessionManager:
             json.dumps(state.model_dump(mode="json"), indent=2, default=str)
         )
 
-    def save_checkpoint(self, checkpoint_dict: dict[str, Any]) -> None:
-        """Save a checkpoint to the session state.
+    async def get_pending_checkpoint_from_log(
+        self, truncated_id: str
+    ) -> tuple[ToolUseEntry, ToolResultEntry, dict[str, Any]] | None:
+        """Find a pending checkpoint by truncated ID from session log.
 
-        Args:
-            checkpoint_dict: Checkpoint data (from CheckpointState.to_dict()).
+        Returns (tool_use, tool_result, checkpoint_dict) or None.
         """
-        state = self._load_state()
-        if state is None:
-            state = SessionState(
-                provider=self.provider,
-                chat_id=self.chat_id,
-                user_id=self.user_id,
-                thread_id=self.thread_id,
-            )
-        state.pending_checkpoint = checkpoint_dict
-        self._save_state(state)
-        logger.debug(
-            f"Saved checkpoint {checkpoint_dict.get('checkpoint_id')} to session"
-        )
+        entries = await self._reader.load_entries()
 
-    def get_pending_checkpoint(self) -> dict[str, Any] | None:
-        """Get the pending checkpoint from the session state, if any."""
-        state = self._load_state()
-        return state.pending_checkpoint if state else None
+        # Build tool_use lookup
+        tool_uses: dict[str, ToolUseEntry] = {}
+        for entry in entries:
+            if isinstance(entry, ToolUseEntry):
+                tool_uses[entry.id] = entry
 
-    def clear_checkpoint(self) -> None:
-        """Clear any pending checkpoint from the session state."""
-        state = self._load_state()
-        if state is None or state.pending_checkpoint is None:
-            return
-        state.pending_checkpoint = None
-        self._save_state(state)
-        logger.debug("Cleared checkpoint from session")
+        # Find matching checkpoint in tool results (reverse order = most recent)
+        for entry in reversed(entries):
+            if not isinstance(entry, ToolResultEntry):
+                continue
+            if not entry.metadata or "checkpoint" not in entry.metadata:
+                continue
+
+            checkpoint = entry.metadata["checkpoint"]
+            if checkpoint.get("checkpoint_id", "")[:55] == truncated_id:
+                tool_use = tool_uses.get(entry.tool_use_id)
+                if tool_use:
+                    return (tool_use, entry, checkpoint)
+
+        return None
+
+    async def has_bot_response_id(self, bot_response_id: str) -> bool:
+        """Check if this session contains a message with the given bot_response_id."""
+        entries = await self._reader.load_entries()
+        for entry in entries:
+            if isinstance(entry, MessageEntry):
+                if (
+                    entry.metadata
+                    and entry.metadata.get("bot_response_id") == bot_response_id
+                ):
+                    return True
+        return False
