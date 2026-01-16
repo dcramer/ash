@@ -303,6 +303,7 @@ class SystemPromptBuilder:
             "- `ash-sb schedule create 'msg' --at <time>` - Set reminder/task",
             "- `ash-sb schedule create 'msg' --cron '<expr>'` - Recurring task",
             "- `ash-sb schedule list` - List scheduled tasks",
+            "- `ash-sb schedule cancel --id <id>` - Cancel a scheduled task",
             "- `ash-sb config reload` - Reload config after changes",
             "",
             "Run `ash-sb --help` for all commands.",
