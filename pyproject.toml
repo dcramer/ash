@@ -86,6 +86,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.8.0",
     "ty>=0.0.1a11",
+    "pyyaml>=6.0",
     # For testing sandbox CLI (module only, entry point conflicts with main ash)
     "ash-sandbox-cli",
 ]
@@ -140,6 +141,7 @@ known-first-party = ["ash"]
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/**" = ["S101", "S105", "S106"]
+"evals/**" = ["S101", "S105", "S106", "E402"]
 "src/ash/cli/**" = ["S603", "S607"]  # Allow subprocess calls in CLI
 "src/ash/sandbox/**" = ["ASYNC109"]  # Allow timeout parameters in sandbox
 
@@ -152,7 +154,7 @@ line-ending = "auto"
 # ============== PYTEST CONFIGURATION ==============
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "evals"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -166,6 +168,7 @@ addopts = [
 markers = [
     "slow: marks tests as slow",
     "integration: marks tests as integration tests",
+    "eval: marks tests as evaluation tests (require real LLM)",
 ]
 
 # ============== COVERAGE ==============
