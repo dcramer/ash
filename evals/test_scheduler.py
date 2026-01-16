@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ash.core.agent import Agent
+from ash.core.agent import AgentComponents
 from ash.llm.base import LLMProvider
 from evals.report import print_report
 from evals.runner import load_eval_suite, run_eval_case, run_eval_suite
@@ -29,7 +29,7 @@ class TestSchedulerEvals:
     @pytest.mark.asyncio
     async def test_schedule_simple_reminder(
         self,
-        eval_agent: Agent,
+        eval_agent: AgentComponents,
         judge_llm: LLMProvider,
     ) -> None:
         """Test simple reminder scheduling."""
@@ -37,7 +37,7 @@ class TestSchedulerEvals:
         case = next(c for c in suite.cases if c.id == "schedule_simple_reminder")
 
         result = await run_eval_case(
-            agent=eval_agent,
+            agent=eval_agent.agent,
             case=case,
             judge_llm=judge_llm,
         )
@@ -52,7 +52,7 @@ class TestSchedulerEvals:
     @pytest.mark.asyncio
     async def test_schedule_with_timezone(
         self,
-        eval_agent: Agent,
+        eval_agent: AgentComponents,
         judge_llm: LLMProvider,
     ) -> None:
         """Test timezone-aware scheduling."""
@@ -60,7 +60,7 @@ class TestSchedulerEvals:
         case = next(c for c in suite.cases if c.id == "schedule_with_timezone")
 
         result = await run_eval_case(
-            agent=eval_agent,
+            agent=eval_agent.agent,
             case=case,
             judge_llm=judge_llm,
         )
@@ -74,7 +74,7 @@ class TestSchedulerEvals:
     @pytest.mark.asyncio
     async def test_schedule_recurring(
         self,
-        eval_agent: Agent,
+        eval_agent: AgentComponents,
         judge_llm: LLMProvider,
     ) -> None:
         """Test recurring reminder handling."""
@@ -82,7 +82,7 @@ class TestSchedulerEvals:
         case = next(c for c in suite.cases if c.id == "schedule_recurring")
 
         result = await run_eval_case(
-            agent=eval_agent,
+            agent=eval_agent.agent,
             case=case,
             judge_llm=judge_llm,
         )
@@ -96,7 +96,7 @@ class TestSchedulerEvals:
     @pytest.mark.asyncio
     async def test_schedule_vague_time(
         self,
-        eval_agent: Agent,
+        eval_agent: AgentComponents,
         judge_llm: LLMProvider,
     ) -> None:
         """Test handling of vague time references."""
@@ -104,7 +104,7 @@ class TestSchedulerEvals:
         case = next(c for c in suite.cases if c.id == "schedule_vague_time")
 
         result = await run_eval_case(
-            agent=eval_agent,
+            agent=eval_agent.agent,
             case=case,
             judge_llm=judge_llm,
         )
@@ -118,14 +118,14 @@ class TestSchedulerEvals:
     @pytest.mark.asyncio
     async def test_full_scheduler_suite(
         self,
-        eval_agent: Agent,
+        eval_agent: AgentComponents,
         judge_llm: LLMProvider,
     ) -> None:
         """Run all scheduler eval cases and assert accuracy threshold."""
         suite = load_eval_suite(SCHEDULER_CASES)
 
         report = await run_eval_suite(
-            agent=eval_agent,
+            agent=eval_agent.agent,
             suite=suite,
             judge_llm=judge_llm,
         )

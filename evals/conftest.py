@@ -1,6 +1,7 @@
 """Eval-specific pytest fixtures."""
 
 import os
+import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -20,13 +21,12 @@ if _env_local.exists() and not os.environ.get("ANTHROPIC_API_KEY"):
         os.environ["ANTHROPIC_API_KEY"] = content
 
 from ash.config import AshConfig
-from ash.config.models import ModelConfig
-from ash.config.workspace import Workspace
-from ash.core.agent import Agent, AgentConfig
-from ash.core.prompt import RuntimeInfo, SystemPromptBuilder
+from ash.config.models import MemoryConfig, ModelConfig, SandboxConfig
+from ash.config.workspace import Workspace, WorkspaceLoader
+from ash.core.agent import AgentComponents, create_agent
+from ash.db.engine import Database
+from ash.db.models import Base
 from ash.llm import AnthropicProvider, LLMProvider
-from ash.skills import SkillRegistry
-from ash.tools import ToolExecutor, ToolRegistry
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -57,9 +57,60 @@ def judge_llm(real_llm: LLMProvider) -> LLMProvider:
 
 
 @pytest.fixture
-def eval_config() -> AshConfig:
-    """Minimal AshConfig for eval runs."""
+def eval_workspace_path(tmp_path: Path) -> Path:
+    """Create an isolated workspace directory for evals.
+
+    Creates a unique workspace at /tmp/ash-evals-{uuid}/
+    """
+    workspace_id = uuid.uuid4().hex[:8]
+    workspace_path = tmp_path / f"ash-evals-{workspace_id}"
+    workspace_path.mkdir(parents=True)
+
+    # Create SOUL.md
+    soul_content = """# Eval Assistant
+
+You are a helpful AI assistant being evaluated.
+
+## Behavior
+
+- Be helpful and accurate
+- Use tools when appropriate
+- Provide clear, concise responses
+- When asked to schedule reminders, use the bash tool with the `ash schedule` command
+"""
+    (workspace_path / "SOUL.md").write_text(soul_content)
+
+    return workspace_path
+
+
+@pytest.fixture
+def eval_workspace(eval_workspace_path: Path) -> Workspace:
+    """Load the eval workspace."""
+    loader = WorkspaceLoader(eval_workspace_path)
+    return loader.load()
+
+
+@pytest.fixture
+async def eval_database(tmp_path: Path) -> AsyncGenerator[Database, None]:
+    """Create a temporary test database for evals."""
+    db_path = tmp_path / "eval.db"
+    db = Database(database_path=db_path)
+    await db.connect()
+
+    # Create all tables
+    async with db.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    yield db
+
+    await db.disconnect()
+
+
+@pytest.fixture
+def eval_config(eval_workspace_path: Path, tmp_path: Path) -> AshConfig:
+    """Create AshConfig for eval runs with isolated workspace."""
     return AshConfig(
+        workspace=eval_workspace_path,
         models={
             "default": ModelConfig(
                 provider="anthropic",
@@ -72,95 +123,47 @@ def eval_config() -> AshConfig:
                 temperature=0,
             ),
         },
-    )
-
-
-@pytest.fixture
-def eval_workspace(tmp_path: Path) -> Workspace:
-    """Create a temporary workspace with basic SOUL.md."""
-    workspace_path = tmp_path / "workspace"
-    workspace_path.mkdir()
-
-    soul_content = """# Eval Assistant
-
-You are a helpful AI assistant being evaluated.
-
-## Behavior
-
-- Be helpful and accurate
-- Use tools when appropriate
-- Provide clear, concise responses
-"""
-    (workspace_path / "SOUL.md").write_text(soul_content)
-
-    return Workspace(path=workspace_path, soul=soul_content)
-
-
-@pytest.fixture
-def eval_tool_registry() -> ToolRegistry:
-    """Create a minimal tool registry for evals.
-
-    Note: For evals that test tool use, you may want to add specific tools.
-    """
-    return ToolRegistry()
-
-
-@pytest.fixture
-def eval_skill_registry() -> SkillRegistry:
-    """Create an empty skill registry for evals."""
-    return SkillRegistry()
-
-
-@pytest.fixture
-def eval_prompt_builder(
-    eval_workspace: Workspace,
-    eval_tool_registry: ToolRegistry,
-    eval_skill_registry: SkillRegistry,
-    eval_config: AshConfig,
-) -> SystemPromptBuilder:
-    """Create a prompt builder for evals."""
-    return SystemPromptBuilder(
-        workspace=eval_workspace,
-        tool_registry=eval_tool_registry,
-        skill_registry=eval_skill_registry,
-        config=eval_config,
-    )
-
-
-@pytest.fixture
-def eval_runtime() -> RuntimeInfo:
-    """Create runtime info for evals."""
-    return RuntimeInfo.from_environment(
-        model="claude-sonnet-4-5",
-        provider="anthropic",
-        timezone="UTC",
+        sandbox=SandboxConfig(
+            # Use default sandbox settings
+            workspace_access="rw",
+        ),
+        memory=MemoryConfig(
+            database_path=tmp_path / "eval.db",
+            extraction_enabled=False,  # Disable background extraction for evals
+            compaction_enabled=False,  # Disable compaction for evals
+        ),
     )
 
 
 @pytest.fixture
 async def eval_agent(
-    real_llm: LLMProvider,
-    eval_tool_registry: ToolRegistry,
-    eval_prompt_builder: SystemPromptBuilder,
-    eval_runtime: RuntimeInfo,
-) -> AsyncGenerator[Agent, None]:
-    """Create a fully configured agent for eval testing.
+    eval_config: AshConfig,
+    eval_workspace: Workspace,
+    eval_database: Database,
+) -> AsyncGenerator[AgentComponents, None]:
+    """Create a fully configured agent with real tools for eval testing.
 
-    This creates a minimal agent without sandbox, memory, or other
-    heavyweight components - suitable for basic behavior evals.
+    This creates a complete agent with:
+    - Real sandbox execution
+    - Database for scheduling/memory
+    - All built-in tools (bash, read_file, write_file, etc.)
+
+    The workspace is isolated to /tmp/ash-evals-{uuid}/ to prevent
+    interference with real user data.
     """
-    tool_executor = ToolExecutor(eval_tool_registry)
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        pytest.skip("ANTHROPIC_API_KEY not set")
 
-    agent = Agent(
-        llm=real_llm,
-        tool_executor=tool_executor,
-        prompt_builder=eval_prompt_builder,
-        runtime=eval_runtime,
-        config=AgentConfig(
-            model="claude-sonnet-4-5",
-            temperature=0.7,
-            max_tool_iterations=10,
-        ),
-    )
+    async with eval_database.session() as db_session:
+        components = await create_agent(
+            config=eval_config,
+            workspace=eval_workspace,
+            db_session=db_session,
+        )
 
-    yield agent
+        yield components
+
+        # Cleanup: stop sandbox if running
+        if components.sandbox_executor:
+            await components.sandbox_executor.cleanup()
