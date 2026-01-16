@@ -131,6 +131,17 @@ class AgentExecutor:
                 return AgentResult.success(text, iterations=iteration)
 
             for tool_use in tool_uses:
+                # Prevent agents from invoking themselves via use_agent
+                if tool_use.name == "use_agent":
+                    target_agent = tool_use.input.get("agent", "")
+                    if target_agent == agent_config.name:
+                        session.add_tool_result(
+                            tool_use.id,
+                            f"Agent '{agent_config.name}' cannot invoke itself",
+                            is_error=True,
+                        )
+                        continue
+
                 if (
                     agent_config.allowed_tools
                     and tool_use.name not in agent_config.allowed_tools
