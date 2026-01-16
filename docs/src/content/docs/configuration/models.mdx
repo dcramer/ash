@@ -16,13 +16,13 @@ Use Haiku for simple tasks (fast, cheap) and Sonnet for complex tasks:
 ```toml
 [models.default]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-4-5"
 temperature = 0.7
 max_tokens = 4096
 
 [models.sonnet]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-4-5"
 max_tokens = 8192
 
 # Override model for specific skills
@@ -71,7 +71,7 @@ Example:
 ```toml
 [models.reasoning]
 provider = "anthropic"
-model = "claude-opus-4-5-20251101"
+model = "claude-opus-4-5"
 thinking = "medium"
 ```
 
@@ -103,15 +103,15 @@ Define multiple named models:
 ```toml
 [models.default]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-4-5"
 
 [models.sonnet]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-4-5"
 
 [models.reasoning]
 provider = "anthropic"
-model = "claude-opus-4-5-20251101"
+model = "claude-opus-4-5"
 # No temperature for reasoning models
 ```
 
@@ -152,9 +152,9 @@ Keys are resolved in this order:
 
 ### Anthropic
 
-- `claude-haiku-4-5-20251001` (recommended for default - fast, cheap)
-- `claude-sonnet-4-5-20250929` (recommended for complex tasks)
-- `claude-opus-4-5-20251101` (reasoning tasks)
+- `claude-haiku-4-5` (recommended for default - fast, cheap)
+- `claude-sonnet-4-5` (recommended for complex tasks)
+- `claude-opus-4-5` (reasoning tasks)
 
 ### OpenAI
 
@@ -168,7 +168,7 @@ A model named `default` is required:
 ```toml
 [models.default]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-4-5"
 ```
 
 This model is used when no `--model` flag is specified.

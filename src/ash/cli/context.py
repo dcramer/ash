@@ -11,11 +11,11 @@ from ash.db import Database, init_database
 # Model options by provider (ordered by recommendation for cost/speed)
 ANTHROPIC_MODELS = [
     (
-        "claude-haiku-4-5-20251001",
+        "claude-haiku-4-5",
         "Claude Haiku 4.5 (Recommended - fast, cost-effective)",
     ),
-    ("claude-sonnet-4-5-20250929", "Claude Sonnet 4.5 (More capable, higher cost)"),
-    ("claude-opus-4-5-20251101", "Claude Opus 4.5 (Most capable, highest cost)"),
+    ("claude-sonnet-4-5", "Claude Sonnet 4.5 (More capable, higher cost)"),
+    ("claude-opus-4-5", "Claude Opus 4.5 (Most capable, highest cost)"),
 ]
 
 

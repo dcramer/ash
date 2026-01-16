@@ -22,9 +22,9 @@ class TestLLMConfig:
     """Tests for LLMConfig model."""
 
     def test_minimal_config(self):
-        config = LLMConfig(provider="anthropic", model="claude-sonnet-4-5-20250929")
+        config = LLMConfig(provider="anthropic", model="claude-sonnet-4-5")
         assert config.provider == "anthropic"
-        assert config.model == "claude-sonnet-4-5-20250929"
+        assert config.model == "claude-sonnet-4-5"
         assert config.temperature == 0.7  # default
         assert config.max_tokens == 4096  # default
 
@@ -160,7 +160,7 @@ class TestLoadConfig:
     def test_load_from_file(self, config_file):
         config = load_config(config_file)
         assert config.default_llm.provider == "anthropic"
-        assert config.default_llm.model == "claude-sonnet-4-5-20250929"
+        assert config.default_llm.model == "claude-sonnet-4-5"
 
     def test_file_not_found(self, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -199,9 +199,9 @@ class TestModelConfig:
     """Tests for ModelConfig model."""
 
     def test_minimal_config(self):
-        config = ModelConfig(provider="anthropic", model="claude-sonnet-4-5-20250929")
+        config = ModelConfig(provider="anthropic", model="claude-sonnet-4-5")
         assert config.provider == "anthropic"
-        assert config.model == "claude-sonnet-4-5-20250929"
+        assert config.model == "claude-sonnet-4-5"
         assert config.temperature is None  # default: use API default
         assert config.max_tokens == 4096  # default
 
@@ -220,7 +220,7 @@ class TestModelConfig:
         """Test that temperature can be None (for reasoning models)."""
         config = ModelConfig(
             provider="anthropic",
-            model="claude-3-5-opus-20241219",
+            model="claude-3-5-opus",
             temperature=None,  # Explicitly None for reasoning models
         )
         assert config.temperature is None
@@ -237,42 +237,32 @@ class TestNamedModelConfigs:
         """Test [models.<alias>] configuration."""
         config = AshConfig(
             models={
-                "default": ModelConfig(
-                    provider="anthropic", model="claude-sonnet-4-5-20250929"
-                ),
-                "fast": ModelConfig(
-                    provider="anthropic", model="claude-3-5-haiku-20241022"
-                ),
+                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
+                "fast": ModelConfig(provider="anthropic", model="claude-3-5-haiku"),
             }
         )
         assert "default" in config.models
         assert "fast" in config.models
-        assert config.models["default"].model == "claude-sonnet-4-5-20250929"
-        assert config.models["fast"].model == "claude-3-5-haiku-20241022"
+        assert config.models["default"].model == "claude-sonnet-4-5"
+        assert config.models["fast"].model == "claude-3-5-haiku"
 
     def test_get_model(self):
         """Test get_model() lookup."""
         config = AshConfig(
             models={
-                "default": ModelConfig(
-                    provider="anthropic", model="claude-sonnet-4-5-20250929"
-                ),
-                "fast": ModelConfig(
-                    provider="anthropic", model="claude-3-5-haiku-20241022"
-                ),
+                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
+                "fast": ModelConfig(provider="anthropic", model="claude-3-5-haiku"),
             }
         )
         model = config.get_model("fast")
         assert model.provider == "anthropic"
-        assert model.model == "claude-3-5-haiku-20241022"
+        assert model.model == "claude-3-5-haiku"
 
     def test_get_model_unknown_alias(self):
         """Test get_model() with unknown alias raises ConfigError."""
         config = AshConfig(
             models={
-                "default": ModelConfig(
-                    provider="anthropic", model="claude-sonnet-4-5-20250929"
-                ),
+                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
             }
         )
         with pytest.raises(ConfigError) as exc_info:
@@ -284,12 +274,8 @@ class TestNamedModelConfigs:
         """Test list_models() returns sorted aliases."""
         config = AshConfig(
             models={
-                "default": ModelConfig(
-                    provider="anthropic", model="claude-sonnet-4-5-20250929"
-                ),
-                "fast": ModelConfig(
-                    provider="anthropic", model="claude-3-5-haiku-20241022"
-                ),
+                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
+                "fast": ModelConfig(provider="anthropic", model="claude-3-5-haiku"),
                 "capable": ModelConfig(provider="openai", model="gpt-4o"),
             }
         )
@@ -300,21 +286,17 @@ class TestNamedModelConfigs:
         """Test default_model property returns 'default' alias."""
         config = AshConfig(
             models={
-                "default": ModelConfig(
-                    provider="anthropic", model="claude-sonnet-4-5-20250929"
-                ),
+                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
             }
         )
         assert config.default_model.provider == "anthropic"
-        assert config.default_model.model == "claude-sonnet-4-5-20250929"
+        assert config.default_model.model == "claude-sonnet-4-5"
 
     def test_resolve_api_key_from_provider_config(self):
         """Test API key resolution from provider-level config."""
         config = AshConfig(
             models={
-                "default": ModelConfig(
-                    provider="anthropic", model="claude-sonnet-4-5-20250929"
-                ),
+                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
             },
             anthropic=ProviderConfig(api_key=SecretStr("test-key")),
         )
@@ -327,9 +309,7 @@ class TestNamedModelConfigs:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
         config = AshConfig(
             models={
-                "default": ModelConfig(
-                    provider="anthropic", model="claude-sonnet-4-5-20250929"
-                ),
+                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
             }
         )
         api_key = config.resolve_api_key("default")
@@ -341,9 +321,7 @@ class TestNamedModelConfigs:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
         config = AshConfig(
             models={
-                "default": ModelConfig(
-                    provider="anthropic", model="claude-sonnet-4-5-20250929"
-                ),
+                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
             },
             anthropic=ProviderConfig(api_key=SecretStr("config-key")),
         )
@@ -355,9 +333,7 @@ class TestNamedModelConfigs:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         config = AshConfig(
             models={
-                "default": ModelConfig(
-                    provider="anthropic", model="claude-sonnet-4-5-20250929"
-                ),
+                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
             }
         )
         api_key = config.resolve_api_key("default")
@@ -372,14 +348,14 @@ class TestBackwardCompatibility:
         config = AshConfig(
             default_llm=LLMConfig(
                 provider="anthropic",
-                model="claude-sonnet-4-5-20250929",
+                model="claude-sonnet-4-5",
                 temperature=0.5,
                 max_tokens=2048,
             )
         )
         assert "default" in config.models
         assert config.models["default"].provider == "anthropic"
-        assert config.models["default"].model == "claude-sonnet-4-5-20250929"
+        assert config.models["default"].model == "claude-sonnet-4-5"
         assert config.models["default"].temperature == 0.5
         assert config.models["default"].max_tokens == 2048
 
@@ -388,7 +364,7 @@ class TestBackwardCompatibility:
         config = AshConfig(
             default_llm=LLMConfig(
                 provider="anthropic",
-                model="claude-sonnet-4-5-20250929",
+                model="claude-sonnet-4-5",
                 api_key=SecretStr("test-key"),
             )
         )
@@ -407,7 +383,7 @@ class TestBackwardCompatibility:
                 },
                 default_llm=LLMConfig(
                     provider="anthropic",
-                    model="claude-sonnet-4-5-20250929",
+                    model="claude-sonnet-4-5",
                 ),
             )
         # models.default should win
@@ -431,12 +407,12 @@ class TestLoadConfigWithModels:
         config_content = """
 [models.default]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-4-5"
 temperature = 0.7
 
 [models.fast]
 provider = "anthropic"
-model = "claude-3-5-haiku-20241022"
+model = "claude-3-5-haiku"
 """
         config_file = tmp_path / "config.toml"
         config_file.write_text(config_content)
@@ -444,15 +420,15 @@ model = "claude-3-5-haiku-20241022"
 
         assert "default" in config.models
         assert "fast" in config.models
-        assert config.models["default"].model == "claude-sonnet-4-5-20250929"
-        assert config.models["fast"].model == "claude-3-5-haiku-20241022"
+        assert config.models["default"].model == "claude-sonnet-4-5"
+        assert config.models["fast"].model == "claude-3-5-haiku"
 
     def test_load_provider_api_key_from_toml(self, tmp_path):
         """Test loading provider API keys from TOML."""
         config_content = """
 [models.default]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-4-5"
 
 [anthropic]
 api_key = "test-api-key"

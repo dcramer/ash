@@ -38,7 +38,7 @@ def minimal_config() -> AshConfig:
     return AshConfig(
         default_llm=LLMConfig(
             provider="anthropic",
-            model="claude-sonnet-4-5-20250929",
+            model="claude-sonnet-4-5",
         )
     )
 
@@ -50,7 +50,7 @@ def full_config(tmp_path: Path) -> AshConfig:
         workspace=tmp_path / "workspace",
         default_llm=LLMConfig(
             provider="anthropic",
-            model="claude-sonnet-4-5-20250929",
+            model="claude-sonnet-4-5",
             temperature=0.5,
             max_tokens=2048,
         ),
@@ -69,7 +69,7 @@ workspace = "/tmp/ash-workspace"
 
 [default_llm]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-4-5"
 temperature = 0.7
 max_tokens = 4096
 """

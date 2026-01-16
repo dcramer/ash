@@ -63,7 +63,7 @@ ash chat "Hello, world"
 ```toml
 [models.default]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-4-5"
 ```
 
 ```python

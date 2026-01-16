@@ -35,13 +35,13 @@ api_key = "sk-..."  # Or use OPENAI_API_KEY env var
 # Named model configurations (Haiku for fast/cheap, Sonnet for complex tasks)
 [models.default]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-4-5"
 temperature = 0.7
 max_tokens = 4096
 
 [models.sonnet]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-4-5"
 max_tokens = 8192
 
 # Telegram bot integration
@@ -130,7 +130,7 @@ api_key = "sk-..."
 
 [models.default]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-4-5"
 
 [embeddings]
 provider = "openai"
@@ -142,7 +142,7 @@ For a better experience, add a "sonnet" alias for complex tasks:
 ```toml
 [models.sonnet]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-4-5"
 ```
 
 ## Configuration Commands

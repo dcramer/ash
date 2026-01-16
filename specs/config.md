@@ -69,13 +69,13 @@ api_key = "..."  # or OPENAI_API_KEY env
 # Named model configurations
 [models.default]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-4-5"
 temperature = 0.7
 max_tokens = 4096
 
 [models.sonnet]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-sonnet-4-5"
 max_tokens = 8192
 
 # Per-skill model overrides

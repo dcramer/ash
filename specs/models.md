@@ -37,18 +37,18 @@ Files: src/ash/config/models.py, src/ash/config/loader.py, src/ash/llm/registry.
 # Named model configurations
 [models.default]
 provider = "anthropic"
-model = "claude-3-5-haiku-20241022"  # Fast, cheap for simple tasks
+model = "claude-3-5-haiku"  # Fast, cheap for simple tasks
 temperature = 0.7  # Optional - omit to use API default
 max_tokens = 4096
 
 [models.sonnet]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"  # More capable for complex tasks
+model = "claude-sonnet-4-5"  # More capable for complex tasks
 max_tokens = 8192
 
 [models.reasoning]
 provider = "anthropic"
-model = "claude-3-5-opus-20241219"
+model = "claude-3-5-opus"
 # temperature omitted for reasoning models that don't support it
 max_tokens = 8192
 
@@ -69,7 +69,7 @@ model = "sonnet"  # Use more capable model for code review
 # Backward compatibility (maps to models.default if no [models] section)
 [default_llm]
 provider = "anthropic"
-model = "claude-3-5-haiku-20241022"
+model = "claude-3-5-haiku"
 ```
 
 ### Python Classes

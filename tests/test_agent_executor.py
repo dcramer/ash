@@ -42,7 +42,7 @@ class TestAgentExecutorModelResolution:
                     role=Role.ASSISTANT,
                     content=[TextContent(text="Done")],
                 ),
-                model="claude-sonnet-4-5-20250929",
+                model="claude-sonnet-4-5",
                 usage=MagicMock(input_tokens=10, output_tokens=5),
             )
         )
@@ -60,12 +60,8 @@ class TestAgentExecutorModelResolution:
         """Create config with multiple models."""
         config = MagicMock(spec=AshConfig)
         config.models = {
-            "default": ModelConfig(
-                provider="anthropic", model="claude-haiku-4-5-20251001"
-            ),
-            "sonnet": ModelConfig(
-                provider="anthropic", model="claude-sonnet-4-5-20250929"
-            ),
+            "default": ModelConfig(provider="anthropic", model="claude-haiku-4-5"),
+            "sonnet": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
         }
         config.default_model = config.models["default"]
         config.agents = {}
@@ -92,7 +88,7 @@ class TestAgentExecutorModelResolution:
         # Verify LLM was called with resolved model
         mock_llm.complete.assert_called_once()
         call_kwargs = mock_llm.complete.call_args
-        assert call_kwargs.kwargs["model"] == "claude-sonnet-4-5-20250929"
+        assert call_kwargs.kwargs["model"] == "claude-sonnet-4-5"
 
     @pytest.mark.asyncio
     async def test_agent_without_model_uses_none(
@@ -131,7 +127,7 @@ class TestAgentExecutorModelResolution:
         # Verify LLM was called with config override model
         mock_llm.complete.assert_called_once()
         call_kwargs = mock_llm.complete.call_args
-        assert call_kwargs.kwargs["model"] == "claude-sonnet-4-5-20250929"
+        assert call_kwargs.kwargs["model"] == "claude-sonnet-4-5"
 
     @pytest.mark.asyncio
     async def test_invalid_model_alias_returns_error(
