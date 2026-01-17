@@ -41,7 +41,29 @@ MIN_EDIT_INTERVAL = 1.0  # Minimum time between edits
 
 
 def escape_markdown_v2(text: str) -> str:
-    """Escape special characters for Telegram MarkdownV2."""
+    """Escape special characters for Telegram MarkdownV2 format.
+
+    Telegram supports two markdown modes: MARKDOWN (legacy) and MARKDOWN_V2.
+    MarkdownV2 requires ALL special characters to be escaped with backslash,
+    even inside regular text. This is different from standard markdown.
+
+    Special characters that MUST be escaped in MarkdownV2:
+        _ * [ ] ( ) ~ ` > # + - = | { } . !
+
+    Example:
+        escape_markdown_v2("Hello...") → "Hello\\.\\.\\."
+        escape_markdown_v2("(test)") → "\\(test\\)"
+
+    When to use:
+        - Always escape user-provided text before including in MarkdownV2 messages
+        - Status/thinking messages use MarkdownV2 for consistent formatting
+        - Final responses use regular MARKDOWN (more forgiving, less escaping)
+
+    Note:
+        In Python string literals, backslashes must be doubled.
+        So "_Thinking\\\\.\\\\.\\\\._" becomes "_Thinking\\.\\.\\._" at runtime,
+        which Telegram interprets as italic "Thinking...".
+    """
     special_chars = r"_*[]()~`>#+-=|{}.!"
     return "".join(f"\\{c}" if c in special_chars else c for c in text)
 
@@ -132,7 +154,23 @@ MAX_MESSAGE_LENGTH = 4096  # Telegram message limit
 
 
 def format_thinking_status(num_tools: int) -> str:
-    """Format a simple thinking status with tool count."""
+    """Format a thinking status line with tool count, pre-escaped for MarkdownV2.
+
+    Returns a MarkdownV2-formatted italic string. All special characters are
+    pre-escaped in the string literal (double backslashes in Python source).
+
+    Examples:
+        format_thinking_status(0) → "_Thinking\\.\\.\\._"
+            Renders as: _Thinking..._  (italic)
+
+        format_thinking_status(2) → "_Thinking\\.\\.\\. \\(2 tool calls\\)_"
+            Renders as: _Thinking... (2 tool calls)_  (italic)
+
+    Note:
+        This function returns MarkdownV2-escaped text. It must be sent with
+        parse_mode="markdown_v2" to render correctly. Using regular MARKDOWN
+        mode will show literal backslashes.
+    """
     if num_tools == 0:
         return "_Thinking\\.\\.\\._"
     call_word = "call" if num_tools == 1 else "calls"
@@ -140,7 +178,20 @@ def format_thinking_status(num_tools: int) -> str:
 
 
 def format_tool_summary(num_tools: int, elapsed_seconds: float) -> str:
-    """Format a summary of tool calls."""
+    """Format a summary of tool calls for regular MARKDOWN (not MarkdownV2).
+
+    Returns a MARKDOWN-formatted italic string. Unlike format_thinking_status(),
+    this function does NOT escape for MarkdownV2 because the final response
+    is edited with regular MARKDOWN mode (more forgiving of special chars).
+
+    Examples:
+        format_tool_summary(3, 5.2) → "_Made 3 tool calls in 5.2s_"
+            Renders as: _Made 3 tool calls in 5.2s_  (italic)
+
+    Note:
+        This is used in final responses, not thinking messages. The period in
+        the elapsed time is NOT escaped because regular MARKDOWN doesn't require it.
+    """
     call_word = "call" if num_tools == 1 else "calls"
     return f"_Made {num_tools} tool {call_word} in {elapsed_seconds:.1f}s_"
 
@@ -258,21 +309,34 @@ class ToolTracker:
         self.progress_messages: list[str] = []
         self.start_time: float | None = None
 
-    def _build_display_message(self, status: str, final_content: str = "") -> str:
+    def _build_display_message(
+        self, status: str, final_content: str = "", *, escape_progress: bool = True
+    ) -> str:
         """Build the consolidated message, truncating if needed.
 
         Args:
-            status: The status line (thinking or summary)
-            final_content: Optional final response content
+            status: The status line (pre-escaped for MarkdownV2 if used with that mode)
+            final_content: Optional final response content (NOT escaped)
+            escape_progress: Whether to escape progress messages for MarkdownV2.
+                Set to True when the message will be sent with parse_mode="markdown_v2".
 
         Returns:
-            Message content, truncated to fit Telegram's limit
+            Message content, truncated to fit Telegram's limit.
+
+        Note:
+            This method combines MarkdownV2-escaped status with progress messages.
+            Progress messages are escaped when escape_progress=True to prevent
+            special characters from breaking the MarkdownV2 parsing.
         """
         parts = [status]
 
         if self.progress_messages:
             parts.append("")  # Blank line after status
-            parts.extend(self.progress_messages)
+            if escape_progress:
+                escaped = [escape_markdown_v2(m) for m in self.progress_messages]
+                parts.extend(escaped)
+            else:
+                parts.extend(self.progress_messages)
 
         if final_content:
             parts.append("")  # Blank line before final content
@@ -287,7 +351,11 @@ class ToolTracker:
         # Truncate oldest progress messages until it fits
         # Keep status + final content, drop progress messages from the start
         truncated_progress = self.progress_messages.copy()
-        truncation_notice = "[...earlier messages truncated...]"
+        truncation_notice = (
+            escape_markdown_v2("[...earlier messages truncated...]")
+            if escape_progress
+            else "[...earlier messages truncated...]"
+        )
 
         while truncated_progress and len(message) > MAX_MESSAGE_LENGTH:
             truncated_progress.pop(0)
@@ -295,7 +363,10 @@ class ToolTracker:
             if truncated_progress:
                 parts.append("")
                 parts.append(truncation_notice)
-                parts.extend(truncated_progress)
+                if escape_progress:
+                    parts.extend(escape_markdown_v2(m) for m in truncated_progress)
+                else:
+                    parts.extend(truncated_progress)
             if final_content:
                 parts.append("")
                 parts.append(final_content)
@@ -374,10 +445,17 @@ class ToolTracker:
         return ""
 
     async def finalize_response(self, response_content: str) -> str:
-        """Send or edit the final response, returning the message ID."""
+        """Send or edit the final response, returning the message ID.
+
+        The final response is edited with regular MARKDOWN mode (not MarkdownV2),
+        so progress messages are NOT escaped. This allows the response content
+        to use standard markdown formatting.
+        """
         summary = self.get_summary_prefix()
         final_content = (
-            self._build_display_message(summary, response_content)
+            self._build_display_message(
+                summary, response_content, escape_progress=False
+            )
             if summary
             else response_content
         )
@@ -1068,7 +1146,10 @@ class TelegramMessageHandler:
 
         summary = tracker.get_summary_prefix()
         if summary or tracker.progress_messages:
-            final_content = tracker._build_display_message(summary, response_content)
+            # Final response uses regular MARKDOWN, not MarkdownV2
+            final_content = tracker._build_display_message(
+                summary, response_content, escape_progress=False
+            )
         else:
             final_content = response_content
 
@@ -1250,7 +1331,10 @@ class TelegramMessageHandler:
         summary = tracker.get_summary_prefix()
         response_text = response.text or ""
         if summary or tracker.progress_messages:
-            final_content = tracker._build_display_message(summary, response_text)
+            # Final response uses regular MARKDOWN, not MarkdownV2
+            final_content = tracker._build_display_message(
+                summary, response_text, escape_progress=False
+            )
         else:
             final_content = response_text
 
@@ -1286,7 +1370,10 @@ class TelegramMessageHandler:
             )
             reply_markup = create_checkpoint_keyboard(checkpoint)
             checkpoint_msg = format_checkpoint_message(checkpoint)
-            final_content = tracker._build_display_message(summary, checkpoint_msg)
+            # Checkpoint message uses regular MARKDOWN, not MarkdownV2
+            final_content = tracker._build_display_message(
+                summary, checkpoint_msg, escape_progress=False
+            )
             logger.info(
                 "Checkpoint detected, showing inline keyboard (id=%s, agent=%s)",
                 truncated_id,
@@ -1624,20 +1711,6 @@ class TelegramMessageHandler:
             except Exception as e:
                 logger.debug("Failed to update message: %s", e)
 
-        # Send immediate feedback that work is resuming
-        resuming_msg_id: str | None = None
-        try:
-            resuming_msg_id = await self._provider.send(
-                OutgoingMessage(
-                    chat_id=chat_id,
-                    text="_Resuming\\.\\.\\._",
-                    reply_to_message_id=checkpoint_message_id,
-                    parse_mode="markdown_v2",
-                )
-            )
-        except Exception as e:
-            logger.debug("Failed to send resuming indicator: %s", e)
-
         # Check if we can use direct tool invocation
         has_agent_context = agent_name and original_message and checkpoint_id
         has_tool_registry = self._tool_registry and self._tool_registry.has("use_agent")
@@ -1649,12 +1722,6 @@ class TelegramMessageHandler:
                 reason,
                 truncated_id,
             )
-            # Delete resuming indicator before fallback
-            if resuming_msg_id:
-                try:
-                    await self._provider.delete(chat_id, resuming_msg_id)
-                except Exception as e:
-                    logger.debug("Failed to delete resuming indicator: %s", e)
             # Clear checkpoint before fallback (fallback will create new session context)
             self._clear_checkpoint(truncated_id)
             await self._handle_checkpoint_via_message(
@@ -1702,6 +1769,18 @@ class TelegramMessageHandler:
                 truncated_id,
             )
 
+        # Create tracker for resume flow (reply to checkpoint message)
+        # This enables send_message tool calls and "Thinking..." indicator
+        tracker = ToolTracker(
+            provider=self._provider,
+            chat_id=chat_id,
+            reply_to=checkpoint_message_id or "",
+            config=self._config,
+            agent_registry=self._agent_registry,
+            skill_registry=self._skill_registry,
+        )
+        self._register_progress_tool(tracker)
+
         tool_context = ToolContext(
             session_id=session_key,
             user_id=user_id,
@@ -1725,12 +1804,12 @@ class TelegramMessageHandler:
             result = await use_agent_tool.execute(tool_input, tool_context)
         except Exception as e:
             logger.exception("Error calling use_agent tool directly")
-            # Delete resuming indicator before error message
-            if resuming_msg_id:
+            # Clean up thinking message if it was created
+            if tracker.thinking_msg_id:
                 try:
-                    await self._provider.delete(chat_id, resuming_msg_id)
-                except Exception as e:
-                    logger.debug("Failed to delete resuming indicator: %s", e)
+                    await self._provider.delete(chat_id, tracker.thinking_msg_id)
+                except Exception as delete_err:
+                    logger.debug("Failed to delete thinking message: %s", delete_err)
             # Don't clear checkpoint on error - user can retry
             await self._provider.send(
                 OutgoingMessage(
@@ -1779,23 +1858,30 @@ class TelegramMessageHandler:
                 new_truncated_id,
             )
 
-        # Delete resuming indicator before sending actual response
-        if resuming_msg_id:
-            try:
-                await self._provider.delete(chat_id, resuming_msg_id)
-            except Exception as e:
-                logger.debug("Failed to delete resuming indicator: %s", e)
-
-        # Send the response (reply to checkpoint message for threading)
+        # Finalize response using tracker
+        sent_message_id: str | None = None
         if response_text.strip():
-            sent_message_id = await self._provider.send(
-                OutgoingMessage(
-                    chat_id=chat_id,
-                    text=response_text,
-                    reply_to_message_id=checkpoint_message_id,
-                    reply_markup=reply_markup,
+            if reply_markup:
+                # Nested checkpoint: need keyboard, delete thinking msg and send new
+                if tracker.thinking_msg_id:
+                    try:
+                        await self._provider.delete(chat_id, tracker.thinking_msg_id)
+                    except Exception as delete_err:
+                        logger.debug(
+                            "Failed to delete thinking message: %s", delete_err
+                        )
+                # Send new message with keyboard
+                sent_message_id = await self._provider.send(
+                    OutgoingMessage(
+                        chat_id=chat_id,
+                        text=response_text,
+                        reply_to_message_id=checkpoint_message_id,
+                        reply_markup=reply_markup,
+                    )
                 )
-            )
+            else:
+                # No nested checkpoint - use tracker finalization
+                sent_message_id = await tracker.finalize_response(response_text)
 
             # Persist the interaction to session
             session_manager = self._get_session_manager(chat_id, user_id, thread_id)
