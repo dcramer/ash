@@ -228,6 +228,7 @@ class TestCompletionResponse:
             model="claude-3-sonnet",
         )
         assert response.message is message
+        assert response.usage is not None
         assert response.usage.input_tokens == 10
         assert response.stop_reason == "end_turn"
         assert response.model == "claude-3-sonnet"

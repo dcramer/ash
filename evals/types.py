@@ -59,7 +59,8 @@ class EvalCase(BaseModel):
     description: str = Field(description="Human-readable description of the test")
     prompt: str = Field(description="User message to send to the agent")
     expected_behavior: str = Field(
-        description="Description of what the agent should do"
+        default="",
+        description="Description of what the agent should do",
     )
     criteria: list[str] = Field(
         default_factory=list,
@@ -80,6 +81,10 @@ class EvalCase(BaseModel):
     phase_constraints: dict[str, PhaseConstraint] | None = Field(
         default=None,
         description="Per-phase tool constraints for multi-turn evals",
+    )
+    input_data: dict[str, str] | None = Field(
+        default=None,
+        description="Optional input data to pass to the agent context",
     )
 
 

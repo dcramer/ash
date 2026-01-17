@@ -95,12 +95,14 @@ class AgentContext:
     provider: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     input_data: dict[str, Any] = field(default_factory=dict)
+    voice: str | None = None  # Communication style for user-facing messages
 
     @classmethod
     def from_tool_context(
         cls,
         ctx: "ToolContext",
         input_data: dict[str, Any] | None = None,
+        voice: str | None = None,
     ) -> "AgentContext":
         """Create AgentContext from ToolContext, preserving all shared fields."""
         return cls(
@@ -111,6 +113,7 @@ class AgentContext:
             provider=ctx.provider,
             metadata=dict(ctx.metadata) if ctx.metadata else {},
             input_data=input_data or {},
+            voice=voice,
         )
 
 

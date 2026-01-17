@@ -212,9 +212,12 @@ class TestChatStateModel:
         state.update_participant("user-3", None, "Charlie")
 
         assert len(state.participants) == 3
-        assert state.get_participant("user-1").username == "alice"
-        assert state.get_participant("user-2").username == "bob"
-        assert state.get_participant("user-3").username is None
+        p1 = state.get_participant("user-1")
+        p2 = state.get_participant("user-2")
+        p3 = state.get_participant("user-3")
+        assert p1 is not None and p1.username == "alice"
+        assert p2 is not None and p2.username == "bob"
+        assert p3 is not None and p3.username is None
 
 
 class TestChatStateManager:
@@ -600,6 +603,7 @@ class TestBidirectionalReferences:
 
         state = manager.load()
         participant = state.get_participant("user-1")
+        assert participant is not None
         assert participant.session_id == "telegram_-123456_user-1"
 
     def test_telegram_handler_sets_session_id(
@@ -709,6 +713,7 @@ class TestBidirectionalReferences:
 
         chat_state = chat_state_manager.load()
         participant = chat_state.get_participant(user_id)
+        assert participant is not None
         assert participant.session_id == sess_id
 
         session_state_data = json.loads(session_manager.state_path.read_text())

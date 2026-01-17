@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
 import openai
+import openai.types.chat
 
 from ash.llm.base import LLMProvider
 from ash.llm.types import (
@@ -158,13 +159,17 @@ class OpenAIProvider(LLMProvider):
 
         if msg.tool_calls:
             for tool_call in msg.tool_calls:
-                content.append(
-                    ToolUse(
-                        id=tool_call.id,
-                        name=tool_call.function.name,
-                        input=json.loads(tool_call.function.arguments),
+                if isinstance(
+                    tool_call,
+                    openai.types.chat.ChatCompletionMessageFunctionToolCall,
+                ):
+                    content.append(
+                        ToolUse(
+                            id=tool_call.id,
+                            name=tool_call.function.name,
+                            input=json.loads(tool_call.function.arguments),
+                        )
                     )
-                )
 
         usage = None
         if response.usage:

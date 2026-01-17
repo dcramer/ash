@@ -1,9 +1,11 @@
 """Built-in agents shipped with Ash."""
 
+from ash.agents.builtin.plan import PlanAgent
 from ash.agents.builtin.research import ResearchAgent
 from ash.agents.builtin.skill_writer import SkillWriterAgent
 
 __all__ = [
+    "PlanAgent",
     "ResearchAgent",
     "SkillWriterAgent",
 ]
@@ -15,5 +17,6 @@ def register_builtin_agents(registry) -> None:
     Args:
         registry: AgentRegistry to register agents with.
     """
+    registry.register(PlanAgent())
     registry.register(ResearchAgent())
     registry.register(SkillWriterAgent())

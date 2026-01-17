@@ -102,6 +102,17 @@ class SkillAgent(Agent):
         if user_context:
             prompt += f"\n\n## Context\n\n{user_context}"
 
+        # Add voice guidance for user-facing messages
+        if context.voice:
+            prompt += f"""
+
+## Communication Style (for user-facing messages only)
+
+{context.voice}
+
+IMPORTANT: Apply this style ONLY to interrupt() prompts that users will see.
+Do NOT apply it to tool outputs, file content, or technical results."""
+
         return prompt
 
 
@@ -117,6 +128,7 @@ class UseSkillTool(Tool):
         registry: "SkillRegistry",
         executor: "AgentExecutor",
         config: "AshConfig",
+        voice: str | None = None,
     ) -> None:
         """Initialize the tool.
 
@@ -124,10 +136,12 @@ class UseSkillTool(Tool):
             registry: Skill registry to look up skills.
             executor: Agent executor to run skill agents.
             config: Application configuration for skill settings.
+            voice: Optional communication style for user-facing skill messages.
         """
         self._registry = registry
         self._executor = executor
         self._config = config
+        self._voice = voice
 
     @property
     def name(self) -> str:
@@ -234,10 +248,12 @@ class UseSkillTool(Tool):
 
         if context:
             agent_context = AgentContext.from_tool_context(
-                context, input_data={"context": user_context}
+                context, input_data={"context": user_context}, voice=self._voice
             )
         else:
-            agent_context = AgentContext(input_data={"context": user_context})
+            agent_context = AgentContext(
+                input_data={"context": user_context}, voice=self._voice
+            )
 
         logger.info(f"Invoking skill '{skill_name}' with message: {message[:100]}...")
 

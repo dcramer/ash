@@ -159,6 +159,7 @@ class TestLoadConfig:
 
     def test_load_from_file(self, config_file):
         config = load_config(config_file)
+        assert config.default_llm is not None
         assert config.default_llm.provider == "anthropic"
         assert config.default_llm.model == "claude-sonnet-4-5"
 
@@ -326,6 +327,7 @@ class TestNamedModelConfigs:
             anthropic=ProviderConfig(api_key=SecretStr("config-key")),
         )
         api_key = config.resolve_api_key("default")
+        assert api_key is not None
         assert api_key.get_secret_value() == "config-key"
 
     def test_resolve_api_key_none_if_missing(self, monkeypatch):

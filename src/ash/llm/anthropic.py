@@ -144,9 +144,9 @@ class AnthropicProvider(LLMProvider):
         content: list[ContentBlock] = []
 
         for block in response.content:
-            if block.type == "text":
+            if isinstance(block, anthropic.types.TextBlock):
                 content.append(TextContent(text=block.text))
-            elif block.type == "tool_use":
+            elif isinstance(block, anthropic.types.ToolUseBlock):
                 content.append(
                     ToolUse(
                         id=block.id,
@@ -226,11 +226,13 @@ class AnthropicProvider(LLMProvider):
             logger.debug(f"Acquired API slot, streaming {model_name}")
             async with self._client.messages.stream(**kwargs) as stream:
                 async for event in stream:
-                    if event.type == "message_start":
+                    if isinstance(event, anthropic.types.MessageStartEvent):
                         yield StreamChunk(type=StreamEventType.MESSAGE_START)
 
-                    elif event.type == "content_block_start":
-                        if event.content_block.type == "tool_use":
+                    elif isinstance(event, anthropic.types.ContentBlockStartEvent):
+                        if isinstance(
+                            event.content_block, anthropic.types.ToolUseBlock
+                        ):
                             current_tool_id = event.content_block.id
                             yield StreamChunk(
                                 type=StreamEventType.TOOL_USE_START,
@@ -238,20 +240,20 @@ class AnthropicProvider(LLMProvider):
                                 tool_name=event.content_block.name,
                             )
 
-                    elif event.type == "content_block_delta":
-                        if event.delta.type == "text_delta":
+                    elif isinstance(event, anthropic.types.ContentBlockDeltaEvent):
+                        if isinstance(event.delta, anthropic.types.TextDelta):
                             yield StreamChunk(
                                 type=StreamEventType.TEXT_DELTA,
                                 content=event.delta.text,
                             )
-                        elif event.delta.type == "input_json_delta":
+                        elif isinstance(event.delta, anthropic.types.InputJSONDelta):
                             yield StreamChunk(
                                 type=StreamEventType.TOOL_USE_DELTA,
                                 content=event.delta.partial_json,
                                 tool_use_id=current_tool_id,
                             )
 
-                    elif event.type == "content_block_stop":
+                    elif isinstance(event, anthropic.types.ContentBlockStopEvent):
                         if current_tool_id:
                             yield StreamChunk(
                                 type=StreamEventType.TOOL_USE_END,
@@ -259,7 +261,7 @@ class AnthropicProvider(LLMProvider):
                             )
                             current_tool_id = None
 
-                    elif event.type == "message_stop":
+                    elif isinstance(event, anthropic.types.MessageStopEvent):
                         yield StreamChunk(type=StreamEventType.MESSAGE_END)
             logger.debug("Stream complete")
 

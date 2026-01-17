@@ -703,6 +703,20 @@ class Agent:
             )
             tool_calls.extend(new_calls)
 
+            # Check if any tool returned a checkpoint - stop loop to wait for user input
+            checkpoint = _extract_checkpoint(tool_calls)
+            if checkpoint:
+                self._maybe_spawn_memory_extraction(
+                    user_message, setup.effective_user_id, session
+                )
+                return AgentResponse(
+                    text=response.message.get_text() or "",
+                    tool_calls=tool_calls,
+                    iterations=iterations,
+                    compaction=compaction_info,
+                    checkpoint=checkpoint,
+                )
+
             if steering:
                 for msg in steering:
                     if msg.text:
@@ -979,9 +993,13 @@ async def create_agent(
 
     agent_executor = AgentExecutor(llm, tool_executor, config)
     tool_registry.register(
-        UseAgentTool(agent_registry, agent_executor, skill_registry, config)
+        UseAgentTool(
+            agent_registry, agent_executor, skill_registry, config, voice=workspace.soul
+        )
     )
-    tool_registry.register(UseSkillTool(skill_registry, agent_executor, config))
+    tool_registry.register(
+        UseSkillTool(skill_registry, agent_executor, config, voice=workspace.soul)
+    )
 
     runtime = RuntimeInfo.from_environment(
         model=model_config.model,

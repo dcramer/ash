@@ -1,0 +1,52 @@
+name: Plan Agent Behavior
+description: Core tests for plan agent structure and context handling
+
+cases:
+  # Primary test: structure, scannability, and checkpoint behavior
+  - id: structured_plan
+    description: Plan should be structured, scannable, and checkpoint correctly
+    prompt: "Plan implementation for adding user authentication to a web app"
+    expected_behavior: |
+      The agent should:
+      1. Create a structured plan with multiple phases
+      2. Each phase has actions and verification steps
+      3. Use bullet points for scannability (not paragraphs)
+      4. Call interrupt to present plan for approval
+      5. Provide options like Approve/Modify/Cancel
+    criteria:
+      - Output contains multiple phases
+      - Each phase has actions and verification
+      - Uses bullet points, not paragraphs
+      - Calls interrupt tool
+      - Provides approval options
+    expected_tools:
+      - interrupt
+    tags:
+      - plan_quality
+      - structure
+      - checkpoint
+
+  # Secondary test: context awareness
+  - id: uses_research_input
+    description: Plan should incorporate provided research findings
+    prompt: "Create skill implementation plan"
+    input_data:
+      research: |
+        **API**: OpenWeatherMap (https://openweathermap.org/api)
+        **Auth**: API key required
+        **Data**: JSON with temp, humidity, conditions
+        **Approach**: Python script with httpx
+      skill_type: python
+      skill_name: weather
+    expected_behavior: |
+      The agent should:
+      1. Reference the OpenWeatherMap API in the plan
+      2. Include API key configuration step
+      3. Plan for Python implementation
+    criteria:
+      - References OpenWeatherMap or the provided API
+      - Includes API key/authentication setup
+      - Plans for Python-based implementation
+    tags:
+      - input_handling
+      - context_awareness

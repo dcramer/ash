@@ -37,6 +37,7 @@ class UseAgentTool(Tool):
         executor: "AgentExecutor",
         skill_registry: "SkillRegistry | None" = None,
         config: "AshConfig | None" = None,
+        voice: str | None = None,
     ) -> None:
         """Initialize the tool.
 
@@ -45,11 +46,13 @@ class UseAgentTool(Tool):
             executor: Agent executor to run agents.
             skill_registry: Optional skill registry for reloading after skill-writer.
             config: Optional config for workspace path.
+            voice: Optional communication style for user-facing subagent messages.
         """
         self._registry = registry
         self._executor = executor
         self._skill_registry = skill_registry
         self._config = config
+        self._voice = voice
         # In-memory checkpoint storage (keyed by checkpoint_id)
         # In production, this would be stored in the session via SessionManager
         self._pending_checkpoints: dict[str, CheckpointState] = {}
@@ -147,10 +150,10 @@ class UseAgentTool(Tool):
 
         if context:
             agent_context = AgentContext.from_tool_context(
-                context, input_data=extra_input
+                context, input_data=extra_input, voice=self._voice
             )
         else:
-            agent_context = AgentContext(input_data=extra_input)
+            agent_context = AgentContext(input_data=extra_input, voice=self._voice)
 
         # Handle resume from checkpoint
         resume_from: CheckpointState | None = None
@@ -197,7 +200,7 @@ class UseAgentTool(Tool):
                 )
 
             return ToolResult.success(
-                f"**Agent paused for input**\n\n{checkpoint.prompt}{options_str}",
+                f"{checkpoint.prompt}{options_str}",
                 **{CHECKPOINT_METADATA_KEY: checkpoint.to_dict()},
             )
 
