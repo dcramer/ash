@@ -226,3 +226,187 @@ class TestDefaultRedactPatterns:
         for pattern in DEFAULT_REDACT_PATTERNS:
             # Should not raise
             re.compile(pattern, re.IGNORECASE)
+
+
+class TestLogContext:
+    """Tests for log_context context manager and related functions."""
+
+    def test_short_id_with_none(self):
+        from ash.logging import _short_id
+
+        assert _short_id(None) == ""
+
+    def test_short_id_with_empty_string(self):
+        from ash.logging import _short_id
+
+        assert _short_id("") == ""
+
+    def test_short_id_with_telegram_session_key(self):
+        from ash.logging import _short_id
+
+        # Should extract chat part from telegram session key
+        assert _short_id("telegram_-542863895_1234") == "-5428638"
+
+    def test_short_id_with_discord_session_key(self):
+        from ash.logging import _short_id
+
+        assert _short_id("discord_12345678_user") == "12345678"
+
+    def test_short_id_with_slack_session_key(self):
+        from ash.logging import _short_id
+
+        assert _short_id("slack_C01234_U56789") == "C01234"
+
+    def test_short_id_with_regular_string(self):
+        from ash.logging import _short_id
+
+        assert _short_id("some_session_id_here") == "some_ses"
+
+    def test_short_id_with_custom_length(self):
+        from ash.logging import _short_id
+
+        assert _short_id("telegram_-542863895_1234", max_len=5) == "-5428"
+
+    def test_log_context_sets_contextvars(self):
+        from ash.logging import _log_chat_id, _log_session_id, log_context
+
+        # Before context
+        assert _log_chat_id.get() is None
+        assert _log_session_id.get() is None
+
+        with log_context(chat_id="chat123", session_id="session456"):
+            assert _log_chat_id.get() == "chat123"
+            assert _log_session_id.get() == "session456"
+
+        # After context
+        assert _log_chat_id.get() is None
+        assert _log_session_id.get() is None
+
+    def test_log_context_with_only_chat_id(self):
+        from ash.logging import _log_chat_id, _log_session_id, log_context
+
+        with log_context(chat_id="chat123"):
+            assert _log_chat_id.get() == "chat123"
+            assert _log_session_id.get() is None
+
+    def test_log_context_with_only_session_id(self):
+        from ash.logging import _log_chat_id, _log_session_id, log_context
+
+        with log_context(session_id="session456"):
+            assert _log_chat_id.get() is None
+            assert _log_session_id.get() == "session456"
+
+    def test_log_context_nested(self):
+        from ash.logging import _log_chat_id, _log_session_id, log_context
+
+        with log_context(chat_id="outer_chat"):
+            assert _log_chat_id.get() == "outer_chat"
+
+            with log_context(chat_id="inner_chat", session_id="inner_session"):
+                assert _log_chat_id.get() == "inner_chat"
+                assert _log_session_id.get() == "inner_session"
+
+            # Back to outer
+            assert _log_chat_id.get() == "outer_chat"
+            assert _log_session_id.get() is None
+
+
+class TestComponentFormatter:
+    """Tests for ComponentFormatter with context injection."""
+
+    def test_extracts_component_from_ash_logger(self):
+        import logging
+
+        from ash.logging import ComponentFormatter
+
+        formatter = ComponentFormatter("%(component)s: %(message)s")
+        record = logging.LogRecord(
+            name="ash.providers.telegram",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+        result = formatter.format(record)
+        assert "providers:" in result
+
+    def test_extracts_component_from_non_ash_logger(self):
+        import logging
+
+        from ash.logging import ComponentFormatter
+
+        formatter = ComponentFormatter("%(component)s: %(message)s")
+        record = logging.LogRecord(
+            name="httpx.client",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+        result = formatter.format(record)
+        assert "httpx:" in result
+
+    def test_injects_context_when_available(self):
+        import logging
+
+        from ash.logging import ComponentFormatter, log_context
+
+        formatter = ComponentFormatter("%(context)s%(component)s: %(message)s")
+        record = logging.LogRecord(
+            name="ash.agents",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+
+        with log_context(chat_id="-542863895"):
+            result = formatter.format(record)
+            assert "[-5428638]" in result
+
+    def test_no_context_when_not_set(self):
+        import logging
+
+        from ash.logging import ComponentFormatter
+
+        formatter = ComponentFormatter("%(context)s%(component)s: %(message)s")
+        record = logging.LogRecord(
+            name="ash.agents",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+        result = formatter.format(record)
+        # Should not have brackets when no context
+        assert "[" not in result or "[]" in result  # Allow empty brackets
+
+    def test_context_with_session_id_different_from_chat_id(self):
+        import logging
+
+        from ash.logging import ComponentFormatter, log_context
+
+        formatter = ComponentFormatter("%(context)s%(component)s: %(message)s")
+        record = logging.LogRecord(
+            name="ash.agents",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+
+        with log_context(chat_id="-542863895", session_id="abc123def456"):
+            result = formatter.format(record)
+            # Should have both chat and session
+            assert "-5428638" in result
+            assert "s:abc123" in result

@@ -3,15 +3,20 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from ash.core.agent import Agent
 from ash.core.session import SessionState
 from ash.llm.base import LLMProvider
-from evals.judge import LLMJudge
+from evals.judge import LLMJudge, check_forbidden_tools
 from evals.types import EvalCase, EvalConfig, EvalSuite, JudgeResult
+
+if TYPE_CHECKING:
+    from ash.agents.base import Agent as SubAgent
+    from ash.agents.base import AgentContext, AgentResult
+    from ash.agents.executor import AgentExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +209,17 @@ async def run_eval_case(
             user_id="eval-user",
         )
 
-        # Judge the response
+        # Pre-judge: Check forbidden tools deterministically
+        forbidden_result = check_forbidden_tools(case, response.tool_calls)
+        if forbidden_result:
+            return EvalResult(
+                case=case,
+                response_text=response.text,
+                tool_calls=response.tool_calls,
+                judge_result=forbidden_result,
+            )
+
+        # Judge the response with LLM
         judge = LLMJudge(judge_llm, config)
         judge_result = await judge.evaluate(
             case=case,
@@ -292,3 +307,180 @@ async def run_eval_suite(
         )
 
     return report
+
+
+# Multi-turn evaluation support for agents with checkpoints
+
+
+@dataclass
+class MultiTurnEvalResult:
+    """Result from running a multi-turn eval (agent with checkpoints)."""
+
+    case: EvalCase
+    final_result: "AgentResult"
+    phase_results: list["AgentResult"]  # Results per phase (between checkpoints)
+    phase_tool_calls: list[list[dict[str, Any]]]  # Tool calls per phase
+    total_iterations: int
+
+    @property
+    def all_tool_calls(self) -> list[dict[str, Any]]:
+        """Flatten all tool calls across phases."""
+        return [tc for phase in self.phase_tool_calls for tc in phase]
+
+
+async def run_agent_to_completion(
+    executor: "AgentExecutor",
+    agent: "SubAgent",
+    input_message: str,
+    context: "AgentContext",
+    *,
+    max_checkpoints: int = 10,
+    auto_approve: str = "Proceed",
+) -> tuple["AgentResult", list["AgentResult"]]:
+    """Run an agent through all checkpoints to completion.
+
+    Automatically approves each checkpoint with the specified response,
+    allowing multi-phase agents (like skill-writer) to run to completion.
+
+    Args:
+        executor: The agent executor.
+        agent: The agent to run.
+        input_message: Initial user message/task.
+        context: Execution context.
+        max_checkpoints: Maximum checkpoints before giving up.
+        auto_approve: Response to send at each checkpoint.
+
+    Returns:
+        Tuple of (final_result, all_intermediate_results_including_final)
+    """
+    results: list[AgentResult] = []
+    result = await executor.execute(agent, input_message, context)
+    results.append(result)
+
+    checkpoint_count = 0
+    while result.checkpoint and checkpoint_count < max_checkpoints:
+        result = await executor.execute(
+            agent,
+            input_message,
+            context,
+            resume_from=result.checkpoint,
+            user_response=auto_approve,
+        )
+        results.append(result)
+        checkpoint_count += 1
+
+    return result, results
+
+
+def extract_tool_calls_from_session(session_json: str) -> list[dict[str, Any]]:
+    """Extract tool calls from a serialized session.
+
+    Parses the session JSON and extracts all tool_use blocks from
+    assistant messages.
+
+    Args:
+        session_json: JSON serialized SessionState.
+
+    Returns:
+        List of tool call dicts with 'name' and 'input' keys.
+    """
+    import json
+
+    data = json.loads(session_json)
+    tool_calls: list[dict[str, Any]] = []
+
+    for message in data.get("messages", []):
+        if message.get("role") != "assistant":
+            continue
+
+        content = message.get("content", [])
+        if isinstance(content, str):
+            continue
+
+        for block in content:
+            if block.get("type") == "tool_use":
+                tool_calls.append(
+                    {
+                        "name": block.get("name", ""),
+                        "input": block.get("input", {}),
+                        "id": block.get("id", ""),
+                    }
+                )
+
+    return tool_calls
+
+
+def extract_phase_tool_calls(
+    results: list["AgentResult"],
+) -> list[list[dict[str, Any]]]:
+    """Extract tool calls for each phase from multi-turn results.
+
+    Each phase ends with an interrupt checkpoint. Returns list of tool call
+    lists, one per phase.
+
+    Args:
+        results: List of AgentResults from run_agent_to_completion.
+
+    Returns:
+        List of tool call lists, one per phase.
+    """
+    phases: list[list[dict[str, Any]]] = []
+    prev_tool_count = 0
+
+    for result in results:
+        # Get tool calls from checkpoint session if available
+        if result.checkpoint:
+            all_calls = extract_tool_calls_from_session(result.checkpoint.session_json)
+            # Extract only the new calls since last phase
+            phase_calls = all_calls[prev_tool_count:]
+            phases.append(phase_calls)
+            prev_tool_count = len(all_calls)
+        elif not result.is_error:
+            # Final result (no checkpoint) - no session to extract from
+            # The final phase's tool calls are harder to get without checkpoint
+            phases.append([])
+
+    return phases
+
+
+def check_phase_constraints(
+    case: EvalCase,
+    phase_tool_calls: list[list[dict[str, Any]]],
+) -> list[tuple[int, str]]:
+    """Check if phase constraints are violated.
+
+    Args:
+        case: The eval case with optional phase_constraints.
+        phase_tool_calls: Tool calls per phase from extract_phase_tool_calls.
+
+    Returns:
+        List of (phase_index, violation_message) tuples.
+    """
+    violations: list[tuple[int, str]] = []
+    if not case.phase_constraints:
+        return violations
+
+    phase_names = list(case.phase_constraints.keys())
+    for i, phase_name in enumerate(phase_names):
+        if i >= len(phase_tool_calls):
+            break
+
+        constraint = case.phase_constraints[phase_name]
+        tools = phase_tool_calls[i]
+        used = {tc["name"] for tc in tools}
+
+        # Check forbidden tools
+        forbidden_used = used & set(constraint.forbidden_tools)
+        if forbidden_used:
+            violations.append(
+                (i, f"Phase '{phase_name}' used forbidden tools: {forbidden_used}")
+            )
+
+        # Check expected tools
+        missing = set(constraint.expected_tools) - used
+        if missing:
+            violations.append(
+                (i, f"Phase '{phase_name}' missing expected tools: {missing}")
+            )
+
+    return violations

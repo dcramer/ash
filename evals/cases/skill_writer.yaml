@@ -1,0 +1,144 @@
+name: Skill Writer Behavior
+description: Tests for skill-writer agent phase compliance and skill quality
+
+cases:
+  # Phase Compliance Tests
+  - id: research_phase_read_only
+    description: Research phase must not write files or execute code
+    prompt: "Create a skill that converts markdown to HTML using a Python library"
+    expected_behavior: |
+      The agent should:
+      1. Use web_search/web_fetch directly OR delegate to the research agent
+      2. Call interrupt with research findings
+
+      The agent must NOT:
+      - Use bash to test or install anything
+      - Write any files
+    criteria:
+      - Uses web_search/web_fetch or delegates to research agent
+      - Finds a suitable library (e.g., markdown, mistune)
+      - Calls interrupt with research summary
+      - Does not execute any code
+    expected_tools:
+      - interrupt
+    forbidden_tools:
+      - bash
+      - write_file
+    tags:
+      - phase_compliance
+      - research
+
+  - id: plan_phase_read_only
+    description: Plan phase must not write files or execute code
+    prompt: "Create a skill that fetches weather data from an API"
+    expected_behavior: |
+      After research checkpoint, the plan phase should:
+      1. Decide on skill type (Python-based)
+      2. Design file structure
+      3. Call interrupt with implementation plan
+
+      The plan phase must NOT:
+      - Use bash
+      - Write files
+      - Test anything
+    criteria:
+      - Decides skill type with rationale
+      - Describes file structure
+      - Explains how user input flows to output
+      - Does not write or execute anything
+    phase_constraints:
+      research:
+        forbidden_tools:
+          - bash
+          - write_file
+      plan:
+        expected_tools:
+          - interrupt
+        forbidden_tools:
+          - bash
+          - write_file
+        must_checkpoint: true
+    tags:
+      - phase_compliance
+      - plan
+
+  # Skill Quality Tests
+  - id: skill_instructions_actionable
+    description: Created skill should have imperative instructions
+    prompt: "Create a skill that converts text to uppercase"
+    expected_behavior: |
+      The created SKILL.md should contain imperative instructions like:
+      "Convert the user's message to uppercase" NOT passive like
+      "To convert text, run the following command".
+
+      The instructions should reference user input explicitly.
+    criteria:
+      - SKILL.md created successfully
+      - Instructions use imperative voice
+      - Instructions reference user input explicitly
+      - Validation passes
+    tags:
+      - skill_quality
+
+  - id: skill_executes_without_questions
+    description: Invoking skill should execute, not ask clarifying questions
+    prompt: "Create a simple skill that counts words in text"
+    expected_behavior: |
+      After skill creation:
+      1. Invoking use_skill(skill="word-count", message="hello world test")
+         should return "3" or "3 words"
+      2. It should NOT ask "What text would you like me to count?"
+    criteria:
+      - Skill created and validated
+      - Invoking skill returns word count
+      - No clarifying questions asked
+    tags:
+      - skill_quality
+      - execution
+
+  # End-to-End Tests
+  - id: e2e_instruction_only_skill
+    description: Full flow for instruction-only skill
+    prompt: "Create a skill for reviewing Python code for security issues"
+    expected_behavior: |
+      Complete 3-phase flow:
+      1. Research: Find Python security best practices (OWASP, etc.)
+      2. Plan: Design instruction-only skill (no scripts needed)
+      3. Implement: Create SKILL.md with security review guidelines
+      4. Validate: ash-sb skill validate passes
+    criteria:
+      - Completes all 3 phases
+      - No bash/writes during research and plan
+      - Creates instruction-only skill (no .py files)
+      - Validation passes
+    phase_constraints:
+      research:
+        forbidden_tools:
+          - bash
+          - write_file
+      plan:
+        forbidden_tools:
+          - bash
+          - write_file
+    tags:
+      - e2e
+      - instruction_only
+
+  - id: e2e_python_skill
+    description: Full flow for Python-based skill
+    prompt: "Create a skill that fetches a URL and summarizes the content"
+    expected_behavior: |
+      Complete 3-phase flow:
+      1. Research: Find web fetching libraries (httpx, beautifulsoup)
+      2. Plan: Design Python script + SKILL.md
+      3. Implement: Create fetch.py and SKILL.md
+      4. Validate and test
+    criteria:
+      - Completes all 3 phases
+      - No bash/writes during research and plan
+      - Creates .py script with PEP 723 dependencies
+      - SKILL.md references the script correctly
+      - Validation passes
+    tags:
+      - e2e
+      - python_skill

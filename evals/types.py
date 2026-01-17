@@ -6,6 +6,23 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 
+class PhaseConstraint(BaseModel):
+    """Constraints for a specific phase in multi-turn evals."""
+
+    expected_tools: list[str] = Field(
+        default_factory=list,
+        description="Tools that SHOULD be called in this phase",
+    )
+    forbidden_tools: list[str] = Field(
+        default_factory=list,
+        description="Tools that MUST NOT be called in this phase",
+    )
+    must_checkpoint: bool = Field(
+        default=False,
+        description="Whether this phase must end with an interrupt/checkpoint",
+    )
+
+
 @dataclass
 class EvalConfig:
     """Configuration for eval runs.
@@ -55,6 +72,14 @@ class EvalCase(BaseModel):
     tags: list[str] = Field(
         default_factory=list,
         description="Tags for filtering/grouping cases",
+    )
+    forbidden_tools: list[str] = Field(
+        default_factory=list,
+        description="Tools that MUST NOT be called (auto-fail if used)",
+    )
+    phase_constraints: dict[str, PhaseConstraint] | None = Field(
+        default=None,
+        description="Per-phase tool constraints for multi-turn evals",
     )
 
 

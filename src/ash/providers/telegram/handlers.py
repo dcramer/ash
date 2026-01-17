@@ -128,17 +128,21 @@ def format_tool_brief(
             return f"Running: {display_name}"
 
 
-def format_thinking_message(briefs: list[str]) -> str:
-    """Format a list of tool briefs into a thinking message."""
-    escaped = [escape_markdown_v2(b) for b in briefs]
-    lines = ["_Thinking\\.\\.\\._"] + [f"• {b}" for b in escaped]
-    return "\n".join(lines)
+MAX_MESSAGE_LENGTH = 4096  # Telegram message limit
+
+
+def format_thinking_status(num_tools: int) -> str:
+    """Format a simple thinking status with tool count."""
+    if num_tools == 0:
+        return "_Thinking\\.\\.\\._"
+    call_word = "call" if num_tools == 1 else "calls"
+    return f"_Thinking\\.\\.\\. \\({num_tools} tool {call_word}\\)_"
 
 
 def format_tool_summary(num_tools: int, elapsed_seconds: float) -> str:
     """Format a summary of tool calls."""
     call_word = "call" if num_tools == 1 else "calls"
-    return f"_Made {num_tools} tool {call_word} in {elapsed_seconds:.1f}s_\n\n"
+    return f"_Made {num_tools} tool {call_word} in {elapsed_seconds:.1f}s_"
 
 
 @dataclass
@@ -165,8 +169,74 @@ class SessionContext:
         return messages
 
 
+class ProgressMessageTool:
+    """Per-run send_message tool that appends to the thinking message.
+
+    This tool replaces the default send_message tool during agent execution,
+    so progress updates appear in the consolidated thinking message instead
+    of being sent as separate replies.
+    """
+
+    def __init__(self, tracker: "ToolTracker") -> None:
+        self._tracker = tracker
+
+    @property
+    def name(self) -> str:
+        return "send_message"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Send a progress update to the user. "
+            "Use for status updates or intermediate results. "
+            "The message appears in the current response thread."
+        )
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The progress message to display",
+                },
+            },
+            "required": ["message"],
+        }
+
+    async def execute(
+        self,
+        input_data: dict[str, Any],
+        context: Any,  # ToolContext, but we don't need to type it strictly
+    ) -> Any:
+        from ash.tools.base import ToolResult
+
+        message = input_data.get("message", "").strip()
+        if not message:
+            return ToolResult.error("Message cannot be empty")
+
+        self._tracker.add_progress_message(message)
+        await self._tracker.update_display()
+        return ToolResult.success("Progress message added")
+
+    def to_definition(self) -> dict[str, Any]:
+        """Convert to LLM tool definition format."""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+        }
+
+
 class ToolTracker:
-    """Tracks tool calls and manages thinking message updates."""
+    """Tracks tool calls and manages thinking message updates.
+
+    Consolidates all progress into a single message that gets edited:
+    - Status line: "Thinking... (N tool calls)" or "Made N tool calls in Xs"
+    - Progress messages: Appended via add_progress_message()
+    - Final response: Appended at the end
+    """
 
     def __init__(
         self,
@@ -184,31 +254,78 @@ class ToolTracker:
         self._agent_registry = agent_registry
         self._skill_registry = skill_registry
         self.thinking_msg_id: str | None = None
-        self.briefs: list[str] = []
+        self.tool_count: int = 0
+        self.progress_messages: list[str] = []
         self.start_time: float | None = None
 
+    def _build_display_message(self, status: str, final_content: str = "") -> str:
+        """Build the consolidated message, truncating if needed.
+
+        Args:
+            status: The status line (thinking or summary)
+            final_content: Optional final response content
+
+        Returns:
+            Message content, truncated to fit Telegram's limit
+        """
+        parts = [status]
+
+        if self.progress_messages:
+            parts.append("")  # Blank line after status
+            parts.extend(self.progress_messages)
+
+        if final_content:
+            parts.append("")  # Blank line before final content
+            parts.append(final_content)
+
+        message = "\n".join(parts)
+
+        # If under limit, return as-is
+        if len(message) <= MAX_MESSAGE_LENGTH:
+            return message
+
+        # Truncate oldest progress messages until it fits
+        # Keep status + final content, drop progress messages from the start
+        truncated_progress = self.progress_messages.copy()
+        truncation_notice = "[...earlier messages truncated...]"
+
+        while truncated_progress and len(message) > MAX_MESSAGE_LENGTH:
+            truncated_progress.pop(0)
+            parts = [status]
+            if truncated_progress:
+                parts.append("")
+                parts.append(truncation_notice)
+                parts.extend(truncated_progress)
+            if final_content:
+                parts.append("")
+                parts.append(final_content)
+            message = "\n".join(parts)
+
+        return message
+
     async def on_tool_start(self, tool_name: str, tool_input: dict[str, Any]) -> None:
-        brief = format_tool_brief(
+        """Record a tool call and update the thinking message."""
+        # Validate tool call (for logging purposes, but don't block)
+        format_tool_brief(
             tool_name,
             tool_input,
             config=self._config,
             agent_registry=self._agent_registry,
             skill_registry=self._skill_registry,
         )
-        if not brief:
-            return
 
         if self.start_time is None:
             self.start_time = time.monotonic()
 
-        self.briefs.append(brief)
-        thinking_text = format_thinking_message(self.briefs)
+        self.tool_count += 1
+        status = format_thinking_status(self.tool_count)
+        display_message = self._build_display_message(status)
 
         if self.thinking_msg_id is None:
             self.thinking_msg_id = await self._provider.send(
                 OutgoingMessage(
                     chat_id=self._chat_id,
-                    text=thinking_text,
+                    text=display_message,
                     reply_to_message_id=self._reply_to,
                     parse_mode="markdown_v2",
                 )
@@ -217,19 +334,60 @@ class ToolTracker:
             await self._provider.edit(
                 self._chat_id,
                 self.thinking_msg_id,
-                thinking_text,
+                display_message,
+                parse_mode="markdown_v2",
+            )
+
+    def add_progress_message(self, message: str) -> None:
+        """Add a progress message to be displayed."""
+        self.progress_messages.append(message)
+
+    async def update_display(self) -> None:
+        """Update the thinking message with current progress."""
+        if self.thinking_msg_id is None:
+            # Create initial message if none exists
+            status = format_thinking_status(self.tool_count)
+            display_message = self._build_display_message(status)
+            self.thinking_msg_id = await self._provider.send(
+                OutgoingMessage(
+                    chat_id=self._chat_id,
+                    text=display_message,
+                    reply_to_message_id=self._reply_to,
+                    parse_mode="markdown_v2",
+                )
+            )
+        else:
+            status = format_thinking_status(self.tool_count)
+            display_message = self._build_display_message(status)
+            await self._provider.edit(
+                self._chat_id,
+                self.thinking_msg_id,
+                display_message,
                 parse_mode="markdown_v2",
             )
 
     def get_summary_prefix(self) -> str:
-        if self.briefs and self.start_time:
+        """Get the summary line for the final message."""
+        if self.tool_count > 0 and self.start_time:
             elapsed = time.monotonic() - self.start_time
-            return format_tool_summary(len(self.briefs), elapsed)
+            return format_tool_summary(self.tool_count, elapsed)
         return ""
 
     async def finalize_response(self, response_content: str) -> str:
         """Send or edit the final response, returning the message ID."""
-        final_content = self.get_summary_prefix() + response_content
+        summary = self.get_summary_prefix()
+        final_content = (
+            self._build_display_message(summary, response_content)
+            if summary
+            else response_content
+        )
+
+        # Include progress messages in final content if we have them but no summary
+        if not summary and self.progress_messages:
+            parts = self.progress_messages + (
+                ["", response_content] if response_content else []
+            )
+            final_content = "\n".join(parts)
 
         if self.thinking_msg_id:
             await self._provider.edit(
@@ -374,6 +532,24 @@ class TelegramMessageHandler:
             agent_registry=self._agent_registry,
             skill_registry=self._skill_registry,
         )
+
+    def _register_progress_tool(self, tracker: ToolTracker) -> None:
+        """Register the per-run progress message tool.
+
+        This replaces the default send_message tool so progress updates
+        get consolidated into the thinking message.
+        """
+        if self._tool_registry is None:
+            return
+
+        # Unregister existing send_message if present
+        if self._tool_registry.has("send_message"):
+            self._tool_registry.unregister("send_message")
+
+        # Register the per-run progress tool
+        progress_tool = ProgressMessageTool(tracker)
+        self._tool_registry.register(progress_tool)  # type: ignore[arg-type]
+        logger.debug("Registered per-run progress message tool")
 
     def _log_response(self, text: str | None) -> None:
         bot_name = self._provider.bot_username or "bot"
@@ -831,6 +1007,7 @@ class TelegramMessageHandler:
         await self._provider.send_typing(message.chat_id)
 
         tracker = self._create_tool_tracker(message)
+        self._register_progress_tool(tracker)
         response_msg_id: str | None = None
         response_content = ""
         start_time = time.time()
@@ -889,7 +1066,11 @@ class TelegramMessageHandler:
                     )
                     last_edit_time = time.time()
 
-        final_content = tracker.get_summary_prefix() + response_content
+        summary = tracker.get_summary_prefix()
+        if summary or tracker.progress_messages:
+            final_content = tracker._build_display_message(summary, response_content)
+        else:
+            final_content = response_content
 
         if tracker.thinking_msg_id:
             await self._provider.edit(
@@ -1038,6 +1219,7 @@ class TelegramMessageHandler:
         # Store current message ID so send_message tool can reply to it
         session.metadata["current_message_id"] = message.id
         tracker = self._create_tool_tracker(message)
+        self._register_progress_tool(tracker)
 
         async def get_steering_messages() -> list[IncomingMessage]:
             pending = ctx.take_pending()
@@ -1065,7 +1247,12 @@ class TelegramMessageHandler:
             except asyncio.CancelledError:
                 pass
 
-        final_content = tracker.get_summary_prefix() + (response.text or "")
+        summary = tracker.get_summary_prefix()
+        response_text = response.text or ""
+        if summary or tracker.progress_messages:
+            final_content = tracker._build_display_message(summary, response_text)
+        else:
+            final_content = response_text
 
         # Check for checkpoint in response and create inline keyboard if present
         reply_markup = None
@@ -1098,9 +1285,8 @@ class TelegramMessageHandler:
                 tool_use_id=tool_use_id,
             )
             reply_markup = create_checkpoint_keyboard(checkpoint)
-            final_content = tracker.get_summary_prefix() + format_checkpoint_message(
-                checkpoint
-            )
+            checkpoint_msg = format_checkpoint_message(checkpoint)
+            final_content = tracker._build_display_message(summary, checkpoint_msg)
             logger.info(
                 "Checkpoint detected, showing inline keyboard (id=%s, agent=%s)",
                 truncated_id,

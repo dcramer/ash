@@ -292,7 +292,16 @@ class SkillWriterAgent(Agent):
             name="skill-writer",
             description="Create, update, or rewrite a skill with proper SKILL.md format",
             system_prompt=SKILL_WRITER_PROMPT,
-            allowed_tools=[],  # Empty = all tools (except itself via executor check)
+            allowed_tools=[
+                # Coordination
+                "use_agent",  # Delegate research to research agent
+                "interrupt",  # Checkpoints between phases
+                "send_message",  # Progress updates
+                # Implementation phase only
+                "write_file",  # Create skill files
+                "read_file",  # Check created files
+                "bash",  # Validate and test scripts
+            ],
             max_iterations=50,
             is_skill_agent=True,
             supports_checkpointing=True,

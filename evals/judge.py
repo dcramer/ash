@@ -56,6 +56,11 @@ For each specific criterion, score independently:
 - 0.5: Criterion partially satisfied
 - 0.0: Criterion not satisfied
 
+### Forbidden Tools
+If the case specifies forbidden_tools, the response MUST FAIL if any of those tools were called.
+This is a hard constraint - no exceptions regardless of how well other criteria are met.
+Check the "Tools Called" section and compare against forbidden_tools.
+
 ## Response Format
 Respond with ONLY a valid JSON object (no markdown, no explanation outside JSON):
 {
@@ -64,6 +69,39 @@ Respond with ONLY a valid JSON object (no markdown, no explanation outside JSON)
   "reasoning": "Brief explanation of judgment with specific evidence",
   "criteria_scores": {"criterion_name": score, ...}
 }"""
+
+
+def check_forbidden_tools(
+    case: EvalCase,
+    tool_calls: list[dict[str, Any]],
+) -> JudgeResult | None:
+    """Return immediate failure if forbidden tools were used.
+
+    This is a deterministic pre-judge check that runs before sending
+    to the LLM judge. If any forbidden tools were called, the eval
+    fails immediately without needing LLM judgment.
+
+    Args:
+        case: The evaluation case with optional forbidden_tools.
+        tool_calls: List of tool calls made by the agent.
+
+    Returns:
+        JudgeResult with failure if violations found, None otherwise.
+    """
+    if not case.forbidden_tools:
+        return None
+
+    used_tools = {tc["name"] for tc in tool_calls}
+    violations = used_tools & set(case.forbidden_tools)
+
+    if violations:
+        return JudgeResult(
+            passed=False,
+            score=0.0,
+            reasoning=f"Forbidden tool(s) used: {', '.join(sorted(violations))}",
+            criteria_scores={f"no_{t}": 0.0 for t in violations},
+        )
+    return None
 
 
 class Judge(ABC):
@@ -210,6 +248,14 @@ class LLMJudge(Judge):
                 f"\n\nExpected tools to be called: {', '.join(case.expected_tools)}"
             )
 
+        # Format forbidden tools
+        forbidden_tools_text = ""
+        if case.forbidden_tools:
+            forbidden_tools_text = (
+                f"\n\nForbidden tools (MUST NOT be called): "
+                f"{', '.join(case.forbidden_tools)}"
+            )
+
         return f"""## User Prompt
 {case.prompt}
 
@@ -219,6 +265,7 @@ class LLMJudge(Judge):
 ## Specific Criteria
 {criteria_text}
 {expected_tools_text}
+{forbidden_tools_text}
 
 ## Assistant's Response
 {response_text or "(no text response)"}
