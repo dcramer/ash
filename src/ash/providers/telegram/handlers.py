@@ -395,6 +395,15 @@ class TelegramMessageHandler:
 
     async def handle_message(self, message: IncomingMessage) -> None:
         """Handle an incoming Telegram message."""
+        from ash.logging import log_context
+
+        # Set chat_id context immediately so all logs have it
+        # (session_id is added later in _process_single_message when known)
+        with log_context(chat_id=message.chat_id):
+            await self._handle_message_inner(message)
+
+    async def _handle_message_inner(self, message: IncomingMessage) -> None:
+        """Inner implementation of handle_message (runs with chat_id log context)."""
         logger.debug(
             "Received message from %s in chat %s: %s",
             message.username or message.user_id,
@@ -480,6 +489,20 @@ class TelegramMessageHandler:
         self, message: IncomingMessage, ctx: SessionContext
     ) -> None:
         """Process a single message within the session lock."""
+        from ash.logging import log_context
+
+        thread_id = message.metadata.get("thread_id")
+        session_key = make_session_key(
+            self._provider.name, message.chat_id, message.user_id, thread_id
+        )
+
+        with log_context(chat_id=message.chat_id, session_id=session_key):
+            await self._process_single_message_inner(message, ctx)
+
+    async def _process_single_message_inner(
+        self, message: IncomingMessage, ctx: SessionContext
+    ) -> None:
+        """Inner implementation of _process_single_message (runs with log context)."""
         await self._provider.set_reaction(message.chat_id, message.id, "👀")
         session = await self._get_or_create_session(message)
 
@@ -803,6 +826,8 @@ class TelegramMessageHandler:
         ctx: SessionContext,
     ) -> None:
         """Handle message with streaming response."""
+        # Store current message ID so send_message tool can reply to it
+        session.metadata["current_message_id"] = message.id
         await self._provider.send_typing(message.chat_id)
 
         tracker = self._create_tool_tracker(message)
@@ -935,7 +960,11 @@ class TelegramMessageHandler:
         return truncated_id
 
     async def _get_checkpoint(
-        self, truncated_id: str, bot_response_id: str | None = None
+        self,
+        truncated_id: str,
+        bot_response_id: str | None = None,
+        chat_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """Get checkpoint, using cache or falling back to session log lookup.
 
@@ -953,7 +982,7 @@ class TelegramMessageHandler:
                 _, _, checkpoint = result
                 return routing, checkpoint
 
-        # Slow path (recovery): find session by bot_response_id
+        # Slow path (recovery): find session by bot_response_id in loaded sessions
         if bot_response_id:
             for sm in self._session_managers.values():
                 if await sm.has_bot_response_id(bot_response_id):
@@ -973,6 +1002,26 @@ class TelegramMessageHandler:
                         )
                         return routing, checkpoint
 
+        # Disk recovery: try loading session directly from chat/user context
+        # This handles server restarts where _session_managers is empty
+        if chat_id and user_id:
+            # Try without thread_id first (most common case)
+            session_manager = self._get_session_manager(chat_id, user_id, None)
+            result = await session_manager.get_pending_checkpoint_from_log(truncated_id)
+            if result:
+                _, _, checkpoint = result
+                routing = {
+                    "session_key": session_manager.session_key,
+                    "chat_id": chat_id,
+                    "user_id": user_id,
+                    "thread_id": None,
+                }
+                logger.info(
+                    "Recovered checkpoint %s from disk using chat context",
+                    truncated_id[:20],
+                )
+                return routing, checkpoint
+
         return None, None
 
     def _clear_checkpoint(self, truncated_id: str) -> None:
@@ -986,6 +1035,8 @@ class TelegramMessageHandler:
         ctx: SessionContext,
     ) -> None:
         """Handle message with synchronous response."""
+        # Store current message ID so send_message tool can reply to it
+        session.metadata["current_message_id"] = message.id
         tracker = self._create_tool_tracker(message)
 
         async def get_steering_messages() -> list[IncomingMessage]:
@@ -1255,12 +1306,8 @@ class TelegramMessageHandler:
         from aiogram.types import CallbackQuery as CQ
 
         from ash.providers.telegram.checkpoint_ui import (
-            create_checkpoint_keyboard,
-            format_checkpoint_message,
             parse_callback_data,
         )
-        from ash.tools.base import ToolContext
-        from ash.tools.builtin.agents import CHECKPOINT_METADATA_KEY
 
         if not isinstance(callback_query, CQ):
             logger.warning("Invalid callback query type")
@@ -1279,17 +1326,29 @@ class TelegramMessageHandler:
 
         truncated_id, option_index = parsed
 
-        # Get bot_response_id from the message for recovery lookup
+        # Get context from callback for recovery lookup
         bot_response_id = (
             str(callback_query.message.message_id) if callback_query.message else None
         )
+        callback_chat_id = (
+            str(callback_query.message.chat.id) if callback_query.message else None
+        )
+        callback_user_id = (
+            str(callback_query.from_user.id) if callback_query.from_user else None
+        )
 
-        # Use _get_checkpoint to check both memory and session log (for recovery)
-        routing, checkpoint = await self._get_checkpoint(truncated_id, bot_response_id)
+        # Use _get_checkpoint to check memory, loaded sessions, and disk
+        routing, checkpoint = await self._get_checkpoint(
+            truncated_id,
+            bot_response_id,
+            chat_id=callback_chat_id,
+            user_id=callback_user_id,
+        )
         if checkpoint is None or routing is None:
             logger.warning("Checkpoint not found: %s", truncated_id)
             await callback_query.answer(
-                "This checkpoint has expired. Please try again.", show_alert=True
+                "Checkpoint not found. It may have expired or the session was lost.",
+                show_alert=True,
             )
             return
 
@@ -1300,30 +1359,98 @@ class TelegramMessageHandler:
             return
 
         selected_option = options[option_index]
+
+        # Extract routing data
         chat_id = routing.get("chat_id", "")
         user_id = routing.get("user_id", "")
         thread_id = routing.get("thread_id")
         agent_name = routing.get("agent_name")
         original_message = routing.get("original_message")
         checkpoint_id = checkpoint.get("checkpoint_id")
+        session_key = routing.get("session_key", "")
+
+        # Validate that the user clicking is the one who was asked
+        from_user = callback_query.from_user
+        if not from_user:
+            logger.warning("Callback query has no from_user, rejecting")
+            await callback_query.answer("Unable to verify user.", show_alert=True)
+            return
+        if str(from_user.id) != user_id:
+            await callback_query.answer(
+                "This question was asked to another user.", show_alert=True
+            )
+            return
+
+        # Process with log context for traceability
+        from ash.logging import log_context
+
+        with log_context(chat_id=chat_id, session_id=session_key):
+            await self._handle_callback_query_inner(
+                callback_query=callback_query,
+                routing=routing,
+                checkpoint=checkpoint,
+                selected_option=selected_option,
+                truncated_id=truncated_id,
+                chat_id=chat_id,
+                user_id=user_id,
+                thread_id=thread_id,
+                agent_name=agent_name,
+                original_message=original_message,
+                checkpoint_id=checkpoint_id,
+                session_key=session_key,
+            )
+
+    async def _handle_callback_query_inner(
+        self,
+        callback_query: "CallbackQuery",
+        routing: dict[str, Any],
+        checkpoint: dict[str, Any],
+        selected_option: str,
+        truncated_id: str,
+        chat_id: str,
+        user_id: str,
+        thread_id: str | None,
+        agent_name: str | None,
+        original_message: str | None,
+        checkpoint_id: str | None,
+        session_key: str,
+    ) -> None:
+        """Inner implementation of callback query handling (runs with log context)."""
+        from ash.providers.telegram.checkpoint_ui import (
+            create_checkpoint_keyboard,
+            format_checkpoint_message,
+        )
+        from ash.tools.base import ToolContext
+        from ash.tools.builtin.agents import CHECKPOINT_METADATA_KEY
 
         # Don't clear checkpoint yet - wait until processing succeeds
         await callback_query.answer(f"Selected: {selected_option}")
 
-        # Remove the inline keyboard from the message
-        if callback_query.message:
+        # Store checkpoint message ID for reply threading and update the message
+        message = callback_query.message
+        checkpoint_message_id = str(message.message_id) if message else None
+
+        if checkpoint_message_id:
             try:
-                message_text = (
-                    getattr(callback_query.message, "text", None)
-                    or "Checkpoint response received"
-                )
-                await self._provider.edit(
-                    chat_id,
-                    str(callback_query.message.message_id),
-                    message_text,
-                )
+                original_text = getattr(message, "text", None) or "Checkpoint"
+                updated_text = f"{original_text}\n\n✓ Selected: {selected_option}"
+                await self._provider.edit(chat_id, checkpoint_message_id, updated_text)
             except Exception as e:
-                logger.debug("Failed to remove keyboard: %s", e)
+                logger.debug("Failed to update message: %s", e)
+
+        # Send immediate feedback that work is resuming
+        resuming_msg_id: str | None = None
+        try:
+            resuming_msg_id = await self._provider.send(
+                OutgoingMessage(
+                    chat_id=chat_id,
+                    text="_Resuming\\.\\.\\._",
+                    reply_to_message_id=checkpoint_message_id,
+                    parse_mode="markdown_v2",
+                )
+            )
+        except Exception as e:
+            logger.debug("Failed to send resuming indicator: %s", e)
 
         # Check if we can use direct tool invocation
         has_agent_context = agent_name and original_message and checkpoint_id
@@ -1336,14 +1463,18 @@ class TelegramMessageHandler:
                 reason,
                 truncated_id,
             )
+            # Delete resuming indicator before fallback
+            if resuming_msg_id:
+                try:
+                    await self._provider.delete(chat_id, resuming_msg_id)
+                except Exception as e:
+                    logger.debug("Failed to delete resuming indicator: %s", e)
             # Clear checkpoint before fallback (fallback will create new session context)
             self._clear_checkpoint(truncated_id)
             await self._handle_checkpoint_via_message(
                 callback_query, routing, checkpoint, selected_option
             )
             return
-
-        session_key = routing.get("session_key", "")
 
         logger.info(
             "Resuming checkpoint via direct tool call: agent=%s, checkpoint=%s, response='%s'",
@@ -1369,6 +1500,7 @@ class TelegramMessageHandler:
                 OutgoingMessage(
                     chat_id=chat_id,
                     text="Error: use_agent tool is not properly configured.",
+                    reply_to_message_id=checkpoint_message_id,
                 )
             )
             return
@@ -1390,6 +1522,7 @@ class TelegramMessageHandler:
             chat_id=chat_id,
             thread_id=thread_id,
             provider=self._provider.name,
+            metadata={"current_message_id": checkpoint_message_id},
         )
 
         # Generate a tool_use_id for persistence
@@ -1406,11 +1539,18 @@ class TelegramMessageHandler:
             result = await use_agent_tool.execute(tool_input, tool_context)
         except Exception as e:
             logger.exception("Error calling use_agent tool directly")
+            # Delete resuming indicator before error message
+            if resuming_msg_id:
+                try:
+                    await self._provider.delete(chat_id, resuming_msg_id)
+                except Exception as e:
+                    logger.debug("Failed to delete resuming indicator: %s", e)
             # Don't clear checkpoint on error - user can retry
             await self._provider.send(
                 OutgoingMessage(
                     chat_id=chat_id,
                     text=f"Error resuming agent: {e}. You can try clicking the button again.",
+                    reply_to_message_id=checkpoint_message_id,
                 )
             )
             return
@@ -1453,12 +1593,20 @@ class TelegramMessageHandler:
                 new_truncated_id,
             )
 
-        # Send the response
+        # Delete resuming indicator before sending actual response
+        if resuming_msg_id:
+            try:
+                await self._provider.delete(chat_id, resuming_msg_id)
+            except Exception as e:
+                logger.debug("Failed to delete resuming indicator: %s", e)
+
+        # Send the response (reply to checkpoint message for threading)
         if response_text.strip():
             sent_message_id = await self._provider.send(
                 OutgoingMessage(
                     chat_id=chat_id,
                     text=response_text,
+                    reply_to_message_id=checkpoint_message_id,
                     reply_markup=reply_markup,
                 )
             )
@@ -1494,6 +1642,7 @@ class TelegramMessageHandler:
                 tool_use_id=tool_use_id,
                 output=result.content,
                 success=not result.is_error,
+                metadata=result.metadata,
             )
 
             # Register bot response in thread index for reply routing
@@ -1514,6 +1663,7 @@ class TelegramMessageHandler:
                 tool_use_id=tool_use_id,
                 output=result.content,
                 success=not result.is_error,
+                metadata=result.metadata,
             )
             logger.debug("Empty response from resumed agent")
 

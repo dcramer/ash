@@ -145,12 +145,12 @@ class UseAgentTool(Tool):
 
         agent = self._registry.get(agent_name)
 
-        agent_context = AgentContext(
-            session_id=context.session_id if context else None,
-            user_id=context.user_id if context else None,
-            chat_id=context.chat_id if context else None,
-            input_data=extra_input,
-        )
+        if context:
+            agent_context = AgentContext.from_tool_context(
+                context, input_data=extra_input
+            )
+        else:
+            agent_context = AgentContext(input_data=extra_input)
 
         # Handle resume from checkpoint
         resume_from: CheckpointState | None = None
@@ -197,12 +197,7 @@ class UseAgentTool(Tool):
                 )
 
             return ToolResult.success(
-                f"**Agent paused for input**\n\n{checkpoint.prompt}{options_str}\n\n"
-                f"To continue, call use_agent with:\n"
-                f"- agent: {agent_name}\n"
-                f"- message: (same as before)\n"
-                f"- resume_checkpoint_id: {checkpoint.checkpoint_id}\n"
-                f"- checkpoint_response: (user's response)",
+                f"**Agent paused for input**\n\n{checkpoint.prompt}{options_str}",
                 **{CHECKPOINT_METADATA_KEY: checkpoint.to_dict()},
             )
 

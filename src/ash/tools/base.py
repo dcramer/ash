@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from ash.agents.base import AgentContext
     from ash.config.models import SandboxConfig
     from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
 
@@ -24,6 +25,23 @@ class ToolContext:
     # Extra environment variables to pass to sandbox
     # e.g., {"SKILL_API_KEY": "abc123"}
     env: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_agent_context(
+        cls,
+        ctx: "AgentContext",
+        env: dict[str, str] | None = None,
+    ) -> "ToolContext":
+        """Create ToolContext from AgentContext, preserving all shared fields."""
+        return cls(
+            session_id=ctx.session_id,
+            user_id=ctx.user_id,
+            chat_id=ctx.chat_id,
+            thread_id=ctx.thread_id,
+            provider=ctx.provider,
+            metadata=dict(ctx.metadata) if ctx.metadata else {},
+            env=env or {},
+        )
 
 
 @dataclass

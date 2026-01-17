@@ -16,14 +16,42 @@ Guidelines:
 - Retries: Log at INFO on retry attempt, WARNING on exhaustion
 """
 
+import contextvars
 import json
 import logging
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TextIO
+
+# Context variables for session-aware logging
+_log_chat_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_chat_id", default=None
+)
+_log_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_session_id", default=None
+)
+
+
+@contextmanager
+def log_context(
+    chat_id: str | None = None, session_id: str | None = None
+) -> Iterator[None]:
+    """Context manager for setting log context in current async task."""
+    chat_token = _log_chat_id.set(chat_id) if chat_id is not None else None
+    session_token = _log_session_id.set(session_id) if session_id is not None else None
+    try:
+        yield
+    finally:
+        if chat_token is not None:
+            _log_chat_id.reset(chat_token)
+        if session_token is not None:
+            _log_session_id.reset(session_token)
+
 
 # Default retention period for log files
 DEFAULT_LOG_RETENTION_DAYS = 7
@@ -250,13 +278,27 @@ class JSONLHandler(logging.Handler):
         super().close()
 
 
+def _short_id(full_id: str | None, max_len: int = 8) -> str:
+    """Shorten ID for display. Returns empty string if None."""
+    if not full_id:
+        return ""
+    # For session keys like "telegram_-542863895_123", extract chat part
+    if full_id.startswith(("telegram_", "discord_", "slack_")):
+        parts = full_id.split("_")
+        if len(parts) >= 2:
+            return parts[1][:max_len]
+    return full_id[:max_len]
+
+
 class ComponentFormatter(logging.Formatter):
-    """Formatter that extracts component name from logger path.
+    """Formatter that extracts component name and adds session context.
 
     Converts full module paths to short component names:
     - ash.providers.telegram.handlers -> providers
     - ash.tools.executor -> tools
     - ash.core.agent -> core
+
+    Also injects chat_id/session_id context from contextvars when available.
     """
 
     def format(self, record: logging.LogRecord) -> str:
@@ -266,6 +308,22 @@ class ComponentFormatter(logging.Formatter):
             record.component = parts[1]  # providers, tools, core, etc.
         else:
             record.component = parts[0]
+
+        # Add context from contextvars
+        chat_id = _log_chat_id.get()
+        session_id = _log_session_id.get()
+
+        ctx_parts = []
+        chat_short = _short_id(chat_id) if chat_id else ""
+        if chat_short:
+            ctx_parts.append(chat_short)
+        # Only show session if different from chat (avoid redundancy)
+        session_short = _short_id(session_id, 6) if session_id else ""
+        if session_short and session_short != chat_short:
+            ctx_parts.append(f"s:{session_short}")
+
+        record.context = f"[{' '.join(ctx_parts)}] " if ctx_parts else ""
+
         return super().format(record)
 
 
@@ -317,8 +375,11 @@ def configure_logging(
             show_path=False,
             show_time=True,
             markup=True,
+            log_time_format="%H:%M:%S",  # Time only, no date
         )
-        console_handler.setFormatter(ComponentFormatter("%(component)s | %(message)s"))
+        console_handler.setFormatter(
+            ComponentFormatter("[dim]%(context)s[/dim]%(component)s | %(message)s")
+        )
     else:
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(

@@ -84,6 +84,28 @@ class AgentExecutor:
         Returns:
             AgentResult with content, or interrupted result with checkpoint.
         """
+        from ash.logging import log_context
+
+        with log_context(chat_id=context.chat_id, session_id=context.session_id):
+            return await self._execute_inner(
+                agent=agent,
+                input_message=input_message,
+                context=context,
+                environment=environment,
+                resume_from=resume_from,
+                user_response=user_response,
+            )
+
+    async def _execute_inner(
+        self,
+        agent: Agent,
+        input_message: str,
+        context: AgentContext,
+        environment: dict[str, str] | None = None,
+        resume_from: CheckpointState | None = None,
+        user_response: str | None = None,
+    ) -> AgentResult:
+        """Inner implementation of execute (runs with log context)."""
         agent_config = agent.config
 
         # Handle resume from checkpoint
@@ -163,12 +185,7 @@ class AgentExecutor:
             agent_config.supports_checkpointing,
         )
 
-        tool_context = ToolContext(
-            session_id=context.session_id,
-            user_id=context.user_id,
-            chat_id=context.chat_id,
-            env=environment or {},
-        )
+        tool_context = ToolContext.from_agent_context(context, env=environment)
 
         for iteration in range(start_iteration, max_iterations + 1):
             logger.debug(
@@ -283,7 +300,8 @@ class AgentExecutor:
                 last_text = last_msg.get_text()
 
         return AgentResult(
-            content=last_text or f"Agent reached iteration limit ({max_iterations})",
+            content=last_text
+            or "The agent couldn't complete within the allowed steps. It may have made partial progress.",
             is_error=True,
             iterations=max_iterations,
         )

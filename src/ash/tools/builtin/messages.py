@@ -79,9 +79,16 @@ class SendMessageTool(Tool):
         if not context.user_id:
             return ToolResult.error("No user context available")
 
+        # Get reply_to from context metadata (set by message handler)
+        reply_to = context.metadata.get("current_message_id")
+
         try:
             sent_id = await self._provider.send(
-                OutgoingMessage(chat_id=context.chat_id, text=message)
+                OutgoingMessage(
+                    chat_id=context.chat_id,
+                    text=message,
+                    reply_to_message_id=reply_to,
+                )
             )
         except Exception as e:
             logger.exception("Failed to send message to chat %s", context.chat_id)

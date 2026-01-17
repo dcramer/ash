@@ -184,6 +184,7 @@ async def _run_server(
         config=ash_config,
         agent_registry=components.agent_registry,
         skill_registry=components.skill_registry,
+        tool_registry=components.tool_registry,
     )
 
     # Start server

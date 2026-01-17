@@ -18,6 +18,12 @@ Provide a structured response with:
 - **Findings**: Detailed analysis with inline citations
 - **Sources**: Numbered list of URLs used
 
+## Progress Updates
+
+Use `send_message` to share progress on long research tasks:
+- "🔍 Searching for official documentation..."
+- "📚 Found 3 authoritative sources, synthesizing..."
+
 ## Best Practices
 
 - Prefer official documentation over blog posts
@@ -36,7 +42,7 @@ class ResearchAgent(Agent):
             name="research",
             description="Research a topic using web search to find authoritative sources",
             system_prompt=RESEARCH_SYSTEM_PROMPT,
-            allowed_tools=["web_search", "web_fetch"],
+            allowed_tools=["web_search", "web_fetch", "send_message"],
             max_iterations=15,
         )
 

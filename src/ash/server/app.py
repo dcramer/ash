@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ash.db import Database
     from ash.providers.telegram import TelegramMessageHandler, TelegramProvider
     from ash.skills import SkillRegistry
+    from ash.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class AshServer:
         config: "AshConfig | None" = None,
         agent_registry: "AgentRegistry | None" = None,
         skill_registry: "SkillRegistry | None" = None,
+        tool_registry: "ToolRegistry | None" = None,
     ):
         self._database = database
         self._agent = agent
@@ -42,6 +44,7 @@ class AshServer:
         self._config = config
         self._agent_registry = agent_registry
         self._skill_registry = skill_registry
+        self._tool_registry = tool_registry
         self._telegram_handler: TelegramMessageHandler | None = None
 
         self._app = self._create_app()
@@ -71,6 +74,11 @@ class AshServer:
                     config=self._config,
                     agent_registry=self._agent_registry,
                     skill_registry=self._skill_registry,
+                    tool_registry=self._tool_registry,
+                )
+                # Wire up callback handler for checkpoint inline keyboards
+                self._telegram_provider.set_callback_handler(
+                    self._telegram_handler.handle_callback_query
                 )
                 # Start in polling mode if no webhook
                 # Webhook mode is handled via the routes
@@ -120,6 +128,7 @@ def create_app(
     config: "AshConfig | None" = None,
     agent_registry: "AgentRegistry | None" = None,
     skill_registry: "SkillRegistry | None" = None,
+    tool_registry: "ToolRegistry | None" = None,
 ) -> FastAPI:
     """Create the FastAPI application."""
     server = AshServer(
@@ -129,5 +138,6 @@ def create_app(
         config=config,
         agent_registry=agent_registry,
         skill_registry=skill_registry,
+        tool_registry=tool_registry,
     )
     return server.app

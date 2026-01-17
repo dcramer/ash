@@ -3,15 +3,17 @@
 import asyncio
 import logging
 import re
-from collections.abc import AsyncIterator
+
+# Type for callback query handler
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
+from aiogram.types import CallbackQuery, ReactionTypeEmoji
 from aiogram.types import Message as TelegramMessage
-from aiogram.types import ReactionTypeEmoji
 
 from ash.providers.base import (
     ImageAttachment,
@@ -20,6 +22,8 @@ from ash.providers.base import (
     OutgoingMessage,
     Provider,
 )
+
+CallbackHandler = Callable[[CallbackQuery], Awaitable[None]]
 
 logger = logging.getLogger("telegram")
 
@@ -71,6 +75,7 @@ class TelegramProvider(Provider):
         )
         self._dp = Dispatcher()
         self._handler: MessageHandler | None = None
+        self._callback_handler: CallbackHandler | None = None
         self._running = False
         self._bot_username: str | None = None
 
@@ -89,6 +94,10 @@ class TelegramProvider(Provider):
     @property
     def bot_username(self) -> str | None:
         return self._bot_username
+
+    def set_callback_handler(self, handler: CallbackHandler) -> None:
+        """Set the callback query handler for interactive UI elements."""
+        self._callback_handler = handler
 
     def _is_user_allowed(self, user_id: int, username: str | None) -> bool:
         if not self._allowed_users:
@@ -483,17 +492,60 @@ class TelegramProvider(Provider):
                 except Exception:
                     logger.exception("Error handling message")
 
+        @self._dp.callback_query()
+        async def handle_callback_query(callback_query: CallbackQuery) -> None:
+            """Handle callback queries from inline keyboards."""
+            if self._callback_handler:
+                try:
+                    await self._callback_handler(callback_query)
+                except Exception:
+                    logger.exception("Error handling callback query")
+                    if callback_query.message:
+                        await self._bot.answer_callback_query(
+                            callback_query.id,
+                            text="Error processing your selection",
+                            show_alert=True,
+                        )
+
     async def send(self, message: OutgoingMessage) -> str:
         """Send a message via Telegram."""
         parse_mode = _get_parse_mode(message.parse_mode)
-        sent = await self._send_with_fallback(
-            chat_id=int(message.chat_id),
-            text=message.text,
-            reply_to=int(message.reply_to_message_id)
-            if message.reply_to_message_id
-            else None,
-            parse_mode=parse_mode,
+        reply_to = (
+            int(message.reply_to_message_id) if message.reply_to_message_id else None
         )
+
+        try:
+            sent = await self._bot.send_message(
+                chat_id=int(message.chat_id),
+                text=message.text,
+                reply_to_message_id=reply_to,
+                parse_mode=parse_mode,
+                reply_markup=message.reply_markup,
+            )
+        except TelegramBadRequest as e:
+            error_msg = str(e).lower()
+            if "can't parse" in error_msg and parse_mode is not None:
+                logger.debug(f"Markdown parsing failed, sending as plain text: {e}")
+                sent = await self._bot.send_message(
+                    chat_id=int(message.chat_id),
+                    text=message.text,
+                    reply_to_message_id=reply_to,
+                    parse_mode=None,
+                    reply_markup=message.reply_markup,
+                )
+            elif (
+                "message to be replied not found" in error_msg and reply_to is not None
+            ):
+                logger.debug(f"Reply target not found, sending without reply: {e}")
+                sent = await self._bot.send_message(
+                    chat_id=int(message.chat_id),
+                    text=message.text,
+                    parse_mode=parse_mode,
+                    reply_markup=message.reply_markup,
+                )
+            else:
+                raise
+
         logger.debug(
             "Sent message to chat %s: %s", message.chat_id, _truncate(message.text)
         )

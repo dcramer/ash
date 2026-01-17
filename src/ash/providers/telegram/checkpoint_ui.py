@@ -76,12 +76,5 @@ def format_checkpoint_message(checkpoint: dict[str, Any]) -> str:
         Formatted message string.
     """
     prompt = checkpoint.get("prompt", "Agent paused for input")
-    options = checkpoint.get("options")
-
-    message = f"**Agent paused for input**\n\n{prompt}"
-
-    if options:
-        options_text = "\n".join(f"- {opt}" for opt in options)
-        message += f"\n\n**Options:**\n{options_text}"
-
-    return message
+    # Options are shown as clickable buttons, no need to include in text
+    return f"**Agent paused for input**\n\n{prompt}"

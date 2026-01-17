@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4"
+DEFAULT_MODEL = "claude-sonnet-4-5"
 
 
 class AnthropicProvider(LLMProvider):

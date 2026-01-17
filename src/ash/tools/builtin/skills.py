@@ -232,12 +232,12 @@ class UseSkillTool(Tool):
         model_override = skill_config.model if skill_config else None
         agent = SkillAgent(skill, model_override=model_override)
 
-        agent_context = AgentContext(
-            session_id=context.session_id if context else None,
-            user_id=context.user_id if context else None,
-            chat_id=context.chat_id if context else None,
-            input_data={"context": user_context},
-        )
+        if context:
+            agent_context = AgentContext.from_tool_context(
+                context, input_data={"context": user_context}
+            )
+        else:
+            agent_context = AgentContext(input_data={"context": user_context})
 
         logger.info(f"Invoking skill '{skill_name}' with message: {message[:100]}...")
 

@@ -3,7 +3,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ash.tools.base import ToolContext
 
 # Checkpoint expiration time in seconds (1 hour)
 CHECKPOINT_TTL_SECONDS = 3600
@@ -88,7 +91,27 @@ class AgentContext:
     session_id: str | None = None
     user_id: str | None = None
     chat_id: str | None = None
+    thread_id: str | None = None
+    provider: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     input_data: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_tool_context(
+        cls,
+        ctx: "ToolContext",
+        input_data: dict[str, Any] | None = None,
+    ) -> "AgentContext":
+        """Create AgentContext from ToolContext, preserving all shared fields."""
+        return cls(
+            session_id=ctx.session_id,
+            user_id=ctx.user_id,
+            chat_id=ctx.chat_id,
+            thread_id=ctx.thread_id,
+            provider=ctx.provider,
+            metadata=dict(ctx.metadata) if ctx.metadata else {},
+            input_data=input_data or {},
+        )
 
 
 @dataclass
