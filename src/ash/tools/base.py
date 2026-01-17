@@ -17,6 +17,7 @@ class ToolContext:
     session_id: str | None = None
     user_id: str | None = None
     chat_id: str | None = None
+    thread_id: str | None = None  # For threading in group chats
     provider: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 

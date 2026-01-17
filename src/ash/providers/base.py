@@ -49,6 +49,7 @@ class OutgoingMessage:
     reply_to_message_id: str | None = None
     parse_mode: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    reply_markup: Any = None  # Provider-specific reply markup (e.g., inline keyboard)
 
 
 # Type for message handler callback

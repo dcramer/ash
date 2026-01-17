@@ -47,6 +47,22 @@ GetSteeringMessagesCallback = Callable[[], Awaitable[list["IncomingMessage"]]]
 
 MAX_TOOL_ITERATIONS = 25
 
+# Metadata key for checkpoint data in tool results (from use_agent tool)
+CHECKPOINT_METADATA_KEY = "checkpoint"
+
+
+def _extract_checkpoint(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Extract checkpoint from tool calls metadata if present.
+
+    Looks for the most recent use_agent call with checkpoint metadata.
+    """
+    for call in reversed(tool_calls):
+        if call.get("name") == "use_agent":
+            metadata = call.get("metadata", {})
+            if CHECKPOINT_METADATA_KEY in metadata:
+                return metadata[CHECKPOINT_METADATA_KEY]
+    return None
+
 
 def _build_routing_env(
     session: SessionState,
@@ -182,6 +198,7 @@ class AgentResponse:
     tool_calls: list[dict[str, Any]]
     iterations: int
     compaction: CompactionInfo | None = None
+    checkpoint: dict[str, Any] | None = None
 
 
 class Agent:
@@ -581,6 +598,7 @@ class Agent:
                     "input": tool_use.input,
                     "result": result.content,
                     "is_error": result.is_error,
+                    "metadata": result.metadata,
                 }
             )
 
@@ -661,12 +679,14 @@ class Agent:
                     tool_calls=tool_calls,
                     iterations=iterations,
                     compaction=compaction_info,
+                    checkpoint=_extract_checkpoint(tool_calls),
                 )
 
             tool_context = ToolContext(
                 session_id=session.session_id,
                 user_id=setup.effective_user_id,
                 chat_id=session.chat_id,
+                thread_id=session.metadata.get("thread_id"),
                 provider=session.provider,
                 metadata=dict(session.metadata),
                 env=_build_routing_env(
@@ -699,6 +719,7 @@ class Agent:
             tool_calls=tool_calls,
             iterations=iterations,
             compaction=compaction_info,
+            checkpoint=_extract_checkpoint(tool_calls),
         )
 
     async def process_message_streaming(
@@ -774,6 +795,7 @@ class Agent:
                 session_id=session.session_id,
                 user_id=setup.effective_user_id,
                 chat_id=session.chat_id,
+                thread_id=session.metadata.get("thread_id"),
                 provider=session.provider,
                 metadata=dict(session.metadata),
                 env=_build_routing_env(

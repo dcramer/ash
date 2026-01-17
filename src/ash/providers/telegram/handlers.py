@@ -106,7 +106,7 @@ def format_tool_brief(
             agent_name = tool_input.get("agent", "unknown")
             model = _resolve_agent_model(agent_name, config, agent_registry)
             suffix = f" ({model})" if model else ""
-            preview = _truncate_str(tool_input.get("message", ""), 40)
+            preview = _truncate_str(tool_input.get("message", ""), 150)
             return f"{agent_name}{suffix}: {preview}"
         case "write_file":
             return f"Writing: {_get_filename(tool_input.get('file_path', ''))}"
@@ -121,7 +121,7 @@ def format_tool_brief(
             skill_name = tool_input.get("skill", "unknown")
             model = _resolve_skill_model(skill_name, config, skill_registry)
             suffix = f" ({model})" if model else ""
-            preview = _truncate_str(tool_input.get("message", ""), 40)
+            preview = _truncate_str(tool_input.get("message", ""), 150)
             return f"{skill_name}{suffix}: {preview}"
         case _:
             display_name = tool_name.replace("_tool", "").replace("_", " ")
@@ -277,6 +277,24 @@ class TelegramMessageHandler:
         self._concurrency_semaphore = asyncio.Semaphore(max_concurrent)
         # Pending checkpoints keyed by truncated checkpoint_id
         self._pending_checkpoints: dict[str, dict[str, Any]] = {}
+
+        # Register provider-specific tools
+        self._register_provider_tools()
+
+    def _register_provider_tools(self) -> None:
+        """Register provider-specific tools that need access to the provider."""
+        if self._tool_registry is None:
+            return
+
+        from ash.tools.builtin.messages import SendMessageTool
+
+        if not self._tool_registry.has("send_message"):
+            send_message_tool = SendMessageTool(
+                provider=self._provider,
+                session_manager_factory=self._get_session_manager,
+            )
+            self._tool_registry.register(send_message_tool)
+            logger.debug("Registered send_message tool for Telegram provider")
 
     def _get_thread_index(self, chat_id: str) -> ThreadIndex:
         """Get or create a ThreadIndex for a chat."""
@@ -1337,11 +1355,40 @@ class TelegramMessageHandler:
         await self._provider.send_typing(chat_id)
 
         assert self._tool_registry is not None  # Checked above via has_tool_registry
+
+        # Restore CheckpointState to UseAgentTool's cache before calling execute.
+        # The checkpoint data comes from the session log, but UseAgentTool.execute()
+        # looks up from its own in-memory cache. We need to restore it there.
+        from ash.agents.base import CheckpointState
+        from ash.tools.builtin.agents import UseAgentTool
+
         use_agent_tool = self._tool_registry.get("use_agent")
+        if not isinstance(use_agent_tool, UseAgentTool):
+            logger.error("use_agent tool is not a UseAgentTool instance")
+            await self._provider.send(
+                OutgoingMessage(
+                    chat_id=chat_id,
+                    text="Error: use_agent tool is not properly configured.",
+                )
+            )
+            return
+
+        # checkpoint_id is guaranteed to be non-None here (checked in has_agent_context above)
+        assert checkpoint_id is not None
+        existing = await use_agent_tool.get_checkpoint(checkpoint_id)
+        if existing is None:
+            checkpoint_state = CheckpointState.from_dict(checkpoint)
+            await use_agent_tool.store_checkpoint(checkpoint_state)
+            logger.info(
+                "Restored checkpoint %s to UseAgentTool cache",
+                truncated_id,
+            )
+
         tool_context = ToolContext(
             session_id=session_key,
             user_id=user_id,
             chat_id=chat_id,
+            thread_id=thread_id,
             provider=self._provider.name,
         )
 
