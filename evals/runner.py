@@ -115,6 +115,11 @@ class EvalReport:
         return len(self.results)
 
     @property
+    def valid_results(self) -> list[EvalResult]:
+        """Results excluding judge errors (for accurate metrics)."""
+        return [r for r in self.results if not r.is_judge_error]
+
+    @property
     def passed(self) -> int:
         """Number of passed cases."""
         return sum(1 for r in self.results if r.passed)
@@ -122,12 +127,12 @@ class EvalReport:
     @property
     def failed(self) -> int:
         """Number of failed cases (excluding judge errors)."""
-        return sum(1 for r in self.results if not r.passed and not r.is_judge_error)
+        return sum(1 for r in self.valid_results if not r.passed)
 
     @property
     def judge_errors(self) -> int:
         """Number of cases that failed due to judge errors."""
-        return sum(1 for r in self.results if r.is_judge_error)
+        return len(self.results) - len(self.valid_results)
 
     @property
     def accuracy(self) -> float:
@@ -135,23 +140,22 @@ class EvalReport:
 
         Excludes judge errors from the calculation to give true accuracy.
         """
-        valid_results = [r for r in self.results if not r.is_judge_error]
-        if not valid_results:
+        valid = self.valid_results
+        if not valid:
             return 0.0
-        passed = sum(1 for r in valid_results if r.passed)
-        return passed / len(valid_results)
+        return sum(1 for r in valid if r.passed) / len(valid)
 
     @property
     def average_score(self) -> float:
         """Average score across all cases (excluding judge errors)."""
-        valid_results = [r for r in self.results if not r.is_judge_error]
-        if not valid_results:
+        valid = self.valid_results
+        if not valid:
             return 0.0
-        return sum(r.score for r in valid_results) / len(valid_results)
+        return sum(r.score for r in valid) / len(valid)
 
     def failed_cases(self) -> list[EvalResult]:
         """Get list of failed cases (excluding judge errors)."""
-        return [r for r in self.results if not r.passed and not r.is_judge_error]
+        return [r for r in self.valid_results if not r.passed]
 
     def judge_error_cases(self) -> list[EvalResult]:
         """Get list of cases that failed due to judge errors."""
@@ -180,17 +184,12 @@ async def run_eval_case(
     Returns:
         EvalResult with the response and judgment.
     """
+    from dataclasses import replace
+
     if config is None:
         config = EvalConfig()
     if judge_model is not None:
-        # Support legacy judge_model parameter
-        config = EvalConfig(
-            judge_model=judge_model,
-            judge_temperature=config.judge_temperature,
-            judge_max_tokens=config.judge_max_tokens,
-            retry_attempts=config.retry_attempts,
-            retry_base_delay=config.retry_base_delay,
-        )
+        config = replace(config, judge_model=judge_model)
 
     # Create fresh session if not provided
     if session is None:
@@ -270,16 +269,12 @@ async def run_eval_suite(
     Returns:
         EvalReport with all results.
     """
+    from dataclasses import replace
+
     if config is None:
         config = EvalConfig()
     if judge_model is not None:
-        config = EvalConfig(
-            judge_model=judge_model,
-            judge_temperature=config.judge_temperature,
-            judge_max_tokens=config.judge_max_tokens,
-            retry_attempts=config.retry_attempts,
-            retry_base_delay=config.retry_base_delay,
-        )
+        config = replace(config, judge_model=judge_model)
 
     report = EvalReport(suite_name=suite.name, config=config)
 
@@ -293,11 +288,12 @@ async def run_eval_suite(
         )
         report.results.append(result)
 
-        status = (
-            "PASSED"
-            if result.passed
-            else ("JUDGE_ERROR" if result.is_judge_error else "FAILED")
-        )
+        if result.passed:
+            status = "PASSED"
+        elif result.is_judge_error:
+            status = "JUDGE_ERROR"
+        else:
+            status = "FAILED"
         logger.info(f"Case {case.id}: {status} (score: {result.score:.2f})")
 
     # Log summary

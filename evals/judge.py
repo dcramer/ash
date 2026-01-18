@@ -214,6 +214,15 @@ class LLMJudge(Judge):
             criteria_scores=result_data.get("criteria_scores", {}),
         )
 
+    def _format_tool_call(self, tc: dict[str, Any]) -> str:
+        """Format a single tool call for the prompt."""
+        desc = f"- {tc['name']}"
+        if tc.get("input"):
+            desc += f": {json.dumps(tc['input'], default=str)[:200]}"
+        if tc.get("is_error"):
+            desc += " [ERROR]"
+        return desc
+
     def _build_prompt(
         self,
         case: EvalCase,
@@ -221,40 +230,29 @@ class LLMJudge(Judge):
         tool_calls: list[dict[str, Any]],
     ) -> str:
         """Build the evaluation prompt."""
-        # Format tool calls
-        if tool_calls:
-            tools_list = []
-            for tc in tool_calls:
-                tool_desc = f"- {tc['name']}"
-                if tc.get("input"):
-                    tool_desc += f": {json.dumps(tc['input'], default=str)[:200]}"
-                if tc.get("is_error"):
-                    tool_desc += " [ERROR]"
-                tools_list.append(tool_desc)
-            tools_summary = "\n".join(tools_list)
-        else:
-            tools_summary = "(no tools called)"
+        tools_summary = (
+            "\n".join(self._format_tool_call(tc) for tc in tool_calls)
+            if tool_calls
+            else "(no tools called)"
+        )
 
-        # Format criteria
-        if case.criteria:
-            criteria_text = "\n".join(f"- {c}" for c in case.criteria)
-        else:
-            criteria_text = "(no specific criteria)"
+        criteria_text = (
+            "\n".join(f"- {c}" for c in case.criteria)
+            if case.criteria
+            else "(no specific criteria)"
+        )
 
-        # Format expected tools
-        expected_tools_text = ""
-        if case.expected_tools:
-            expected_tools_text = (
-                f"\n\nExpected tools to be called: {', '.join(case.expected_tools)}"
-            )
+        expected_tools_text = (
+            f"\n\nExpected tools to be called: {', '.join(case.expected_tools)}"
+            if case.expected_tools
+            else ""
+        )
 
-        # Format forbidden tools
-        forbidden_tools_text = ""
-        if case.forbidden_tools:
-            forbidden_tools_text = (
-                f"\n\nForbidden tools (MUST NOT be called): "
-                f"{', '.join(case.forbidden_tools)}"
-            )
+        forbidden_tools_text = (
+            f"\n\nForbidden tools (MUST NOT be called): {', '.join(case.forbidden_tools)}"
+            if case.forbidden_tools
+            else ""
+        )
 
         return f"""## User Prompt
 {case.prompt}
@@ -341,16 +339,12 @@ async def judge_response(
     Returns:
         JudgeResult with pass/fail status, score, and reasoning.
     """
+    from dataclasses import replace
+
     if config is None:
         config = EvalConfig(judge_model=model)
-    elif model != "claude-sonnet-4-5":  # Only override if explicitly set
-        config = EvalConfig(
-            judge_model=model,
-            judge_temperature=config.judge_temperature,
-            judge_max_tokens=config.judge_max_tokens,
-            retry_attempts=config.retry_attempts,
-            retry_base_delay=config.retry_base_delay,
-        )
+    elif model != "claude-sonnet-4-5":
+        config = replace(config, judge_model=model)
 
     judge = LLMJudge(llm, config)
     return await judge.evaluate(case, response_text, tool_calls)

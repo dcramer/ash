@@ -314,6 +314,8 @@ class SystemPromptBuilder:
             "",
             "- `ash-sb memory search 'query'` - Search memories",
             "- `ash-sb memory add 'content'` - Store a memory",
+            "- `ash-sb memory list` - List recent memories with IDs",
+            "- `ash-sb memory delete <id>` - Delete a memory by ID",
             "- `ash-sb schedule create 'msg' --at <time>` - Set reminder/task",
             "- `ash-sb schedule create 'msg' --cron '<expr>'` - Recurring task",
             "- `ash-sb schedule list` - List scheduled tasks",

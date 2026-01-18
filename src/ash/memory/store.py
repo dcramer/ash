@@ -269,6 +269,26 @@ class MemoryStore:
         )
         return result.scalar_one_or_none()
 
+    async def get_memory_by_prefix(self, memory_id_prefix: str) -> Memory | None:
+        """Get memory by ID or ID prefix.
+
+        Supports short IDs like git - if exactly one memory matches the prefix,
+        return it. Returns None if no match or multiple matches.
+        """
+        # Try exact match first
+        memory = await self.get_memory(memory_id_prefix)
+        if memory:
+            return memory
+
+        # Try prefix match
+        result = await self._session.execute(
+            select(Memory).where(Memory.id.startswith(memory_id_prefix))
+        )
+        matches = list(result.scalars().all())
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
     async def delete_memory(
         self,
         memory_id: str,

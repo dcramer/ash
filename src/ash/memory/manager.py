@@ -286,9 +286,19 @@ class MemoryManager:
         owner_user_id: str | None = None,
         chat_id: str | None = None,
     ) -> bool:
-        """Delete a memory and its embedding."""
+        """Delete a memory and its embedding.
+
+        Supports partial memory IDs (prefix matching).
+        """
+        # Look up full memory ID first (supports prefix matching)
+        memory = await self._store.get_memory_by_prefix(memory_id)
+        if not memory:
+            return False
+
+        full_id = memory.id
+
         deleted = await self._store.delete_memory(
-            memory_id,
+            full_id,
             owner_user_id=owner_user_id,
             chat_id=chat_id,
         )
@@ -296,11 +306,11 @@ class MemoryManager:
             return False
 
         try:
-            await self._retriever.delete_memory_embedding(memory_id)
+            await self._retriever.delete_memory_embedding(full_id)
         except Exception:
             logger.warning(
                 "Failed to delete memory embedding",
-                extra={"memory_id": memory_id},
+                extra={"memory_id": full_id},
                 exc_info=True,
             )
 
