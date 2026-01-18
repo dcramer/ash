@@ -278,14 +278,20 @@ class JSONLHandler(logging.Handler):
         super().close()
 
 
-def _short_id(full_id: str | None, max_len: int = 8) -> str:
-    """Shorten ID for display. Returns empty string if None."""
+def _short_id(
+    full_id: str | None, max_len: int = 8, use_last_part: bool = False
+) -> str:
+    """Shorten ID; use_last_part=True extracts thread_id from provider-prefixed keys."""
     if not full_id:
         return ""
-    # For session keys like "telegram_-542863895_123", extract chat part
+    # For session keys like "telegram_-542863895_1662"
     if full_id.startswith(("telegram_", "discord_", "slack_")):
         parts = full_id.split("_")
+        if use_last_part and len(parts) >= 3:
+            # Return session number (last part)
+            return parts[-1][:max_len]
         if len(parts) >= 2:
+            # Return chat_id (second part)
             return parts[1][:max_len]
     return full_id[:max_len]
 
@@ -317,8 +323,9 @@ class ComponentFormatter(logging.Formatter):
         chat_short = _short_id(chat_id) if chat_id else ""
         if chat_short:
             ctx_parts.append(chat_short)
-        # Only show session if different from chat (avoid redundancy)
-        session_short = _short_id(session_id, 6) if session_id else ""
+        # Show thread_id from session key (e.g., "1662" from "telegram_-542863895_1662")
+        # Skip if same as chat (happens when session has no thread_id)
+        session_short = _short_id(session_id, use_last_part=True) if session_id else ""
         if session_short and session_short != chat_short:
             ctx_parts.append(f"s:{session_short}")
 

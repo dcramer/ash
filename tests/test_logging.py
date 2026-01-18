@@ -267,6 +267,25 @@ class TestLogContext:
 
         assert _short_id("telegram_-542863895_1234", max_len=5) == "-5428"
 
+    def test_short_id_use_last_part(self):
+        from ash.logging import _short_id
+
+        # With use_last_part=True, should return the session number (last part)
+        assert _short_id("telegram_-542863895_1234", use_last_part=True) == "1234"
+        assert _short_id("telegram_-542863895_1662", use_last_part=True) == "1662"
+
+        # Should still work with max_len
+        assert (
+            _short_id("telegram_-542863895_123456789", use_last_part=True, max_len=5)
+            == "12345"
+        )
+
+        # Falls back to second part if only 2 parts
+        assert _short_id("telegram_-542863895", use_last_part=True) == "-5428638"
+
+        # Non-provider-prefixed IDs use default behavior
+        assert _short_id("some_generic_session", use_last_part=True) == "some_gen"
+
     def test_log_context_sets_contextvars(self):
         from ash.logging import _log_chat_id, _log_session_id, log_context
 
@@ -410,3 +429,34 @@ class TestComponentFormatter:
             # Should have both chat and session
             assert "-5428638" in result
             assert "s:abc123" in result
+
+    def test_context_with_provider_prefixed_session_id(self):
+        import logging
+
+        from ash.logging import ComponentFormatter, log_context
+
+        formatter = ComponentFormatter("%(context)s%(component)s: %(message)s")
+        record = logging.LogRecord(
+            name="ash.tools",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+
+        # Session ID like "telegram_-542863895_1662" should show thread_id
+        with log_context(chat_id="-542863895", session_id="telegram_-542863895_1662"):
+            result = formatter.format(record)
+            # Should show chat_id and thread_id
+            assert "-5428638" in result  # chat
+            assert "s:1662" in result  # thread_id
+
+        # Session ID without thread_id should NOT show redundant session
+        with log_context(chat_id="-542863895", session_id="telegram_-542863895"):
+            result = formatter.format(record)
+            assert "-5428638" in result  # chat
+            assert (
+                " s:" not in result
+            )  # no redundant session display (space prefix distinguishes from "tools:")
