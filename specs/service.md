@@ -2,7 +2,7 @@
 
 > Background process management with OS-native integration
 
-Files: src/ash/service/manager.py, src/ash/service/backends/*.py, src/ash/cli/app.py
+Files: src/ash/service/manager.py, src/ash/service/backends/generic.py, src/ash/service/backends/launchd.py, src/ash/service/backends/systemd.py, src/ash/cli/app.py
 
 ## Requirements
 

@@ -29,6 +29,25 @@ AI commits MUST include:
 Co-Authored-By: (the agent model's name and attribution byline)
 ```
 
+## Development Roles
+
+Use `/role-master` to coordinate project reviews and delegate to specialist roles.
+
+| Role | Purpose | Script |
+|------|---------|--------|
+| `/role-master` | Coordinate work, delegate, verify | `scripts/role-health.py` |
+| `/role-arch` | Architecture, dependencies | `scripts/arch-check.py` |
+| `/role-eval` | Write evals, coverage gaps | `scripts/eval-coverage.py` |
+| `/role-spec` | Spec quality, completeness | `scripts/spec-audit.py` |
+| `/role-ux` | Aggregate conversation patterns | `scripts/ux-analyze.py` |
+| `/role-debug` | Single session deep analysis | `scripts/session-debug.py` |
+
+**Running a project review:**
+```
+/role-master review the project
+```
+This spawns subagents for each specialist role, aggregates findings, and reports priorities.
+
 ## Skills
 
 | Skill | Purpose |

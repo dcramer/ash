@@ -1,0 +1,73 @@
+name: Agent Registry Behavior
+description: Tests for agent invocation via use_agent tool and registry functionality
+
+cases:
+  - id: invoke_research_agent
+    description: Successfully invoke the research agent for a topic
+    prompt: "Research the current best practices for Python async programming"
+    expected_behavior: |
+      The assistant should recognize this is a research task and delegate to
+      the research agent using the use_agent tool. The research agent should
+      perform web searches and return synthesized findings.
+    criteria:
+      - Uses use_agent tool to invoke research agent
+      - Specifies "research" as the agent name
+      - Provides a clear message/task for the agent
+      - Returns research findings to the user
+    expected_tools:
+      - use_agent
+    tags:
+      - registry
+      - research
+      - delegation
+
+  - id: invoke_nonexistent_agent
+    description: Handle request for an agent that doesn't exist
+    prompt: "Use the foobar agent to do something"
+    expected_behavior: |
+      The assistant should attempt to use the use_agent tool with "foobar"
+      as the agent name. The tool should return an error indicating the
+      agent is not found and list available agents.
+    criteria:
+      - Attempts to use use_agent with the requested agent name
+      - Handles the error response appropriately
+      - Informs user about available agents or alternatives
+    expected_tools:
+      - use_agent
+    tags:
+      - registry
+      - error_handling
+
+  - id: agent_delegation_with_context
+    description: Pass context/input data to a delegated agent
+    prompt: "Create a plan for building a REST API, focusing on authentication"
+    expected_behavior: |
+      The assistant should delegate to the plan agent using use_agent,
+      providing the task description. The plan agent should create
+      a structured implementation plan.
+    criteria:
+      - Uses use_agent to invoke plan agent
+      - Provides clear task description in message
+      - Returns structured plan output
+    expected_tools:
+      - use_agent
+    tags:
+      - registry
+      - plan
+      - delegation
+
+  - id: list_available_agents
+    description: User asks what agents are available
+    prompt: "What specialized agents can you use for complex tasks?"
+    expected_behavior: |
+      The assistant should describe the available agents (research, plan,
+      skill_writer) and their purposes. This tests awareness of the
+      registry's contents without necessarily invoking an agent.
+    criteria:
+      - Mentions research agent and its purpose
+      - Mentions plan agent and its purpose
+      - Explains when to use specialized agents
+    tags:
+      - registry
+      - discovery
+      - information

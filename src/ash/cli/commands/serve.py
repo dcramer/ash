@@ -164,12 +164,25 @@ async def _run_server(
 
     # Build sender map from available providers
     senders: dict[str, Any] = {}
+    registrars: dict[str, Any] = {}
     if telegram_provider:
         senders["telegram"] = telegram_provider.send_message
 
+        # Create registrar for tracking scheduled messages in thread index
+        from ash.chats import ChatStateManager, ThreadIndex
+
+        async def telegram_registrar(chat_id: str, message_id: str) -> None:
+            """Register a scheduled message in the thread index for reply tracking."""
+            manager = ChatStateManager(provider="telegram", chat_id=chat_id)
+            thread_index = ThreadIndex(manager)
+            # Scheduled messages start new threads (message_id is both external_id and thread_id)
+            thread_index.register_message(message_id, message_id)
+
+        registrars["telegram"] = telegram_registrar
+
     # Create and register handler if we have senders
     if senders:
-        schedule_handler = ScheduledTaskHandler(agent, senders)
+        schedule_handler = ScheduledTaskHandler(agent, senders, registrars)
         schedule_watcher.add_handler(schedule_handler.handle)
         logger.debug(f"Schedule watcher: {schedule_file}")
     else:

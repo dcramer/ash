@@ -2,7 +2,7 @@
 
 > Typer-based command-line interface with consistent help behavior
 
-Files: src/ash/cli/app.py, src/ash/cli/commands/*.py, src/ash/cli/console.py
+Files: src/ash/cli/app.py, src/ash/cli/commands/__init__.py, src/ash/cli/console.py
 
 ## Requirements
 

@@ -2,7 +2,7 @@
 
 > Patterns for writing effective agent and skill prompts
 
-Files: src/ash/agents/builtin/*.py, src/ash/tools/builtin/skills.py
+Files: src/ash/agents/builtin/plan.py, src/ash/agents/builtin/research.py, src/ash/agents/builtin/skill_writer.py, src/ash/tools/builtin/skills.py
 
 ## Requirements
 
@@ -20,6 +20,7 @@ Files: src/ash/agents/builtin/*.py, src/ash/tools/builtin/skills.py
 - Give concrete examples of bad behavior to avoid
 - Explain WHY constraints exist when non-obvious
 - Group related guidance under `##` headers
+- Include response length guidance (aim for <300 chars for simple queries)
 
 ### MUST NOT
 

@@ -1,0 +1,399 @@
+"""Tests for Telegram provider spec behaviors.
+
+Tests key behaviors from specs/telegram.md:
+- Message conversion (Telegram -> IncomingMessage)
+- Thinking message formatting
+- User/group authorization
+- Mention detection and stripping
+"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from ash.providers.base import OutgoingMessage
+from ash.providers.telegram.handlers import (
+    ToolTracker,
+    escape_markdown_v2,
+    format_thinking_status,
+    format_tool_brief,
+    format_tool_summary,
+)
+from ash.providers.telegram.provider import TelegramProvider
+
+
+class TestMessageConversion:
+    """Test Telegram message to IncomingMessage conversion."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create a Telegram provider with mock bot."""
+        with patch("ash.providers.telegram.provider.Bot"):
+            provider = TelegramProvider(
+                bot_token="test_token",
+                allowed_users=["@testuser"],
+            )
+            provider._bot_username = "testbot"
+            yield provider
+
+    def test_to_incoming_message_basic(self, provider):
+        """Test basic message conversion preserves all fields."""
+        mock_message = MagicMock()
+        mock_message.message_id = 123
+        mock_message.chat.id = 456
+        mock_message.chat.type = "private"
+        mock_message.chat.title = None
+        mock_message.from_user.full_name = "Test User"
+        mock_message.reply_to_message = None
+        mock_message.message_thread_id = None
+
+        incoming = provider._to_incoming_message(
+            mock_message,
+            user_id=789,
+            username="testuser",
+            text="Hello, bot!",
+        )
+
+        assert incoming.id == "123"
+        assert incoming.chat_id == "456"
+        assert incoming.user_id == "789"
+        assert incoming.text == "Hello, bot!"
+        assert incoming.username == "testuser"
+        assert incoming.display_name == "Test User"
+        assert incoming.metadata["chat_type"] == "private"
+        assert incoming.images == []
+
+    def test_to_incoming_message_with_reply(self, provider):
+        """Test message conversion includes reply_to_message_id."""
+        mock_message = MagicMock()
+        mock_message.message_id = 123
+        mock_message.chat.id = 456
+        mock_message.chat.type = "private"
+        mock_message.chat.title = None
+        mock_message.from_user.full_name = "Test User"
+        mock_message.reply_to_message = MagicMock()
+        mock_message.reply_to_message.message_id = 100
+        mock_message.message_thread_id = None
+
+        incoming = provider._to_incoming_message(
+            mock_message,
+            user_id=789,
+            username="testuser",
+            text="Replying to you",
+        )
+
+        assert incoming.reply_to_message_id == "100"
+
+    def test_to_incoming_message_group_with_thread(self, provider):
+        """Test group message conversion includes thread_id for forum topics."""
+        mock_message = MagicMock()
+        mock_message.message_id = 123
+        mock_message.chat.id = -1001234567890
+        mock_message.chat.type = "supergroup"
+        mock_message.chat.title = "Test Group"
+        mock_message.from_user.full_name = "Test User"
+        mock_message.reply_to_message = None
+        mock_message.message_thread_id = 42  # Forum topic thread
+
+        incoming = provider._to_incoming_message(
+            mock_message,
+            user_id=789,
+            username="testuser",
+            text="Message in forum topic",
+        )
+
+        assert incoming.metadata["chat_type"] == "supergroup"
+        assert incoming.metadata["chat_title"] == "Test Group"
+        assert incoming.metadata["thread_id"] == "42"
+
+
+class TestThinkingMessages:
+    """Test thinking message formatting per spec."""
+
+    def test_format_thinking_status_no_tools(self):
+        """Test thinking status with no tool calls."""
+        status = format_thinking_status(0)
+        # MarkdownV2 escaped: _Thinking..._
+        assert status == "_Thinking\\.\\.\\._"
+
+    def test_format_thinking_status_one_tool(self):
+        """Test thinking status with one tool call."""
+        status = format_thinking_status(1)
+        assert "1 tool call" in status
+        assert "calls" not in status
+
+    def test_format_thinking_status_multiple_tools(self):
+        """Test thinking status with multiple tool calls."""
+        status = format_thinking_status(5)
+        assert "5 tool calls" in status
+
+    def test_format_tool_summary(self):
+        """Test tool summary for final message."""
+        summary = format_tool_summary(3, 5.2)
+        # Regular MARKDOWN, not escaped
+        assert summary == "_Made 3 tool calls in 5.2s_"
+
+    def test_format_tool_summary_singular(self):
+        """Test tool summary with singular call."""
+        summary = format_tool_summary(1, 2.0)
+        assert "1 tool call" in summary
+        assert "calls" not in summary
+
+
+class TestToolBriefFormatting:
+    """Test tool brief formatting for thinking messages."""
+
+    def test_bash_command(self):
+        """Test bash command formatting."""
+        brief = format_tool_brief("bash", {"command": "git status"})
+        assert brief == "Running: `git status`"
+
+    def test_bash_command_truncation(self):
+        """Test long bash commands are truncated."""
+        long_cmd = "echo " + "x" * 100
+        brief = format_tool_brief("bash", {"command": long_cmd})
+        assert len(brief) < len(long_cmd) + 20
+        assert "..." in brief
+
+    def test_web_search(self):
+        """Test web search formatting."""
+        brief = format_tool_brief("web_search", {"query": "python async"})
+        assert brief == "Searching: python async"
+
+    def test_web_fetch(self):
+        """Test web fetch shows domain only."""
+        brief = format_tool_brief(
+            "web_fetch", {"url": "https://docs.python.org/3/library/asyncio.html"}
+        )
+        assert brief == "Reading: docs.python.org"
+
+    def test_read_file(self):
+        """Test read file shows filename only."""
+        brief = format_tool_brief(
+            "read_file", {"file_path": "/home/user/project/config.py"}
+        )
+        assert brief == "Reading: config.py"
+
+    def test_write_file(self):
+        """Test write file shows filename only."""
+        brief = format_tool_brief("write_file", {"file_path": "/home/user/output.txt"})
+        assert brief == "Writing: output.txt"
+
+    def test_remember(self):
+        """Test remember tool formatting."""
+        brief = format_tool_brief("remember", {"content": "User prefers dark mode"})
+        assert brief == "Saving to memory"
+
+    def test_recall(self):
+        """Test recall tool formatting."""
+        brief = format_tool_brief("recall", {"query": "user preferences"})
+        assert brief == "Searching memories: user preferences"
+
+    def test_unknown_tool(self):
+        """Test unknown tool uses generic format (underscores removed, _tool suffix stripped)."""
+        brief = format_tool_brief("custom_tool", {"param": "value"})
+        # Implementation strips _tool suffix and replaces underscores with spaces
+        assert brief == "Running: custom"
+
+
+class TestMarkdownEscaping:
+    """Test MarkdownV2 escaping for Telegram."""
+
+    def test_escape_periods(self):
+        """Test periods are escaped for MarkdownV2."""
+        result = escape_markdown_v2("Thinking...")
+        assert result == "Thinking\\.\\.\\."
+
+    def test_escape_parentheses(self):
+        """Test parentheses are escaped."""
+        result = escape_markdown_v2("(test)")
+        assert result == "\\(test\\)"
+
+    def test_escape_special_chars(self):
+        """Test all special chars are escaped."""
+        # Special chars: _ * [ ] ( ) ~ ` > # + - = | { } . !
+        result = escape_markdown_v2("_*[]()~`>#+-=|{}.!")
+        # Each char should be preceded by backslash
+        assert result == "\\_\\*\\[\\]\\(\\)\\~\\`\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!"
+
+    def test_escape_normal_text_unchanged(self):
+        """Test normal text passes through unchanged."""
+        result = escape_markdown_v2("Hello world")
+        assert result == "Hello world"
+
+
+class TestUserAuthorization:
+    """Test user authorization logic."""
+
+    def test_user_allowed_by_username(self):
+        """Test user allowed by @username."""
+        with patch("ash.providers.telegram.provider.Bot"):
+            provider = TelegramProvider(
+                bot_token="test",
+                allowed_users=["@alice", "@bob"],
+            )
+            assert provider._is_user_allowed(0, "alice") is True
+            assert provider._is_user_allowed(0, "charlie") is False
+
+    def test_user_allowed_by_id(self):
+        """Test user allowed by numeric ID."""
+        with patch("ash.providers.telegram.provider.Bot"):
+            provider = TelegramProvider(
+                bot_token="test",
+                allowed_users=["12345", "67890"],
+            )
+            assert provider._is_user_allowed(12345, None) is True
+            assert provider._is_user_allowed(99999, None) is False
+
+    def test_empty_allowed_users_permits_all(self):
+        """Test empty allowed_users list permits all users."""
+        with patch("ash.providers.telegram.provider.Bot"):
+            provider = TelegramProvider(
+                bot_token="test",
+                allowed_users=[],
+            )
+            assert provider._is_user_allowed(12345, "anyone") is True
+
+
+class TestMentionDetection:
+    """Test bot mention detection and stripping for groups."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create provider with bot username set."""
+        with patch("ash.providers.telegram.provider.Bot"):
+            provider = TelegramProvider(bot_token="test")
+            provider._bot_username = "testbot"
+            yield provider
+
+    def test_is_mentioned_in_text(self, provider):
+        """Test mention detected in message text."""
+        mock_message = MagicMock()
+        mock_message.text = "Hey @testbot what's up?"
+        mock_message.caption = None
+        mock_message.entities = []
+        mock_message.caption_entities = []
+
+        assert provider._is_mentioned(mock_message) is True
+
+    def test_is_mentioned_case_insensitive(self, provider):
+        """Test mention detection is case-insensitive."""
+        mock_message = MagicMock()
+        mock_message.text = "Hey @TestBot what's up?"
+        mock_message.caption = None
+        mock_message.entities = []
+        mock_message.caption_entities = []
+
+        assert provider._is_mentioned(mock_message) is True
+
+    def test_is_not_mentioned(self, provider):
+        """Test no mention detected when bot not mentioned."""
+        mock_message = MagicMock()
+        mock_message.text = "Hey @otherbot what's up?"
+        mock_message.caption = None
+        mock_message.entities = []
+        mock_message.caption_entities = []
+
+        assert provider._is_mentioned(mock_message) is False
+
+    def test_strip_mention(self, provider):
+        """Test bot mention is stripped from text."""
+        result = provider._strip_mention("@testbot hello there")
+        assert result == "hello there"
+
+    def test_strip_mention_middle_of_text(self, provider):
+        """Test mention stripped from middle of text (leaves extra space)."""
+        result = provider._strip_mention("hey @testbot can you help?")
+        # Implementation uses regex substitution which may leave extra space
+        assert result == "hey  can you help?"
+
+    def test_strip_mention_case_insensitive(self, provider):
+        """Test mention stripping is case-insensitive."""
+        result = provider._strip_mention("@TestBot hello")
+        assert result == "hello"
+
+    def test_strip_mention_preserves_other_mentions(self, provider):
+        """Test other mentions are preserved."""
+        result = provider._strip_mention("@testbot tell @alice hello")
+        assert result == "tell @alice hello"
+
+
+class TestToolTracker:
+    """Test ToolTracker for thinking message management."""
+
+    @pytest.fixture
+    def mock_provider(self):
+        """Create mock provider for tracker tests."""
+        provider = MagicMock()
+        provider.send = AsyncMock(return_value="msg_123")
+        provider.edit = AsyncMock()
+        return provider
+
+    @pytest.fixture
+    def tracker(self, mock_provider):
+        """Create a ToolTracker instance."""
+        return ToolTracker(
+            provider=mock_provider,
+            chat_id="456",
+            reply_to="789",
+        )
+
+    async def test_first_tool_creates_thinking_message(self, tracker, mock_provider):
+        """Test first tool call creates the thinking message."""
+        await tracker.on_tool_start("bash", {"command": "ls"})
+
+        assert tracker.thinking_msg_id == "msg_123"
+        assert tracker.tool_count == 1
+        mock_provider.send.assert_called_once()
+        # Check that the message contains thinking status
+        call_args = mock_provider.send.call_args
+        msg = call_args[0][0]
+        assert isinstance(msg, OutgoingMessage)
+        assert "Thinking" in msg.text
+
+    async def test_subsequent_tools_edit_message(self, tracker, mock_provider):
+        """Test subsequent tool calls edit the thinking message."""
+        await tracker.on_tool_start("bash", {"command": "ls"})
+        await tracker.on_tool_start("bash", {"command": "pwd"})
+
+        assert tracker.tool_count == 2
+        mock_provider.edit.assert_called_once()
+
+    async def test_finalize_response_edits_thinking_message(
+        self, tracker, mock_provider
+    ):
+        """Test finalize_response edits thinking message with final content."""
+        await tracker.on_tool_start("bash", {"command": "ls"})
+        msg_id = await tracker.finalize_response("Here's the result")
+
+        assert msg_id == "msg_123"
+        mock_provider.edit.assert_called()
+        # Final edit should include the response
+        final_call = mock_provider.edit.call_args
+        assert "Here's the result" in final_call[0][2]
+
+    async def test_finalize_response_no_tools_sends_directly(
+        self, tracker, mock_provider
+    ):
+        """Test finalize_response sends new message when no tools were used."""
+        msg_id = await tracker.finalize_response("Quick response")
+
+        # Should send, not edit (no thinking message exists)
+        assert msg_id == "msg_123"
+        mock_provider.send.assert_called_once()
+
+    def test_get_summary_prefix_with_tools(self, tracker):
+        """Test summary prefix includes tool count and time."""
+        import time
+
+        tracker.tool_count = 3
+        tracker.start_time = time.monotonic() - 5.0  # 5 seconds ago
+
+        summary = tracker.get_summary_prefix()
+        assert "3 tool calls" in summary
+        assert "5." in summary  # Should show ~5s elapsed
+
+    def test_get_summary_prefix_no_tools(self, tracker):
+        """Test summary prefix is empty when no tools used."""
+        summary = tracker.get_summary_prefix()
+        assert summary == ""

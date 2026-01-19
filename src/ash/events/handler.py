@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 # Type for message sender: (chat_id, text) -> message_id
 MessageSender = Callable[[str, str], Awaitable[str]]
 
+# Type for message registrar: (chat_id, message_id) -> None
+# Registers a sent message in the thread index so replies are tracked
+MessageRegistrar = Callable[[str, str], Awaitable[None]]
+
 
 class ScheduledTaskHandler:
     """Handles execution of scheduled tasks.
@@ -30,15 +34,18 @@ class ScheduledTaskHandler:
         self,
         agent: "Agent",
         senders: dict[str, MessageSender],
+        registrars: dict[str, MessageRegistrar] | None = None,
     ):
         """Initialize the handler.
 
         Args:
             agent: Agent instance to process tasks.
             senders: Map of provider name -> send function.
+            registrars: Map of provider name -> message registrar for thread tracking.
         """
         self._agent = agent
         self._senders = senders
+        self._registrars = registrars or {}
 
     async def handle(self, entry: ScheduleEntry) -> None:
         """Process a scheduled task.
@@ -101,11 +108,19 @@ class ScheduledTaskHandler:
                     if entry.username:
                         response_text = f"@{entry.username} {response_text}"
 
-                    await sender(entry.chat_id, response_text)
+                    message_id = await sender(entry.chat_id, response_text)
                     logger.info(
                         f"Sent scheduled response to {entry.provider}/{entry.chat_id}: "
                         f"{response_text[:50]}..."
                     )
+
+                    # Register the message in thread index so replies get tracked
+                    registrar = self._registrars.get(entry.provider)
+                    if registrar:
+                        await registrar(entry.chat_id, message_id)
+                        logger.debug(
+                            f"Registered scheduled message {message_id} in thread index"
+                        )
                 else:
                     logger.warning(
                         f"No sender configured for provider: {entry.provider}"

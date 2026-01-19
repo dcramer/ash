@@ -2,7 +2,7 @@
 
 > Unix domain socket RPC for sandbox-to-host communication
 
-Files: src/ash/rpc/protocol.py, src/ash/rpc/server.py, src/ash/sandbox/cli/rpc.py
+Files: src/ash/rpc/__init__.py, src/ash/rpc/server.py
 
 ## Requirements
 

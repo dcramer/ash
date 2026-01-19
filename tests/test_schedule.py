@@ -442,3 +442,36 @@ class TestScheduledTaskHandler:
         mock_agent.process_message.assert_called_once()
         # Verify response was sent
         mock_sender.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_calls_registrar(self):
+        """Test handler calls registrar after sending message."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.events.handler import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Response"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        mock_registrar = AsyncMock()
+        handler = ScheduledTaskHandler(
+            agent=mock_agent,
+            senders={"telegram": mock_sender},
+            registrars={"telegram": mock_registrar},
+        )
+
+        entry = ScheduleEntry(
+            message="Test",
+            trigger_at=datetime.now(UTC),
+            provider="telegram",
+            chat_id="123",
+            user_id="456",
+        )
+
+        await handler.handle(entry)
+
+        # Verify registrar was called with chat_id and message_id
+        mock_registrar.assert_called_once_with("123", "msg_123")
