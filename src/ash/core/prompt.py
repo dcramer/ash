@@ -94,6 +94,7 @@ class PromptContext:
     sender_display_name: str | None = None
     chat_title: str | None = None
     chat_type: str | None = None  # "group", "supergroup", "private"
+    is_scheduled_task: bool = False  # True when executing a scheduled task
 
 
 class SystemPromptBuilder:
@@ -124,7 +125,7 @@ class SystemPromptBuilder:
             self._build_agents_section(),
             self._build_model_aliases_section(),
             self._build_workspace_section(),
-            self._build_sandbox_section(),
+            self._build_sandbox_section(context),
             self._build_runtime_section(context.runtime) if context.runtime else "",
             self._build_sender_section(context),
             self._build_people_section(context.known_people)
@@ -290,7 +291,7 @@ class SystemPromptBuilder:
     def _build_workspace_section(self) -> str:
         return "## Workspace\n\nWorking directory: /workspace"
 
-    def _build_sandbox_section(self) -> str:
+    def _build_sandbox_section(self, context: PromptContext) -> str:
         sandbox = self._config.sandbox
         network_status = "disabled" if sandbox.network_mode == "none" else "enabled"
 
@@ -316,26 +317,72 @@ class SystemPromptBuilder:
             "- `ash-sb memory add 'content'` - Store a memory",
             "- `ash-sb memory list` - List recent memories with IDs",
             "- `ash-sb memory delete <id>` - Delete a memory by ID",
-            "- `ash-sb schedule create 'msg' --at <time>` - Set reminder/task",
-            "- `ash-sb schedule create 'msg' --cron '<expr>'` - Recurring task",
-            "- `ash-sb schedule list` - List scheduled tasks",
-            "- `ash-sb schedule cancel --id <id>` - Cancel a scheduled task",
-            "- `ash-sb config reload` - Reload config after changes",
-            "",
-            "Run `ash-sb --help` for all commands.",
-            "",
-            "### Setting Reminders",
-            "",
-            "When users say 'remind me at 11pm' or 'in 2 hours', run schedule create.",
-            "Times are interpreted in the user's local timezone - pass them directly.",
-            "If the user says '1150' without am/pm, infer from context (late night = pm).",
-            "",
-            "- `ash-sb schedule create 'call mom' --at '11pm'`",
-            "- `ash-sb schedule create 'check build' --at 'in 2 hours'`",
-            "- `ash-sb schedule create 'meeting prep' --at 'tomorrow at 9am'`",
-            "",
-            "Report the scheduled time in local timezone. Do not mention UTC.",
         ]
+
+        # Only include scheduling commands for regular (non-scheduled) sessions
+        if not context.is_scheduled_task:
+            lines.extend(
+                [
+                    "- `ash-sb schedule create 'msg' --at <time>` - Set reminder/task",
+                    "- `ash-sb schedule create 'msg' --cron '<expr>'` - Recurring task",
+                    "- `ash-sb schedule list` - List scheduled tasks",
+                    "- `ash-sb schedule cancel --id <id>` - Cancel a scheduled task",
+                ]
+            )
+
+        lines.extend(
+            [
+                "- `ash-sb config reload` - Reload config after changes",
+                "",
+                "Run `ash-sb --help` for all commands.",
+            ]
+        )
+
+        # Only include reminder guidance for regular sessions
+        if not context.is_scheduled_task:
+            lines.extend(
+                [
+                    "",
+                    "### Setting Reminders",
+                    "",
+                    "When users say 'remind me at 11pm' or 'in 2 hours', run schedule create.",
+                    "Times are interpreted in the user's local timezone - pass them directly.",
+                    "If the user says '1150' without am/pm, infer from context (late night = pm).",
+                    "",
+                    "- `ash-sb schedule create 'call mom' --at '11pm'`",
+                    "- `ash-sb schedule create 'check build' --at 'in 2 hours'`",
+                    "- `ash-sb schedule create 'meeting prep' --at 'tomorrow at 9am'`",
+                    "",
+                    "Report the scheduled time in local timezone. Do not mention UTC.",
+                    "",
+                    "### Writing Scheduled Tasks",
+                    "",
+                    "When creating scheduled tasks, write messages as if instructing a future agent:",
+                    "- BAD: 'remind me about buses' (vague, conversational)",
+                    "- GOOD: 'check bus arrivals for route 40 at 3rd & Pike and report them' (actionable)",
+                    "- BAD: 'don't forget the meeting' (unclear action)",
+                    "- GOOD: 'send a reminder: team meeting in 15 minutes' (clear deliverable)",
+                    "",
+                    "Scheduled tasks run in a fresh session without conversation history.",
+                    "The message you write IS the task - make it self-contained.",
+                ]
+            )
+        else:
+            # For scheduled tasks, include execution guidance
+            lines.extend(
+                [
+                    "",
+                    "### Scheduled Task Execution",
+                    "",
+                    "You are executing a previously scheduled task.",
+                    "The task was created by a user at an earlier time. Execute what it asks:",
+                    "- If it requests data (weather, bus times), fetch and report it",
+                    "- If it's a reminder, deliver the message",
+                    "- If the task seems misconfigured, execute it anyway and suggest a fix",
+                    "",
+                    "You have full access to tools. The response will be sent to the chat that scheduled it.",
+                ]
+            )
 
         return "\n".join(lines)
 

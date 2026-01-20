@@ -277,6 +277,7 @@ class Agent:
         chat_type: str | None = None,
         chat_state_path: str | None = None,
         thread_state_path: str | None = None,
+        is_scheduled_task: bool = False,
     ) -> str:
         """Build system prompt with optional memory context.
 
@@ -293,6 +294,7 @@ class Agent:
             chat_type: Type of chat ("group", "supergroup", "private").
             chat_state_path: Path to chat-level state.json.
             thread_state_path: Path to thread-specific state.json (when in thread).
+            is_scheduled_task: Whether this is a scheduled task execution.
 
         Returns:
             Complete system prompt.
@@ -311,6 +313,7 @@ class Agent:
             sender_display_name=sender_display_name,
             chat_title=chat_title,
             chat_type=chat_type,
+            is_scheduled_task=is_scheduled_task,
         )
         return self._prompt_builder.build(prompt_context)
 
@@ -429,6 +432,7 @@ class Agent:
                 and (thread_id := session.metadata.get("thread_id"))
                 else None
             ),
+            is_scheduled_task=session.metadata.get("is_scheduled_task", False),
         )
 
         system_tokens = estimate_tokens(system_prompt)

@@ -264,14 +264,26 @@ def list_tasks() -> None:
     # Show timezone in header
     typer.echo(f"Scheduled tasks (times shown in {timezone}):\n")
 
-    # Simple table output
-    typer.echo(f"{'ID':<10} {'Type':<10} {'Schedule':<25} {'Message'}")
-    typer.echo("-" * 85)
+    # Simple table output with target and scheduled_by columns
+    typer.echo(
+        f"{'ID':<10} {'Type':<10} {'Target':<18} {'By':<12} {'Schedule':<18} {'Message'}"
+    )
+    typer.echo("-" * 110)
 
     for entry in entries:
         entry_id = entry.get("id", "?")
         task_type = "periodic" if "cron" in entry else "one-shot"
-        message_preview = _truncate(entry.get("message", ""), max_len=35)
+
+        # Show provider:chat_id (truncated)
+        chat_id = entry.get("chat_id", "?")
+        truncated_chat = chat_id[:10] if len(chat_id) > 10 else chat_id
+        target = f"{entry.get('provider', '?')}:{truncated_chat}"
+
+        # Show who scheduled it
+        username = entry.get("username", "")
+        scheduled_by = f"@{username}" if username else "?"
+
+        message_preview = _truncate(entry.get("message", ""), max_len=25)
 
         if "cron" in entry:
             schedule = entry["cron"]
@@ -280,7 +292,10 @@ def list_tasks() -> None:
         else:
             schedule = "?"
 
-        typer.echo(f"{entry_id:<10} {task_type:<10} {schedule:<25} {message_preview}")
+        typer.echo(
+            f"{entry_id:<10} {task_type:<10} {target:<18} {scheduled_by:<12} "
+            f"{schedule:<18} {message_preview}"
+        )
 
     typer.echo(f"\nTotal: {len(entries)} task(s)")
 

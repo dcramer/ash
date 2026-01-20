@@ -69,18 +69,27 @@ class ScheduledTaskHandler:
             f"(provider={entry.provider}, chat_id={entry.chat_id})"
         )
 
-        # Build context for the agent
-        # The critical requirement is that the agent MUST produce text output that gets
-        # sent to the user. The user scheduled this and expects a notification.
+        # Build schedule context as facts (system prompt handles instructions)
+        if entry.cron:
+            schedule_line = f"Schedule: {entry.cron} (recurring)"
+        else:
+            trigger_str = (
+                entry.trigger_at.isoformat() if entry.trigger_at else "unknown"
+            )
+            schedule_line = f"Trigger: {trigger_str} (one-shot)"
+
         scheduled_by = f"@{entry.username}" if entry.username else "unknown"
-        prefixed_message = (
-            f"[SCHEDULED TASK - scheduled by {scheduled_by}]\n\n"
-            f"Message to deliver: {entry.message}\n\n"
-            f"Instructions: Send this message to the chat. If the message mentions a specific "
-            f"person (like @someone), that's who it's for. If it's a reminder, just deliver it. "
-            f"If it asks you to do something (like check weather, run a command), do it and "
-            f"report the result. Keep your response concise."
+
+        # Present as context facts, similar to system prompt sections
+        schedule_context = (
+            f"[Scheduled Task]\n"
+            f"Entry ID: {entry.id}\n"
+            f"{schedule_line}\n"
+            f"Scheduled by: {scheduled_by}\n"
         )
+
+        # User message is just the task - system prompt handles behavior
+        prefixed_message = f"{schedule_context}\n{entry.message}"
 
         # Create ephemeral session for this task
         session = SessionState(
@@ -89,6 +98,10 @@ class ScheduledTaskHandler:
             chat_id=entry.chat_id or "",
             user_id=entry.user_id or "",
         )
+        # Populate metadata so system prompt builder includes full context
+        session.metadata["username"] = entry.username or ""
+        session.metadata["session_mode"] = "fresh"
+        session.metadata["is_scheduled_task"] = True
 
         try:
             # Process through agent
