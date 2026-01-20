@@ -134,7 +134,7 @@ def create(
         str | None,
         typer.Option(
             "--at",
-            help="ISO 8601 UTC timestamp for one-time execution (e.g., 2026-01-12T09:00:00Z)",
+            help="When to execute (e.g., '7:45am', 'tomorrow at 9am', 'in 2 hours')",
         ),
     ] = None,
     cron: Annotated[

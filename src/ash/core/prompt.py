@@ -358,14 +358,14 @@ class SystemPromptBuilder:
                     "### Setting Reminders",
                     "",
                     "When users say 'remind me at 11pm' or 'in 2 hours', run schedule create.",
-                    "Times are interpreted in the user's local timezone - pass them directly.",
-                    "If the user says '1150' without am/pm, infer from context (late night = pm).",
+                    "Pass time expressions directly to --at exactly as the user says them.",
+                    "Do not convert to UTC - the CLI handles timezone conversion automatically.",
                     "",
                     "- `ash-sb schedule create 'call mom' --at '11pm'`",
                     "- `ash-sb schedule create 'check build' --at 'in 2 hours'`",
                     "- `ash-sb schedule create 'meeting prep' --at 'tomorrow at 9am'`",
                     "",
-                    "Report the scheduled time in local timezone. Do not mention UTC.",
+                    "When confirming, report the scheduled time in the user's timezone.",
                     "",
                     "### Writing Scheduled Tasks",
                     "",
@@ -415,9 +415,11 @@ class SystemPromptBuilder:
             lines.append(f"Timezone: {tz}, Current time: {time}")
             lines.append("")
             lines.append(
-                "IMPORTANT: When discussing times with the user, use this timezone."
+                "This is the user's local timezone. Assume all times they mention are in this timezone."
             )
-            lines.append("Convert any UTC times to local time before presenting them.")
+            lines.append(
+                "When reporting times, always use this timezone (convert UTC if needed)."
+            )
 
         return "\n".join(lines)
 
