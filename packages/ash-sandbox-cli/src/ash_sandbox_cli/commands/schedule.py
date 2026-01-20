@@ -54,6 +54,20 @@ def _truncate(text: str, max_len: int = 50) -> str:
     return f"{text[:max_len]}..." if len(text) > max_len else text
 
 
+def _lookup_chat_title(provider: str, chat_id: str) -> str | None:
+    """Look up chat title from chat state file."""
+    if not provider or not chat_id:
+        return None
+    state_path = Path(f"/chats/{provider}/{chat_id}/state.json")
+    if not state_path.exists():
+        return None
+    try:
+        data = json.loads(state_path.read_text())
+        return data.get("chat", {}).get("title")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def _parse_time(time_str: str, timezone: str) -> datetime | None:
     """Parse time string to UTC datetime.
 
@@ -278,7 +292,9 @@ def list_tasks() -> None:
         task_type = "periodic" if "cron" in entry else "one-shot"
 
         # Show provider:title (fallback to provider:chat_id[:10])
-        chat_title = entry.get("chat_title", "")
+        chat_title = entry.get("chat_title") or _lookup_chat_title(
+            entry.get("provider", ""), entry.get("chat_id", "")
+        )
         if chat_title:
             target = f"{entry.get('provider', '?')}:{chat_title}"
         else:
