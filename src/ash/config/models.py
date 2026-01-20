@@ -14,7 +14,11 @@ from pydantic import (
     model_validator,
 )
 
-from ash.config.paths import get_database_path, get_workspace_path
+from ash.config.paths import (
+    get_database_path,
+    get_system_timezone,
+    get_workspace_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +268,8 @@ class AshConfig(BaseModel):
     workspace: Path = Field(default_factory=get_workspace_path)
     # User's timezone (IANA timezone name, e.g., "America/New_York")
     # Used for displaying times and evaluating cron schedules
-    timezone: str = "UTC"
+    # Default: detect from system (TZ env, /etc/timezone, /etc/localtime)
+    timezone: str = Field(default_factory=get_system_timezone)
     # Named model configurations (new style)
     models: dict[str, ModelConfig] = Field(default_factory=dict)
 

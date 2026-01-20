@@ -70,7 +70,7 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Manage scheduled tasks.
 
-        Scheduled tasks are stored in workspace/schedule.jsonl.
+        Scheduled tasks are stored in ~/.ash/schedule.jsonl.
 
         Examples:
             ash schedule list                  # List all scheduled tasks
@@ -82,10 +82,9 @@ def register(app: typer.Typer) -> None:
             click.echo(ctx.get_help())
             raise typer.Exit(0)
 
-        from ash.config import load_config
+        from ash.config.paths import get_schedule_file
 
-        config = load_config()
-        schedule_file = config.workspace / "schedule.jsonl"
+        schedule_file = get_schedule_file()
 
         if action == "list":
             _schedule_list(schedule_file)

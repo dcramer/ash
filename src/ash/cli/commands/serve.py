@@ -163,9 +163,10 @@ async def _run_server(
         )
 
     # Set up schedule watcher
+    from ash.config.paths import get_schedule_file
     from ash.events import ScheduledTaskHandler, ScheduleWatcher
 
-    schedule_file = ash_config.workspace / "schedule.jsonl"
+    schedule_file = get_schedule_file()
     schedule_watcher = ScheduleWatcher(schedule_file, timezone=ash_config.timezone)
 
     # Build sender map from available providers

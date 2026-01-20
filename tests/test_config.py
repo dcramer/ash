@@ -513,3 +513,76 @@ class TestResolveEnvSecrets:
         }
         result = _resolve_env_secrets(config)
         assert result["default_llm"].get("api_key") is None
+
+
+class TestSystemTimezone:
+    """Tests for system timezone detection."""
+
+    def test_get_system_timezone_returns_string(self):
+        """Test that get_system_timezone returns a valid timezone string."""
+        from ash.config.paths import get_system_timezone
+
+        tz = get_system_timezone()
+        assert isinstance(tz, str)
+        assert len(tz) > 0
+
+    def test_get_system_timezone_respects_tz_env(self, monkeypatch):
+        """Test that TZ environment variable takes precedence."""
+        from ash.config.paths import get_system_timezone
+
+        monkeypatch.setenv("TZ", "America/New_York")
+        tz = get_system_timezone()
+        assert tz == "America/New_York"
+
+    def test_get_system_timezone_is_valid_iana(self):
+        """Test that returned timezone is valid IANA name."""
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        from ash.config.paths import get_system_timezone
+
+        tz = get_system_timezone()
+        try:
+            ZoneInfo(tz)
+        except ZoneInfoNotFoundError:
+            pytest.fail(f"get_system_timezone returned invalid IANA name: {tz}")
+
+
+class TestAshConfigTimezoneDefault:
+    """Tests for AshConfig timezone default behavior."""
+
+    def test_timezone_defaults_to_system(self, monkeypatch):
+        """Test that AshConfig timezone defaults to system timezone."""
+        from ash.config.models import AshConfig, ModelConfig
+        from ash.config.paths import get_system_timezone
+
+        # Set a known timezone
+        monkeypatch.setenv("TZ", "Europe/London")
+
+        config = AshConfig(
+            models={"default": ModelConfig(provider="anthropic", model="test")}
+        )
+
+        # Should default to system timezone
+        assert config.timezone == get_system_timezone()
+        assert config.timezone == "Europe/London"
+
+    def test_timezone_can_be_overridden(self):
+        """Test that timezone can be explicitly set."""
+        from ash.config.models import AshConfig, ModelConfig
+
+        config = AshConfig(
+            models={"default": ModelConfig(provider="anthropic", model="test")},
+            timezone="America/Los_Angeles",
+        )
+        assert config.timezone == "America/Los_Angeles"
+
+    def test_invalid_timezone_raises_error(self):
+        """Test that invalid timezone raises validation error."""
+        from ash.config.models import AshConfig, ModelConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            AshConfig(
+                models={"default": ModelConfig(provider="anthropic", model="test")},
+                timezone="Invalid/Timezone",
+            )
+        assert "Invalid timezone" in str(exc_info.value)

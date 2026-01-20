@@ -15,6 +15,43 @@ from pathlib import Path
 ENV_VAR = "ASH_HOME"
 
 
+def get_system_timezone() -> str:
+    """Detect system timezone, falling back to UTC.
+
+    Resolution order:
+    1. TZ environment variable (if set)
+    2. /etc/timezone file (Debian/Ubuntu)
+    3. /etc/localtime symlink target (most Linux distros)
+    4. Fallback to UTC
+
+    Returns:
+        IANA timezone name (e.g., "America/Los_Angeles", "Europe/London", "UTC").
+    """
+    # Check TZ environment variable first
+    if tz := os.environ.get("TZ"):
+        return tz
+
+    # Linux: read /etc/timezone (Debian/Ubuntu)
+    try:
+        tz = Path("/etc/timezone").read_text().strip()
+        if tz:
+            return tz
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    # Linux: follow /etc/localtime symlink (most distros)
+    try:
+        link = Path("/etc/localtime").resolve()
+        parts = str(link).split("zoneinfo/")
+        if len(parts) > 1:
+            return parts[1]
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    # Fallback to UTC
+    return "UTC"
+
+
 @lru_cache(maxsize=1)
 def get_ash_home() -> Path:
     """Get the base directory for all Ash data.
@@ -116,6 +153,11 @@ def get_installed_skills_path() -> Path:
     return get_ash_home() / "skills.installed"
 
 
+def get_schedule_file() -> Path:
+    """Get the schedule file path."""
+    return get_ash_home() / "schedule.jsonl"
+
+
 def get_uv_cache_path() -> Path:
     """Get the uv package cache directory path for sandbox."""
     return get_ash_home() / "cache" / "uv"
@@ -158,6 +200,7 @@ def get_all_paths() -> dict[str, Path]:
         "config": get_config_path(),
         "database": get_database_path(),
         "workspace": get_workspace_path(),
+        "schedule": get_schedule_file(),
         "logs": get_logs_path(),
         "run": get_run_path(),
         "chats": get_chats_path(),

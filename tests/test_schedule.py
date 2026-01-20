@@ -475,3 +475,87 @@ class TestScheduledTaskHandler:
 
         # Verify registrar was called with chat_id and message_id
         mock_registrar.assert_called_once_with("123", "msg_123")
+
+
+class TestScheduleEntryTimezone:
+    """Tests for ScheduleEntry timezone handling."""
+
+    def test_entry_with_stored_timezone(self):
+        """Test entry stores and uses its own timezone."""
+        entry = ScheduleEntry(
+            message="Test",
+            cron="0 8 * * *",
+            timezone="America/Los_Angeles",
+        )
+        assert entry.timezone == "America/Los_Angeles"
+
+    def test_timezone_serialization(self):
+        """Test timezone is serialized in to_json_line."""
+        entry = ScheduleEntry(
+            message="Test",
+            cron="0 8 * * *",
+            timezone="America/Los_Angeles",
+        )
+        line = entry.to_json_line()
+        assert '"timezone": "America/Los_Angeles"' in line
+
+    def test_timezone_deserialization(self):
+        """Test timezone is parsed from JSON line."""
+        line = '{"cron": "0 8 * * *", "message": "Test", "timezone": "America/Los_Angeles"}'
+        entry = ScheduleEntry.from_line(line)
+        assert entry is not None
+        assert entry.timezone == "America/Los_Angeles"
+
+    def test_cron_always_evaluated_in_utc(self):
+        """Test cron expressions are always evaluated in UTC."""
+        # Same cron, different stored timezone - should give same result
+        entry_la = ScheduleEntry(
+            message="Test",
+            cron="0 8 * * *",
+            timezone="America/Los_Angeles",
+        )
+        entry_utc = ScheduleEntry(
+            message="Test",
+            cron="0 8 * * *",
+            timezone="UTC",
+        )
+        entry_none = ScheduleEntry(
+            message="Test",
+            cron="0 8 * * *",
+            timezone=None,
+        )
+
+        # All should return the same UTC time (8:00 UTC)
+        next_la = entry_la.next_fire_time()
+        next_utc = entry_utc.next_fire_time()
+        next_none = entry_none.next_fire_time()
+
+        assert next_la is not None
+        assert next_utc is not None
+        assert next_none is not None
+        assert next_la == next_utc == next_none
+        assert next_la.hour == 8  # 8 AM UTC
+
+    def test_one_shot_timezone_stored(self):
+        """Test one-shot entry can store timezone."""
+        entry = ScheduleEntry(
+            message="Test",
+            trigger_at=datetime(2026, 1, 15, 8, 0, 0, tzinfo=UTC),
+            timezone="America/Los_Angeles",
+        )
+        assert entry.timezone == "America/Los_Angeles"
+        line = entry.to_json_line()
+        assert '"timezone": "America/Los_Angeles"' in line
+
+    def test_cron_next_fire_is_utc(self):
+        """Test cron next fire time is returned in UTC."""
+        entry = ScheduleEntry(
+            message="Test",
+            cron="0 15 * * *",  # 3 PM UTC = 7 AM PST
+            last_run=datetime(2026, 1, 15, 15, 0, 0, tzinfo=UTC),
+        )
+
+        next_fire = entry.next_fire_time()
+        assert next_fire is not None
+        assert next_fire.tzinfo == UTC
+        assert next_fire.hour == 15  # 3 PM UTC

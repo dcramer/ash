@@ -254,24 +254,13 @@ class TestScheduleCommand:
         assert "No scheduled tasks" in result.stdout
 
     def test_schedule_list_with_entries(self, cli_runner, monkeypatch, tmp_path):
-        from ash.config import models
-
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        schedule_file = workspace / "schedule.jsonl"
+        schedule_file = tmp_path / "schedule.jsonl"
         schedule_file.write_text(
             '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Test task"}\n'
         )
         monkeypatch.setattr(
-            "ash.config.load_config",
-            lambda: models.AshConfig(
-                models={
-                    "default": models.ModelConfig(
-                        provider="anthropic", model="claude-3-sonnet"
-                    )
-                },
-                workspace=workspace,
-            ),
+            "ash.config.paths.get_schedule_file",
+            lambda: schedule_file,
         )
 
         result = cli_runner.invoke(app, ["schedule", "list"])
@@ -279,24 +268,13 @@ class TestScheduleCommand:
         assert "Test task" in result.stdout
 
     def test_schedule_cancel_success(self, cli_runner, monkeypatch, tmp_path):
-        from ash.config import models
-
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        schedule_file = workspace / "schedule.jsonl"
+        schedule_file = tmp_path / "schedule.jsonl"
         schedule_file.write_text(
             '{"id": "abc12345", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task to cancel"}\n'
         )
         monkeypatch.setattr(
-            "ash.config.load_config",
-            lambda: models.AshConfig(
-                models={
-                    "default": models.ModelConfig(
-                        provider="anthropic", model="claude-3-sonnet"
-                    )
-                },
-                workspace=workspace,
-            ),
+            "ash.config.paths.get_schedule_file",
+            lambda: schedule_file,
         )
 
         result = cli_runner.invoke(app, ["schedule", "cancel", "--id", "abc12345"])
@@ -307,25 +285,14 @@ class TestScheduleCommand:
         assert schedule_file.read_text().strip() == ""
 
     def test_schedule_clear_with_force(self, cli_runner, monkeypatch, tmp_path):
-        from ash.config import models
-
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        schedule_file = workspace / "schedule.jsonl"
+        schedule_file = tmp_path / "schedule.jsonl"
         schedule_file.write_text(
             '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
             '{"trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
         )
         monkeypatch.setattr(
-            "ash.config.load_config",
-            lambda: models.AshConfig(
-                models={
-                    "default": models.ModelConfig(
-                        provider="anthropic", model="claude-3-sonnet"
-                    )
-                },
-                workspace=workspace,
-            ),
+            "ash.config.paths.get_schedule_file",
+            lambda: schedule_file,
         )
 
         result = cli_runner.invoke(app, ["schedule", "clear", "--force"])

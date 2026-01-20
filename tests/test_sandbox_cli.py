@@ -101,7 +101,7 @@ class TestScheduleCreate:
         result = cli_runner.invoke(app, ["create", "Past time", "--at", past])
 
         assert result.exit_code == 1
-        assert "must be in the future" in result.output
+        assert "in the past" in result.output
 
     def test_create_requires_routing_context(
         self, cli_runner_no_context, schedule_file

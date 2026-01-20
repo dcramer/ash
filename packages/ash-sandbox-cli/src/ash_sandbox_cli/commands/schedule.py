@@ -15,7 +15,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-SCHEDULE_FILE = Path("/workspace/schedule.jsonl")
+SCHEDULE_FILE = Path("/schedule.jsonl")
 
 
 def _get_context() -> dict[str, str]:
@@ -173,7 +173,14 @@ def create(
             typer.echo(f"Error: Could not parse time: {at}", err=True)
             raise typer.Exit(1)
         if trigger_time <= datetime.now(UTC):
-            typer.echo(f"Error: --at must be in the future. Got: {at}", err=True)
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(ctx["timezone"])
+            local_str = trigger_time.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z")
+            typer.echo(
+                f"Error: Time '{at}' parsed as {local_str} which is in the past",
+                err=True,
+            )
             raise typer.Exit(1)
 
     # Validate cron format
@@ -210,6 +217,8 @@ def create(
         entry["user_id"] = ctx["user_id"]
     if ctx["username"]:
         entry["username"] = ctx["username"]
+    # Store timezone so cron expressions are evaluated in the correct local time
+    entry["timezone"] = ctx["timezone"]
 
     entry["created_at"] = datetime.now(UTC).isoformat()
 

@@ -42,6 +42,9 @@ class ScheduleEntry:
     trigger_at: datetime | None = None  # One-shot
     cron: str | None = None  # Periodic
     last_run: datetime | None = None  # For periodic
+    # Timezone the entry was created in (IANA name)
+    # Used for evaluating cron expressions in the correct local time
+    timezone: str | None = None
     # Context for routing response back
     chat_id: str | None = None
     chat_title: str | None = None  # Friendly name for the chat
@@ -61,7 +64,8 @@ class ScheduleEntry:
         """Get the next fire time for this entry.
 
         Args:
-            timezone: IANA timezone name for evaluating cron expressions.
+            timezone: Fallback IANA timezone name for evaluating cron expressions.
+                      If the entry has a stored timezone, that takes precedence.
 
         Returns:
             The next fire time in UTC, or None if not schedulable.
@@ -70,7 +74,9 @@ class ScheduleEntry:
             return self.trigger_at
 
         if self.cron:
-            return self._next_run_time(timezone)
+            # Use stored timezone if available, otherwise fall back to parameter
+            tz = self.timezone or timezone
+            return self._next_run_time(tz)
 
         return None
 
@@ -78,10 +84,13 @@ class ScheduleEntry:
         """Check if this entry is due for execution.
 
         Args:
-            timezone: IANA timezone name for evaluating cron expressions.
+            timezone: Fallback IANA timezone name for evaluating cron expressions.
+                      If the entry has a stored timezone, that takes precedence.
         """
         now = datetime.now(UTC)
         entry_id = self.id or "?"
+        # Use stored timezone if available, otherwise fall back to parameter
+        tz = self.timezone or timezone
 
         if self.trigger_at:
             is_due = now >= self.trigger_at
@@ -92,7 +101,7 @@ class ScheduleEntry:
             return is_due
 
         if self.cron:
-            next_run = self._next_run_time(timezone)
+            next_run = self._next_run_time(tz)
             if next_run is None:
                 logger.debug(
                     f"Entry {entry_id}: cron={self.cron}, next_run=None, due=False"
@@ -100,7 +109,7 @@ class ScheduleEntry:
                 return False
             is_due = now >= next_run
             logger.debug(
-                f"Entry {entry_id}: cron='{self.cron}' (tz={timezone}), "
+                f"Entry {entry_id}: cron='{self.cron}' (tz={tz}), "
                 f"next_run={next_run.isoformat()}, now={now.isoformat()}, due={is_due}"
             )
             return is_due
@@ -110,33 +119,29 @@ class ScheduleEntry:
     def _next_run_time(self, timezone: str = "UTC") -> datetime | None:
         """Calculate next run time from cron and last_run.
 
-        Cron expressions are evaluated in the user's timezone so that
-        "0 8 * * *" means 8am local time, not 8am UTC.
+        Cron expressions are always evaluated in UTC for consistency.
+        This ensures scheduled times don't shift if system timezone changes.
 
         Args:
-            timezone: IANA timezone name for evaluating cron expressions.
+            timezone: Unused, kept for API compatibility. Cron always uses UTC.
         """
         if not self.cron:
             return None
         try:
-            from zoneinfo import ZoneInfo
-
             from croniter import croniter
 
-            tz = ZoneInfo(timezone)
-
+            # Always use UTC for cron evaluation
             if self.last_run:
-                # Normal case: get next run after last_run
-                # Convert last_run to user timezone for cron evaluation
-                base_time = self.last_run.astimezone(tz)
+                base_time = self.last_run.astimezone(UTC)
             else:
-                # New task: wait for the next scheduled occurrence
-                base_time = datetime.now(UTC).astimezone(tz)
+                base_time = datetime.now(UTC)
 
-            # croniter evaluates in the timezone of base_time
-            next_local = croniter(self.cron, base_time).get_next(datetime)
-            # Convert back to UTC for comparison
-            return next_local.astimezone(UTC)
+            # croniter evaluates in UTC
+            next_utc = croniter(self.cron, base_time).get_next(datetime)
+            # Ensure it's UTC-aware
+            if next_utc.tzinfo is None:
+                next_utc = next_utc.replace(tzinfo=UTC)
+            return next_utc
         except Exception as e:
             logger.warning(
                 f"Failed to parse cron expression '{self.cron}' for entry {self.id}: {e}"
@@ -159,6 +164,9 @@ class ScheduleEntry:
             data["cron"] = self.cron
             if self.last_run:
                 data["last_run"] = self.last_run.isoformat()
+
+        if self.timezone:
+            data["timezone"] = self.timezone
 
         # Context fields
         if self.chat_id:
@@ -208,6 +216,7 @@ class ScheduleEntry:
                 "trigger_at",
                 "cron",
                 "last_run",
+                "timezone",
                 "chat_id",
                 "chat_title",
                 "user_id",
@@ -223,6 +232,7 @@ class ScheduleEntry:
                 trigger_at=trigger_at,
                 cron=cron,
                 last_run=last_run,
+                timezone=data.get("timezone"),
                 chat_id=data.get("chat_id"),
                 chat_title=data.get("chat_title"),
                 user_id=data.get("user_id"),
