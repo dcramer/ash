@@ -357,15 +357,19 @@ class SystemPromptBuilder:
                     "",
                     "### Setting Reminders",
                     "",
-                    "When users say 'remind me at 11pm' or 'in 2 hours', run schedule create.",
-                    "Pass time expressions directly to --at exactly as the user says them.",
-                    "Do not convert to UTC - the CLI handles timezone conversion automatically.",
+                    "All times are in the user's local timezone (see Runtime section).",
+                    "Never convert to UTC - pass times exactly as the user says them.",
                     "",
+                    "**One-time reminders** - use --at with natural language:",
                     "- `ash-sb schedule create 'call mom' --at '11pm'`",
                     "- `ash-sb schedule create 'check build' --at 'in 2 hours'`",
                     "- `ash-sb schedule create 'meeting prep' --at 'tomorrow at 9am'`",
                     "",
-                    "When confirming, report the scheduled time in the user's timezone.",
+                    "**Recurring tasks** - use --cron in local time:",
+                    "- `ash-sb schedule create 'standup' --cron '0 9 * * 1-5'` (9am weekdays)",
+                    "- `ash-sb schedule create 'bus check' --cron '45 7 * * 1,2,4'` (7:45am Mon/Tue/Thu)",
+                    "",
+                    "Always confirm scheduled times in the user's local timezone.",
                     "",
                     "### Writing Scheduled Tasks",
                     "",
@@ -415,10 +419,10 @@ class SystemPromptBuilder:
             lines.append(f"Timezone: {tz}, Current time: {time}")
             lines.append("")
             lines.append(
-                "This is the user's local timezone. Assume all times they mention are in this timezone."
+                "This is the user's local timezone. All times in conversation are in this timezone."
             )
             lines.append(
-                "When reporting times, always use this timezone (convert UTC if needed)."
+                "Never mention UTC to the user - always report times in their local timezone."
             )
 
         return "\n".join(lines)

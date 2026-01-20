@@ -141,14 +141,14 @@ def create(
         str | None,
         typer.Option(
             "--cron",
-            help="Cron expression for recurring execution (e.g., '0 8 * * *' for daily 8am)",
+            help="Cron in local time (e.g., '0 8 * * *' for 8am daily, '45 7 * * 1-5' for 7:45am weekdays)",
         ),
     ] = None,
 ) -> None:
     """Create a scheduled task.
 
     Examples:
-        ash-sb schedule create "Remind me to check the build" --at 2026-01-12T10:00:00Z
+        ash-sb schedule create "Remind me to check the build" --at "tomorrow at 9am"
         ash-sb schedule create "Daily status check" --cron "0 8 * * *"
     """
     # Require routing context
