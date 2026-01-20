@@ -184,3 +184,124 @@ grep -A 30 "SKILL_AGENT_WRAPPER" src/ash/tools/builtin/skills.py
 - "After completing a task that involves tool use, provide a quick summary"
 - Explicit action instructions ("Change X" not "Can you suggest changes to X")
 - State tool/skill results are invisible in each section that uses them
+
+## System Prompt (Main Agent)
+
+Files: src/ash/core/prompt.py
+
+The main agent's system prompt is built dynamically by `SystemPromptBuilder`. This section covers requirements and patterns for the system prompt.
+
+### Section Ordering
+
+Sections MUST appear in this order (critical rules first, context last):
+
+1. **Soul** - Personality and voice
+2. **Core Principles** - Critical behavioral constraints (near top for attention)
+3. **Available Tools** - Tool list + usage guidance
+4. **Skills** - Skill list + invocation guidance
+5. **Agents** - Agent list + delegation patterns
+6. **Model Aliases** - Available model configurations
+7. **Workspace** - Working directory info
+8. **Sandbox** - Execution environment + CLI commands
+9. **Runtime** - Model, timezone, current time
+10. **Current Message** - Sender context (group chats only)
+11. **Known People** - User's contacts
+12. **Memory** - Retrieved context + memory guidance
+13. **Conversation Context** - Time gap awareness
+14. **Session** - History file access
+
+### Core Principles Section
+
+Place critical behavioral constraints immediately after the soul. These are the highest-priority rules that should never be violated.
+
+```markdown
+## Core Principles
+
+- NEVER claim success without verification
+- NEVER attempt a task yourself after an agent fails - report and ask user
+- ALWAYS use tools for lookups - never assume or guess answers
+- Report failures explicitly with actual error messages
+```
+
+### Parallel Execution Guidance
+
+Add to the Tools section:
+
+```markdown
+### Parallel Execution
+
+When multiple independent operations are needed, execute them in parallel.
+For example: reading 3 files → run 3 read_file calls simultaneously.
+Only run sequentially when outputs depend on previous results.
+```
+
+### Proactive Behavior Defaults
+
+Add to the Tools or Core Principles section:
+
+```markdown
+### Behavioral Defaults
+
+- Implement changes rather than only suggesting them
+- If intent is unclear, infer the most useful action and proceed
+- Use tools to discover missing details rather than asking
+```
+
+### Error Recovery Patterns
+
+Add to the Tools section:
+
+```markdown
+### Error Recovery
+
+- If a command times out, report it and try a simpler approach
+- If you hit rate limits, wait briefly and retry once
+- For persistent failures, explain what was tried and ask user
+```
+
+### Context-Aware Sections
+
+The prompt adapts based on context:
+
+| Context | Sections Affected | Behavior |
+|---------|-------------------|----------|
+| Group chat | Current Message | Shows sender, chat title, participant paths |
+| DM | Current Message | Section omitted |
+| Scheduled task | Sandbox | Omits reminder commands, adds execution guidance |
+| Interactive | Sandbox | Full reminder/scheduling guidance |
+| Fresh session | Session | Emphasizes file reading, warns about empty assumption |
+| Persistent session | Session | Lighter file guidance |
+
+### Token Budget
+
+- `system_prompt_buffer` in `AgentConfig` reserves 8000 tokens for system prompt
+- Use conditional sections to minimize prompt size
+- Avoid verbose prose - prefer scannable bullets
+- Test prompt size with `len(prompt) // 4` as rough token estimate
+
+### Formatting Standards
+
+| Element | Format |
+|---------|--------|
+| Major sections | `##` header |
+| Subsections | `###` header |
+| Rules/constraints | Bullet points |
+| Commands/examples | Code blocks |
+| Key terms | **Bold** |
+
+### Verification
+
+```bash
+# Review prompt builder
+cat src/ash/core/prompt.py
+
+# Check section ordering in build()
+grep "_build_.*_section" src/ash/core/prompt.py
+```
+
+- All required sections are present
+- Sections appear in correct order
+- Core Principles section exists and is near top
+- Parallel execution guidance is in Tools section
+- Context-aware sections are conditionally included
+- Formatting is consistent across sections

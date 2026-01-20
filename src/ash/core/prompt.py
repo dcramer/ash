@@ -120,6 +120,7 @@ class SystemPromptBuilder:
             parts.append(self._workspace.soul)
 
         sections = [
+            self._build_core_principles_section(),
             self._build_tools_section(),
             self._build_skills_section(),
             self._build_agents_section(),
@@ -142,6 +143,18 @@ class SystemPromptBuilder:
 
         return "".join(parts)
 
+    def _build_core_principles_section(self) -> str:
+        return "\n".join(
+            [
+                "## Core Principles",
+                "",
+                "- NEVER claim success without verification - check tool output before reporting completion",
+                "- NEVER attempt a task yourself after an agent fails - report the failure and ask the user",
+                "- ALWAYS use tools for lookups - never assume or guess answers",
+                "- Report failures explicitly with actual error messages",
+            ]
+        )
+
     def _build_tools_section(self) -> str:
         tool_defs = self._tools.get_definitions()
         if not tool_defs:
@@ -162,30 +175,29 @@ class SystemPromptBuilder:
                 "",
                 "### Tool Usage",
                 "",
-                "**IMPORTANT**: When asked to check, search, find, or look up something:",
-                "- ALWAYS use the appropriate tool - never assume or guess the answer",
-                "- Do not claim to have checked something without actually running a command",
-                "- If you need to read a file or search for content, use bash/read_file",
-                "- Never say 'I checked and found X' unless you actually ran a tool",
+                "Always use tools for lookups - never claim to have checked something without running a command.",
+                "",
+                "### Parallel Execution",
+                "",
+                "When multiple independent operations are needed, execute them in parallel.",
+                "For example: reading 3 files → run 3 read_file calls simultaneously.",
+                "Only run sequentially when outputs depend on previous results.",
                 "",
                 "### Presenting Results",
                 "",
                 "The user cannot see tool/skill/agent results - only your response.",
                 "After tool use, summarize what happened and include relevant output.",
-                "Do not react to content without showing it (e.g., don't say 'that's funny!' without the joke).",
                 "",
                 "### Handling Failures",
                 "",
-                "When tools fail, commands error, or operations can't complete:",
-                "- Report failures explicitly - never claim success when something failed",
-                "- Include the actual error message or output in your response",
-                "- If a command returns empty output, state that clearly",
-                "- If an agent reaches its iteration limit, explain what was attempted",
-                "- NEVER say 'Done!' or 'I've completed X' unless you verified success",
+                "When tools fail or commands error:",
+                "- Include the actual error message in your response",
+                "- If output is empty, state that clearly",
                 "",
-                "**When an agent fails, DO NOT attempt the task yourself.**",
-                "Report the failure and ask the user how to proceed.",
-                "Trying to work around agent failures usually makes things worse.",
+                "### Error Recovery",
+                "",
+                "- If a command times out, report it and try a simpler approach",
+                "- For persistent failures, explain what was tried and ask the user",
             ]
         )
 
