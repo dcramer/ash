@@ -13,6 +13,7 @@ from ash.config.models import (
     SandboxConfig,
     SentryConfig,
     ServerConfig,
+    SkillSource,
     TelegramConfig,
 )
 from ash.config.paths import (
@@ -35,6 +36,7 @@ __all__ = [
     "SandboxConfig",
     "SentryConfig",
     "ServerConfig",
+    "SkillSource",
     "TelegramConfig",
     "Workspace",
     "WorkspaceLoader",

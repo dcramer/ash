@@ -1,0 +1,235 @@
+---
+title: Skills
+description: Configure skill sources and per-skill settings
+sidebar:
+  order: 8
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Configure external skill sources and per-skill settings in `~/.ash/config.toml`.
+
+## Overview
+
+The `[skills]` section controls:
+
+- **Global settings** - Auto-sync behavior
+- **External sources** - GitHub repos and local paths (`[[skills.sources]]`)
+- **Per-skill config** - API keys, model overrides, enable/disable (`[skills.name]`)
+
+## Global Settings
+
+```toml
+[skills]
+auto_sync = true       # Sync sources on startup (optional)
+update_interval = 24   # Hours between auto-updates (optional)
+```
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `auto_sync` | bool | `false` | Automatically sync sources on startup |
+| `update_interval` | int | `24` | Hours between automatic updates |
+
+## External Sources
+
+Add skill sources using `[[skills.sources]]` array entries:
+
+```toml
+# GitHub repo
+[[skills.sources]]
+repo = "anthropic/skills"
+
+# Pinned to version
+[[skills.sources]]
+repo = "company/internal-skills"
+ref = "v2.0.0"
+
+# Local path (symlinked)
+[[skills.sources]]
+path = "~/my-local-skills"
+```
+
+### Source Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `repo` | string | GitHub repo in `owner/repo` format |
+| `path` | string | Local filesystem path |
+| `ref` | string | Git ref (branch, tag, commit) - repos only |
+
+<Aside type="note">
+  Each source must have either `repo` or `path`, not both.
+</Aside>
+
+### CLI Commands
+
+The CLI modifies these config entries:
+
+```bash
+# Adds [[skills.sources]] entry and installs
+ash skill add anthropic/skills
+
+# Removes entry and uninstalls
+ash skill remove anthropic/skills
+
+# Installs all configured sources
+ash skill sync
+
+# Updates installed repos
+ash skill update
+```
+
+## Per-Skill Configuration
+
+Configure individual skills with `[skills.name]` sections:
+
+```toml
+[skills.research]
+enabled = true
+PERPLEXITY_API_KEY = "pplx-..."
+
+[skills.code-review]
+model = "haiku"
+MAX_FILES = "10"
+
+[skills.deprecated-tool]
+enabled = false
+```
+
+### Per-Skill Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Enable/disable the skill (default: `true`) |
+| `model` | string | Model alias override for this skill |
+| `*` | string | Any other field becomes an environment variable |
+
+### Environment Variables
+
+Any field not named `enabled` or `model` is converted to an environment variable:
+
+```toml
+[skills.research]
+perplexity_api_key = "pplx-..."  # → PERPLEXITY_API_KEY
+ha_token = "abc123"              # → HA_TOKEN
+```
+
+Keys are automatically uppercased.
+
+## Complete Example
+
+```toml
+# ─────────────────────────────────────────────────────────────
+# Skills Configuration
+# ─────────────────────────────────────────────────────────────
+
+[skills]
+auto_sync = true
+update_interval = 24
+
+# External skill sources
+[[skills.sources]]
+repo = "anthropic/skills"
+
+[[skills.sources]]
+repo = "company/team-skills"
+ref = "main"
+
+[[skills.sources]]
+path = "~/dotfiles/ash-skills"
+
+# Per-skill configuration
+[skills.research]
+PERPLEXITY_API_KEY = "pplx-..."
+TAVILY_API_KEY = "tvly-..."
+
+[skills.calendar]
+enabled = true
+GOOGLE_CALENDAR_ID = "primary"
+
+[skills.code-review]
+model = "sonnet"
+MAX_REVIEW_SIZE = "500"
+
+[skills.experimental]
+enabled = false
+```
+
+## Directory Structure
+
+After installation, skills are stored in:
+
+```
+~/.ash/
+├── config.toml                # Configuration with [[skills.sources]]
+├── skills/                    # User skills (manually created)
+│   └── my-skill/
+│       └── SKILL.md
+├── skills.installed/          # External skills (managed by CLI)
+│   ├── .sources.json          # Installation metadata
+│   ├── github/
+│   │   └── anthropic__skills/ # Cloned repos
+│   └── local/
+│       └── ash-skills -> ~/   # Symlinks
+└── workspace/
+    └── skills/                # Project-specific skills
+```
+
+## Loading Precedence
+
+Skills from later sources override earlier ones:
+
+1. **Bundled** (lowest) - Built-in skills
+2. **Installed** - From `[[skills.sources]]`
+3. **User** - From `~/.ash/skills/`
+4. **Workspace** (highest) - From `workspace/skills/`
+
+This means a workspace skill named `research` will override an installed skill with the same name.
+
+## Troubleshooting
+
+### Skill not loading
+
+Check if the skill is enabled:
+
+```bash
+ash skill list --source
+```
+
+Verify per-skill config:
+
+```toml
+[skills.my-skill]
+enabled = true  # Make sure this isn't false
+```
+
+### Source not syncing
+
+Manually sync:
+
+```bash
+ash skill sync
+```
+
+Check source status:
+
+```bash
+ash skill sources
+```
+
+### Git not found
+
+Install git for repo sources:
+
+```bash
+# Ubuntu/Debian
+apt install git
+
+# macOS
+brew install git
+```
+
+## See Also
+
+- [Skills Architecture](/architecture/skills/) - How skills work
+- [`ash skill` CLI](/cli/skill/) - Skill management commands

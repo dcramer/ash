@@ -1,4 +1,11 @@
-"""Skill registry for discovering and loading skills from workspace."""
+"""Skill registry for discovering and loading skills from multiple sources.
+
+Loading precedence (later sources override earlier):
+1. Bundled - Built-in skills (lowest priority)
+2. Installed - Externally installed from repos/local paths
+3. User - User skills (~/.ash/skills/)
+4. Workspace - Project-specific skills (highest priority)
+"""
 
 import logging
 import re
@@ -7,7 +14,8 @@ from typing import Any
 
 import yaml
 
-from ash.skills.base import SkillDefinition
+from ash.config.paths import get_user_skills_path
+from ash.skills.base import SkillDefinition, SkillSourceType
 
 logger = logging.getLogger(__name__)
 
@@ -15,21 +23,109 @@ FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
 class SkillRegistry:
-    """Registry for skill definitions loaded from workspace/skills/."""
+    """Registry for skill definitions loaded from multiple sources.
+
+    Skills are loaded in order of precedence:
+    1. Bundled (lowest) - built-in skills
+    2. Installed - from [[skills.sources]] in config
+    3. User - ~/.ash/skills/
+    4. Workspace (highest) - workspace/skills/
+    """
 
     def __init__(self) -> None:
         self._skills: dict[str, SkillDefinition] = {}
         self._skill_sources: dict[str, Path] = {}
 
-    def discover(self, workspace_path: Path, *, include_bundled: bool = True) -> None:
+    def discover(
+        self,
+        workspace_path: Path,
+        *,
+        include_bundled: bool = True,
+        include_installed: bool = True,
+        include_user: bool = True,
+    ) -> None:
+        """Discover skills from all sources in precedence order.
+
+        Args:
+            workspace_path: Path to workspace (workspace/skills/ for project skills)
+            include_bundled: Load bundled skills (lowest priority)
+            include_installed: Load installed skills from ~/.ash/skills.installed/
+            include_user: Load user skills from ~/.ash/skills/
+        """
+        # 1. Bundled skills (lowest priority)
+        if include_bundled:
+            self._load_bundled_skills()
+
+        # 2. Installed skills (from external sources)
+        if include_installed:
+            self._load_installed_skills()
+
+        # 3. User skills (~/.ash/skills/)
+        if include_user:
+            user_skills_dir = get_user_skills_path()
+            if user_skills_dir.exists():
+                self._load_from_directory(
+                    user_skills_dir,
+                    source_type=SkillSourceType.USER,
+                )
+
+        # 4. Workspace skills (highest priority)
         skills_dir = workspace_path / "skills"
-        if not skills_dir.exists():
+        if skills_dir.exists():
+            self._load_from_directory(
+                skills_dir,
+                source_type=SkillSourceType.WORKSPACE,
+            )
+        else:
             logger.debug(f"Workspace skills directory not found: {skills_dir}")
-            return
 
-        self._load_from_directory(skills_dir)
+    def _load_bundled_skills(self) -> None:
+        """Load built-in skills (placeholder for future bundled skills)."""
+        # Currently no bundled skills - this is where we'd load them
+        pass
 
-    def _load_from_directory(self, skills_dir: Path) -> None:
+    def _load_installed_skills(self) -> None:
+        """Load skills from installed sources (repos and local paths)."""
+        from ash.skills.installer import SkillInstaller
+
+        installer = SkillInstaller()
+        installed_dirs = installer.get_installed_skills_dirs()
+
+        for skills_dir in installed_dirs:
+            # Get source info from installer metadata
+            source_repo = None
+            source_ref = None
+
+            for source in installer.list_installed():
+                install_path = Path(source.install_path)
+                # Check if this directory is from this source
+                if skills_dir == install_path or skills_dir == install_path / "skills":
+                    source_repo = source.repo
+                    source_ref = source.ref
+                    break
+
+            self._load_from_directory(
+                skills_dir,
+                source_type=SkillSourceType.INSTALLED,
+                source_repo=source_repo,
+                source_ref=source_ref,
+            )
+
+    def _load_from_directory(
+        self,
+        skills_dir: Path,
+        source_type: SkillSourceType = SkillSourceType.WORKSPACE,
+        source_repo: str | None = None,
+        source_ref: str | None = None,
+    ) -> None:
+        """Load skills from a directory.
+
+        Args:
+            skills_dir: Directory containing skills
+            source_type: Type of source (bundled, installed, user, workspace)
+            source_repo: GitHub repo (owner/repo) if installed from repo
+            source_ref: Git ref if installed from repo
+        """
         if not skills_dir.exists():
             return
 
@@ -41,21 +137,35 @@ class SkillRegistry:
                 if skill_file.exists():
                     try:
                         self._load_markdown_skill(
-                            skill_file, default_name=skill_dir.name
+                            skill_file,
+                            default_name=skill_dir.name,
+                            source_type=source_type,
+                            source_repo=source_repo,
+                            source_ref=source_ref,
                         )
                     except Exception as e:
                         logger.warning(f"Failed to load skill from {skill_file}: {e}")
 
         for md_file in skills_dir.glob("*.md"):
             try:
-                self._load_markdown_skill(md_file)
+                self._load_markdown_skill(
+                    md_file,
+                    source_type=source_type,
+                    source_repo=source_repo,
+                    source_ref=source_ref,
+                )
             except Exception as e:
                 logger.warning(f"Failed to load skill from {md_file}: {e}")
 
         for pattern in ("*.yaml", "*.yml"):
             for yaml_file in skills_dir.glob(pattern):
                 try:
-                    self._load_yaml_skill(yaml_file)
+                    self._load_yaml_skill(
+                        yaml_file,
+                        source_type=source_type,
+                        source_repo=source_repo,
+                        source_ref=source_ref,
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to load skill from {yaml_file}: {e}")
 
@@ -69,6 +179,9 @@ class SkillRegistry:
         data: dict[str, Any],
         instructions: str,
         skill_path: Path | None,
+        source_type: SkillSourceType = SkillSourceType.WORKSPACE,
+        source_repo: str | None = None,
+        source_ref: str | None = None,
     ) -> SkillDefinition:
         return SkillDefinition(
             name=name,
@@ -77,6 +190,9 @@ class SkillRegistry:
             skill_path=skill_path,
             authors=data.get("authors", []),
             rationale=data.get("rationale"),
+            source_type=source_type,
+            source_repo=source_repo,
+            source_ref=source_ref,
             env=data.get("env", []),
             packages=data.get("packages", []),
             allowed_tools=data.get("allowed_tools", []),
@@ -88,13 +204,23 @@ class SkillRegistry:
         if skill.name in self._skills:
             existing_source = self._skill_sources.get(skill.name)
             if existing_source and existing_source != source_path:
-                logger.warning(f"Skill '{skill.name}' overwritten by {source_path}")
+                logger.debug(
+                    f"Skill '{skill.name}' from {existing_source} "
+                    f"overridden by {source_path}"
+                )
 
         self._skills[skill.name] = skill
         self._skill_sources[skill.name] = source_path
         logger.debug(f"Loaded skill: {skill.name} from {source_path}")
 
-    def _load_markdown_skill(self, path: Path, default_name: str | None = None) -> None:
+    def _load_markdown_skill(
+        self,
+        path: Path,
+        default_name: str | None = None,
+        source_type: SkillSourceType = SkillSourceType.WORKSPACE,
+        source_repo: str | None = None,
+        source_ref: str | None = None,
+    ) -> None:
         content = path.read_text()
 
         match = FRONTMATTER_PATTERN.match(content)
@@ -115,10 +241,18 @@ class SkillRegistry:
         name = data.get("name") or default_name or path.stem
         skill_path = path.parent if path.name == "SKILL.md" else None
 
-        skill = self._create_skill(name, data, instructions, skill_path)
+        skill = self._create_skill(
+            name, data, instructions, skill_path, source_type, source_repo, source_ref
+        )
         self._register_skill(skill, path)
 
-    def _load_yaml_skill(self, path: Path) -> None:
+    def _load_yaml_skill(
+        self,
+        path: Path,
+        source_type: SkillSourceType = SkillSourceType.WORKSPACE,
+        source_repo: str | None = None,
+        source_ref: str | None = None,
+    ) -> None:
         with path.open() as f:
             data = yaml.safe_load(f)
 
@@ -131,7 +265,9 @@ class SkillRegistry:
             raise ValueError("Skill missing required field: instructions")
 
         name = data.get("name", path.stem)
-        skill = self._create_skill(name, data, data["instructions"], None)
+        skill = self._create_skill(
+            name, data, data["instructions"], None, source_type, source_repo, source_ref
+        )
         self._register_skill(skill, path)
 
     def register(self, skill: SkillDefinition) -> None:
@@ -153,10 +289,14 @@ class SkillRegistry:
         return list(self._skills.values())
 
     def reload_workspace(self, workspace_path: Path) -> int:
+        """Reload workspace skills only (preserves other sources)."""
         count_before = len(self._skills)
         skills_dir = workspace_path / "skills"
         if skills_dir.exists():
-            self._load_from_directory(skills_dir)
+            self._load_from_directory(
+                skills_dir,
+                source_type=SkillSourceType.WORKSPACE,
+            )
         return len(self._skills) - count_before
 
     def validate_skill_file(self, path: Path) -> tuple[bool, str | None]:

@@ -7,27 +7,192 @@ sidebar:
 
 import { Aside } from '@astrojs/starlight/components';
 
-Manage workspace skills - validate and list available skills.
+Manage skills - install external skills, list available skills, and validate skill files.
 
 ## Usage
 
 ```bash
-uv run ash skill <subcommand> [OPTIONS]
+ash skill <subcommand> [OPTIONS]
 ```
 
 ## Subcommands
 
 | Subcommand | Description |
 |------------|-------------|
-| `validate` | Validate a skill file format |
+| `add` | Add and install a skill source |
+| `remove` | Remove a skill source |
+| `sync` | Sync all sources from config |
+| `update` | Update installed skill repos |
+| `sources` | List configured skill sources |
 | `list` | List available skills |
+| `validate` | Validate a skill file format |
+
+## skill add
+
+Add and install a skill source. Supports GitHub repos and local paths.
+
+```bash
+ash skill add <source>
+```
+
+### Source Formats
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| GitHub repo | `owner/repo` | Clone from GitHub |
+| Repo with ref | `owner/repo@v1.0` | Pin to specific version/branch |
+| Local path | `~/my-skills` | Symlink local directory |
+
+### Examples
+
+Install from GitHub:
+
+```bash
+ash skill add anthropic/skills
+```
+
+Pin to a specific version:
+
+```bash
+ash skill add anthropic/skills@v1.0.0
+```
+
+Install from local path:
+
+```bash
+ash skill add ~/my-local-skills
+```
+
+<Aside type="note">
+  `ash skill add` both adds the source to your config.toml and installs it immediately.
+  This is similar to `uv add` or `npm install --save`.
+</Aside>
+
+## skill remove
+
+Remove a skill source from config and delete installed files.
+
+```bash
+ash skill remove <source>
+```
+
+### Examples
+
+```bash
+ash skill remove anthropic/skills
+ash skill remove ~/my-local-skills
+```
+
+## skill sync
+
+Install/update all sources configured in `[[skills.sources]]`.
+
+```bash
+ash skill sync
+```
+
+This is useful after manually editing config.toml or when setting up a new machine.
+
+### Example
+
+```bash
+# After cloning your dotfiles with config.toml
+ash skill sync
+```
+
+## skill update
+
+Update installed skill repos to latest commits.
+
+```bash
+ash skill update [source]
+```
+
+### Examples
+
+Update all repos:
+
+```bash
+ash skill update
+```
+
+Update specific repo:
+
+```bash
+ash skill update anthropic/skills
+```
+
+<Aside type="note">
+  Local path sources are symlinked, so they don't need updating - changes are reflected immediately.
+</Aside>
+
+## skill sources
+
+List configured skill sources and their installation status.
+
+```bash
+ash skill sources
+```
+
+### Output
+
+```
+┌──────┬──────────────────┬───────┬───────────┬────────────────────┐
+│ Type │ Source           │ Ref   │ Status    │ Skills             │
+├──────┼──────────────────┼───────┼───────────┼────────────────────┤
+│ repo │ anthropic/skills │ -     │ installed │ research, calendar │
+│ repo │ other/repo       │ v2.0  │ installed │ helper             │
+│ path │ ~/my-skills      │ -     │ installed │ custom-tool        │
+└──────┴──────────────────┴───────┴───────────┴────────────────────┘
+```
+
+## skill list
+
+List all discovered skills from all sources.
+
+```bash
+ash skill list [OPTIONS]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--source`, `-s` | Show source type for each skill |
+| `--config`, `-c` | Path to configuration file |
+
+### Examples
+
+List skills:
+
+```bash
+ash skill list
+```
+
+Show where each skill comes from:
+
+```bash
+ash skill list --source
+```
+
+### Output with --source
+
+```
+┌─────────────┬─────────────────────────┬───────────┬──────────────────┐
+│ Name        │ Description             │ Source    │ Repo/Path        │
+├─────────────┼─────────────────────────┼───────────┼──────────────────┤
+│ research    │ Research topics online  │ installed │ anthropic/skills │
+│ calendar    │ Manage calendar events  │ installed │ anthropic/skills │
+│ my-tool     │ Custom workspace tool   │ workspace │ -                │
+└─────────────┴─────────────────────────┴───────────┴──────────────────┘
+```
 
 ## skill validate
 
-Validate a skill file format:
+Validate a skill file format.
 
 ```bash
-uv run ash skill validate <path>
+ash skill validate <path>
 ```
 
 ### Examples
@@ -35,13 +200,13 @@ uv run ash skill validate <path>
 Validate by directory:
 
 ```bash
-uv run ash skill validate ~/.ash/workspace/skills/my-skill
+ash skill validate ~/.ash/workspace/skills/my-skill
 ```
 
 Validate by file:
 
 ```bash
-uv run ash skill validate ~/.ash/workspace/skills/my-skill/SKILL.md
+ash skill validate ~/.ash/workspace/skills/my-skill/SKILL.md
 ```
 
 ### Validation Checks
@@ -51,50 +216,31 @@ uv run ash skill validate ~/.ash/workspace/skills/my-skill/SKILL.md
 - Contains required `description` field
 - Has instructions in markdown body
 
-## skill list
+## Configuration
 
-List available skills:
+Skill sources are stored in `~/.ash/config.toml`:
 
-```bash
-uv run ash skill list [OPTIONS]
+```toml
+[skills]
+auto_sync = true      # Sync sources on startup
+update_interval = 24  # Hours between auto-updates
+
+[[skills.sources]]
+repo = "anthropic/skills"
+
+[[skills.sources]]
+repo = "other/repo"
+ref = "v2.0"
+
+[[skills.sources]]
+path = "~/my-local-skills"
 ```
 
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--all`, `-a` | Include unavailable skills |
-| `--config`, `-c` | Path to configuration file |
-
-### Examples
-
-List available skills:
-
-```bash
-uv run ash skill list
-```
-
-Include unavailable skills:
-
-```bash
-uv run ash skill list --all
-```
-
-### Output
-
-```
-┌─────────────┬─────────────────────────┬───────────┬────────────────────────────────────┐
-│ Name        │ Description             │ Status    │ Path                               │
-├─────────────┼─────────────────────────┼───────────┼────────────────────────────────────┤
-│ weather     │ Check weather forecast  │ available │ /home/user/.ash/.../skills/weather │
-│ api-client  │ Call external API       │ missing   │ /home/user/.ash/.../skills/api-... │
-│             │                         │ API_KEY   │                                    │
-└─────────────┴─────────────────────────┴───────────┴────────────────────────────────────┘
-```
+See [Skills Configuration](/configuration/skills/) for details.
 
 ## Creating Skills
 
-To create a new skill, simply create a directory with a `SKILL.md` file:
+To create a new skill manually:
 
 ```bash
 # Create skill directory
@@ -110,7 +256,7 @@ Instructions for the agent go here...
 EOF
 
 # Validate the skill
-uv run ash skill validate ~/.ash/workspace/skills/my-skill
+ash skill validate ~/.ash/workspace/skills/my-skill
 ```
 
 <Aside type="tip">
@@ -120,4 +266,5 @@ uv run ash skill validate ~/.ash/workspace/skills/my-skill
 ## See Also
 
 - [Skills Architecture](/architecture/skills/) - How skills work
+- [Skills Configuration](/configuration/skills/) - Configure skill sources
 - [Extending Ash](/development/extending/) - Adding custom skills

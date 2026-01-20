@@ -99,6 +99,23 @@ def get_skill_state_path() -> Path:
     return get_ash_home() / "data" / "skills"
 
 
+def get_user_skills_path() -> Path:
+    """Get the user skills directory path (manually created skills)."""
+    return get_ash_home() / "skills"
+
+
+def get_installed_skills_path() -> Path:
+    """Get the installed skills directory path (externally installed skills).
+
+    Structure:
+        ~/.ash/skills.installed/
+        ├── .sources.json          # Metadata about installed sources
+        ├── github/owner__repo/    # Cloned repos (double underscore separator)
+        └── local/skill-name -> ~  # Symlinks to local paths
+    """
+    return get_ash_home() / "skills.installed"
+
+
 def get_uv_cache_path() -> Path:
     """Get the uv package cache directory path for sandbox."""
     return get_ash_home() / "cache" / "uv"
@@ -146,6 +163,8 @@ def get_all_paths() -> dict[str, Path]:
         "chats": get_chats_path(),
         "sessions": get_sessions_path(),
         "skill_state": get_skill_state_path(),
+        "user_skills": get_user_skills_path(),
+        "installed_skills": get_installed_skills_path(),
         "uv_cache": get_uv_cache_path(),
         "pid": get_pid_path(),
         "service_log": get_service_log_path(),

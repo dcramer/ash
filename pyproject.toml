@@ -41,6 +41,7 @@ dependencies = [
     # Configuration & Validation
     "pydantic>=2.9.0",
     "pydantic-settings>=2.5.0",
+    "tomlkit>=0.13.0",  # For preserving TOML formatting when writing
     # HTTP Client
     "httpx>=0.27.0",
     # Environment
@@ -144,6 +145,7 @@ known-first-party = ["ash"]
 "evals/**" = ["S101", "S105", "S106", "E402"]
 "src/ash/cli/**" = ["S603", "S607"]  # Allow subprocess calls in CLI
 "src/ash/sandbox/**" = ["ASYNC109"]  # Allow timeout parameters in sandbox
+"src/ash/skills/installer.py" = ["S603", "S607"]  # Allow subprocess calls for git operations
 
 [tool.ruff.format]
 quote-style = "double"

@@ -19,6 +19,72 @@ When a skill is invoked:
 
 This makes skills powerful for complex workflows that combine multiple tools.
 
+## Skill Sources
+
+Skills are loaded from multiple sources in order of precedence (later sources override earlier):
+
+| Priority | Source | Location | Description |
+|----------|--------|----------|-------------|
+| 1 (lowest) | Bundled | Built-in | Skills bundled with Ash |
+| 2 | Installed | `~/.ash/skills.installed/` | External repos and local paths |
+| 3 | User | `~/.ash/skills/` | User-created skills |
+| 4 (highest) | Workspace | `workspace/skills/` | Project-specific skills |
+
+This allows workspace skills to override installed skills, and installed skills to override bundled ones.
+
+## Installing External Skills
+
+Install skills from GitHub repos or local paths using the CLI:
+
+```bash
+# From GitHub
+ash skill add anthropic/skills
+
+# Pin to version
+ash skill add anthropic/skills@v1.0.0
+
+# From local path
+ash skill add ~/my-local-skills
+```
+
+The CLI adds sources to `config.toml` and installs them immediately:
+
+```toml
+[[skills.sources]]
+repo = "anthropic/skills"
+
+[[skills.sources]]
+path = "~/my-local-skills"
+```
+
+### Directory Structure
+
+```
+~/.ash/
+├── skills/                    # User skills (manual)
+├── skills.installed/          # External skills (managed)
+│   ├── .sources.json          # Installation metadata
+│   ├── github/owner__repo/    # Cloned repos
+│   └── local/skill-name -> ~  # Symlinks to local paths
+└── workspace/skills/          # Project skills
+```
+
+### Managing Installed Skills
+
+```bash
+# List configured sources
+ash skill sources
+
+# Sync all from config (useful on new machines)
+ash skill sync
+
+# Update repos to latest
+ash skill update
+
+# Remove a source
+ash skill remove anthropic/skills
+```
+
 ## Skill Formats
 
 Skills can be defined in two formats:
@@ -51,24 +117,19 @@ Skills use markdown files with YAML frontmatter:
 ```markdown
 ---
 description: What the skill does (required)
-requires:
-  bins:
-    - curl
-    - jq
-  env:
-    - API_KEY
-  os:
-    - darwin
-    - linux
+authors:
+  - Your Name
+rationale: Why this skill was created
+env:
+  - API_KEY
+packages:
+  - curl
+  - jq
 allowed_tools:
   - bash
   - web_search
-input_schema:
-  type: object
-  properties:
-    query:
-      type: string
-      description: Search query
+model: haiku  # Optional model override
+max_iterations: 10
 ---
 
 ## Instructions
@@ -85,27 +146,29 @@ Details about how to accomplish the task...
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `description` | string | Yes | One-line description shown to the agent |
-| `requires` | object | No | System requirements for availability |
-| `allowed_tools` | list | No | Tools the skill needs |
-| `input_schema` | object | No | JSON Schema for skill inputs |
+| `authors` | list | No | Who created/maintains this skill |
+| `rationale` | string | No | Why this skill was created |
+| `env` | list | No | Environment variables to inject from config |
+| `packages` | list | No | System packages required (apt) |
+| `allowed_tools` | list | No | Tools the skill can use (empty = all) |
+| `model` | string | No | Model alias override for this skill |
+| `max_iterations` | int | No | Iteration limit (default: 10) |
 
-### Requirements
+## Per-Skill Configuration
 
-Skills can specify system requirements. If requirements aren't met, the skill is hidden from the agent.
+Configure individual skills in `config.toml`:
 
-```yaml
-requires:
-  bins:           # Required binaries (must be in PATH)
-    - curl
-    - jq
-  env:            # Required environment variables
-    - API_KEY
-    - SECRET_TOKEN
-  os:             # Supported operating systems
-    - darwin      # macOS
-    - linux
-    - windows
+```toml
+[skills.research]
+enabled = true
+PERPLEXITY_API_KEY = "pplx-..."
+
+[skills.code-review]
+model = "haiku"
+enabled = false  # Disable this skill
 ```
+
+Environment variables are auto-uppercased: `ha_token` becomes `HA_TOKEN`.
 
 ## Skill Instructions
 
@@ -141,7 +204,7 @@ Return results as:
 
 Location: `src/ash/skills/registry.py`
 
-Skills are discovered from the workspace:
+Skills are discovered from all sources:
 
 ```python
 registry = SkillRegistry()
@@ -151,19 +214,27 @@ skill = registry.get("my-skill")
 available_skills = registry.list_available()
 ```
 
+The registry tracks source type for each skill:
+
+```python
+skill.source_type  # SkillSourceType.WORKSPACE, INSTALLED, USER, BUNDLED
+skill.source_repo  # "owner/repo" if installed from GitHub
+skill.source_ref   # Git ref if pinned
+```
+
 ## Creating Skills
 
 ### Using the CLI
 
 ```bash
 # Create a new skill directory
-uv run ash skill init my-skill
+ash skill init my-skill
 
 # Create with description
-uv run ash skill init my-skill -d "Do something useful"
+ash skill init my-skill -d "Do something useful"
 
 # Create with resource directories
-uv run ash skill init my-skill --resources scripts,references
+ash skill init my-skill --resources scripts,references
 ```
 
 ### Manual Creation
@@ -176,13 +247,13 @@ uv run ash skill init my-skill --resources scripts,references
 
 ```bash
 # Validate a skill file
-uv run ash skill validate ~/.ash/workspace/skills/my-skill
+ash skill validate ~/.ash/workspace/skills/my-skill
 
 # List all available skills
-uv run ash skill list
+ash skill list
 
-# Include unavailable skills
-uv run ash skill list --all
+# Show skill sources
+ash skill list --source
 ```
 
 ## Skill Resources
@@ -209,9 +280,8 @@ Reference resources in instructions using relative paths from the skill director
 ```markdown
 ---
 description: Search and summarize GitHub issues
-requires:
-  env:
-    - GITHUB_TOKEN
+env:
+  - GITHUB_TOKEN
 allowed_tools:
   - bash
   - web_fetch
@@ -240,6 +310,14 @@ When asked to find GitHub issues:
 - Respect rate limits (5000 requests/hour with auth)
 - Filter by state using `?state=open` or `?state=closed`
 ```
+
+## Compatibility
+
+The skill format is compatible with:
+
+- [Agent Skills spec](https://agentskills.io) - Standard skill format
+- Vercel/Anthropic skill repos - Works with community skill repos
+- skild.sh packages - Structure-compatible
 
 <Aside type="tip">
   Skills are instruction-based, not script-based. Write clear steps the agent can follow using its available tools.

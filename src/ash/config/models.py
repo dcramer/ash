@@ -224,6 +224,36 @@ class SkillConfig(BaseModel):
         }
 
 
+class SkillSource(BaseModel):
+    """A skill source - either GitHub repo or local path.
+
+    Examples:
+        [[skills.sources]]
+        repo = "owner/repo"          # GitHub repo
+
+        [[skills.sources]]
+        repo = "owner/other"
+        ref = "v2.0"                 # Pin to version
+
+        [[skills.sources]]
+        path = "~/my-skills"         # Local path (symlinked)
+    """
+
+    repo: str | None = None  # GitHub repo (owner/repo format)
+    path: str | None = None  # Local path (~/... or /...)
+    ref: str | None = None  # Git ref (branch/tag/commit)
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> "SkillSource":
+        if not self.repo and not self.path:
+            raise ValueError("Must specify either 'repo' or 'path'")
+        if self.repo and self.path:
+            raise ValueError("Cannot specify both 'repo' and 'path'")
+        if self.ref and not self.repo:
+            raise ValueError("'ref' only applies to repo sources")
+        return self
+
+
 class ConfigError(Exception):
     """Configuration error."""
 
@@ -277,6 +307,56 @@ class AshConfig(BaseModel):
     # Skill-specific configuration: [skills.<name>] sections
     # Allows setting API keys, model override, and enabled flag per skill
     skills: dict[str, SkillConfig] = Field(default_factory=dict)
+
+    # External skill sources: [[skills.sources]] array
+    skill_sources: list[SkillSource] = Field(default_factory=list)
+    # Auto-sync configuration from [skills] section
+    skill_auto_sync: bool = False
+    skill_update_interval: int = 24  # Hours between auto-updates
+
+    @model_validator(mode="before")
+    @classmethod
+    def _extract_skills_config(cls, data: dict) -> dict:
+        """Extract [skills] settings and [[skills.sources]] from skills dict.
+
+        TOML structure:
+            [skills]
+            auto_sync = true
+            update_interval = 24
+
+            [[skills.sources]]
+            repo = "owner/repo"
+
+            [skills.research]
+            PERPLEXITY_API_KEY = "..."
+
+        Becomes:
+            skill_auto_sync = True
+            skill_update_interval = 24
+            skill_sources = [SkillSource(repo="owner/repo")]
+            skills = {"research": SkillConfig(...)}
+        """
+        if not isinstance(data, dict):
+            return data
+
+        skills_data = data.get("skills")
+        if not isinstance(skills_data, dict):
+            return data
+
+        # Make a copy to avoid mutating the original
+        skills_data = dict(skills_data)
+
+        # Extract sources array and global settings
+        sources = skills_data.pop("sources", [])
+        auto_sync = skills_data.pop("auto_sync", False)
+        update_interval = skills_data.pop("update_interval", 24)
+
+        data["skill_sources"] = sources
+        data["skill_auto_sync"] = auto_sync
+        data["skill_update_interval"] = update_interval
+        # Remaining entries are per-skill configs
+        data["skills"] = skills_data
+        return data
 
     @model_validator(mode="after")
     def _migrate_default_llm(self) -> "AshConfig":
