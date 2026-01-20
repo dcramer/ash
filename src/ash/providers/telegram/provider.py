@@ -1,13 +1,17 @@
 """Telegram provider using aiogram."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
-
-# Type for callback query handler
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from aiogram import Bot, Dispatcher, F
+
+if TYPE_CHECKING:
+    from ash.chats import ChatStateManager
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
@@ -506,6 +510,56 @@ class TelegramProvider(Provider):
                             text="Error processing your selection",
                             show_alert=True,
                         )
+
+        def _get_group_chat_state(
+            message: TelegramMessage,
+        ) -> ChatStateManager | None:
+            """Get ChatStateManager for group chats, or None for non-groups."""
+            from ash.chats import ChatStateManager
+
+            if message.chat.type not in ("group", "supergroup"):
+                return None
+            return ChatStateManager(
+                provider="telegram",
+                chat_id=str(message.chat.id),
+                thread_id=None,
+            )
+
+        @self._dp.message(F.new_chat_members)
+        async def handle_new_members(message: TelegramMessage) -> None:
+            """Handle new chat members joining."""
+            chat_state = _get_group_chat_state(message)
+            if not chat_state:
+                return
+
+            members = message.new_chat_members or []
+            for user in members:
+                chat_state.record_member_joined(
+                    user_id=str(user.id),
+                    username=user.username,
+                    display_name=user.full_name,
+                    is_bot=user.is_bot,
+                )
+
+            logger.debug(
+                "Recorded %d new member(s) in chat %s",
+                len(members),
+                message.chat.id,
+            )
+
+        @self._dp.message(F.left_chat_member)
+        async def handle_left_member(message: TelegramMessage) -> None:
+            """Handle a member leaving the chat."""
+            chat_state = _get_group_chat_state(message)
+            if not chat_state:
+                return
+
+            user = message.left_chat_member
+            if not user:
+                return
+
+            chat_state.record_member_left(str(user.id))
+            logger.debug("Recorded member %s left chat %s", user.id, message.chat.id)
 
     async def send(self, message: OutgoingMessage) -> str:
         """Send a message via Telegram."""

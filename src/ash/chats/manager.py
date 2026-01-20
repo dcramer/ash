@@ -2,9 +2,10 @@
 
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
-from ash.chats.models import ChatInfo, ChatState
+from ash.chats.models import ChatInfo, ChatState, Participant
 from ash.config.paths import get_chat_dir
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,51 @@ class ChatStateManager:
         if title is not None:
             state.chat.title = title
         self.save()
+
+    def record_member_joined(
+        self,
+        user_id: str,
+        username: str | None = None,
+        display_name: str | None = None,
+        is_bot: bool = False,
+    ) -> None:
+        """Record a member joining the chat."""
+        state = self.load()
+        now = datetime.now(UTC)
+        participant = state.get_participant(user_id)
+
+        if participant:
+            # They rejoined
+            participant.left = False
+            participant.joined_at = now
+            participant.last_active = now
+            if username is not None:
+                participant.username = username
+            if display_name is not None:
+                participant.display_name = display_name
+        else:
+            # New member
+            participant = Participant(
+                id=user_id,
+                username=username,
+                display_name=display_name,
+                is_bot=is_bot,
+                first_seen=now,
+                last_active=now,
+                joined_at=now,
+            )
+            state.participants.append(participant)
+
+        self.save()
+
+    def record_member_left(self, user_id: str) -> None:
+        """Record a member leaving the chat."""
+        state = self.load()
+        participant = state.get_participant(user_id)
+        if participant:
+            participant.left = True
+            participant.last_active = datetime.now(UTC)
+            self.save()
 
     def _create_default_state(self) -> ChatState:
         """Create default state for a new chat."""

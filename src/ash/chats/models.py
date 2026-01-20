@@ -12,8 +12,11 @@ class Participant(BaseModel):
     username: str | None = None
     display_name: str | None = None
     session_id: str | None = None  # Reference to session key
+    is_bot: bool = False
     first_seen: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_active: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    joined_at: datetime | None = None  # When they joined (if we saw the event)
+    left: bool = False  # True if they left the chat
 
 
 class ChatInfo(BaseModel):
