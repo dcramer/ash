@@ -7,6 +7,7 @@ from ash.cli.commands import (
     config,
     database,
     init,
+    logs,
     memory,
     sandbox,
     schedule,
@@ -37,6 +38,7 @@ serve.register(app)
 chat.register(app)
 config.register(app)
 database.register(app)
+logs.register(app)
 memory.register(app)
 schedule.register(app)
 sessions.register(app)

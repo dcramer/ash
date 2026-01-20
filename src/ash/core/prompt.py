@@ -344,9 +344,19 @@ class SystemPromptBuilder:
 
         lines.extend(
             [
+                "- `ash-sb logs` - View recent logs",
+                "- `ash-sb logs --since 1h 'schedule'` - Search logs",
+                "- `ash-sb logs --level ERROR` - Filter by level",
                 "- `ash-sb config reload` - Reload config after changes",
                 "",
                 "Run `ash-sb --help` for all commands.",
+                "",
+                "### Debugging with Logs",
+                "",
+                "When troubleshooting 'why didn't X happen?' questions:",
+                "- Use `ash-sb logs --since 1h 'search term'` to find relevant entries",
+                "- Logs are stored in `/logs/YYYY-MM-DD.jsonl` (JSONL format)",
+                "- You can also use bash + jq for custom queries",
             ]
         )
 

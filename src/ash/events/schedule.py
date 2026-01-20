@@ -57,6 +57,23 @@ class ScheduleEntry:
     def is_periodic(self) -> bool:
         return self.cron is not None
 
+    def next_fire_time(self, timezone: str = "UTC") -> datetime | None:
+        """Get the next fire time for this entry.
+
+        Args:
+            timezone: IANA timezone name for evaluating cron expressions.
+
+        Returns:
+            The next fire time in UTC, or None if not schedulable.
+        """
+        if self.trigger_at:
+            return self.trigger_at
+
+        if self.cron:
+            return self._next_run_time(timezone)
+
+        return None
+
     def is_due(self, timezone: str = "UTC") -> bool:
         """Check if this entry is due for execution.
 
@@ -64,15 +81,29 @@ class ScheduleEntry:
             timezone: IANA timezone name for evaluating cron expressions.
         """
         now = datetime.now(UTC)
+        entry_id = self.id or "?"
 
         if self.trigger_at:
-            return now >= self.trigger_at
+            is_due = now >= self.trigger_at
+            logger.debug(
+                f"Entry {entry_id}: trigger_at={self.trigger_at.isoformat()}, "
+                f"now={now.isoformat()}, due={is_due}"
+            )
+            return is_due
 
         if self.cron:
             next_run = self._next_run_time(timezone)
             if next_run is None:
+                logger.debug(
+                    f"Entry {entry_id}: cron={self.cron}, next_run=None, due=False"
+                )
                 return False
-            return now >= next_run
+            is_due = now >= next_run
+            logger.debug(
+                f"Entry {entry_id}: cron='{self.cron}' (tz={timezone}), "
+                f"next_run={next_run.isoformat()}, now={now.isoformat()}, due={is_due}"
+            )
+            return is_due
 
         return False
 
@@ -305,6 +336,7 @@ class ScheduleWatcher:
     async def _check_schedule(self) -> None:
         """Check the schedule file and trigger due entries."""
         if not self._schedule_file.exists():
+            logger.debug(f"Schedule file does not exist: {self._schedule_file}")
             return
 
         # Read with lock to get consistent state
@@ -318,6 +350,10 @@ class ScheduleWatcher:
             entry = ScheduleEntry.from_line(line, i)
             if entry:
                 entries.append(entry)
+
+        logger.debug(
+            f"Checking schedule: {len(entries)} entries found (tz={self._timezone})"
+        )
 
         due = [e for e in entries if e.is_due(self._timezone)]
         if not due:

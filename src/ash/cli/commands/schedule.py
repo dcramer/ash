@@ -1,11 +1,45 @@
 """Schedule management commands."""
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 import click
 import typer
 
 from ash.cli.console import console, dim, error, success, warning
+
+
+def _format_countdown(next_fire: datetime | None) -> str:
+    """Format a countdown string for the next fire time."""
+    if next_fire is None:
+        return "[dim]?[/dim]"
+
+    now = datetime.now(UTC)
+    if next_fire <= now:
+        return "[green]now[/green]"
+
+    delta = next_fire - now
+    total_seconds = int(delta.total_seconds())
+
+    if total_seconds < 60:
+        return f"in {total_seconds}s"
+
+    total_minutes = total_seconds // 60
+    if total_minutes < 60:
+        return f"in {total_minutes}m"
+
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    if hours < 24:
+        if minutes:
+            return f"in {hours}h {minutes}m"
+        return f"in {hours}h"
+
+    days = hours // 24
+    hours = hours % 24
+    if hours:
+        return f"in {days}d {hours}h"
+    return f"in {days}d"
 
 
 def register(app: typer.Typer) -> None:
@@ -75,9 +109,11 @@ def _schedule_list(schedule_file) -> None:
     """List all scheduled tasks."""
     from rich.table import Table
 
+    from ash.config import load_config
     from ash.events.schedule import ScheduleWatcher
 
-    watcher = ScheduleWatcher(schedule_file)
+    config = load_config()
+    watcher = ScheduleWatcher(schedule_file, timezone=config.timezone)
     entries = watcher.get_entries()
 
     if not entries:
@@ -90,15 +126,13 @@ def _schedule_list(schedule_file) -> None:
     table.add_column("Chat")
     table.add_column("Message")
     table.add_column("Schedule")
-    table.add_column("Provider")
-    table.add_column("Due")
+    table.add_column("Next Fire")
 
     for entry in entries:
         entry_type = "periodic" if entry.is_periodic else "one-shot"
         message = (
             entry.message[:40] + "..." if len(entry.message) > 40 else entry.message
         )
-        due = "[green]yes[/green]" if entry.is_due() else "[dim]no[/dim]"
 
         # Display chat_title or truncated chat_id
         if entry.chat_title:
@@ -118,14 +152,17 @@ def _schedule_list(schedule_file) -> None:
         else:
             schedule = "?"
 
+        # Calculate next fire countdown
+        next_fire = entry.next_fire_time(config.timezone)
+        next_fire_display = _format_countdown(next_fire)
+
         table.add_row(
             entry.id or "[dim]?[/dim]",
             entry_type,
             chat,
             message,
             schedule,
-            entry.provider or "[dim]none[/dim]",
-            due,
+            next_fire_display,
         )
 
     console.print(table)
