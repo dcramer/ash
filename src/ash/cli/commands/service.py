@@ -46,6 +46,13 @@ def register(app: typer.Typer) -> None:
         ] = False,
     ) -> None:
         """Start the Ash service."""
+        # Auto-build sandbox image if Dockerfile exists (skip silently if Docker unavailable)
+        from ash.cli.commands.sandbox import _get_dockerfile_path, _sandbox_build
+
+        dockerfile_path = _get_dockerfile_path()
+        if dockerfile_path:
+            _sandbox_build(dockerfile_path)
+
         if foreground:
             from ash.cli.commands.serve import _run_server
 
@@ -65,6 +72,13 @@ def register(app: typer.Typer) -> None:
     @service_app.command("restart")
     def service_restart() -> None:
         """Restart the Ash service."""
+        # Auto-build sandbox image if Dockerfile exists (skip silently if Docker unavailable)
+        from ash.cli.commands.sandbox import _get_dockerfile_path, _sandbox_build
+
+        dockerfile_path = _get_dockerfile_path()
+        if dockerfile_path:
+            _sandbox_build(dockerfile_path)
+
         _run_service_action("restart")
 
     @service_app.command("status")

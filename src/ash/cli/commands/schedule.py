@@ -87,6 +87,7 @@ def _schedule_list(schedule_file) -> None:
     table = Table(show_header=True)
     table.add_column("ID", style="dim")
     table.add_column("Type")
+    table.add_column("Chat")
     table.add_column("Message")
     table.add_column("Schedule")
     table.add_column("Provider")
@@ -99,6 +100,16 @@ def _schedule_list(schedule_file) -> None:
         )
         due = "[green]yes[/green]" if entry.is_due() else "[dim]no[/dim]"
 
+        # Display chat_title or truncated chat_id
+        if entry.chat_title:
+            chat = entry.chat_title
+        elif entry.chat_id:
+            chat = (
+                entry.chat_id[:10] + "..." if len(entry.chat_id) > 10 else entry.chat_id
+            )
+        else:
+            chat = "[dim]none[/dim]"
+
         # Determine schedule display
         if entry.is_periodic:
             schedule = entry.cron
@@ -110,6 +121,7 @@ def _schedule_list(schedule_file) -> None:
         table.add_row(
             entry.id or "[dim]?[/dim]",
             entry_type,
+            chat,
             message,
             schedule,
             entry.provider or "[dim]none[/dim]",

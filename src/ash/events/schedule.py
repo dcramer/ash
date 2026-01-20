@@ -44,6 +44,7 @@ class ScheduleEntry:
     last_run: datetime | None = None  # For periodic
     # Context for routing response back
     chat_id: str | None = None
+    chat_title: str | None = None  # Friendly name for the chat
     user_id: str | None = None
     username: str | None = None  # For @mentions in response
     provider: str | None = None
@@ -131,6 +132,8 @@ class ScheduleEntry:
         # Context fields
         if self.chat_id:
             data["chat_id"] = self.chat_id
+        if self.chat_title:
+            data["chat_title"] = self.chat_title
         if self.user_id:
             data["user_id"] = self.user_id
         if self.username:
@@ -175,6 +178,7 @@ class ScheduleEntry:
                 "cron",
                 "last_run",
                 "chat_id",
+                "chat_title",
                 "user_id",
                 "username",
                 "provider",
@@ -189,6 +193,7 @@ class ScheduleEntry:
                 cron=cron,
                 last_run=last_run,
                 chat_id=data.get("chat_id"),
+                chat_title=data.get("chat_title"),
                 user_id=data.get("user_id"),
                 username=data.get("username"),
                 provider=data.get("provider"),
@@ -323,9 +328,14 @@ class ScheduleWatcher:
         updated_periodic: dict[int, ScheduleEntry] = {}
 
         for entry in due:
+            chat_display = (
+                f"{entry.chat_title} ({entry.chat_id})"
+                if entry.chat_title
+                else entry.chat_id
+            )
             logger.info(
                 f"Triggering scheduled task: {entry.message[:50]}... "
-                f"(chat_id={entry.chat_id}, provider={entry.provider})"
+                f"(chat={chat_display}, provider={entry.provider})"
             )
             try:
                 for handler in self._handlers:

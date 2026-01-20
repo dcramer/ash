@@ -64,9 +64,14 @@ class ScheduledTaskHandler:
             )
             raise ValueError("Missing required routing context (provider/chat_id)")
 
+        chat_display = (
+            f"{entry.chat_title} ({entry.chat_id})"
+            if entry.chat_title
+            else entry.chat_id
+        )
         logger.info(
             f"Executing scheduled task: {entry.message[:50]}... "
-            f"(provider={entry.provider}, chat_id={entry.chat_id})"
+            f"(provider={entry.provider}, chat={chat_display})"
         )
 
         # Build schedule context as facts (system prompt handles instructions)
@@ -102,6 +107,8 @@ class ScheduledTaskHandler:
         session.metadata["username"] = entry.username or ""
         session.metadata["session_mode"] = "fresh"
         session.metadata["is_scheduled_task"] = True
+        if entry.chat_title:
+            session.metadata["chat_title"] = entry.chat_title
 
         try:
             # Process through agent

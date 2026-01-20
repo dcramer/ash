@@ -79,6 +79,7 @@ def _build_routing_env(
         "ASH_SESSION_ID": session.session_id or "",
         "ASH_USER_ID": effective_user_id or "",
         "ASH_CHAT_ID": session.chat_id or "",
+        "ASH_CHAT_TITLE": session.metadata.get("chat_title", ""),
         "ASH_PROVIDER": session.provider or "",
         "ASH_USERNAME": session.metadata.get("username", ""),
         "ASH_TIMEZONE": timezone,

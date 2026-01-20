@@ -24,6 +24,7 @@ def _get_context() -> dict[str, str]:
         "session_id": os.environ.get("ASH_SESSION_ID", ""),
         "user_id": os.environ.get("ASH_USER_ID", ""),
         "chat_id": os.environ.get("ASH_CHAT_ID", ""),
+        "chat_title": os.environ.get("ASH_CHAT_TITLE", ""),
         "provider": os.environ.get("ASH_PROVIDER", ""),
         "username": os.environ.get("ASH_USERNAME", ""),
         "timezone": os.environ.get("ASH_TIMEZONE", "UTC"),
@@ -189,6 +190,8 @@ def create(
     # Add routing context (chat_id and provider guaranteed by _require_routing_context)
     entry["chat_id"] = ctx["chat_id"]
     entry["provider"] = ctx["provider"]
+    if ctx["chat_title"]:
+        entry["chat_title"] = ctx["chat_title"]
     if ctx["user_id"]:
         entry["user_id"] = ctx["user_id"]
     if ctx["username"]:
@@ -274,10 +277,14 @@ def list_tasks() -> None:
         entry_id = entry.get("id", "?")
         task_type = "periodic" if "cron" in entry else "one-shot"
 
-        # Show provider:chat_id (truncated)
-        chat_id = entry.get("chat_id", "?")
-        truncated_chat = chat_id[:10] if len(chat_id) > 10 else chat_id
-        target = f"{entry.get('provider', '?')}:{truncated_chat}"
+        # Show provider:title (fallback to provider:chat_id[:10])
+        chat_title = entry.get("chat_title", "")
+        if chat_title:
+            target = f"{entry.get('provider', '?')}:{chat_title}"
+        else:
+            chat_id = entry.get("chat_id", "?")
+            truncated_chat = chat_id[:10] if len(chat_id) > 10 else chat_id
+            target = f"{entry.get('provider', '?')}:{truncated_chat}"
 
         # Show who scheduled it
         username = entry.get("username", "")
