@@ -83,6 +83,9 @@ Create the skill (no interrupt needed):
 ```markdown
 ---
 description: One-line description
+authors:              # REQUIRED - who requested/maintains this skill
+  - username
+rationale: Why this skill was created (user's intent)
 allowed_tools:        # Optional
   - bash
 env:                  # Optional - env vars from config
@@ -93,6 +96,10 @@ packages:             # Optional - system packages (apt)
 
 Instructions for the agent.
 ```
+
+**Provenance fields (REQUIRED):**
+- `authors` - List of usernames. Start with who requested the skill. When updating, append new contributors.
+- `rationale` - Capture the user's intent: why they wanted this skill, what problem it solves. Extract from their request.
 
 ## Python Execution
 

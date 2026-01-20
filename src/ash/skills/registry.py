@@ -75,6 +75,8 @@ class SkillRegistry:
             description=data["description"],
             instructions=instructions,
             skill_path=skill_path,
+            authors=data.get("authors", []),
+            rationale=data.get("rationale"),
             env=data.get("env", []),
             packages=data.get("packages", []),
             allowed_tools=data.get("allowed_tools", []),

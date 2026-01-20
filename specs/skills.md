@@ -58,6 +58,10 @@ workspace/skills/
 # workspace/skills/research/SKILL.md
 ---
 description: Research topics using Perplexity AI
+authors:                       # Who created/maintains this skill
+  - alice
+  - bob
+rationale: Enable deep research without main agent context bloat
 env:                           # Env vars to inject from config
   - PERPLEXITY_API_KEY
 packages:                      # System packages to install (apt)
@@ -149,6 +153,10 @@ class SkillDefinition:
     instructions: str
 
     skill_path: Path | None = None
+
+    # Provenance
+    authors: list[str] = field(default_factory=list)  # Who created/maintains this skill
+    rationale: str | None = None                       # Why this skill was created
 
     # Subagent execution
     env: list[str] = field(default_factory=list)           # Env vars to inject

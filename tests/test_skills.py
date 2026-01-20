@@ -95,6 +95,56 @@ Research and summarize topics.
         assert skill.max_iterations == 15
         assert skill.instructions == "Research and summarize topics."
 
+    def test_discover_skill_with_provenance(self, tmp_path: Path):
+        """Test that authors and rationale fields are parsed."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "documented"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: A well-documented skill
+authors:
+  - alice
+  - bob
+rationale: Enable deep research without main agent context bloat
+---
+
+Do something well-documented.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("documented")
+        assert skill.authors == ["alice", "bob"]
+        assert (
+            skill.rationale == "Enable deep research without main agent context bloat"
+        )
+
+    def test_discover_skill_without_provenance_defaults_to_empty(self, tmp_path: Path):
+        """Test that missing authors/rationale default to empty/None."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "minimal"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: A minimal skill
+---
+
+Do something minimal.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("minimal")
+        assert skill.authors == []
+        assert skill.rationale is None
+
     def test_discover_skill_with_packages(self, tmp_path: Path):
         """Test that packages field is parsed from frontmatter."""
         skills_dir = tmp_path / "skills"

@@ -94,8 +94,20 @@ class SkillAgent(Agent):
         Returns:
             System prompt string with wrapper + skill instructions + context.
         """
-        # Start with wrapper guidance + skill instructions
-        prompt = SKILL_AGENT_WRAPPER + self._skill.instructions
+        # Start with wrapper guidance
+        prompt = SKILL_AGENT_WRAPPER
+
+        # Add provenance if available
+        if self._skill.authors or self._skill.rationale:
+            prompt += f"## Skill: {self._skill.name}\n"
+            if self._skill.authors:
+                prompt += f"**Authors:** {', '.join(self._skill.authors)}\n"
+            if self._skill.rationale:
+                prompt += f"**Rationale:** {self._skill.rationale}\n"
+            prompt += "\n"
+
+        # Add skill instructions
+        prompt += self._skill.instructions
 
         # Inject user-provided context if available
         user_context = context.input_data.get("context", "")

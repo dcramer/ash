@@ -18,6 +18,10 @@ class SkillDefinition:
 
     skill_path: Path | None = None  # Path to skill directory
 
+    # Provenance
+    authors: list[str] = field(default_factory=list)  # Who created/maintains this skill
+    rationale: str | None = None  # Why this skill was created
+
     # Subagent execution settings
     env: list[str] = field(default_factory=list)  # Env vars to inject from config
     packages: list[str] = field(default_factory=list)  # System packages (apt)
