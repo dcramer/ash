@@ -40,12 +40,12 @@ export default defineConfig({
           autogenerate: { directory: "cli" },
         },
         {
-          label: "Configuration",
-          autogenerate: { directory: "configuration" },
+          label: "Systems",
+          autogenerate: { directory: "systems" },
         },
         {
-          label: "Architecture",
-          autogenerate: { directory: "architecture" },
+          label: "Configuration",
+          autogenerate: { directory: "configuration" },
         },
         {
           label: "Development",

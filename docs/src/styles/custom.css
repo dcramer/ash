@@ -183,7 +183,7 @@ nav.sidebar a[aria-current="page"]:hover {
 pre {
   background: var(--sl-color-gray-6) !important;
   border: 1px solid var(--sl-color-gray-5) !important;
-  border-radius: 10px !important;
+  border-radius: 0 !important;
 }
 
 code {
@@ -274,7 +274,7 @@ code {
 
 /* ===== TABLES ===== */
 table {
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
   border: 1px solid var(--sl-color-gray-5);
 }
@@ -286,10 +286,12 @@ th {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--sl-color-gray-2) !important;
+  padding: 0.75rem 1rem !important;
 }
 
 td {
   border-color: var(--sl-color-gray-5) !important;
+  padding: 0.75rem 1rem !important;
 }
 
 /* ===== TOC ===== */

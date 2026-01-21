@@ -167,18 +167,21 @@ uv run ash config validate
 
 ## Configuration Sections
 
+Each section has full documentation in the Systems pages:
+
 | Section | Purpose | Documentation |
 |---------|---------|---------------|
-| `[models.*]` | LLM model definitions | [Models](/configuration/models/) |
-| `[telegram]` | Telegram bot settings | [Telegram](/configuration/telegram/) |
-| `[sandbox]` | Docker sandbox settings | [Sandbox](/configuration/sandbox/) |
-| `[server]` | HTTP server settings | [Server](/configuration/server/) |
-| `[memory]` | Memory and context | [Memory](/configuration/memory/) |
-| `[sessions]` | Session management | [Sessions](/configuration/sessions/) |
-| `[embeddings]` | Semantic search | [Embeddings](/configuration/embeddings/) |
-| `[brave_search]` | Web search | [Brave Search](/configuration/brave-search/) |
-| `[sentry]` | Error tracking | [Sentry](/configuration/sentry/) |
-| `[agents.*]` | Agent overrides | [Agents](/architecture/agents/) |
+| `[models.*]` | LLM model definitions | [LLM Providers](/systems/llm/) |
+| `[telegram]` | Telegram bot settings | [Providers](/systems/providers/) |
+| `[sandbox]` | Docker sandbox settings | [Sandbox](/systems/sandbox/) |
+| `[server]` | HTTP server settings | [Providers](/systems/providers/) |
+| `[memory]` | Memory and context | [Memory](/systems/memory/) |
+| `[sessions]` | Session management | [Providers](/systems/providers/) |
+| `[embeddings]` | Semantic search | [Memory](/systems/memory/) |
+| `[skills]` | Skill sources and config | [Skills](/systems/skills/) |
+| `[agents.*]` | Agent overrides | [Agents](/systems/agents/) |
+| `[brave_search]` | Web search | [Configuration Reference](/configuration/reference/) |
+| `[sentry]` | Error tracking | [Configuration Reference](/configuration/reference/) |
 
 <Aside type="tip">
   Use `ash init` to create a configuration file, then edit it manually.

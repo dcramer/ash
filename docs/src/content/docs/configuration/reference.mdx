@@ -1,0 +1,364 @@
+---
+title: Configuration Reference
+description: Complete reference for all config.toml options
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Quick reference for all `config.toml` options. For detailed explanations, see the linked Systems pages.
+
+## Global Settings
+
+```toml
+workspace = "~/.ash/workspace"
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `workspace` | path | `"~/.ash/workspace"` | Directory for SOUL.md and skills |
+
+## API Keys
+
+```toml
+[anthropic]
+api_key = "sk-ant-..."
+
+[openai]
+api_key = "sk-..."
+```
+
+| Section | Option | Env Variable | Description |
+|---------|--------|--------------|-------------|
+| `[anthropic]` | `api_key` | `ANTHROPIC_API_KEY` | Anthropic API key |
+| `[openai]` | `api_key` | `OPENAI_API_KEY` | OpenAI API key |
+
+## Models
+
+See [LLM Providers](/systems/llm/) for details.
+
+```toml
+[models.default]
+provider = "anthropic"
+model = "claude-haiku-4-5"
+temperature = 0.7
+max_tokens = 4096
+
+[models.sonnet]
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+max_tokens = 8192
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | string | required | `"anthropic"` or `"openai"` |
+| `model` | string | required | Model identifier |
+| `temperature` | float | `null` | Sampling temperature (0.0-1.0) |
+| `max_tokens` | int | `4096` | Maximum response tokens |
+| `thinking` | string | `null` | Extended thinking: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"` |
+
+## Sandbox
+
+See [Sandbox](/systems/sandbox/) for details.
+
+```toml
+[sandbox]
+image = "ash-sandbox:latest"
+timeout = 60
+memory_limit = "512m"
+cpu_limit = 1.0
+runtime = "runc"
+network_mode = "bridge"
+dns_servers = []
+http_proxy = ""
+workspace_access = "rw"
+sessions_access = "none"
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `image` | string | `"ash-sandbox:latest"` | Docker image name |
+| `timeout` | int | `60` | Command timeout in seconds |
+| `memory_limit` | string | `"512m"` | Container memory limit |
+| `cpu_limit` | float | `1.0` | CPU cores allowed |
+| `runtime` | string | `"runc"` | Container runtime (`"runc"` or `"runsc"`) |
+| `network_mode` | string | `"bridge"` | Network mode (`"none"` or `"bridge"`) |
+| `dns_servers` | list | `[]` | Custom DNS servers |
+| `http_proxy` | string | `""` | HTTP proxy URL |
+| `workspace_access` | string | `"rw"` | Workspace mount (`"none"`, `"ro"`, `"rw"`) |
+| `sessions_access` | string | `"none"` | Sessions mount (`"none"`, `"ro"`) |
+
+## Memory
+
+See [Memory](/systems/memory/) for details.
+
+```toml
+[memory]
+database_path = "~/.ash/memory.db"
+max_context_messages = 20
+context_token_budget = 100000
+recency_window = 10
+system_prompt_buffer = 8000
+auto_gc = true
+max_entries = null
+compaction_enabled = true
+compaction_reserve_tokens = 16384
+compaction_keep_recent_tokens = 20000
+compaction_summary_max_tokens = 2000
+extraction_enabled = true
+extraction_model = null
+extraction_min_message_length = 20
+extraction_debounce_seconds = 30
+extraction_confidence_threshold = 0.7
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `database_path` | path | `"~/.ash/memory.db"` | SQLite database path |
+| `max_context_messages` | int | `20` | Maximum messages in context |
+| `context_token_budget` | int | `100000` | Target context window size |
+| `recency_window` | int | `10` | Always keep last N messages |
+| `system_prompt_buffer` | int | `8000` | Reserved tokens for system prompt |
+| `auto_gc` | bool | `true` | Run garbage collection on startup |
+| `max_entries` | int | `null` | Cap on active memories |
+| `compaction_enabled` | bool | `true` | Enable context compaction |
+| `compaction_reserve_tokens` | int | `16384` | Buffer before triggering |
+| `compaction_keep_recent_tokens` | int | `20000` | Always keep recent context |
+| `compaction_summary_max_tokens` | int | `2000` | Max tokens for summary |
+| `extraction_enabled` | bool | `true` | Enable auto memory extraction |
+| `extraction_model` | string | `null` | Model for extraction |
+| `extraction_min_message_length` | int | `20` | Skip short messages |
+| `extraction_debounce_seconds` | int | `30` | Min seconds between extractions |
+| `extraction_confidence_threshold` | float | `0.7` | Minimum confidence for storing |
+
+## Embeddings
+
+See [Memory](/systems/memory/) for details.
+
+```toml
+[embeddings]
+provider = "openai"
+model = "text-embedding-3-small"
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | string | `"openai"` | Embedding provider |
+| `model` | string | `"text-embedding-3-small"` | Embedding model |
+
+## Skills
+
+See [Skills](/systems/skills/) for details.
+
+```toml
+[skills]
+auto_sync = true
+update_interval = 24
+
+[[skills.sources]]
+repo = "anthropic/skills"
+
+[[skills.sources]]
+path = "~/my-local-skills"
+
+[skills.research]
+enabled = true
+PERPLEXITY_API_KEY = "pplx-..."
+```
+
+### Global Settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `auto_sync` | bool | `false` | Sync sources on startup |
+| `update_interval` | int | `24` | Hours between auto-updates |
+
+### Source Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `repo` | string | GitHub repo in `owner/repo` format |
+| `path` | string | Local filesystem path |
+| `ref` | string | Git ref (branch, tag, commit) |
+
+### Per-Skill Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Enable/disable the skill |
+| `model` | string | Model alias override |
+| `*` | string | Environment variables (auto-uppercased) |
+
+## Agents
+
+See [Agents](/systems/agents/) for details.
+
+```toml
+[agents.research]
+model = "sonnet"
+max_iterations = 50
+
+[agents.skill-writer]
+model = "sonnet"
+max_iterations = 20
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `model` | string | `null` | Model alias override |
+| `max_iterations` | int | varies | Maximum iterations |
+
+## Telegram
+
+See [Providers](/systems/providers/) for details.
+
+```toml
+[telegram]
+bot_token = "123456789:ABC..."
+allowed_users = ["@yourusername", "123456789"]
+allowed_groups = ["-100123456789"]
+group_mode = "mention"
+webhook_url = "https://your-domain.com/webhook"
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `bot_token` | string | required | Bot token from BotFather |
+| `allowed_users` | list | `[]` | Authorized usernames or IDs |
+| `allowed_groups` | list | `[]` | Authorized group chat IDs |
+| `group_mode` | string | `"mention"` | `"mention"` or `"always"` |
+| `webhook_url` | string | `null` | Webhook URL (polling if not set) |
+
+## Server
+
+See [Providers](/systems/providers/) for details.
+
+```toml
+[server]
+host = "127.0.0.1"
+port = 8080
+webhook_path = "/webhook"
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `host` | string | `"127.0.0.1"` | Bind address |
+| `port` | int | `8080` | Port number |
+| `webhook_path` | string | `"/webhook"` | Telegram webhook path |
+
+## Sessions
+
+See [Providers](/systems/providers/) for details.
+
+```toml
+[sessions]
+mode = "persistent"
+max_concurrent = 2
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `mode` | string | `"persistent"` | `"persistent"` or `"fresh"` |
+| `max_concurrent` | int | `2` | Maximum parallel sessions |
+
+## Brave Search
+
+```toml
+[brave_search]
+api_key = "BSA..."
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `api_key` | string | required | Brave Search API key |
+
+### Getting an API Key
+
+<Steps>
+
+1. **Sign up** at [Brave Search API](https://brave.com/search/api/)
+
+2. **Create an API key** in the dashboard
+
+3. **Configure Ash**:
+   ```toml
+   [brave_search]
+   api_key = "BSA..."
+   ```
+   Or use environment variable: `BRAVE_SEARCH_API_KEY`
+
+</Steps>
+
+## Sentry
+
+```toml
+[sentry]
+dsn = "https://abc123@o123.ingest.sentry.io/456"
+environment = "production"
+release = "1.0.0"
+traces_sample_rate = 0.1
+profiles_sample_rate = 0.0
+send_default_pii = false
+debug = false
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `dsn` | string | `null` | Sentry DSN |
+| `environment` | string | `null` | Environment name |
+| `release` | string | `null` | Release version |
+| `traces_sample_rate` | float | `0.1` | Transaction sampling (0.0-1.0) |
+| `profiles_sample_rate` | float | `0.0` | Profiling sampling (0.0-1.0) |
+| `send_default_pii` | bool | `false` | Include PII in reports |
+| `debug` | bool | `false` | Enable debug logging |
+
+<Aside type="caution">
+  Set `send_default_pii = false` to avoid sending personal information to Sentry.
+</Aside>
+
+## Workspace Files
+
+The workspace directory contains:
+
+```
+~/.ash/workspace/
+├── SOUL.md      # Assistant personality
+├── USER.md      # User profile (optional)
+└── skills/      # Custom skills
+```
+
+### SOUL.md
+
+Defines your assistant's personality:
+
+```markdown
+# Ash
+
+You are a personal assistant named Ash.
+
+## Personality
+- Helpful and direct
+- Technical but accessible
+- Concise responses
+
+## Guidelines
+- Always verify before executing destructive commands
+```
+
+### USER.md (optional)
+
+Describes the user for personalized responses:
+
+```markdown
+# User Profile
+
+## About
+- Software engineer
+- Works on Python and TypeScript projects
+
+## Preferences
+- Concise code examples
+- Unix command line tools
+```

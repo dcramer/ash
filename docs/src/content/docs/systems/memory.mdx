@@ -1,0 +1,353 @@
+---
+title: Memory
+description: Storage, context management, and semantic search
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The memory system provides persistent storage and semantic retrieval. Conversation history is stored as JSONL session files, while extracted facts are stored in SQLite with vector embeddings.
+
+## Overview
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| MemoryStore | `memory/store.py` | CRUD operations |
+| Embeddings | `memory/embeddings.py` | Vector generation |
+| Retrieval | `memory/retrieval.py` | Semantic search |
+
+## Configuration
+
+```toml
+[memory]
+database_path = "~/.ash/memory.db"
+max_context_messages = 20
+context_token_budget = 100000
+recency_window = 10
+system_prompt_buffer = 8000
+auto_gc = true
+max_entries = null
+```
+
+### Core Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `database_path` | path | `"~/.ash/memory.db"` | SQLite database path |
+| `max_context_messages` | int | `20` | Maximum messages in context |
+| `context_token_budget` | int | `100000` | Target context window size |
+| `recency_window` | int | `10` | Always keep last N messages |
+| `system_prompt_buffer` | int | `8000` | Reserved tokens for system prompt |
+| `auto_gc` | bool | `true` | Run garbage collection on server startup |
+| `max_entries` | int | `null` | Cap on active memories (null = unlimited) |
+
+### Compaction
+
+When context grows too large, Ash summarizes old messages instead of dropping them:
+
+```toml
+[memory]
+compaction_enabled = true
+compaction_reserve_tokens = 16384
+compaction_keep_recent_tokens = 20000
+compaction_summary_max_tokens = 2000
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `compaction_enabled` | bool | `true` | Enable context compaction |
+| `compaction_reserve_tokens` | int | `16384` | Buffer before triggering compaction |
+| `compaction_keep_recent_tokens` | int | `20000` | Always keep recent context |
+| `compaction_summary_max_tokens` | int | `2000` | Max tokens for summary |
+
+### Memory Extraction
+
+Ash can automatically extract facts from conversations and store them as memories:
+
+```toml
+[memory]
+extraction_enabled = true
+extraction_model = null
+extraction_min_message_length = 20
+extraction_debounce_seconds = 30
+extraction_confidence_threshold = 0.7
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `extraction_enabled` | bool | `true` | Enable auto memory extraction |
+| `extraction_model` | string | `null` | Model for extraction (null = default) |
+| `extraction_min_message_length` | int | `20` | Skip short messages |
+| `extraction_debounce_seconds` | int | `30` | Min seconds between extractions |
+| `extraction_confidence_threshold` | float | `0.7` | Minimum confidence for storing |
+
+<Aside type="note">
+  Memory extraction runs in the background after conversations, so it doesn't slow down responses.
+</Aside>
+
+## Database Schema
+
+### Sessions
+
+Conversations grouped by provider and chat:
+
+```sql
+CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    metadata JSON
+);
+```
+
+### Messages
+
+Individual messages within sessions:
+
+```sql
+CREATE TABLE messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT REFERENCES sessions(id),
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP,
+    token_count INTEGER,
+    metadata JSON
+);
+```
+
+### Memories
+
+Persistent knowledge entries:
+
+```sql
+CREATE TABLE memories (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    source TEXT,
+    created_at TIMESTAMP,
+    expires_at TIMESTAMP,
+    owner_user_id TEXT,
+    metadata JSON
+);
+```
+
+### Vector Tables
+
+Embeddings stored via sqlite-vec:
+
+```sql
+CREATE VIRTUAL TABLE message_embeddings USING vec0(
+    message_id TEXT PRIMARY KEY,
+    embedding FLOAT[1536]
+);
+
+CREATE VIRTUAL TABLE memory_embeddings USING vec0(
+    memory_id TEXT PRIMARY KEY,
+    embedding FLOAT[1536]
+);
+```
+
+## Context Management
+
+Ash uses smart pruning to fit conversations within token limits:
+
+1. **Recency window** - Last N messages are always included
+2. **Token budget** - Older messages pruned to fit budget
+3. **System prompt buffer** - Space reserved for instructions
+
+<Aside type="tip">
+  Increase `context_token_budget` for longer conversations, but watch API costs.
+</Aside>
+
+During agent processing:
+
+1. Query embedding is generated
+2. Relevant memories are retrieved
+3. Memories are injected into system prompt
+
+```python
+memories = await retriever.retrieve(user_message, limit=5)
+context = format_memories(memories)
+system_prompt = f"{base_prompt}\n\nRelevant memories:\n{context}"
+```
+
+## Components
+
+### Memory Store
+
+Location: `src/ash/memory/store.py`
+
+```python
+class MemoryStore:
+    async def add_memory(self, content: str, **metadata) -> Memory:
+        """Store a new memory."""
+
+    async def get_memory(self, memory_id: str) -> Memory | None:
+        """Retrieve a memory by ID."""
+
+    async def search_memories(
+        self,
+        query: str,
+        limit: int = 10,
+    ) -> list[Memory]:
+        """Semantic search for relevant memories."""
+
+    async def delete_memory(self, memory_id: str) -> bool:
+        """Delete a memory."""
+```
+
+### Embedding Generation
+
+Location: `src/ash/memory/embeddings.py`
+
+```python
+class EmbeddingGenerator:
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings using configured model."""
+```
+
+Uses OpenAI's embedding API via the LLM provider.
+
+### Semantic Search
+
+Location: `src/ash/memory/retrieval.py`
+
+```python
+class MemoryRetriever:
+    async def retrieve(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> list[Memory]:
+        """Find memories similar to query."""
+```
+
+Uses sqlite-vec for vector similarity search:
+
+```sql
+SELECT m.*, vec_distance_cosine(e.embedding, ?) as distance
+FROM memories m
+JOIN memory_embeddings e ON m.id = e.memory_id
+ORDER BY distance ASC
+LIMIT ?
+```
+
+## CLI Commands
+
+### Managing Memories
+
+```bash
+# List stored memories
+uv run ash memory list
+
+# Search memories
+uv run ash memory search -q "project ideas"
+
+# Add a memory
+uv run ash memory add -q "Remember to check logs daily"
+
+# Remove a memory
+uv run ash memory remove --id <uuid>
+
+# View statistics
+uv run ash memory stats
+
+# Run garbage collection
+uv run ash memory gc
+```
+
+### Managing Sessions
+
+```bash
+# View sessions
+uv run ash sessions list
+
+# Search message history
+uv run ash sessions search -q "keyword"
+
+# Export a session
+uv run ash sessions export -o backup.json
+```
+
+### Database Operations
+
+```bash
+# Run migrations after updates
+uv run ash db migrate
+
+# Check migration status
+uv run ash db status
+```
+
+## Embeddings Configuration
+
+Embeddings enable semantic search for memories and messages.
+
+```toml
+[embeddings]
+provider = "openai"
+model = "text-embedding-3-small"
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | string | `"openai"` | Embedding provider |
+| `model` | string | `"text-embedding-3-small"` | Model name |
+
+### Supported Models
+
+| Model | Dimensions | Notes |
+|-------|------------|-------|
+| `text-embedding-3-small` | 1536 | Recommended, cost-effective |
+| `text-embedding-3-large` | 3072 | Higher quality |
+| `text-embedding-ada-002` | 1536 | Legacy model |
+
+<Aside type="tip">
+  `text-embedding-3-small` provides good quality at low cost for most use cases.
+</Aside>
+
+### Disabling Embeddings
+
+Omit the `[embeddings]` section to disable semantic search:
+
+```toml
+# No [embeddings] section = disabled
+```
+
+Memory search will fall back to text matching.
+
+## Full Example
+
+```toml
+[memory]
+database_path = "~/.ash/memory.db"
+
+# Context management
+max_context_messages = 30
+context_token_budget = 150000
+recency_window = 15
+system_prompt_buffer = 10000
+
+# Compaction
+compaction_enabled = true
+compaction_reserve_tokens = 20000
+compaction_keep_recent_tokens = 25000
+
+# Extraction
+extraction_enabled = true
+extraction_confidence_threshold = 0.8
+extraction_debounce_seconds = 60
+
+# Maintenance
+auto_gc = true
+max_entries = 1000
+
+[embeddings]
+provider = "openai"
+model = "text-embedding-3-small"
+```

@@ -2,10 +2,18 @@
 title: Tools
 description: Tool system and execution
 sidebar:
-  order: 3
+  order: 2
 ---
 
 Tools extend the agent's capabilities with actions like running commands, searching the web, and reading files.
+
+## Overview
+
+Tools are the primary way Ash interacts with the world. Each tool:
+- Has a unique name and description
+- Defines input parameters via JSON Schema
+- Executes asynchronously
+- Returns structured results
 
 ## Tool Interface
 
@@ -40,7 +48,7 @@ class Tool(ABC):
         """Execute the tool and return result."""
 ```
 
-## ToolContext
+### ToolContext
 
 Context provided to tool execution:
 
@@ -55,7 +63,7 @@ class ToolContext:
     env: dict[str, str] = field(default_factory=dict)
 ```
 
-## ToolResult
+### ToolResult
 
 Tool execution result:
 
@@ -99,6 +107,8 @@ class BashTool(Tool):
     }
 ```
 
+All commands run in isolated Docker containers. See [Sandbox](/systems/sandbox/) for security details.
+
 ### Web Search Tool
 
 Location: `src/ash/tools/builtin/web_search.py`
@@ -123,6 +133,13 @@ class WebSearchTool(Tool):
         },
         "required": ["query"],
     }
+```
+
+Requires Brave Search API configuration:
+
+```toml
+[brave_search]
+api_key = "BSA..."
 ```
 
 ### Web Fetch Tool
@@ -258,6 +275,8 @@ Built-in agents include:
 - **research** - Multi-step research tasks
 - **skill-writer** - Creates new skills autonomously
 
+See [Agents](/systems/agents/) for details.
+
 ## Tool Registry
 
 Location: `src/ash/tools/registry.py`
@@ -289,6 +308,29 @@ class ToolExecutor:
         tool = self.registry.get(tool_call.name)
         return await tool.execute(tool_call.input, context)
 ```
+
+## Configuration
+
+### Brave Search
+
+Enable web search capabilities:
+
+```toml
+[brave_search]
+api_key = "BSA..."
+```
+
+Get an API key from [Brave Search API](https://brave.com/search/api/).
+
+### Workspace
+
+Configure the workspace directory for file operations:
+
+```toml
+workspace = "~/.ash/workspace"
+```
+
+See [Configuration Reference](/configuration/reference/) for all options.
 
 ## Creating Custom Tools
 
@@ -333,4 +375,13 @@ class WeatherTool(Tool):
         location = input_data.get("location")
         # Implementation here
         return ToolResult.success(f"Weather for {location}: 72°F, sunny")
+```
+
+Register the tool:
+
+```python
+from ash.tools.registry import ToolRegistry
+
+registry = ToolRegistry()
+registry.register(WeatherTool())
 ```

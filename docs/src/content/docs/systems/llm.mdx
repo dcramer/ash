@@ -1,0 +1,315 @@
+---
+title: LLM Providers
+description: LLM abstraction layer and model configuration
+sidebar:
+  order: 8
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The LLM module provides a unified interface for multiple LLM backends including Anthropic Claude and OpenAI models.
+
+## Overview
+
+Ash uses named model configurations that can be referenced throughout the system. This allows you to:
+- Define multiple models with different capabilities
+- Use cost-effective models for simple tasks
+- Switch to more powerful models for complex reasoning
+
+## Configuration
+
+### Recommended Setup
+
+Use Haiku for simple tasks (fast, cheap) and Sonnet for complex tasks:
+
+```toml
+[models.default]
+provider = "anthropic"
+model = "claude-haiku-4-5"
+temperature = 0.7
+max_tokens = 4096
+
+[models.sonnet]
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+max_tokens = 8192
+
+# Override model for specific skills
+[skills.debug]
+model = "sonnet"
+
+[skills.code-review]
+model = "sonnet"
+
+[skills.research]
+model = "sonnet"
+```
+
+<Aside type="tip">
+  This setup saves money by using Haiku for conversation while using Sonnet for complex skills that need more reasoning power.
+</Aside>
+
+### Model Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | string | required | `"anthropic"` or `"openai"` |
+| `model` | string | required | Model identifier |
+| `temperature` | float | `null` | Sampling temperature (0.0-1.0) |
+| `max_tokens` | int | `4096` | Maximum response tokens |
+| `thinking` | string | `null` | Extended thinking budget (see below) |
+
+<Aside type="tip">
+  Set `temperature` to `null` (or omit it) for reasoning models that don't support temperature control.
+</Aside>
+
+### Extended Thinking
+
+For Claude models that support extended thinking, set the `thinking` option to control how much reasoning the model can do:
+
+| Value | Description |
+|-------|-------------|
+| `"off"` | Disable extended thinking |
+| `"minimal"` | Very brief thinking |
+| `"low"` | Limited thinking budget |
+| `"medium"` | Moderate thinking budget |
+| `"high"` | Maximum thinking budget |
+
+Example:
+
+```toml
+[models.reasoning]
+provider = "anthropic"
+model = "claude-opus-4-5"
+thinking = "medium"
+```
+
+<Aside type="note">
+  Extended thinking is only supported by certain Claude models. Check model documentation for compatibility.
+</Aside>
+
+### Default Model Requirement
+
+A model named `default` is required:
+
+```toml
+[models.default]
+provider = "anthropic"
+model = "claude-haiku-4-5"
+```
+
+This model is used when no `--model` flag is specified.
+
+## Provider API Keys
+
+Set API keys at the provider level:
+
+```toml
+[anthropic]
+api_key = "sk-ant-..."
+
+[openai]
+api_key = "sk-..."
+```
+
+Or use environment variables:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+```
+
+### API Key Resolution
+
+Keys are resolved in this order:
+
+1. Provider config (`[anthropic].api_key`)
+2. Environment variable (`ANTHROPIC_API_KEY`)
+
+## Supported Models
+
+### Anthropic
+
+- `claude-haiku-4-5` (recommended for default - fast, cheap)
+- `claude-sonnet-4-5` (recommended for complex tasks)
+- `claude-opus-4-5` (reasoning tasks)
+
+### OpenAI
+
+- `gpt-5-mini` (recommended for default - fast, cheap)
+- `gpt-5` (more capable)
+
+## Per-Skill Model Override
+
+Override the model used by specific skills:
+
+```toml
+[skills.debug]
+model = "sonnet"  # Use sonnet for debugging
+
+[skills.code-review]
+model = "sonnet"  # Use sonnet for code review
+```
+
+Model resolution order:
+1. `[skills.<name>] model` in config
+2. `model` in skill definition (SKILL.md)
+3. `"default"` fallback
+
+## Using Models
+
+### CLI
+
+Use models by alias:
+
+```bash
+uv run ash chat --model sonnet "Complex question"
+uv run ash chat --model reasoning "Very complex problem"
+```
+
+### Multiple Models
+
+Define multiple named models:
+
+```toml
+[models.default]
+provider = "anthropic"
+model = "claude-haiku-4-5"
+
+[models.sonnet]
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+
+[models.reasoning]
+provider = "anthropic"
+model = "claude-opus-4-5"
+# No temperature for reasoning models
+```
+
+## Provider Interface
+
+Location: `src/ash/llm/base.py`
+
+```python
+from abc import ABC, abstractmethod
+from typing import AsyncIterator
+
+class LLMProvider(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Provider name (e.g., 'anthropic', 'openai')."""
+
+    @abstractmethod
+    async def complete(
+        self,
+        messages: list[Message],
+        *,
+        model: str | None = None,
+        tools: list[ToolDefinition] | None = None,
+        system: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float | None = None,
+    ) -> Message:
+        """Generate a complete response."""
+
+    @abstractmethod
+    async def stream(
+        self,
+        messages: list[Message],
+        *,
+        model: str | None = None,
+        tools: list[ToolDefinition] | None = None,
+        system: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float | None = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """Generate a streaming response."""
+
+    @abstractmethod
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+    ) -> list[list[float]]:
+        """Generate embeddings for texts."""
+```
+
+## Implementations
+
+### Anthropic Provider
+
+Location: `src/ash/llm/anthropic.py`
+
+Uses the official `anthropic` SDK:
+
+```python
+from anthropic import AsyncAnthropic
+
+class AnthropicProvider(LLMProvider):
+    def __init__(self, api_key: str):
+        self.client = AsyncAnthropic(api_key=api_key)
+```
+
+### OpenAI Provider
+
+Location: `src/ash/llm/openai.py`
+
+Uses the official `openai` SDK:
+
+```python
+from openai import AsyncOpenAI
+
+class OpenAIProvider(LLMProvider):
+    def __init__(self, api_key: str):
+        self.client = AsyncOpenAI(api_key=api_key)
+```
+
+## Message Types
+
+Location: `src/ash/llm/types.py`
+
+```python
+class Message:
+    role: Literal["user", "assistant"]
+    content: str | list[ContentBlock]
+    tool_calls: list[ToolCall] | None
+
+class ToolCall:
+    id: str
+    name: str
+    input: dict
+
+class StreamChunk:
+    type: Literal["text", "tool_use"]
+    content: str | None
+    tool_call: ToolCall | None
+```
+
+## Provider Registry
+
+Location: `src/ash/llm/registry.py`
+
+Providers are registered and resolved by name:
+
+```python
+registry = LLMRegistry()
+registry.register("anthropic", AnthropicProvider)
+registry.register("openai", OpenAIProvider)
+
+provider = registry.get("anthropic", api_key="...")
+```
+
+## Tool Definitions
+
+Tools are defined for the LLM:
+
+```python
+class ToolDefinition:
+    name: str
+    description: str
+    input_schema: dict  # JSON Schema
+```
+
+The LLM receives tool definitions and can request tool calls in its response.

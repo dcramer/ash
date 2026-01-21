@@ -2,14 +2,14 @@
 title: Sandbox
 description: Docker container isolation for secure command execution
 sidebar:
-  order: 7
+  order: 6
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 All bash commands from the LLM run in isolated Docker containers. The sandbox is **mandatory** - there is no option to run commands directly on the host.
 
-## Threat Model
+## Overview
 
 The sandbox protects against:
 
@@ -46,6 +46,153 @@ The sandbox protects against:
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## Configuration
+
+```toml
+[sandbox]
+image = "ash-sandbox:latest"
+timeout = 60
+memory_limit = "512m"
+cpu_limit = 1.0
+runtime = "runc"
+network_mode = "bridge"
+dns_servers = []
+http_proxy = ""
+workspace_access = "rw"
+sessions_access = "none"
+```
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `image` | string | `"ash-sandbox:latest"` | Docker image name |
+| `timeout` | int | `60` | Command timeout in seconds |
+| `memory_limit` | string | `"512m"` | Container memory limit |
+| `cpu_limit` | float | `1.0` | CPU cores allowed |
+| `runtime` | string | `"runc"` | Container runtime |
+| `network_mode` | string | `"bridge"` | Network isolation mode |
+| `dns_servers` | list | `[]` | Custom DNS servers |
+| `http_proxy` | string | `""` | HTTP proxy URL |
+| `workspace_access` | string | `"rw"` | Workspace mount mode |
+| `sessions_access` | string | `"none"` | Sessions directory mount mode |
+
+## Security Controls
+
+### Container Isolation
+
+| Control | Implementation | Purpose |
+|---------|----------------|---------|
+| Read-only root filesystem | `--read-only` | Prevent persistent changes |
+| Dropped capabilities | `cap_drop: ALL` | Remove Linux capabilities |
+| No privilege escalation | `no-new-privileges` | Prevent setuid exploitation |
+| Process limit | `pids_limit: 100` | Fork bomb protection |
+| Memory limit | `mem_limit: 512m` | Memory exhaustion protection |
+| CPU limit | `cpu_limit: 1.0` | CPU exhaustion protection |
+| Non-root user | `USER sandbox` | Reduced privilege |
+| Removed setuid binaries | Dockerfile cleanup | Prevent privilege escalation |
+
+### Filesystem Access
+
+| Path | Access | Notes |
+|------|--------|-------|
+| `/` (root) | Read-only | Immutable base system |
+| `/etc`, `/usr`, `/bin` | Read-only | System directories protected |
+| `/workspace` | Configurable (none/ro/rw) | Mounted from host workspace |
+| `/tmp` | Read-write (tmpfs, 64MB) | Temporary files, noexec |
+| `/home/sandbox` | Read-write (tmpfs, 64MB) | User home, noexec |
+| `/var/tmp` | Read-write (tmpfs, 32MB) | Temporary files, noexec |
+| `/run` | Read-write (tmpfs, 16MB) | Runtime files, noexec |
+| `/root` | No access | Root home inaccessible |
+
+### Network Isolation
+
+| Mode | Behavior |
+|------|----------|
+| `none` | Completely isolated, no network |
+| `bridge` | Standard Docker networking, can reach internet |
+
+```toml
+[sandbox]
+network_mode = "none"  # Fully isolated
+```
+
+#### DNS Filtering
+
+Use filtered DNS servers:
+
+```toml
+[sandbox]
+network_mode = "bridge"
+dns_servers = ["9.9.9.9", "149.112.112.112"]  # Quad9 filtered DNS
+```
+
+#### HTTP Proxy
+
+Route traffic through a proxy for monitoring:
+
+```toml
+[sandbox]
+http_proxy = "http://localhost:8888"
+```
+
+### Workspace Access
+
+Control how the workspace is mounted:
+
+| Mode | Description |
+|------|-------------|
+| `none` | Workspace not mounted |
+| `ro` | Read-only access |
+| `rw` | Read-write access |
+
+```toml
+[sandbox]
+workspace_access = "ro"  # Read-only for safety
+```
+
+<Aside type="caution">
+  With `workspace_access = "rw"`, commands can modify files in your workspace.
+</Aside>
+
+### Sessions Access
+
+Control whether the agent can read session history from the sandbox:
+
+| Mode | Description |
+|------|-------------|
+| `none` | Sessions not mounted (default) |
+| `ro` | Read-only access to session transcripts |
+
+```toml
+[sandbox]
+sessions_access = "ro"  # Allow reading past conversations
+```
+
+## Container Runtime
+
+### runc (Default)
+
+Standard OCI runtime:
+
+```toml
+[sandbox]
+runtime = "runc"
+```
+
+### gVisor (runsc)
+
+Enhanced isolation with gVisor:
+
+```toml
+[sandbox]
+runtime = "runsc"
+```
+
+<Aside type="tip">
+  gVisor provides stronger isolation but may have compatibility issues with some commands.
+</Aside>
 
 ## Components
 
@@ -89,49 +236,6 @@ class SandboxExecutor:
         """Run command with resource limits."""
 ```
 
-## Security Controls
-
-### Container Isolation
-
-| Control | Implementation | Purpose |
-|---------|----------------|---------|
-| Read-only root filesystem | `--read-only` | Prevent persistent changes |
-| Dropped capabilities | `cap_drop: ALL` | Remove Linux capabilities |
-| No privilege escalation | `no-new-privileges` | Prevent setuid exploitation |
-| Process limit | `pids_limit: 100` | Fork bomb protection |
-| Memory limit | `mem_limit: 512m` | Memory exhaustion protection |
-| CPU limit | `cpu_limit: 1.0` | CPU exhaustion protection |
-| Non-root user | `USER sandbox` | Reduced privilege |
-| Removed setuid binaries | Dockerfile cleanup | Prevent privilege escalation |
-
-### Filesystem Access
-
-| Path | Access | Notes |
-|------|--------|-------|
-| `/` (root) | Read-only | Immutable base system |
-| `/etc`, `/usr`, `/bin` | Read-only | System directories protected |
-| `/workspace` | Configurable (none/ro/rw) | Mounted from host workspace |
-| `/tmp` | Read-write (tmpfs, 64MB) | Temporary files, noexec |
-| `/home/sandbox` | Read-write (tmpfs, 64MB) | User home, noexec |
-| `/var/tmp` | Read-write (tmpfs, 32MB) | Temporary files, noexec |
-| `/run` | Read-write (tmpfs, 16MB) | Runtime files, noexec |
-| `/root` | No access | Root home inaccessible |
-
-### Network Access
-
-| Mode | Behavior |
-|------|----------|
-| `none` | Completely isolated, no network |
-| `bridge` | Standard Docker networking, can reach internet |
-
-Optional controls when network enabled:
-- `dns_servers` - Custom DNS for filtering (e.g., Pi-hole)
-- `http_proxy` - Route traffic through proxy for monitoring
-
-<Aside type="tip">
-  For enhanced security, use gVisor (`runtime = "runsc"`) which adds kernel-level isolation through syscall interception.
-</Aside>
-
 ## Expected Behaviors
 
 ### MUST Allow
@@ -155,64 +259,19 @@ Optional controls when network enabled:
 6. **Host secret access** - No access to host environment variables
 7. **Unlimited execution** - Commands timeout after configured limit
 
-### SHOULD Behave
+## CLI Commands
 
-1. **Timeout handling** - Long-running commands killed after timeout
-2. **Output truncation** - Very long output truncated to prevent memory issues
-3. **Graceful errors** - Clear error messages for blocked operations
-4. **Clean environment** - No leaked state between command executions
-
-## Container Image
-
-Built from `docker/Dockerfile.sandbox`:
-
-```dockerfile
-FROM python:3.12-slim
-
-# Install common tools
-RUN apt-get update && apt-get install -y \
-    curl wget git jq \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create workspace directory
-WORKDIR /workspace
-
-# Run as non-root user
-USER nobody
-```
-
-Build with:
+### Building the Sandbox
 
 ```bash
 uv run ash sandbox build
 ```
 
-## Configuration
+### Managing Containers
 
-```toml
-[sandbox]
-# Container image (build with: ash sandbox build)
-image = "ash-sandbox:latest"
-
-# Execution limits
-timeout = 60          # seconds
-memory_limit = "512m"
-cpu_limit = 1.0
-
-# Runtime: "runc" (default) or "runsc" (gVisor)
-runtime = "runc"
-
-# Network: "none" (isolated) or "bridge" (has network)
-network_mode = "bridge"
-
-# Optional: Custom DNS servers for filtering
-# dns_servers = ["1.1.1.1", "8.8.8.8"]
-
-# Optional: HTTP proxy for monitoring traffic
-# http_proxy = "http://localhost:8888"
-
-# Workspace mounting: "none", "ro" (read-only), "rw" (read-write)
-workspace_access = "rw"
+```bash
+# Clean up stopped containers
+uv run ash sandbox clean
 ```
 
 ## Verification
@@ -236,10 +295,38 @@ This runs tests across 5 categories:
 
 Use the `/test-sandbox` skill for manual verification prompts. Key scenarios:
 
-1. `rm -rf /` → "Read-only file system"
-2. `sudo whoami` → "command not found" or "permission denied"
-3. Fork bomb `:(){ :|:& };:` → Contained by pids limit
-4. Memory bomb → Killed by memory limit
+1. `rm -rf /` -> "Read-only file system"
+2. `sudo whoami` -> "command not found" or "permission denied"
+3. Fork bomb `:(){ :|:& };:` -> Contained by pids limit
+4. Memory bomb -> Killed by memory limit
+
+## Troubleshooting
+
+### Container fails to start
+
+Check Docker is running:
+
+```bash
+docker info
+```
+
+### Command timeout
+
+Increase the timeout:
+
+```toml
+[sandbox]
+timeout = 120
+```
+
+### Out of memory
+
+Increase memory limit:
+
+```toml
+[sandbox]
+memory_limit = "1g"
+```
 
 ## Incident Response
 
