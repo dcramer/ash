@@ -48,7 +48,7 @@ class ResearchAgent(Agent):
             name="research",
             description="Research a topic using web search",
             system_prompt=RESEARCH_SYSTEM_PROMPT,
-            allowed_tools=["web_search", "web_fetch"],
+            tools=["web_search", "web_fetch"],
             max_iterations=15,
         )
 
@@ -62,7 +62,7 @@ class ResearchAgent(Agent):
 AgentConfig(
     name="research",
     description="Research a topic using web search to find authoritative sources",
-    allowed_tools=["web_search", "web_fetch"],
+    tools=["web_search", "web_fetch"],
     max_iterations=15,
 )
 ```

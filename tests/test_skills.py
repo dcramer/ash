@@ -73,7 +73,7 @@ env:
 packages:
   - jq
   - curl
-allowed_tools:
+tools:
   - bash
   - web_search
 model: haiku
@@ -90,7 +90,7 @@ Research and summarize topics.
         skill = registry.get("research")
         assert skill.env == ["PERPLEXITY_API_KEY"]
         assert skill.packages == ["jq", "curl"]
-        assert skill.allowed_tools == ["bash", "web_search"]
+        assert skill.tools == ["bash", "web_search"]
         assert skill.model == "haiku"
         assert skill.max_iterations == 15
         assert skill.instructions == "Research and summarize topics."
@@ -255,7 +255,7 @@ Do something.
 
         (skill_dir / "SKILL.md").write_text(
             """---
-allowed_tools:
+tools:
   - bash
 ---
 
@@ -331,7 +331,7 @@ Instructions.
         skill_file = tmp_path / "test.md"
         skill_file.write_text(
             """---
-allowed_tools:
+tools:
   - bash
 ---
 

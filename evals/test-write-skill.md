@@ -36,7 +36,7 @@ uv run ash chat "Create a skill called 'system-info' that shows system informati
 ```
 
 **Expected:**
-- Has `allowed_tools: [bash]`
+- Has `tools: [bash]`
 - Instructions include bash command examples
 - May use inline or subagent depending on complexity
 
@@ -83,7 +83,7 @@ uv run ash chat "Create a skill called 'research-topic' that researches a topic 
 
 **Expected:**
 - Mode: `subagent` (complex multi-step workflow)
-- Has `allowed_tools` including `web_search`, `remember`
+- Has `tools` including `web_search`, `remember`
 - Has structured process in instructions (headers, numbered steps)
 - Reasonable `max_iterations` (10-15)
 
@@ -119,7 +119,7 @@ After each scenario, evaluate the generated skill against these criteria (0-10 e
 - [ ] Not overly complex
 
 ### 5. Tool Configuration
-- [ ] Correct `allowed_tools` listed
+- [ ] Correct `tools` listed
 - [ ] Tools match what instructions reference
 - [ ] Appropriate `max_iterations` for subagent
 
@@ -157,7 +157,7 @@ description: string  # One-line, no trailing period, starts with verb
 execution_mode: inline | subagent  # inline for simple, subagent for complex
 model: string  # optional model alias
 max_iterations: int  # for subagent mode, default 5
-allowed_tools: list  # tools the skill needs
+tools: list  # tools the skill needs
 config: list  # config values needed (e.g., API_TOKEN, API_KEY=default)
 input_schema:  # JSON Schema for inputs
   type: object
@@ -194,7 +194,7 @@ input_schema:  # JSON Schema for inputs
    - Correct required fields
 
 5. **Tool Configuration** (0-10)
-   - Correct allowed_tools
+   - Correct tools
    - Tools match instructions
    - Appropriate max_iterations
 

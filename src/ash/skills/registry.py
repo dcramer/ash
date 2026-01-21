@@ -195,7 +195,7 @@ class SkillRegistry:
             source_ref=source_ref,
             env=data.get("env", []),
             packages=data.get("packages", []),
-            allowed_tools=data.get("allowed_tools", []),
+            tools=data.get("tools", []),
             model=data.get("model"),
             max_iterations=data.get("max_iterations", 10),
         )

@@ -26,7 +26,7 @@ This enables:
 - Invoke skills via `use_skill` tool (not by reading files)
 - Run skill as subagent with isolated session
 - Inject env vars from config into skill execution
-- Support `allowed_tools` to restrict subagent's tools
+- Support `tools` to restrict subagent's tools
 - Support `model` override per skill
 - Support `max_iterations` limit per skill
 - Provide CLI commands for skill management
@@ -67,7 +67,7 @@ env:                           # Env vars to inject from config
 packages:                      # System packages to install (apt)
   - jq
   - curl
-allowed_tools:                 # Tool whitelist (empty = all tools)
+tools:                         # Tool whitelist (empty = all tools)
   - bash
   - web_search
   - web_fetch
@@ -161,7 +161,7 @@ class SkillDefinition:
     # Subagent execution
     env: list[str] = field(default_factory=list)           # Env vars to inject
     packages: list[str] = field(default_factory=list)      # System packages (apt)
-    allowed_tools: list[str] = field(default_factory=list) # Tool whitelist
+    tools: list[str] = field(default_factory=list)         # Tool whitelist
     model: str | None = None                                # Model override
     max_iterations: int = 10                                # Iteration limit
 ```
@@ -214,7 +214,7 @@ class SkillRegistry:
 | `use_skill("research", ...)` | Spawns subagent, returns result | Isolated LLM loop |
 | Skill with `env: [FOO]` | FOO injected from config | `[skills.x].FOO = "..."` |
 | Skill with `packages: [jq]` | jq installed in sandbox | Via apt-get at build |
-| Skill with `allowed_tools` | Subagent restricted to those tools | Empty = all tools |
+| Skill with `tools` | Subagent restricted to those tools | Empty = all tools |
 | Skill with `model: haiku` | Uses haiku model | Config can override |
 | Skill with config `enabled = false` | Filtered from prompt | Not invocable |
 | `ash skill list` | Shows registered skills | |
@@ -227,7 +227,7 @@ class SkillRegistry:
 | Skill disabled | `use_skill` returns error |
 | Missing env var in config | Skill runs without that var (warning logged) |
 | Max iterations exceeded | Returns partial result with error flag |
-| Tool not in allowed_tools | Subagent tool call blocked with error |
+| Tool not in tools | Subagent tool call blocked with error |
 
 ## Dependencies
 
@@ -291,7 +291,7 @@ cat > workspace/skills/test-api/SKILL.md << 'EOF'
 description: Test API key injection
 env:
   - TEST_API_KEY
-allowed_tools: [bash]
+tools: [bash]
 ---
 
 Echo the TEST_API_KEY environment variable to verify injection.

@@ -79,7 +79,7 @@ class SkillAgent(Agent):
             name=f"skill:{self._skill.name}",
             description=self._skill.description,
             system_prompt=self._skill.instructions,
-            allowed_tools=self._skill.allowed_tools,
+            tools=self._skill.tools,
             max_iterations=self._skill.max_iterations,
             model=self._model_override or self._skill.model,
             is_skill_agent=True,

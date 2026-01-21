@@ -88,7 +88,7 @@ requires:
     - curl
   env:
     - API_KEY
-allowed_tools:
+tools:
   - bash
   - web_fetch
 ---
@@ -121,7 +121,7 @@ Instructions the agent will follow...
 |-------|------|----------|-------------|
 | `description` | string | Yes | One-line description |
 | `requires` | object | No | System requirements |
-| `allowed_tools` | list | No | Tools the skill needs |
+| `tools` | list | No | Tools the skill needs |
 | `input_schema` | object | No | JSON Schema for inputs |
 
 ### Requirements
@@ -284,7 +284,7 @@ class MyAgent(Agent):
             system_prompt="You are a specialized agent that...",
             model="default",  # Model alias from config
             max_iterations=25,
-            allowed_tools=["bash", "web_search"],  # Restrict tools
+            tools=["bash", "web_search"],  # Restrict tools
         )
 
     async def execute(

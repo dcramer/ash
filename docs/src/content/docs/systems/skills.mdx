@@ -71,7 +71,7 @@ env:
 packages:
   - curl
   - jq
-allowed_tools:
+tools:
   - bash
   - web_search
 model: haiku  # Optional model override
@@ -97,7 +97,7 @@ Details about how to accomplish the task...
 | `rationale` | string | No | Why this skill was created |
 | `env` | list | No | Environment variables to inject from config |
 | `packages` | list | No | System packages required (apt) |
-| `allowed_tools` | list | No | Tools the skill can use (empty = all) |
+| `tools` | list | No | Tools the skill can use (empty = all) |
 | `model` | string | No | Model alias override for this skill |
 | `max_iterations` | int | No | Iteration limit (default: 10) |
 
@@ -272,7 +272,7 @@ skill.source_ref   # Git ref if pinned
 description: Search and summarize GitHub issues
 env:
   - GITHUB_TOKEN
-allowed_tools:
+tools:
   - bash
   - web_fetch
 ---

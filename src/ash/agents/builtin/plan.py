@@ -80,7 +80,7 @@ class PlanAgent(Agent):
             name="plan",
             description="Create a step-by-step implementation plan from research or requirements",
             system_prompt=PLAN_SYSTEM_PROMPT,
-            allowed_tools=["read_file", "list_directory", "send_message", "interrupt"],
+            tools=["read_file", "list_directory", "send_message", "interrupt"],
             max_iterations=10,
             supports_checkpointing=True,
         )

@@ -40,7 +40,7 @@ class AgentExecutor:
 
     def _get_tool_definitions(
         self,
-        allowed_tools: list[str],
+        tools: list[str],
         is_skill_agent: bool,
         supports_checkpointing: bool,
     ) -> list[ToolDefinition]:
@@ -53,11 +53,11 @@ class AgentExecutor:
         if not supports_checkpointing:
             excluded.add("interrupt")
 
-        # Filter by allowed tools and exclusions in a single pass
-        if allowed_tools:
-            allowed_set = set(allowed_tools)
+        # Filter by tools whitelist and exclusions in a single pass
+        if tools:
+            tools_set = set(tools)
             return [
-                d for d in all_defs if d.name in allowed_set and d.name not in excluded
+                d for d in all_defs if d.name in tools_set and d.name not in excluded
             ]
 
         return [d for d in all_defs if d.name not in excluded]
@@ -180,7 +180,7 @@ class AgentExecutor:
 
         system_prompt = agent.build_system_prompt(context)
         tool_definitions = self._get_tool_definitions(
-            agent_config.allowed_tools,
+            agent_config.tools,
             agent_config.is_skill_agent,
             agent_config.supports_checkpointing,
         )
@@ -259,10 +259,7 @@ class AgentExecutor:
                         )
                         continue
 
-                if (
-                    agent_config.allowed_tools
-                    and tool_use.name not in agent_config.allowed_tools
-                ):
+                if agent_config.tools and tool_use.name not in agent_config.tools:
                     session.add_tool_result(
                         tool_use.id,
                         f"Tool '{tool_use.name}' is not available to this agent",

@@ -65,7 +65,7 @@ class ResearchAgent(Agent):
             name="research",
             description="Research a topic using web search to find authoritative sources",
             system_prompt=RESEARCH_SYSTEM_PROMPT,
-            allowed_tools=["web_search", "web_fetch", "send_message"],
+            tools=["web_search", "web_fetch", "send_message"],
             max_iterations=15,
         )
 

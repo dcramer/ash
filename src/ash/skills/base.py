@@ -49,8 +49,6 @@ class SkillDefinition:
     # Subagent execution settings
     env: list[str] = field(default_factory=list)  # Env vars to inject from config
     packages: list[str] = field(default_factory=list)  # System packages (apt)
-    allowed_tools: list[str] = field(
-        default_factory=list
-    )  # Tool whitelist (empty = all)
+    tools: list[str] = field(default_factory=list)  # Tool whitelist (empty = all)
     model: str | None = None  # Model alias override
     max_iterations: int = 10  # Iteration limit

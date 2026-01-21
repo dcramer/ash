@@ -86,7 +86,7 @@ description: One-line description
 authors:              # REQUIRED - who requested/maintains this skill
   - username
 rationale: Why this skill was created (user's intent)
-allowed_tools:        # Optional
+tools:                # Optional
   - bash
 env:                  # Optional - env vars from config
   - API_KEY
@@ -180,7 +180,7 @@ class SkillWriterAgent(Agent):
             name="skill-writer",
             description="Create, update, or rewrite a skill with proper SKILL.md format",
             system_prompt=SKILL_WRITER_PROMPT,
-            allowed_tools=[
+            tools=[
                 # Coordination
                 "use_agent",  # Delegate to research/plan agents
                 "interrupt",  # Checkpoints between phases

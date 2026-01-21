@@ -77,7 +77,7 @@ class AgentConfig:
     name: str
     description: str
     system_prompt: str
-    allowed_tools: list[str] = field(default_factory=list)
+    tools: list[str] = field(default_factory=list)
     max_iterations: int = 10
     model: str | None = None
     is_skill_agent: bool = False

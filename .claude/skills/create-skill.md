@@ -29,7 +29,7 @@ env:                  # Optional - env vars from config.toml
   - API_KEY
 packages:             # Optional - apt packages needed
   - jq
-allowed_tools:        # Optional - restrict to these tools
+tools:        # Optional - restrict to these tools
   - bash
 ---
 
@@ -59,4 +59,4 @@ API_KEY = "your-key-here"
 - Keep instructions focused - Claude is smart
 - Put complex logic in scripts, not SKILL.md
 - Only declare env vars you actually use
-- Use `allowed_tools: [bash]` for shell-only skills
+- Use `tools: [bash]` for shell-only skills

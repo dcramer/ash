@@ -59,9 +59,9 @@ def validate(path: Path) -> None:
         raise typer.Exit(1)
 
     # Check optional fields have valid types
-    if "allowed_tools" in frontmatter:
-        if not isinstance(frontmatter["allowed_tools"], list):
-            typer.echo("Error: 'allowed_tools' must be a list", err=True)
+    if "tools" in frontmatter:
+        if not isinstance(frontmatter["tools"], list):
+            typer.echo("Error: 'tools' must be a list", err=True)
             raise typer.Exit(1)
 
     if "requires" in frontmatter:
@@ -82,8 +82,8 @@ def validate(path: Path) -> None:
     typer.echo(f"Valid: {path}")
     typer.echo(f"  Description: {frontmatter['description']}")
 
-    if "allowed_tools" in frontmatter:
-        typer.echo(f"  Tools: {', '.join(frontmatter['allowed_tools'])}")
+    if "tools" in frontmatter:
+        typer.echo(f"  Tools: {', '.join(frontmatter['tools'])}")
 
     if "requires" in frontmatter:
         req = frontmatter["requires"]
