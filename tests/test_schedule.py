@@ -506,9 +506,9 @@ class TestScheduleEntryTimezone:
         assert entry is not None
         assert entry.timezone == "America/Los_Angeles"
 
-    def test_cron_always_evaluated_in_utc(self):
-        """Test cron expressions are always evaluated in UTC."""
-        # Same cron, different stored timezone - should give same result
+    def test_cron_evaluated_in_local_timezone(self):
+        """Test cron expressions are evaluated in the stored local timezone."""
+        # Same cron, different stored timezone - should give different UTC times
         entry_la = ScheduleEntry(
             message="Test",
             cron="0 8 * * *",
@@ -525,7 +525,6 @@ class TestScheduleEntryTimezone:
             timezone=None,
         )
 
-        # All should return the same UTC time (8:00 UTC)
         next_la = entry_la.next_fire_time()
         next_utc = entry_utc.next_fire_time()
         next_none = entry_none.next_fire_time()
@@ -533,8 +532,17 @@ class TestScheduleEntryTimezone:
         assert next_la is not None
         assert next_utc is not None
         assert next_none is not None
-        assert next_la == next_utc == next_none
-        assert next_la.hour == 8  # 8 AM UTC
+
+        # LA time is 8 hours behind UTC (or 7 during DST)
+        # 8 AM LA = 16:00 UTC (or 15:00 during DST)
+        # 8 AM UTC = 8:00 UTC
+        assert next_la != next_utc  # Different timezones = different UTC times
+        assert next_utc.hour == 8  # 8 AM UTC
+        # LA is UTC-8 (PST) or UTC-7 (PDT), so 8 AM LA is 15:00 or 16:00 UTC
+        assert next_la.hour in (15, 16)  # 8 AM Pacific in UTC
+
+        # None timezone defaults to UTC
+        assert next_none == next_utc
 
     def test_one_shot_timezone_stored(self):
         """Test one-shot entry can store timezone."""

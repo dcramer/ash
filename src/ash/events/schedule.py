@@ -119,28 +119,37 @@ class ScheduleEntry:
     def _next_run_time(self, timezone: str = "UTC") -> datetime | None:
         """Calculate next run time from cron and last_run.
 
-        Cron expressions are always evaluated in UTC for consistency.
-        This ensures scheduled times don't shift if system timezone changes.
+        Cron expressions are evaluated in the user's local timezone, then
+        converted to UTC for consistent scheduling. This ensures "8 AM daily"
+        always fires at 8 AM local time, regardless of DST changes.
 
         Args:
-            timezone: Unused, kept for API compatibility. Cron always uses UTC.
+            timezone: IANA timezone name for evaluating the cron expression.
         """
         if not self.cron:
             return None
         try:
+            from zoneinfo import ZoneInfo
+
             from croniter import croniter
 
-            # Always use UTC for cron evaluation
-            if self.last_run:
-                base_time = self.last_run.astimezone(UTC)
-            else:
-                base_time = datetime.now(UTC)
+            # Get timezone object for local evaluation
+            try:
+                tz = ZoneInfo(timezone)
+            except Exception:
+                tz = ZoneInfo("UTC")
 
-            # croniter evaluates in UTC
-            next_utc = croniter(self.cron, base_time).get_next(datetime)
-            # Ensure it's UTC-aware
-            if next_utc.tzinfo is None:
-                next_utc = next_utc.replace(tzinfo=UTC)
+            # Convert base time to local timezone for cron evaluation
+            if self.last_run:
+                base_time = self.last_run.astimezone(tz)
+            else:
+                base_time = datetime.now(tz)
+
+            # Evaluate cron in local timezone, result is timezone-aware
+            next_local = croniter(self.cron, base_time).get_next(datetime)
+
+            # Convert to UTC for consistent storage/comparison
+            next_utc = next_local.astimezone(UTC)
             return next_utc
         except Exception as e:
             logger.warning(
