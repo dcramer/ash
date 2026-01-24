@@ -16,7 +16,12 @@ logger = logging.getLogger(__name__)
 
 # Built-in skills that are handled specially (not loaded from SKILL.md files)
 BUILTIN_SKILLS = {
-    "claude-code": "Delegate tasks to Claude Code CLI with full permissions",
+    "claude-code": (
+        "Delegate tasks to Claude Code CLI with full permissions. "
+        "Each invocation is a fresh conversation. To continue a previous task, "
+        "have Claude Code write output to a file, then reference it in the next "
+        "prompt using @filename syntax."
+    ),
 }
 
 # Wrapper guidance prepended to all skill system prompts
