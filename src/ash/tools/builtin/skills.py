@@ -14,6 +14,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Built-in skills that are handled specially (not loaded from SKILL.md files)
+BUILTIN_SKILLS = {
+    "claude-code": "Delegate tasks to Claude Code CLI with full permissions",
+}
+
 # Wrapper guidance prepended to all skill system prompts
 SKILL_AGENT_WRAPPER = """You are a skill executor. Your job is to run the skill instructions below and report results.
 
@@ -161,10 +166,12 @@ class UseSkillTool(Tool):
 
     @property
     def description(self) -> str:
-        skills = self._registry.list_available()
-        if not skills:
+        # Combine registry skills with built-in skills
+        skill_names = [s.name for s in self._registry.list_available()]
+        skill_names.extend(BUILTIN_SKILLS.keys())
+        if not skill_names:
             return "Invoke a skill (none available)"
-        skill_list = ", ".join(s.name for s in skills)
+        skill_list = ", ".join(sorted(set(skill_names)))
         return f"Invoke a skill with isolated execution. Available: {skill_list}"
 
     @property
@@ -208,6 +215,45 @@ class UseSkillTool(Tool):
                 )
         return env
 
+    async def _execute_claude_code(
+        self,
+        message: str,
+        context: ToolContext | None,
+    ) -> ToolResult:
+        """Execute the claude-code built-in skill.
+
+        This skill delegates to the Claude Code CLI with full permissions.
+        Model is read from [models.claude-code].model config.
+        """
+        from ash.agents.builtin.claude_code import ClaudeCodeAgent
+
+        skill_config = self._config.skills.get("claude-code")
+
+        if skill_config and not skill_config.enabled:
+            return ToolResult.error("Skill 'claude-code' is disabled in config")
+
+        # Get model from [models.claude-code] if configured, default to opus
+        if "claude-code" in self._config.models:
+            model = self._config.models["claude-code"].model
+        else:
+            model = "opus"
+
+        agent = ClaudeCodeAgent()
+
+        if context:
+            agent_context = AgentContext.from_tool_context(context)
+        else:
+            agent_context = AgentContext()
+
+        logger.info(f"Invoking claude-code skill with message: {message[:100]}...")
+
+        result = await agent.execute_passthrough(message, agent_context, model=model)
+
+        if result.is_error:
+            return ToolResult.error(result.content)
+
+        return ToolResult.success(result.content, skill="claude-code")
+
     async def execute(
         self,
         input_data: dict[str, Any],
@@ -223,12 +269,18 @@ class UseSkillTool(Tool):
         if not message:
             return ToolResult.error("Missing required field: message")
 
+        # Handle built-in skills specially
+        if skill_name == "claude-code":
+            return await self._execute_claude_code(message, context)
+
         if not self._registry.has(skill_name):
             self._registry.reload_workspace(self._config.workspace)
             if not self._registry.has(skill_name):
-                available = ", ".join(self._registry.list_names())
+                # Include built-in skills in available list
+                available = set(self._registry.list_names())
+                available.update(BUILTIN_SKILLS.keys())
                 return ToolResult.error(
-                    f"Skill '{skill_name}' not found. Available: {available}"
+                    f"Skill '{skill_name}' not found. Available: {', '.join(sorted(available))}"
                 )
 
         skill = self._registry.get(skill_name)
@@ -249,12 +301,6 @@ class UseSkillTool(Tool):
                 )
 
         env = self._build_skill_environment(skill, skill_config)
-        if not skill_config and skill.env:
-            logger.warning(
-                f"Skill '{skill.name}' needs env vars {skill.env} "
-                f"but no [skills.{skill.name}] config section found"
-            )
-
         model_override = skill_config.model if skill_config else None
         agent = SkillAgent(skill, model_override=model_override)
 

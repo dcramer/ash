@@ -108,6 +108,14 @@ class AgentExecutor:
         """Inner implementation of execute (runs with log context)."""
         agent_config = agent.config
 
+        # Handle passthrough agents - they bypass the LLM loop entirely
+        if agent_config.is_passthrough:
+            logger.info(
+                f"Executing passthrough agent '{agent_config.name}' with input: "
+                f"{input_message[:100]}..."
+            )
+            return await agent.execute_passthrough(input_message, context)
+
         # Handle resume from checkpoint
         if resume_from is not None:
             if user_response is None:
