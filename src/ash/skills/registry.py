@@ -80,9 +80,13 @@ class SkillRegistry:
             logger.debug(f"Workspace skills directory not found: {skills_dir}")
 
     def _load_bundled_skills(self) -> None:
-        """Load built-in skills (placeholder for future bundled skills)."""
-        # Currently no bundled skills - this is where we'd load them
-        pass
+        """Load built-in skills from the package."""
+        bundled_dir = Path(__file__).parent / "bundled"
+        if bundled_dir.exists():
+            self._load_from_directory(
+                bundled_dir,
+                source_type=SkillSourceType.BUNDLED,
+            )
 
     def _load_installed_skills(self) -> None:
         """Load skills from installed sources (repos and local paths)."""
