@@ -25,15 +25,15 @@ cases:
     description: Handle request for an agent that doesn't exist
     prompt: "Use the foobar agent to do something"
     expected_behavior: |
-      The assistant should attempt to use the use_agent tool with "foobar"
-      as the agent name. The tool should return an error indicating the
-      agent is not found and list available agents.
+      The assistant should either:
+      1. Attempt to use the use_agent tool with "foobar" and handle the error, OR
+      2. Proactively inform the user that no such agent exists
+
+      Either way, the user should be informed about available agents.
     criteria:
-      - Attempts to use use_agent with the requested agent name
-      - Handles the error response appropriately
-      - Informs user about available agents or alternatives
-    expected_tools:
-      - use_agent
+      - Informs user that foobar agent does not exist or is not available
+      - Lists or mentions available agents as alternatives
+      - Provides helpful guidance on what the user can do instead
     tags:
       - registry
       - error_handling

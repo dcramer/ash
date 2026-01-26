@@ -393,7 +393,7 @@ class TestServiceCLI:
         mock_manager.backend_name = "generic"
 
         monkeypatch.setattr(
-            "ash.service.manager.ServiceManager",
+            "ash.service.ServiceManager",
             lambda backend=None: mock_manager,
         )
 

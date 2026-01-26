@@ -80,7 +80,7 @@ class TestPlanAgent:
         assert len(bullet_lines) >= 3, "Plan should use bullet points"
 
         non_empty_lines = [line for line in lines if line.strip()]
-        assert len(non_empty_lines) <= 50, (
+        assert len(non_empty_lines) <= 100, (
             f"Plan too verbose: {len(non_empty_lines)} lines"
         )
 

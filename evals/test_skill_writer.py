@@ -60,7 +60,7 @@ class TestSkillWriterPhaseCompliance:
         """Research phase should not use bash or write files."""
         agent, executor = skill_writer_executor
         suite = load_eval_suite(SKILL_WRITER_CASES)
-        case = get_case_by_id(suite, "research_phase_read_only")
+        case = get_case_by_id(suite, "phases_are_read_only")
 
         context = AgentContext(
             session_id="test-research",
@@ -106,7 +106,7 @@ class TestSkillWriterPhaseCompliance:
         """Plan phase should not use bash or write files."""
         agent, executor = skill_writer_executor
         suite = load_eval_suite(SKILL_WRITER_CASES)
-        case = get_case_by_id(suite, "plan_phase_read_only")
+        case = get_case_by_id(suite, "phases_are_read_only")
 
         context = AgentContext(
             session_id="test-plan",
