@@ -101,6 +101,30 @@ Instructions for the agent.
 - `authors` - List of usernames. Start with who requested the skill. When updating, append new contributors.
 - `rationale` - Capture the user's intent: why they wanted this skill, what problem it solves. Extract from their request.
 
+## Skill Structure
+
+Ash skills can include optional directories:
+
+- `references/` - Documentation loaded as needed (API docs, schemas, examples)
+- `scripts/` - Reusable Python/bash scripts for execution
+- `assets/` - Templates, sample files, non-code resources
+
+When to use each:
+- Complex API? Put schema in `references/schema.md`
+- Need templates? Put in `assets/template.json`
+- Repeating code? Put in `scripts/helper.py`
+
+Keep SKILL.md under 200 lines - move details to `references/`.
+
+## Description Quality
+
+The description determines when the skill is invoked. Be specific:
+
+**Good**: "Translate text between languages using DeepL API"
+**Bad**: "Translation skill" (too vague)
+
+Include what it does and the approach (API, method, tool).
+
 ## Python Execution
 
 Always use:
@@ -142,6 +166,31 @@ Report only the translated text.
 1. Tell the agent what to do, not how something could be used
 2. Reference user input explicitly: `<user_message>`, "the user's input"
 3. Specify the expected output format
+
+## Output Patterns
+
+For skills that produce structured output, define the format:
+
+**Template pattern** (rigid format):
+```
+Return JSON: {"status": "success|error", "result": "..."}
+```
+
+**Examples pattern** (flexible format):
+```
+Example output: "Translated: こんにちは"
+```
+
+Use template pattern for machine-readable output, examples pattern for human-readable.
+
+## Workflow Types
+
+When planning skill instructions, choose:
+
+- **Sequential**: Steps 1→2→3 (most skills)
+- **Conditional**: "If X, do A; else do B" (branching logic)
+
+Use sequential by default. Only add branching when the skill needs to handle multiple distinct cases.
 
 ## Error Handling
 
