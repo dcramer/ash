@@ -7,15 +7,20 @@ Loading precedence (later sources override earlier):
 4. Workspace - Project-specific skills (highest priority)
 """
 
+from __future__ import annotations
+
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from ash.config.paths import get_user_skills_path
 from ash.skills.base import SkillDefinition, SkillSourceType
+
+if TYPE_CHECKING:
+    from ash.config.models import SkillConfig  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +37,10 @@ class SkillRegistry:
     4. Workspace (highest) - workspace/skills/
     """
 
-    def __init__(self) -> None:
+    def __init__(self, skill_config: dict[str, SkillConfig] | None = None) -> None:
         self._skills: dict[str, SkillDefinition] = {}
         self._skill_sources: dict[str, Path] = {}
+        self._skill_config = skill_config or {}
 
     def discover(
         self,
@@ -194,6 +200,7 @@ class SkillRegistry:
             skill_path=skill_path,
             authors=data.get("authors", []),
             rationale=data.get("rationale"),
+            opt_in=data.get("opt_in", False),
             source_type=source_type,
             source_repo=source_repo,
             source_ref=source_ref,
@@ -204,7 +211,38 @@ class SkillRegistry:
             max_iterations=data.get("max_iterations", 10),
         )
 
+    def _should_include_skill(self, skill: SkillDefinition) -> bool:
+        """Check if a skill should be included based on config.
+
+        Returns False for:
+        - Opt-in skills without explicit enabled = true in config
+        - Any skill with enabled = false in config
+
+        Returns True otherwise.
+        """
+        config = self._skill_config.get(skill.name)
+
+        # Check if explicitly disabled
+        if config is not None and not config.enabled:
+            logger.debug(f"Skill '{skill.name}' disabled in config")
+            return False
+
+        # Opt-in skills require explicit enablement
+        if skill.opt_in:
+            if config is None or not config.enabled:
+                logger.debug(
+                    f"Opt-in skill '{skill.name}' not enabled "
+                    f"(add [skills.{skill.name}] enabled = true)"
+                )
+                return False
+
+        return True
+
     def _register_skill(self, skill: SkillDefinition, source_path: Path) -> None:
+        # Check if skill should be included based on opt-in/enabled settings
+        if not self._should_include_skill(skill):
+            return
+
         if skill.name in self._skills:
             existing_source = self._skill_sources.get(skill.name)
             if existing_source and existing_source != source_path:

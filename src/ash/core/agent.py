@@ -891,7 +891,7 @@ async def create_agent(
 
     tool_registry = ToolRegistry()
 
-    skill_registry = SkillRegistry()
+    skill_registry = SkillRegistry(skill_config=config.skills)
     skill_registry.discover(config.workspace)
     logger.info(f"Discovered {len(skill_registry)} skills from workspace")
 

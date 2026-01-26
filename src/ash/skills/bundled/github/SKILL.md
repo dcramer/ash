@@ -1,5 +1,6 @@
 ---
 description: Manage GitHub repositories, branches, PRs, and issues
+opt_in: true
 packages:
   - git
   - gh

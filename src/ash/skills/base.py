@@ -46,6 +46,9 @@ class SkillDefinition:
     source_repo: str | None = None  # GitHub repo (owner/repo) if from installed
     source_ref: str | None = None  # Git ref (branch/tag/commit) if from installed
 
+    # Opt-in flag (bundled skills can require explicit enablement)
+    opt_in: bool = False  # If True, requires [skills.<name>] enabled = true
+
     # Subagent execution settings
     env: list[str] = field(default_factory=list)  # Env vars to inject from config
     packages: list[str] = field(default_factory=list)  # System packages (apt)

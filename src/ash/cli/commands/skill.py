@@ -117,19 +117,30 @@ def register(app: typer.Typer) -> None:
                 help="Show source type for each skill",
             ),
         ] = False,
+        show_all: Annotated[
+            bool,
+            typer.Option(
+                "--all",
+                "-a",
+                help="Show all skills including disabled opt-in skills",
+            ),
+        ] = False,
     ) -> None:
         """List registered skills.
 
         Examples:
             ash skill list
             ash skill list --source
+            ash skill list --all  # Include opt-in skills not enabled
         """
         from rich.table import Table
 
         from ash.skills.registry import SkillRegistry
 
         config = get_config(config_path)
-        registry = SkillRegistry()
+        # Pass None for skill_config when showing all to bypass filtering
+        skill_config = None if show_all else config.skills
+        registry = SkillRegistry(skill_config=skill_config)
         registry.discover(config.workspace)
 
         skills = registry.list_available()
@@ -146,21 +157,36 @@ def register(app: typer.Typer) -> None:
             table.add_column("Repo/Path", style="dim")
         else:
             table.add_column("Path", style="dim")
+        if show_all:
+            table.add_column("Status", style="yellow")
 
         for skill in sorted(skills, key=lambda s: s.name):
+            # Determine status for --all view
+            status = ""
+            if show_all and skill.opt_in:
+                skill_cfg = config.skills.get(skill.name)
+                if skill_cfg and skill_cfg.enabled:
+                    status = "[green]enabled[/green]"
+                else:
+                    status = "[dim]opt-in[/dim]"
+
             if show_source:
                 source_info = skill.source_repo or (
                     str(skill.skill_path) if skill.skill_path else "-"
                 )
-                table.add_row(
+                row = [
                     skill.name,
                     skill.description,
                     skill.source_type.value,
                     source_info,
-                )
+                ]
             else:
                 path = str(skill.skill_path) if skill.skill_path else "-"
-                table.add_row(skill.name, skill.description, path)
+                row = [skill.name, skill.description, path]
+
+            if show_all:
+                row.append(status)
+            table.add_row(*row)
 
         console.print(table)
 

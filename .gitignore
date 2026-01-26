@@ -68,3 +68,7 @@ workspace/*
 !workspace/SOUL.md
 !workspace/USER.md
 !workspace/TOOLS.md
+
+# Dex task tracking (keep config, ignore tasks)
+.dex/*
+!.dex/config.toml

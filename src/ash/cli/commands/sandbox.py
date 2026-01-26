@@ -120,7 +120,7 @@ def _sandbox_build(dockerfile_path: Path, config_path: Path | None = None) -> bo
         # Discover skill packages from workspace
         skill_apt: list[str] = []
         if cfg.workspace and cfg.workspace.exists():
-            skill_registry = SkillRegistry()
+            skill_registry = SkillRegistry(skill_config=cfg.skills)
             skill_registry.discover(cfg.workspace, include_bundled=False)
             skill_apt, _, _ = collect_skill_packages(skill_registry)
             if skill_apt:

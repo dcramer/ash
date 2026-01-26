@@ -482,3 +482,201 @@ Test.
         assert "valid-package" in apt
         assert "another_valid" in apt
         assert len(apt) == 2  # Invalid one filtered out
+
+
+# =============================================================================
+# Opt-in Skill Tests
+# =============================================================================
+
+
+class TestSkillRegistryOptIn:
+    """Tests for opt-in skill filtering."""
+
+    def test_opt_in_skill_excluded_without_config(self, tmp_path: Path):
+        """Opt-in skills are excluded when no config enables them."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "optional"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: An optional skill
+opt_in: true
+---
+
+Do something optional.
+"""
+        )
+
+        # No skill_config passed
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+        assert len(registry) == 0
+        assert not registry.has("optional")
+
+    def test_opt_in_skill_included_when_enabled(self, tmp_path: Path):
+        """Opt-in skills are included when explicitly enabled in config."""
+        from ash.config.models import SkillConfig
+
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "optional"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: An optional skill
+opt_in: true
+---
+
+Do something optional.
+"""
+        )
+
+        # Config enables the skill
+        skill_config = {"optional": SkillConfig(enabled=True)}
+        registry = SkillRegistry(skill_config=skill_config)
+        registry.discover(tmp_path, include_bundled=False)
+
+        assert len(registry) == 1
+        assert registry.has("optional")
+        skill = registry.get("optional")
+        assert skill.opt_in is True
+        assert skill.description == "An optional skill"
+
+    def test_regular_skill_excluded_when_disabled(self, tmp_path: Path):
+        """Regular skills can be disabled via config."""
+        from ash.config.models import SkillConfig
+
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "normal"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: A normal skill
+---
+
+Do something normal.
+"""
+        )
+
+        # Config disables the skill
+        skill_config = {"normal": SkillConfig(enabled=False)}
+        registry = SkillRegistry(skill_config=skill_config)
+        registry.discover(tmp_path, include_bundled=False)
+
+        assert len(registry) == 0
+        assert not registry.has("normal")
+
+    def test_regular_skill_included_by_default(self, tmp_path: Path):
+        """Regular skills are included without explicit config."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "normal"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: A normal skill
+---
+
+Do something normal.
+"""
+        )
+
+        # No config - regular skill should be included
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        assert len(registry) == 1
+        assert registry.has("normal")
+        skill = registry.get("normal")
+        assert skill.opt_in is False
+
+    def test_opt_in_false_by_default(self, tmp_path: Path):
+        """Skills without opt_in field default to False."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "test"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Test skill
+---
+
+Test instructions.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("test")
+        assert skill.opt_in is False
+
+    def test_mixed_opt_in_and_regular_skills(self, tmp_path: Path):
+        """Mix of opt-in and regular skills with various config states."""
+        from ash.config.models import SkillConfig
+
+        skills_dir = tmp_path / "skills"
+
+        # Regular skill (no config)
+        (skills_dir / "regular").mkdir(parents=True)
+        (skills_dir / "regular" / "SKILL.md").write_text(
+            """---
+description: Regular skill
+---
+
+Regular.
+"""
+        )
+
+        # Opt-in skill (enabled)
+        (skills_dir / "opt-enabled").mkdir()
+        (skills_dir / "opt-enabled" / "SKILL.md").write_text(
+            """---
+description: Enabled opt-in
+opt_in: true
+---
+
+Enabled.
+"""
+        )
+
+        # Opt-in skill (not enabled)
+        (skills_dir / "opt-disabled").mkdir()
+        (skills_dir / "opt-disabled" / "SKILL.md").write_text(
+            """---
+description: Not enabled opt-in
+opt_in: true
+---
+
+Not enabled.
+"""
+        )
+
+        # Regular skill (disabled)
+        (skills_dir / "disabled").mkdir()
+        (skills_dir / "disabled" / "SKILL.md").write_text(
+            """---
+description: Disabled regular
+---
+
+Disabled.
+"""
+        )
+
+        skill_config = {
+            "opt-enabled": SkillConfig(enabled=True),
+            "disabled": SkillConfig(enabled=False),
+        }
+
+        registry = SkillRegistry(skill_config=skill_config)
+        registry.discover(tmp_path, include_bundled=False)
+
+        # Should have: regular (default on), opt-enabled (explicitly on)
+        # Should NOT have: opt-disabled (no config), disabled (explicitly off)
+        assert len(registry) == 2
+        assert registry.has("regular")
+        assert registry.has("opt-enabled")
+        assert not registry.has("opt-disabled")
+        assert not registry.has("disabled")
