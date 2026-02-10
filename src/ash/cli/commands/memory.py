@@ -443,6 +443,8 @@ async def _memory_add(
     session, content: str, source: str | None, expires_days: int | None
 ) -> None:
     """Add a memory entry."""
+    import os
+
     from ash.memory.types import MemoryType
 
     store = _get_memory_store()
@@ -451,15 +453,25 @@ async def _memory_add(
     if expires_days:
         expires_at = datetime.now(UTC) + timedelta(days=expires_days)
 
+    # Read user attribution from environment (set by sandbox)
+    # ASH_USERNAME is the user's handle (e.g., "notzeeg")
+    # ASH_DISPLAY_NAME is the user's display name (e.g., "David Cramer")
+    source_user_id = os.environ.get("ASH_USERNAME") or None
+    source_user_name = os.environ.get("ASH_DISPLAY_NAME") or None
+
     entry = await store.add_memory(
         content=content,
         source=source or "cli",
         memory_type=MemoryType.KNOWLEDGE,
         expires_at=expires_at,
+        source_user_id=source_user_id,
+        source_user_name=source_user_name,
     )
 
     success(f"Added memory entry: {entry.id[:8]}")
     dim(f"Type: {entry.memory_type.value}")
+    if source_user_id:
+        dim(f"Source: @{source_user_id}")
     if expires_at:
         dim(f"Expires: {expires_at.strftime('%Y-%m-%d')}")
 

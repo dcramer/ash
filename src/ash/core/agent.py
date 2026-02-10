@@ -129,6 +129,7 @@ def _build_routing_env(
         "ASH_CHAT_TITLE": session.metadata.get("chat_title", ""),
         "ASH_PROVIDER": session.provider or "",
         "ASH_USERNAME": session.metadata.get("username", ""),
+        "ASH_DISPLAY_NAME": session.metadata.get("display_name", ""),
         "ASH_TIMEZONE": timezone,
     }
 
