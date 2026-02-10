@@ -3,10 +3,33 @@
 This module enables the bot to observe group messages without being mentioned,
 run background memory extraction, and decide whether to engage.
 
-Components:
-- PassiveEngagementThrottler: Rate limiting and cooldown management
-- PassiveEngagementDecider: LLM-based decision to engage or stay silent
-- PassiveMemoryExtractor: Background memory extraction from observed messages
+Message Flow
+------------
+1. Messages arrive from TelegramProvider._should_process_message() which routes
+   non-mentioned group messages here when passive listening is enabled.
+2. The message handler (handle_passive_message) orchestrates the pipeline.
+
+Three-Stage Pipeline
+--------------------
+Each message goes through up to three stages:
+
+1. Throttler (PassiveEngagementThrottler)
+   - Fast, synchronous check - runs first to avoid unnecessary work
+   - Enforces per-chat cooldowns, active message limits, and global rate limits
+   - If throttled, message is silently dropped (no LLM call)
+
+2. Extractor (PassiveMemoryExtractor)
+   - Runs in background via asyncio.create_task (fire-and-forget)
+   - Extracts facts from observed messages without blocking the main flow
+   - Uses same extraction logic as active message processing
+
+3. Decider (PassiveEngagementDecider)
+   - LLM-based decision on whether to engage with the message
+   - Has fast paths: bot name mentioned = instant engage (no LLM call)
+   - Provides context: recent messages, relevant memories, bot identity
+   - Returns ENGAGE or SILENT
+
+If ENGAGE, the message is promoted to active processing via handle_message().
 """
 
 from __future__ import annotations
@@ -133,6 +156,21 @@ class PassiveEngagementThrottler:
 
     Tracks per-chat cooldowns and global rate limits to prevent
     the bot from being too chatty in passive mode.
+
+    Three Throttle Checks (in order)
+    --------------------------------
+    1. Per-chat cooldown: Minimum time between passive engagements in a single chat.
+       Prevents the bot from responding too frequently in any one conversation.
+
+    2. Active message count: Tracks how many "active" (mentioned/replied) messages
+       have occurred since the last passive engagement. If too many, the bot stays
+       silent to avoid butting into an active back-and-forth conversation.
+
+    3. Global hourly limit: Caps total passive engagements across all chats per hour.
+       Prevents the bot from being too chatty globally, even if individual chats
+       are quiet.
+
+    All three checks must pass for a message to proceed to the engagement decision.
     """
 
     def __init__(self, config: PassiveListeningConfig):
@@ -205,6 +243,22 @@ class PassiveEngagementDecider:
 
     Uses a cheap/fast model to evaluate each message and decide
     whether the bot should respond or stay silent.
+
+    Fast Paths (bypass LLM)
+    -----------------------
+    - Bot name mentioned in text (e.g., "Ash" or "@ash_bot"): Instant ENGAGE
+    - Message too short (<10 chars): Instant SILENT (not worth evaluating)
+
+    LLM Decision Context
+    --------------------
+    When the LLM is called, it receives:
+    - Bot identity (name, username) for self-awareness
+    - Relevant memories about the topic/speaker (if memory lookup enabled)
+    - Recent messages (up to 5) for conversation context
+    - The current message with sender info
+
+    The LLM returns ENGAGE or SILENT based on whether it has something useful
+    to contribute. Errs on the side of SILENT when uncertain.
     """
 
     def __init__(
@@ -319,6 +373,18 @@ class PassiveMemoryExtractor:
 
     Runs in the background to capture facts from group conversations
     without requiring a full agent session.
+
+    Execution Model
+    ---------------
+    This runs as a fire-and-forget asyncio task (via create_task) so it doesn't
+    block the engagement decision. Memory extraction can take 1-2 seconds with
+    an LLM call, and we don't want to delay the bot's response.
+
+    The extractor uses the same extraction logic as active message processing,
+    ensuring consistent fact extraction regardless of how the message arrived.
+
+    Extracted facts are stored with source="passive" so they can be distinguished
+    from facts extracted during active conversations if needed.
     """
 
     def __init__(

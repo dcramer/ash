@@ -260,26 +260,35 @@ class TelegramProvider(Provider):
         else:
             is_group = message.chat.type in ("group", "supergroup")
             if is_group:
+                # Group message decision tree:
+                # 1. Check if group is in the allowed list
+                # 2. If mention mode: check if bot was @mentioned or replied to
+                # 3. If not mentioned but passive listening enabled: route to passive
+                # 4. Otherwise: skip the message
                 if not self._is_group_allowed(message.chat.id):
                     skip_reason = "group_not_allowed"
                 elif self._group_mode == "mention":
                     is_mentioned = self._is_mentioned(message)
                     is_reply = self._is_reply(message)
                     if is_mentioned or is_reply:
+                        # Direct engagement: @mentioned or replied to -> active processing
                         processing_mode = "active"
                     elif (
                         self._passive_config
                         and self._passive_config.enabled
                         and self._passive_handler
                     ):
-                        # Eligible for passive processing
+                        # Passive listening: not mentioned, but config allows observing
+                        # Message goes through throttling and LLM decision before response
                         processing_mode = "passive"
                     else:
+                        # No passive config: silently ignore non-mentioned messages
                         skip_reason = "not_mentioned_or_reply"
                 else:
-                    # group_mode == "always"
+                    # group_mode == "always": respond to all messages in allowed groups
                     processing_mode = "active"
             else:
+                # Direct message (DM): just check user allowlist
                 if not self._is_user_allowed(user_id, username):  # type: ignore[arg-type]
                     skip_reason = "user_not_allowed"
                 else:

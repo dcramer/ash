@@ -198,7 +198,9 @@ class TelegramMessageHandler:
         5. Makes engagement decision via LLM (with bot identity context)
         6. If ENGAGE, promotes to full message processing
         """
-        # Guard: passive listening must be fully initialized
+        # Step 1: Guard check - passive listening must be fully initialized
+        # Both components are required: decider for engagement decisions,
+        # memory_manager for context lookup
         if not self._passive_decider or not self._memory_manager:
             return
 
@@ -219,28 +221,37 @@ class TelegramMessageHandler:
             username=self._provider.bot_username,
         )
 
-        # Fast path: check if bot is addressed by name (bypasses throttling)
+        # Step 2: Fast path - check if bot is addressed by name
+        # If mentioned by name (e.g., "Ash, what do you think?"), bypass all
+        # throttling and engage immediately. This ensures responsiveness when
+        # users explicitly address the bot.
         text = message.text or ""
         name_mentioned = check_bot_name_mention(text, bot_context)
 
         if name_mentioned:
             logger.info("Fast path: bot name mentioned, bypassing throttle")
         else:
-            # Check throttler (only if not directly addressed)
+            # Step 3: Throttle check (only if not directly addressed)
+            # Enforces per-chat cooldowns, active message limits, and global
+            # rate limits. If throttled, silently drop the message.
             if self._passive_throttler and not self._passive_throttler.should_consider(
                 chat_id
             ):
                 return
             logger.info("Passive engagement: throttle passed, evaluating message")
 
-        # Run memory extraction in background (if enabled)
+        # Step 4: Background memory extraction (fire-and-forget)
+        # Runs async via create_task so it doesn't block the engagement decision.
+        # Facts are extracted and stored even if we decide not to engage.
         if self._passive_extractor:
             asyncio.create_task(
                 self._extract_passive_memories(message),
                 name=f"passive_extract_{message.id}",
             )
 
-        # If name mentioned, engage immediately without LLM decision
+        # Step 5: LLM engagement decision
+        # If name was mentioned, skip the LLM call and engage immediately.
+        # Otherwise, query memories and ask the LLM if we should respond.
         if name_mentioned:
             should_engage = True
         else:
@@ -281,20 +292,23 @@ class TelegramMessageHandler:
         # to update the original record. For now, the decision is implicit in
         # whether we promote to active processing.
 
+        # Step 6: Act on the engagement decision
         if should_engage:
             logger.info(
                 "Passive engagement: engaging with message from %s",
                 message.username or message.user_id,
             )
 
-            # Record the engagement
+            # Record the engagement so throttler knows when we last engaged
+            # This resets the per-chat cooldown and active message counter
             if self._passive_throttler:
                 self._passive_throttler.record_engagement(chat_id)
 
-            # Update metadata to indicate this was a passive engagement
+            # Mark metadata so downstream code knows this was passive
             message.metadata["passive_engagement"] = True
 
-            # Promote to active processing
+            # Promote to active processing - this calls handle_message() which
+            # creates a full agent session and generates a response
             await self.handle_message(message)
         else:
             logger.debug(
