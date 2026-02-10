@@ -7,10 +7,8 @@ This is a rebuildable index - the source of truth is the JSONL file.
 from __future__ import annotations
 
 import logging
-import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -18,9 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from ash.config.paths import get_database_path
 from ash.memory.embeddings import EmbeddingGenerator
-
-if TYPE_CHECKING:
-    from ash.memory.types import MemoryEntry
+from ash.memory.types import MemoryEntry
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +81,7 @@ class VectorIndex:
             embedding: Embedding as float list or bytes.
         """
         if isinstance(embedding, list):
-            embedding_blob = self._serialize_embedding(embedding)
+            embedding_blob = MemoryEntry.serialize_embedding_bytes(embedding)
         else:
             embedding_blob = embedding
 
@@ -148,7 +144,7 @@ class VectorIndex:
         Returns:
             List of results with similarity scores.
         """
-        embedding_blob = self._serialize_embedding(embedding)
+        embedding_blob = MemoryEntry.serialize_embedding_bytes(embedding)
 
         result = await self._session.execute(
             text("""
@@ -237,10 +233,6 @@ class VectorIndex:
         )
 
         return count
-
-    def _serialize_embedding(self, embedding: list[float]) -> bytes:
-        """Serialize embedding to bytes for sqlite-vec."""
-        return struct.pack(f"{len(embedding)}f", *embedding)
 
 
 async def create_vector_index(

@@ -445,8 +445,8 @@ class SystemPromptBuilder:
 
         for person in people:
             entry = f"**{person.name}**"
-            if person.relation:
-                entry = f"{entry} ({person.relation})"
+            if person.relationship:
+                entry = f"{entry} ({person.relationship})"
             lines.append(f"- {entry}")
 
         lines.append("")

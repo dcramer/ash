@@ -190,6 +190,53 @@ Optionally, facts are extracted automatically from conversations:
 - Skips assistant actions, temporary context, credentials
 - Confidence threshold filters low-quality extractions
 
+## Multi-User Attribution
+
+Memory supports tracking WHO provided each fact, enabling trust-based reasoning:
+
+### Source Attribution Fields
+
+| Field | Description |
+|-------|-------------|
+| `source_user_id` | Username/ID of who stated this fact |
+| `source_user_name` | Display name of the source user |
+| `subject_person_ids` | Who the memory is ABOUT (third parties) |
+
+### Trust Model
+
+| Source == Subject? | Type | Trustworthiness |
+|-------------------|------|-----------------|
+| Yes (speaking about self) | **FACT** | High - first-person claim |
+| No (speaking about others) | **HEARSAY** | Lower - second-hand claim |
+
+### Examples
+
+| Who said it | Content | Source User | Subjects | Trust |
+|-------------|---------|-------------|----------|-------|
+| David | "I like pizza" | david | [] | FACT |
+| David | "Bob likes pasta" | david | [bob] | HEARSAY |
+| Bob | "I like pasta" | bob | [] | FACT |
+
+### CLI Display
+
+The `ash memory list` command shows:
+- **About**: Subject person(s), or source user if subjects is empty (speaking about self)
+- **Source**: Who provided the information (`@username`)
+- **Trust**: "fact" or "hearsay"
+
+The `ash memory show` command displays full attribution details.
+
+### Extraction with Speaker Identity
+
+During background extraction, messages are formatted with speaker identity:
+```
+@david (David Cramer): I like pizza
+@bob: Bob prefers pasta
+Assistant: Great choices!
+```
+
+The LLM then attributes each extracted fact to the appropriate speaker.
+
 ## JSONL Schema
 
 ### Memory Entry
@@ -207,6 +254,8 @@ Optionally, facts are extracted automatically from conversations:
   "chat_id": null,
   "subject_person_ids": [],
   "source": "user",
+  "source_user_id": "david",
+  "source_user_name": "David Cramer",
   "source_session_id": null,
   "source_message_id": null,
   "extraction_confidence": null,
@@ -231,7 +280,9 @@ Optionally, facts are extracted automatically from conversations:
 | `owner_user_id` | One of these | Personal scope |
 | `chat_id` | required | Group scope |
 | `subject_person_ids` | Yes | Who this is about (empty list if nobody) |
-| `source` | Yes | "user" / "extraction" / "cli" / "rpc" |
+| `source` | Yes | "user" / "extraction" / "background_extraction" / "cli" / "rpc" |
+| `source_user_id` | No | Who said/provided this fact (for multi-user attribution) |
+| `source_user_name` | No | Display name of source user |
 | `source_session_id` | No | Session ID for extraction tracing |
 | `source_message_id` | No | Message UUID for extraction tracing |
 | `extraction_confidence` | No | 0.0-1.0 confidence score |
@@ -249,13 +300,37 @@ Optionally, facts are extracted automatically from conversations:
   "version": 1,
   "owner_user_id": "user-1",
   "name": "Sarah",
-  "relation": "wife",
+  "relationship": "wife",
   "aliases": ["my wife"],
   "created_at": "2026-01-15T10:00:00+00:00",
   "updated_at": null,
   "metadata": null
 }
 ```
+
+### Extracted Fact (Internal)
+
+Used during background extraction, before facts are converted to MemoryEntry:
+
+```json
+{
+  "content": "User prefers dark mode",
+  "subjects": [],
+  "shared": false,
+  "confidence": 0.85,
+  "memory_type": "preference",
+  "speaker": "@david (David Cramer)"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `content` | The fact content |
+| `subjects` | Person references mentioned (e.g., "Sarah", "my wife") |
+| `shared` | Whether this is a group fact |
+| `confidence` | Extraction confidence (0.0-1.0) |
+| `memory_type` | Assigned memory type |
+| `speaker` | Who stated this fact (format: `@username (Display Name)`) |
 
 ## Configuration
 
@@ -365,3 +440,6 @@ uv run ash memory rebuild-index
 - [ ] `ash memory rebuild-index` rebuilds SQLite from JSONL
 - [ ] `ash memory history <id>` shows supersession chain
 - [ ] Auto-migration from SQLite to JSONL on first run
+- [ ] Extracted memories have `source_user_id` populated
+- [ ] `ash memory list` shows About, Source, and Trust columns
+- [ ] `ash memory show <id>` displays full attribution details

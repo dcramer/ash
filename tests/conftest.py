@@ -23,7 +23,6 @@ from ash.llm.types import (
     ToolUse,
     Usage,
 )
-from ash.memory.store import MemoryStore
 from ash.tools.base import Tool, ToolContext, ToolResult
 from ash.tools.registry import ToolRegistry
 
@@ -109,12 +108,6 @@ async def db_session(database: Database) -> AsyncGenerator[AsyncSession, None]:
     """Get a database session for testing."""
     async with database.session() as session:
         yield session
-
-
-@pytest.fixture
-async def memory_store(db_session: AsyncSession) -> MemoryStore:
-    """Create a memory store with test session."""
-    return MemoryStore(db_session)
 
 
 @pytest.fixture

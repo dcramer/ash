@@ -6,6 +6,7 @@ running asynchronously after each exchange.
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ash.llm.types import Message, Role
@@ -16,9 +17,36 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class SpeakerInfo:
+    """Information about a message speaker for attribution."""
+
+    user_id: str | None = None
+    username: str | None = None
+    display_name: str | None = None
+
+    def format_label(self) -> str:
+        """Format speaker label for conversation transcript.
+
+        Returns a label like "@david (David Cramer)" or just "User" if no info.
+        """
+        if self.username and self.display_name:
+            return f"@{self.username} ({self.display_name})"
+        elif self.username:
+            return f"@{self.username}"
+        elif self.display_name:
+            return self.display_name
+        return "User"
+
+    def get_identifier(self) -> str | None:
+        """Get the best identifier for this speaker (username preferred)."""
+        return self.username or self.user_id
+
+
 # Default extraction prompt template
 EXTRACTION_PROMPT = """You are a memory extraction system. Analyze this conversation and identify facts worth remembering about the user(s).
-
+{owner_section}
 ## What to extract:
 - User preferences (likes, dislikes, habits)
 - Facts about people in their life (names, relationships, details)
@@ -39,6 +67,12 @@ Convert pronouns and references to concrete facts:
 - "She's visiting next week" -> Find who "she" is, store "[Person name] is visiting [date]"
 - "Yes, that one" -> Don't extract - too ambiguous
 
+## Speaker Attribution
+Each message in the conversation shows who said it. Track WHO provided each fact:
+- If @david says "I like pizza" -> speaker is "david"
+- If @bob says "David likes pasta" -> speaker is "bob", subjects is ["David"]
+- The speaker field should contain the username (without @) of who stated the fact
+
 {existing_memories_section}
 
 ## Conversation to analyze:
@@ -47,7 +81,8 @@ Convert pronouns and references to concrete facts:
 ## Output format:
 Return a JSON array of facts. Each fact has:
 - content: The fact (MUST be standalone, no unresolved pronouns)
-- subjects: Names of people this is about (empty array if about user themselves)
+- speaker: Username of who stated this fact (without @), or null if unknown
+- subjects: Names of people this is about (empty array if about the speaker themselves)
 - shared: true if this is group/team knowledge, false if personal
 - confidence: 0.0-1.0 how confident this should be stored
 - type: One of: "preference", "identity", "relationship", "knowledge", "context", "event", "task", "observation"
@@ -69,8 +104,8 @@ Only include facts with confidence >= 0.7. If you cannot resolve a reference, do
 
 Return ONLY valid JSON, no other text. Example:
 [
-  {{"content": "User prefers dark mode", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference"}},
-  {{"content": "Sarah's birthday is March 15", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship"}}
+  {{"content": "Prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference"}},
+  {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship"}}
 ]
 
 If there are no facts worth extracting, return an empty array: []"""
@@ -107,12 +142,19 @@ class MemoryExtractor:
         self,
         messages: list[Message],
         existing_memories: list[str] | None = None,
+        owner_names: list[str] | None = None,
+        speaker_info: SpeakerInfo | None = None,
     ) -> list[ExtractedFact]:
         """Analyze conversation and extract facts worth remembering.
 
         Args:
             messages: Conversation messages to analyze.
             existing_memories: Facts already in memory (to avoid duplicates).
+            owner_names: Names/handles that refer to the user themselves
+                (e.g., their username, display name). These should not appear
+                in subjects - they're the owner, not a third party.
+            speaker_info: Information about the speaker for attribution.
+                Used to label user messages with their identity.
 
         Returns:
             List of extracted facts with confidence scores.
@@ -120,10 +162,21 @@ class MemoryExtractor:
         if not messages:
             return []
 
-        # Format conversation for the prompt
-        conversation_text = self._format_conversation(messages)
+        # Format conversation for the prompt with speaker identity
+        conversation_text = self._format_conversation(messages, speaker_info)
         if not conversation_text.strip():
             return []
+
+        # Build owner section
+        owner_section = ""
+        if owner_names:
+            names_str = ", ".join(f'"{n}"' for n in owner_names)
+            owner_section = f"""
+## The user (owner)
+The following names refer to the user themselves: {names_str}
+Facts about these names are facts about the user - use subjects: [] (empty array).
+Do NOT put the user's own name in subjects - subjects is for OTHER people in their life.
+"""
 
         # Build existing memories section
         existing_section = ""
@@ -135,6 +188,7 @@ class MemoryExtractor:
 
         # Build the extraction prompt
         prompt = EXTRACTION_PROMPT.format(
+            owner_section=owner_section,
             existing_memories_section=existing_section,
             conversation=conversation_text,
         )
@@ -154,14 +208,19 @@ class MemoryExtractor:
             logger.warning("Memory extraction failed: %s", e)
             return []
 
-    def _format_conversation(self, messages: list[Message]) -> str:
+    def _format_conversation(
+        self,
+        messages: list[Message],
+        speaker_info: SpeakerInfo | None = None,
+    ) -> str:
         """Format messages into a readable conversation transcript.
 
         Args:
             messages: Messages to format.
+            speaker_info: Optional speaker info for user messages.
 
         Returns:
-            Formatted conversation text.
+            Formatted conversation text with speaker attribution.
         """
         lines = []
         for msg in messages:
@@ -177,7 +236,14 @@ class MemoryExtractor:
             if len(text) > 2000:
                 text = text[:2000] + "..."
 
-            role_label = "User" if msg.role == Role.USER else "Assistant"
+            # Format speaker label with identity if available
+            if msg.role == Role.USER and speaker_info:
+                role_label = speaker_info.format_label()
+            elif msg.role == Role.USER:
+                role_label = "User"
+            else:
+                role_label = "Assistant"
+
             lines.append(f"{role_label}: {text}")
 
         return "\n\n".join(lines)
@@ -245,6 +311,16 @@ class MemoryExtractor:
             except ValueError:
                 memory_type = MemoryType.KNOWLEDGE
 
+            # Parse speaker (who stated this fact)
+            speaker = item.get("speaker")
+            if speaker:
+                speaker = str(speaker).strip()
+                # Remove @ prefix if present
+                if speaker.startswith("@"):
+                    speaker = speaker[1:]
+            else:
+                speaker = None
+
             facts.append(
                 ExtractedFact(
                     content=content,
@@ -252,6 +328,7 @@ class MemoryExtractor:
                     shared=shared,
                     confidence=confidence,
                     memory_type=memory_type,
+                    speaker=speaker,
                 )
             )
 

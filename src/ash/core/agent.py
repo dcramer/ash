@@ -474,6 +474,7 @@ class Agent:
     ) -> None:
         from ash.llm.types import Message as LLMMessage
         from ash.llm.types import Role
+        from ash.memory.extractor import SpeakerInfo
 
         if not self._extractor or not self._memory:
             return
@@ -502,9 +503,33 @@ class Agent:
             if not llm_messages:
                 return
 
+            # Build speaker info from session metadata for attribution
+            speaker_username = session.metadata.get("username")
+            speaker_display_name = session.metadata.get("display_name")
+
+            # Collect owner names to avoid treating the user's own name
+            # as a third party in extraction
+            owner_names: list[str] = []
+            if speaker_username:
+                owner_names.append(speaker_username)
+            if speaker_display_name and speaker_display_name not in owner_names:
+                owner_names.append(speaker_display_name)
+            speaker_info = SpeakerInfo(
+                user_id=user_id,
+                username=speaker_username,
+                display_name=speaker_display_name,
+            )
+
             facts = await self._extractor.extract_from_conversation(
                 messages=llm_messages,
                 existing_memories=existing_memories,
+                owner_names=owner_names if owner_names else None,
+                speaker_info=speaker_info,
+            )
+
+            # Normalize owner names for comparison
+            owner_names_lower = (
+                {n.lower() for n in owner_names} if owner_names else set()
             )
 
             for fact in facts:
@@ -516,6 +541,10 @@ class Agent:
                     if fact.subjects:
                         subject_person_ids = []
                         for subject in fact.subjects:
+                            # Skip subjects that are the owner themselves
+                            if subject.lower() in owner_names_lower:
+                                logger.debug("Skipping owner as subject: %s", subject)
+                                continue
                             try:
                                 result = await self._memory.resolve_or_create_person(
                                     owner_user_id=user_id,
@@ -526,18 +555,29 @@ class Agent:
                             except Exception:
                                 logger.debug("Failed to resolve subject: %s", subject)
 
+                    # Determine source user from extracted speaker or session
+                    source_user_id = fact.speaker or speaker_username or user_id
+                    source_user_name = (
+                        speaker_display_name
+                        if source_user_id == speaker_username
+                        else None
+                    )
+
                     await self._memory.add_memory(
                         content=fact.content,
                         source="background_extraction",
                         owner_user_id=user_id if not fact.shared else None,
                         chat_id=chat_id if fact.shared else None,
                         subject_person_ids=subject_person_ids or None,
+                        source_user_id=source_user_id,
+                        source_user_name=source_user_name,
                     )
 
                     logger.debug(
-                        "Extracted memory: %s (confidence=%.2f)",
+                        "Extracted memory: %s (confidence=%.2f, speaker=%s)",
                         fact.content[:50],
                         fact.confidence,
+                        source_user_id,
                     )
                 except Exception:
                     logger.debug(

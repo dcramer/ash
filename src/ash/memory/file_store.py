@@ -25,6 +25,7 @@ from ash.memory.types import (
     MemoryEntry,
     MemoryType,
     PersonEntry,
+    matches_scope,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,8 @@ class FileMemoryStore:
         chat_id: str | None = None,
         subject_person_ids: list[str] | None = None,
         observed_at: datetime | None = None,
+        source_user_id: str | None = None,
+        source_user_name: str | None = None,
         source_session_id: str | None = None,
         source_message_id: str | None = None,
         extraction_confidence: float | None = None,
@@ -122,6 +125,8 @@ class FileMemoryStore:
             chat_id: Group scope.
             subject_person_ids: People this memory is about.
             observed_at: When fact was observed (for extraction).
+            source_user_id: Who said/provided this fact (for multi-user attribution).
+            source_user_name: Display name of source user.
             source_session_id: Session ID for extraction tracing.
             source_message_id: Message ID for extraction tracing.
             extraction_confidence: Confidence score for extraction.
@@ -142,6 +147,8 @@ class FileMemoryStore:
             chat_id=chat_id,
             subject_person_ids=subject_person_ids or [],
             source=source,
+            source_user_id=source_user_id,
+            source_user_name=source_user_name,
             source_session_id=source_session_id,
             source_message_id=source_message_id,
             extraction_confidence=extraction_confidence,
@@ -237,13 +244,8 @@ class FileMemoryStore:
                 continue
 
             # Scope filter
-            if owner_user_id or chat_id:
-                if owner_user_id and m.owner_user_id == owner_user_id:
-                    pass  # Match
-                elif chat_id and m.owner_user_id is None and m.chat_id == chat_id:
-                    pass  # Match
-                else:
-                    continue
+            if not matches_scope(m, owner_user_id, chat_id):
+                continue
 
             result.append(m)
 
@@ -494,7 +496,7 @@ class FileMemoryStore:
             version=1,
             owner_user_id=owner_user_id,
             name=name,
-            relation=relationship,
+            relationship=relationship,
             aliases=aliases or [],
             created_at=now,
             updated_at=now,
@@ -562,7 +564,7 @@ class FileMemoryStore:
 
             if person.name.lower() == ref:
                 return person
-            if person.relation and person.relation.lower() == ref:
+            if person.relationship and person.relationship.lower() == ref:
                 return person
             if person.aliases:
                 for alias in person.aliases:
@@ -619,7 +621,7 @@ class FileMemoryStore:
         if name is not None:
             person.name = name
         if relationship is not None:
-            person.relation = relationship
+            person.relationship = relationship
         if aliases is not None:
             person.aliases = aliases
         person.updated_at = datetime.now(UTC)

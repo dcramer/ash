@@ -19,7 +19,6 @@ from ash.core.prompt import format_gap_duration
 from ash.core.tokens import estimate_tokens
 from ash.db import Database
 from ash.llm.types import Message, Role
-from ash.memory.store import MemoryStore
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.provider import _truncate
 from ash.sessions import MessageEntry, SessionManager
@@ -960,8 +959,10 @@ class TelegramMessageHandler:
             await self._load_persistent_session(session, session_manager, message)
 
         async with self._database.session() as db_session:
-            store = MemoryStore(db_session)
-            await store.get_or_create_user_profile(
+            from ash.db.user_profiles import get_or_create_user_profile
+
+            await get_or_create_user_profile(
+                session=db_session,
                 user_id=message.user_id,
                 provider=self._provider.name,
                 username=message.username,

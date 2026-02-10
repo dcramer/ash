@@ -1,6 +1,16 @@
 """SQLAlchemy ORM models.
 
-Note: Session and Message models have been removed in favor of JSONL storage.
+Note: Memory and Person data is now stored in JSONL files (source of truth).
+These SQLAlchemy models exist for:
+1. Schema creation for the database
+2. Migration from old SQLite-based storage to JSONL
+3. Vector embeddings storage (memory_embeddings table via sqlite-vec)
+
+The MemoryEntry and PersonEntry types in ash.memory.types are the authoritative
+schemas. The Memory and Person models here may have fewer fields as the DB
+is now primarily used for vector search, not full data storage.
+
+Session and Message models have been removed in favor of JSONL storage.
 See ash.sessions module for the new session management system.
 """
 
@@ -37,7 +47,9 @@ class Person(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     owner_user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    relation: Mapped[str | None] = mapped_column(String, nullable=True)
+    relationship: Mapped[str | None] = mapped_column(
+        "relation", String, nullable=True
+    )  # Column name 'relation' for backward compat
     aliases: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata", JSON, nullable=True
@@ -52,6 +64,11 @@ class Person(Base):
 
 class Memory(Base):
     """Memory entry - a stored fact or piece of information.
+
+    IMPORTANT: This model is for migration and legacy purposes only.
+    The source of truth is JSONL (see MemoryEntry in ash.memory.types).
+    This model intentionally omits several fields (source_user_id, extraction_confidence,
+    etc.) that exist in MemoryEntry, as the DB is now used only for vector embeddings.
 
     Memory scoping:
     - Personal: owner_user_id set, chat_id NULL - only visible to that user

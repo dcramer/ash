@@ -285,7 +285,7 @@ class TestPersonOperations:
 
         assert person.id is not None
         assert person.name == "Sarah"
-        assert person.relation == "wife"
+        assert person.relationship == "wife"
         assert person.aliases == ["my wife"]
 
     async def test_find_person_by_name(self, file_memory_store: FileMemoryStore):

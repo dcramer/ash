@@ -107,6 +107,10 @@ class MemoryEntry:
     # Source Attribution (required)
     source: str = "user"  # "user" | "extraction" | "cli" | "rpc"
 
+    # Source Attribution (optional, for multi-user scenarios)
+    source_user_id: str | None = None  # Who said/provided this fact
+    source_user_name: str | None = None  # Display name for source user
+
     # Source Attribution (optional, for extraction tracing)
     source_session_id: str | None = None
     source_message_id: str | None = None
@@ -148,6 +152,10 @@ class MemoryEntry:
             d["chat_id"] = self.chat_id
         if self.subject_person_ids:
             d["subject_person_ids"] = self.subject_person_ids
+        if self.source_user_id:
+            d["source_user_id"] = self.source_user_id
+        if self.source_user_name:
+            d["source_user_name"] = self.source_user_name
         if self.source_session_id:
             d["source_session_id"] = self.source_session_id
         if self.source_message_id:
@@ -184,6 +192,8 @@ class MemoryEntry:
             chat_id=d.get("chat_id"),
             subject_person_ids=d.get("subject_person_ids") or [],
             source=d.get("source", "user"),
+            source_user_id=d.get("source_user_id"),
+            source_user_name=d.get("source_user_name"),
             source_session_id=d.get("source_session_id"),
             source_message_id=d.get("source_message_id"),
             extraction_confidence=d.get("extraction_confidence"),
@@ -211,9 +221,14 @@ class MemoryEntry:
 
     @staticmethod
     def encode_embedding(floats: list[float]) -> str:
-        """Encode float list to base64 string."""
+        """Encode float list to base64 string for JSONL storage."""
         data = struct.pack(f"{len(floats)}f", *floats)
         return base64.b64encode(data).decode("ascii")
+
+    @staticmethod
+    def serialize_embedding_bytes(floats: list[float]) -> bytes:
+        """Serialize float list to bytes for sqlite-vec."""
+        return struct.pack(f"{len(floats)}f", *floats)
 
 
 @dataclass
@@ -224,7 +239,7 @@ class PersonEntry:
     version: int = 1
     owner_user_id: str = ""
     name: str = ""
-    relation: str | None = None
+    relationship: str | None = None
     aliases: list[str] = field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -239,8 +254,8 @@ class PersonEntry:
             "name": self.name,
         }
 
-        if self.relation:
-            d["relation"] = self.relation
+        if self.relationship:
+            d["relationship"] = self.relationship
         if self.aliases:
             d["aliases"] = self.aliases
         if self.created_at:
@@ -255,12 +270,14 @@ class PersonEntry:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "PersonEntry":
         """Deserialize from JSON dict."""
+        # Support both old "relation" and new "relationship" field names
+        relationship = d.get("relationship") or d.get("relation")
         return cls(
             id=d["id"],
             version=d.get("version", 1),
             owner_user_id=d.get("owner_user_id", ""),
             name=d.get("name", ""),
-            relation=d.get("relation"),
+            relationship=relationship,
             aliases=d.get("aliases") or [],
             created_at=_parse_datetime(d.get("created_at")),
             updated_at=_parse_datetime(d.get("updated_at")),
@@ -304,6 +321,7 @@ class ExtractedFact:
     shared: bool
     confidence: float
     memory_type: MemoryType = MemoryType.KNOWLEDGE
+    speaker: str | None = None  # Who said this (username or identifier)
 
 
 @dataclass
@@ -312,3 +330,37 @@ class GCResult:
 
     removed_count: int
     archived_ids: list[str] = field(default_factory=list)
+
+
+def matches_scope(
+    memory: MemoryEntry,
+    owner_user_id: str | None = None,
+    chat_id: str | None = None,
+) -> bool:
+    """Check if a memory matches the given scope filters.
+
+    Memory scoping rules:
+    - Personal: owner_user_id set - only visible to that user
+    - Group: owner_user_id NULL, chat_id set - visible to everyone in that chat
+
+    Args:
+        memory: Memory entry to check.
+        owner_user_id: Filter to user's personal memories.
+        chat_id: Filter to include group memories for this chat.
+
+    Returns:
+        True if memory matches the scope, False otherwise.
+    """
+    if not owner_user_id and not chat_id:
+        # No scope filter - matches all
+        return True
+
+    # Check if memory matches owner (personal memories)
+    if owner_user_id and memory.owner_user_id == owner_user_id:
+        return True
+
+    # Check if memory matches chat (group memories - owner_user_id must be None)
+    if chat_id and memory.owner_user_id is None and memory.chat_id == chat_id:
+        return True
+
+    return False

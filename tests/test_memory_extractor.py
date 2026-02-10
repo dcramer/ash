@@ -11,6 +11,41 @@ import pytest
 
 from ash.llm.types import CompletionResponse, Message, Role, Usage
 from ash.memory import MemoryExtractor
+from ash.memory.extractor import SpeakerInfo
+
+
+class TestSpeakerInfo:
+    """Tests for SpeakerInfo class."""
+
+    def test_format_label_with_username_and_display_name(self):
+        """Test format_label with both username and display name."""
+        speaker = SpeakerInfo(username="david", display_name="David Cramer")
+        assert speaker.format_label() == "@david (David Cramer)"
+
+    def test_format_label_with_username_only(self):
+        """Test format_label with just username."""
+        speaker = SpeakerInfo(username="david")
+        assert speaker.format_label() == "@david"
+
+    def test_format_label_with_display_name_only(self):
+        """Test format_label with just display name."""
+        speaker = SpeakerInfo(display_name="David Cramer")
+        assert speaker.format_label() == "David Cramer"
+
+    def test_format_label_empty(self):
+        """Test format_label with no info."""
+        speaker = SpeakerInfo()
+        assert speaker.format_label() == "User"
+
+    def test_get_identifier_prefers_username(self):
+        """Test get_identifier returns username over user_id."""
+        speaker = SpeakerInfo(user_id="12345", username="david")
+        assert speaker.get_identifier() == "david"
+
+    def test_get_identifier_falls_back_to_user_id(self):
+        """Test get_identifier falls back to user_id."""
+        speaker = SpeakerInfo(user_id="12345")
+        assert speaker.get_identifier() == "12345"
 
 
 class TestExtractionParsing:
@@ -38,6 +73,32 @@ class TestExtractionParsing:
         assert facts[0].content == "User prefers dark mode"
         assert facts[0].confidence == 0.9
         assert facts[1].subjects == ["Sarah"]
+
+    def test_parses_speaker_field(self, extractor):
+        """Test parsing the speaker field for multi-user attribution."""
+        response = """[
+            {"content": "Likes pizza", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9},
+            {"content": "Bob likes pasta", "speaker": "@bob", "subjects": ["Bob"], "shared": false, "confidence": 0.85}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 2
+        assert facts[0].speaker == "david"
+        assert facts[1].speaker == "bob"  # @ prefix removed
+
+    def test_speaker_field_can_be_null(self, extractor):
+        """Test that speaker field can be null/missing."""
+        response = """[
+            {"content": "Some fact", "speaker": null, "subjects": [], "shared": false, "confidence": 0.9},
+            {"content": "Another fact", "subjects": [], "shared": false, "confidence": 0.9}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 2
+        assert facts[0].speaker is None
+        assert facts[1].speaker is None
 
     def test_filters_low_confidence(self, extractor):
         """Test that low confidence facts are filtered out."""

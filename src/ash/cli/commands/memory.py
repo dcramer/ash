@@ -3,13 +3,27 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import click
 import typer
 
 from ash.cli.console import console, dim, error, success, warning
 from ash.cli.context import get_config, get_database
+
+if TYPE_CHECKING:
+    from ash.memory.file_store import FileMemoryStore
+
+
+def _get_memory_store() -> "FileMemoryStore":
+    """Get a configured FileMemoryStore instance.
+
+    This factory function allows for easier testing and future
+    path injection if needed.
+    """
+    from ash.memory.file_store import FileMemoryStore
+
+    return FileMemoryStore()
 
 
 def register(app: typer.Typer) -> None:
@@ -232,23 +246,6 @@ async def _run_memory_action(
         await database.disconnect()
 
 
-def _apply_scope_filters(
-    stmt, model, user_id: str | None, chat_id: str | None, scope: str | None
-):
-    """Apply user/chat/scope filters to a query."""
-    if user_id:
-        stmt = stmt.where(model.owner_user_id == user_id)
-    if chat_id:
-        stmt = stmt.where(model.chat_id == chat_id)
-    if scope == "personal":
-        stmt = stmt.where(model.owner_user_id.isnot(None))
-    elif scope == "shared":
-        stmt = stmt.where(model.owner_user_id.is_(None), model.chat_id.isnot(None))
-    elif scope == "global":
-        stmt = stmt.where(model.owner_user_id.is_(None), model.chat_id.is_(None))
-    return stmt
-
-
 async def _memory_list(
     session,
     query: str | None,
@@ -261,9 +258,7 @@ async def _memory_list(
     """List memory entries."""
     from rich.table import Table
 
-    from ash.memory.file_store import FileMemoryStore
-
-    store = FileMemoryStore()
+    store = _get_memory_store()
 
     # Apply scope-based filters
     owner_user_id = None
@@ -292,7 +287,6 @@ async def _memory_list(
     )
 
     # Apply additional filters
-    now = datetime.now(UTC)
     filtered_entries = []
     for entry in entries:
         # Scope filter
@@ -331,10 +325,9 @@ async def _memory_list(
     table.add_column("ID", style="dim", max_width=8)
     table.add_column("Type", style="blue", max_width=10)
     table.add_column("About", style="green", max_width=12)
-    table.add_column("Scope", style="magenta", max_width=10)
+    table.add_column("Source", style="cyan", max_width=12)
+    table.add_column("Trust", style="yellow", max_width=8)
     table.add_column("Created", style="dim")
-    table.add_column("Source", style="cyan")
-    table.add_column("Expires", style="yellow")
     table.add_column("Content", style="white", max_width=40)
 
     for entry in filtered_entries:
@@ -351,24 +344,32 @@ async def _memory_list(
                 subject_names.append(person.name)
             else:
                 subject_names.append(person_id[:8])
-        about = ", ".join(subject_names) if subject_names else "[dim]-[/dim]"
 
-        # Determine scope
-        if entry.owner_user_id:
-            entry_scope = f"[cyan]{entry.owner_user_id[:8]}[/cyan]"
-        elif entry.chat_id:
-            entry_scope = f"[yellow]{entry.chat_id[:8]}[/yellow]"
+        # About: subjects if present, otherwise source user (speaking about self)
+        if subject_names:
+            about = ", ".join(subject_names)
+        elif entry.source_user_name:
+            about = entry.source_user_name
+        elif entry.source_user_id:
+            about = entry.source_user_id[:8]
         else:
-            entry_scope = "[dim]global[/dim]"
+            about = "[dim]-[/dim]"
 
-        if entry.expires_at:
-            if entry.expires_at < now:
-                expires = "[red]expired[/red]"
-            else:
-                days_left = (entry.expires_at - now).days
-                expires = f"{days_left}d"
+        # Source: who provided this information
+        if entry.source_user_id:
+            source_display = f"@{entry.source_user_id}"
+        elif entry.source:
+            source_display = entry.source
         else:
-            expires = "[dim]never[/dim]"
+            source_display = "[dim]-[/dim]"
+
+        # Trust: fact (speaking about self) vs hearsay (speaking about others)
+        if subject_names:
+            # Has subjects - check if source is speaking about someone else
+            trust = "[yellow]hearsay[/yellow]"
+        else:
+            # No subjects - speaking about self
+            trust = "[green]fact[/green]"
 
         created = entry.created_at.strftime("%Y-%m-%d") if entry.created_at else "-"
 
@@ -376,10 +377,9 @@ async def _memory_list(
             entry.id[:8],
             entry.memory_type.value,
             about,
-            entry_scope,
+            source_display,
+            trust,
             created,
-            entry.source or "[dim]-[/dim]",
-            expires,
             content,
         )
 
@@ -391,10 +391,9 @@ async def _memory_add(
     session, content: str, source: str | None, expires_days: int | None
 ) -> None:
     """Add a memory entry."""
-    from ash.memory.file_store import FileMemoryStore
     from ash.memory.types import MemoryType
 
-    store = FileMemoryStore()
+    store = _get_memory_store()
 
     expires_at = None
     if expires_days:
@@ -425,13 +424,11 @@ async def _memory_remove(
     """Remove memory entries."""
     from sqlalchemy import text
 
-    from ash.memory.file_store import FileMemoryStore
-
     if not entry_id and not all_entries:
         error("--id or --all is required to remove entries")
         raise typer.Exit(1)
 
-    store = FileMemoryStore()
+    store = _get_memory_store()
 
     if all_entries:
         filter_desc = [
@@ -515,8 +512,6 @@ async def _memory_clear(session, force: bool) -> None:
     """Clear all memory entries."""
     from sqlalchemy import text
 
-    from ash.memory.file_store import FileMemoryStore
-
     if not force:
         warning("This will delete ALL memory entries.")
         confirm = typer.confirm("Are you sure?")
@@ -524,7 +519,7 @@ async def _memory_clear(session, force: bool) -> None:
             dim("Cancelled")
             return
 
-    store = FileMemoryStore()
+    store = _get_memory_store()
     entries = await store.get_all_memories()
 
     # Delete all entries
@@ -543,9 +538,7 @@ async def _memory_clear(session, force: bool) -> None:
 
 async def _memory_gc() -> None:
     """Garbage collect expired and superseded memories."""
-    from ash.memory.file_store import FileMemoryStore
-
-    store = FileMemoryStore()
+    store = _get_memory_store()
     result = await store.gc()
 
     if result.removed_count == 0:
@@ -581,10 +574,9 @@ async def _memory_show(memory_id: str) -> None:
     from rich.table import Table
 
     from ash.config.paths import get_people_jsonl_path
-    from ash.memory.file_store import FileMemoryStore
     from ash.memory.jsonl import PersonJSONL
 
-    store = FileMemoryStore()
+    store = _get_memory_store()
 
     # Find the memory by prefix
     memory = await store.get_memory_by_prefix(memory_id)
@@ -604,7 +596,18 @@ async def _memory_show(memory_id: str) -> None:
 
     table.add_row("ID", memory.id)
     table.add_row("Type", memory.memory_type.value)
-    table.add_row("Source", memory.source or "-")
+
+    # Source user attribution
+    if memory.source_user_id and memory.source_user_name:
+        table.add_row(
+            "Source User", f"@{memory.source_user_id} ({memory.source_user_name})"
+        )
+    elif memory.source_user_id:
+        table.add_row("Source User", f"@{memory.source_user_id}")
+    else:
+        table.add_row("Source User", "-")
+
+    table.add_row("Source Method", memory.source or "-")
 
     # Scope
     if memory.owner_user_id:
@@ -614,9 +617,9 @@ async def _memory_show(memory_id: str) -> None:
     else:
         table.add_row("Scope", "Global")
 
-    # Subjects
+    # Subjects (who this memory is about)
+    subject_names = []
     if memory.subject_person_ids:
-        subject_names = []
         for person_id in memory.subject_person_ids:
             person = people_by_id.get(person_id)
             if person:
@@ -624,8 +627,19 @@ async def _memory_show(memory_id: str) -> None:
             else:
                 subject_names.append(person_id)
         table.add_row("About", ", ".join(subject_names))
+    elif memory.source_user_name:
+        # No subjects means speaking about self
+        table.add_row("About", f"{memory.source_user_name} (self)")
+    elif memory.source_user_id:
+        table.add_row("About", f"@{memory.source_user_id} (self)")
     else:
         table.add_row("About", "-")
+
+    # Trust level
+    if memory.subject_person_ids:
+        table.add_row("Trust", "hearsay (source speaking about others)")
+    else:
+        table.add_row("Trust", "fact (source speaking about themselves)")
 
     # Timestamps
     if memory.created_at:
@@ -660,9 +674,7 @@ async def _memory_history(memory_id: str) -> None:
     """Show supersession chain for a memory."""
     from rich.table import Table
 
-    from ash.memory.file_store import FileMemoryStore
-
-    store = FileMemoryStore()
+    store = _get_memory_store()
 
     # First, find the memory
     memory = await store.get_memory_by_prefix(memory_id)

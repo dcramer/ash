@@ -260,7 +260,7 @@ async def _migrate_people(
             version=1,
             owner_user_id=row[1] or "",
             name=row[2] or "",
-            relation=row[3],
+            relationship=row[3],  # Maps DB 'relation' column to 'relationship' field
             aliases=aliases,
             created_at=created_at,
             updated_at=_parse_datetime(row[7]),
