@@ -2,9 +2,11 @@
 
 import asyncio
 import json
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Any
 
-import click
 import typer
 
 from ash.cli.console import console, dim, error, success, warning
@@ -29,23 +31,298 @@ def _extract_message_text(content: str | list) -> str:
     return "".join(text_parts)
 
 
+# --- Helper types for timeline and tool stats ---
+
+
+@dataclass
+class TimelineEntry:
+    """A single entry in the timeline with nesting info."""
+
+    entry: Any  # One of the Entry types
+    timestamp: datetime
+    agent_session_id: str | None = None
+    depth: int = 0  # Nesting level for subagents
+
+
+@dataclass
+class ToolStats:
+    """Aggregated statistics for a tool."""
+
+    name: str
+    calls: int = 0
+    successes: int = 0
+    failures: int = 0
+    total_duration_ms: int = 0
+    durations: list[int] | None = None
+
+    @property
+    def avg_duration_ms(self) -> int:
+        if self.calls == 0:
+            return 0
+        return self.total_duration_ms // self.calls
+
+
+# --- Helper functions for timeline and agent nesting ---
+
+
+async def _load_timeline(session_dir: Path) -> list[TimelineEntry]:
+    """Load all entries as a chronological timeline with nesting info."""
+    from ash.sessions import SessionReader
+    from ash.sessions.types import (
+        AgentSessionEntry,
+        CompactionEntry,
+        MessageEntry,
+        SessionHeader,
+        ToolResultEntry,
+        ToolUseEntry,
+    )
+
+    reader = SessionReader(session_dir)
+    entries = await reader.load_entries()
+
+    # Build agent session lookup
+    agent_sessions: dict[str, AgentSessionEntry] = {}
+    for entry in entries:
+        if isinstance(entry, AgentSessionEntry):
+            agent_sessions[entry.id] = entry
+
+    timeline: list[TimelineEntry] = []
+
+    for entry in entries:
+        timestamp: datetime | None = None
+        agent_session_id: str | None = None
+        depth = 0
+
+        if isinstance(entry, SessionHeader):
+            timestamp = entry.created_at
+        elif isinstance(entry, AgentSessionEntry):
+            timestamp = entry.created_at
+            # Agent sessions themselves are at the parent level
+        elif isinstance(entry, MessageEntry):
+            timestamp = entry.created_at
+            agent_session_id = entry.agent_session_id
+        elif isinstance(entry, ToolUseEntry):
+            # Tool uses don't have timestamps, use the message timestamp
+            # For now, we'll estimate from nearby entries
+            agent_session_id = entry.agent_session_id
+        elif isinstance(entry, ToolResultEntry):
+            agent_session_id = entry.agent_session_id
+        elif isinstance(entry, CompactionEntry):
+            timestamp = entry.created_at
+
+        # Calculate depth based on agent session chain
+        if agent_session_id and agent_session_id in agent_sessions:
+            depth = 1  # Inside a subagent
+
+        # Use a placeholder timestamp for entries without one
+        if timestamp is None:
+            # Look for timestamp in previous entries
+            for prev in reversed(timeline):
+                if prev.timestamp:
+                    timestamp = prev.timestamp
+                    break
+
+        if timestamp is None:
+            from datetime import UTC
+
+            timestamp = datetime.now(UTC)
+
+        timeline.append(
+            TimelineEntry(
+                entry=entry,
+                timestamp=timestamp,
+                agent_session_id=agent_session_id,
+                depth=depth,
+            )
+        )
+
+    return timeline
+
+
+def _matches_tool_filters(
+    tool_use: Any,
+    result: Any | None,
+    tool_filter: str | None,
+    failed_only: bool,
+    slow_threshold_ms: int | None,
+) -> bool:
+    """Check if a tool call matches the given filters."""
+    if tool_filter and tool_use.name != tool_filter:
+        return False
+    if result:
+        if failed_only and result.success:
+            return False
+        if slow_threshold_ms and (result.duration_ms or 0) < slow_threshold_ms:
+            return False
+    return True
+
+
+def _compute_tool_stats_from_lookups(
+    lookups: "EntryLookups",
+    tool_filter: str | None = None,
+    failed_only: bool = False,
+    slow_threshold_ms: int | None = None,
+) -> dict[str, ToolStats]:
+    """Compute aggregated tool statistics from prebuilt lookups."""
+    stats: dict[str, ToolStats] = {}
+
+    for tool_use_id, result in lookups.tool_results.items():
+        tool_use = lookups.tool_uses.get(tool_use_id)
+        if not tool_use:
+            continue
+
+        if not _matches_tool_filters(
+            tool_use, result, tool_filter, failed_only, slow_threshold_ms
+        ):
+            continue
+
+        name = tool_use.name
+        if name not in stats:
+            stats[name] = ToolStats(name=name, durations=[])
+
+        s = stats[name]
+        s.calls += 1
+        if result.success:
+            s.successes += 1
+        else:
+            s.failures += 1
+        if result.duration_ms:
+            s.total_duration_ms += result.duration_ms
+            if s.durations is not None:
+                s.durations.append(result.duration_ms)
+
+    return stats
+
+
+def _get_tool_calls_from_lookups(
+    lookups: "EntryLookups",
+    tool_filter: str | None = None,
+    failed_only: bool = False,
+    slow_threshold_ms: int | None = None,
+) -> list[tuple[Any, Any, Any]]:
+    """Get filtered tool calls from prebuilt lookups.
+
+    Returns list of (ToolUseEntry, ToolResultEntry|None, AgentSessionEntry|None).
+    """
+    results: list[tuple[Any, Any, Any]] = []
+
+    for tool_use in lookups.tool_uses.values():
+        result = lookups.tool_results.get(tool_use.id)
+
+        if not _matches_tool_filters(
+            tool_use, result, tool_filter, failed_only, slow_threshold_ms
+        ):
+            continue
+
+        agent_session = None
+        if tool_use.agent_session_id:
+            agent_session = lookups.agent_sessions.get(tool_use.agent_session_id)
+
+        results.append((tool_use, result, agent_session))
+
+    return results
+
+
+@dataclass
+class EntryLookups:
+    """Prebuilt lookup dictionaries for session entries."""
+
+    entries: list[Any]
+    tool_uses: dict[str, Any]
+    tool_results: dict[str, Any]
+    agent_sessions: dict[str, Any]
+
+
+async def _load_entries_with_lookups(session_dir: Path) -> EntryLookups:
+    """Load entries and build common lookup dictionaries."""
+    from ash.sessions import SessionReader
+    from ash.sessions.types import (
+        AgentSessionEntry,
+        MessageEntry,
+        ToolResultEntry,
+        ToolUseEntry,
+    )
+
+    reader = SessionReader(session_dir)
+    entries = await reader.load_entries()
+
+    tool_uses: dict[str, ToolUseEntry] = {}
+    tool_results: dict[str, ToolResultEntry] = {}
+    agent_sessions: dict[str, AgentSessionEntry] = {}
+
+    for entry in entries:
+        if isinstance(entry, ToolUseEntry):
+            tool_uses[entry.id] = entry
+        elif isinstance(entry, ToolResultEntry):
+            tool_results[entry.tool_use_id] = entry
+        elif isinstance(entry, AgentSessionEntry):
+            agent_sessions[entry.id] = entry
+
+    # Extract tool_use blocks embedded in message content
+    for entry in entries:
+        if isinstance(entry, MessageEntry) and isinstance(entry.content, list):
+            for block in entry.content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    tool_id = block["id"]
+                    if tool_id not in tool_uses:
+                        tool_uses[tool_id] = ToolUseEntry(
+                            id=tool_id,
+                            message_id=entry.id,
+                            name=block["name"],
+                            input=block["input"],
+                        )
+
+    return EntryLookups(
+        entries=entries,
+        tool_uses=tool_uses,
+        tool_results=tool_results,
+        agent_sessions=agent_sessions,
+    )
+
+
+def _find_session_dir(query: str) -> Path | None:
+    """Find a session directory matching the query (fuzzy match on key)."""
+    from ash.config.paths import get_sessions_path
+
+    sessions_path = get_sessions_path()
+    if not sessions_path.exists():
+        return None
+
+    matching_dirs = [
+        d for d in sessions_path.iterdir() if d.is_dir() and query in d.name
+    ]
+
+    if not matching_dirs:
+        error(f"No session found matching '{query}'")
+        dim("Use 'ash sessions' to see available sessions")
+        return None
+
+    if len(matching_dirs) > 1:
+        warning(f"Multiple sessions match '{query}':")
+        for d in matching_dirs[:5]:
+            console.print(f"  - {d.name}")
+        if len(matching_dirs) > 5:
+            console.print(f"  ... and {len(matching_dirs) - 5} more")
+        dim("Please be more specific")
+        return None
+
+    return matching_dirs[0]
+
+
 def register(app: typer.Typer) -> None:
     """Register the sessions command."""
 
     @app.command()
     def sessions(
-        action: Annotated[
+        session_key: Annotated[
             str | None,
-            typer.Argument(help="Action: list, view, search, clear"),
+            typer.Argument(help="Session key (fuzzy match) or 'search'"),
         ] = None,
-        query: Annotated[
+        subcommand: Annotated[
             str | None,
-            typer.Option(
-                "--query",
-                "-q",
-                help="Search query or session key for view",
-            ),
+            typer.Argument(help="Subcommand: events, tools, or search query"),
         ] = None,
+        # Options for list/view
         limit: Annotated[
             int,
             typer.Option(
@@ -54,6 +331,76 @@ def register(app: typer.Typer) -> None:
                 help="Maximum entries to show",
             ),
         ] = 20,
+        verbose: Annotated[
+            bool,
+            typer.Option(
+                "--verbose",
+                "-v",
+                help="Show full content without truncation",
+            ),
+        ] = False,
+        # Options for view
+        show_tokens: Annotated[
+            bool,
+            typer.Option(
+                "--show-tokens",
+                help="Display token counts",
+            ),
+        ] = False,
+        show_timing: Annotated[
+            bool,
+            typer.Option(
+                "--show-timing",
+                help="Display tool durations",
+            ),
+        ] = False,
+        # Options for events
+        entry_type: Annotated[
+            str | None,
+            typer.Option(
+                "--type",
+                "-t",
+                help="Filter by entry type (comma-separated: message,tool_use,etc)",
+            ),
+        ] = None,
+        # Options for tools
+        tool_name: Annotated[
+            str | None,
+            typer.Option(
+                "--name",
+                help="Filter by tool name",
+            ),
+        ] = None,
+        failed: Annotated[
+            bool,
+            typer.Option(
+                "--failed",
+                help="Show only failed tool calls",
+            ),
+        ] = False,
+        slow: Annotated[
+            int | None,
+            typer.Option(
+                "--slow",
+                help="Show only calls slower than N ms",
+            ),
+        ] = None,
+        summary: Annotated[
+            bool,
+            typer.Option(
+                "--summary",
+                help="Show aggregated stats only (for tools)",
+            ),
+        ] = False,
+        # Output format
+        json_output: Annotated[
+            bool,
+            typer.Option(
+                "--json",
+                help="Machine-readable JSON output",
+            ),
+        ] = False,
+        # Clear option
         force: Annotated[
             bool,
             typer.Option(
@@ -62,54 +409,70 @@ def register(app: typer.Typer) -> None:
                 help="Force action without confirmation",
             ),
         ] = False,
-        verbose: Annotated[
-            bool,
-            typer.Option(
-                "--verbose",
-                "-v",
-                help="Show full tool outputs (for view)",
-            ),
-        ] = False,
     ) -> None:
-        """Manage conversation sessions and messages.
+        """Manage and debug conversation sessions.
 
         Sessions are stored as JSONL files in ~/.ash/sessions/.
 
         Examples:
-            ash sessions list                        # List recent sessions
-            ash sessions view -q telegram_-542      # View session (fuzzy match)
-            ash sessions view -q telegram_-542 -v   # View with full tool outputs
-            ash sessions search -q "hello"           # Search messages
-            ash sessions clear                       # Clear all history
+            ash sessions                           # List recent sessions
+            ash sessions telegram_123              # View session (fuzzy match)
+            ash sessions telegram_123 events       # Show event timeline
+            ash sessions telegram_123 tools        # Show tool analysis
+            ash sessions telegram_123 --show-timing   # View with durations
+            ash sessions search "hello"            # Search across sessions
+            ash sessions clear                     # Clear all history
         """
-        if action is None:
-            ctx = click.get_current_context()
-            click.echo(ctx.get_help())
-            raise typer.Exit(0)
-
         try:
-            if action == "list":
+            # No args = list sessions
+            if session_key is None:
                 asyncio.run(_sessions_list(limit))
+                return
 
-            elif action == "view":
-                if not query:
-                    error("--query is required for view (session key or partial match)")
+            # Special keywords
+            if session_key == "search":
+                if not subcommand:
+                    error('Search query required: ash sessions search "query"')
                     raise typer.Exit(1)
-                asyncio.run(_sessions_view(query, verbose))
+                asyncio.run(_sessions_search(subcommand, limit))
+                return
 
-            elif action == "search":
-                if not query:
-                    error("--query is required for search")
-                    raise typer.Exit(1)
-                asyncio.run(_sessions_search(query, limit))
-
-            elif action == "clear":
+            if session_key == "clear":
                 _sessions_clear(force)
+                return
 
+            # session_key is a session key, check for subcommands
+            if subcommand == "events":
+                asyncio.run(
+                    _sessions_events(
+                        session_key,
+                        entry_types=entry_type.split(",") if entry_type else None,
+                        json_output=json_output,
+                        verbose=verbose,
+                    )
+                )
+            elif subcommand == "tools":
+                asyncio.run(
+                    _sessions_tools(
+                        session_key,
+                        tool_name=tool_name,
+                        failed_only=failed,
+                        slow_threshold_ms=slow,
+                        summary_only=summary,
+                        json_output=json_output,
+                        verbose=verbose,
+                    )
+                )
             else:
-                error(f"Unknown action: {action}")
-                console.print("Valid actions: list, view, search, clear")
-                raise typer.Exit(1)
+                # Default: view session
+                asyncio.run(
+                    _sessions_view(
+                        session_key,
+                        verbose=verbose,
+                        show_tokens=show_tokens,
+                        show_timing=show_timing,
+                    )
+                )
 
         except KeyboardInterrupt:
             console.print("\n[dim]Cancelled[/dim]")
@@ -165,77 +528,36 @@ async def _sessions_list(limit: int) -> None:
     dim(f"\nShowing {len(sessions)} sessions")
 
 
-async def _sessions_view(query: str, verbose: bool) -> None:
+async def _sessions_view(
+    query: str,
+    verbose: bool,
+    show_tokens: bool = False,
+    show_timing: bool = False,
+) -> None:
     """View a session with full conversation and tool calls."""
     from rich.markdown import Markdown
     from rich.panel import Panel
 
-    from ash.config.paths import get_sessions_path
-    from ash.sessions import SessionReader
     from ash.sessions.types import (
         CompactionEntry,
         MessageEntry,
         SessionHeader,
         ToolResultEntry,
-        ToolUseEntry,
     )
 
-    sessions_path = get_sessions_path()
-    if not sessions_path.exists():
-        warning("No sessions found")
+    session_dir = _find_session_dir(query)
+    if not session_dir:
         return
 
-    # Find matching session (fuzzy match on key)
-    matching_dirs = [
-        d for d in sessions_path.iterdir() if d.is_dir() and query in d.name
-    ]
-
-    if not matching_dirs:
-        error(f"No session found matching '{query}'")
-        dim("Use 'ash sessions list' to see available sessions")
-        return
-
-    if len(matching_dirs) > 1:
-        warning(f"Multiple sessions match '{query}':")
-        for d in matching_dirs[:5]:
-            console.print(f"  - {d.name}")
-        if len(matching_dirs) > 5:
-            console.print(f"  ... and {len(matching_dirs) - 5} more")
-        dim("Please be more specific")
-        return
-
-    session_dir = matching_dirs[0]
-    reader = SessionReader(session_dir)
-    entries = await reader.load_entries()
+    lookups = await _load_entries_with_lookups(session_dir)
+    entries = lookups.entries
+    tool_uses = lookups.tool_uses
+    tool_results = lookups.tool_results
+    agent_sessions = lookups.agent_sessions
 
     if not entries:
         warning(f"Session '{session_dir.name}' is empty")
         return
-
-    # Build lookup for tool uses and results
-    tool_uses: dict[str, ToolUseEntry] = {}
-    tool_results: dict[str, ToolResultEntry] = {}
-
-    for entry in entries:
-        if isinstance(entry, ToolUseEntry):
-            tool_uses[entry.id] = entry
-        elif isinstance(entry, ToolResultEntry):
-            tool_results[entry.tool_use_id] = entry
-
-    # Also extract tool_use blocks from message content
-    for entry in entries:
-        if isinstance(entry, MessageEntry) and isinstance(entry.content, list):
-            for block in entry.content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    # Create a synthetic ToolUseEntry for display
-                    tool_id = block["id"]
-                    if tool_id not in tool_uses:
-                        tool_uses[tool_id] = ToolUseEntry(
-                            id=tool_id,
-                            message_id=entry.id,
-                            name=block["name"],
-                            input=block["input"],
-                        )
 
     console.print()
     console.print(
@@ -268,6 +590,11 @@ async def _sessions_view(query: str, verbose: bool) -> None:
             if entry.username:
                 header_parts.append(f"(@{entry.username})")
             header_parts.append(f"[dim]{timestamp}[/dim]")
+
+            # Add token count if requested
+            if show_tokens and entry.token_count:
+                header_parts.append(f"[dim]({entry.token_count} tokens)[/dim]")
+
             header = " ".join(header_parts)
 
             # Extract content
@@ -275,7 +602,6 @@ async def _sessions_view(query: str, verbose: bool) -> None:
                 content_text = entry.content
                 tool_use_blocks = []
             else:
-                # Extract text and tool_use blocks
                 text_parts = []
                 tool_use_blocks = []
                 for block in entry.content:
@@ -288,7 +614,6 @@ async def _sessions_view(query: str, verbose: bool) -> None:
 
             console.print(header)
             if content_text.strip():
-                # Truncate very long content
                 if len(content_text) > 2000 and not verbose:
                     content_text = content_text[:2000] + "\n... [truncated]"
                 console.print(Markdown(content_text))
@@ -300,14 +625,34 @@ async def _sessions_view(query: str, verbose: bool) -> None:
                 tool_input = tool_block["input"]
                 result = tool_results.get(tool_id)
 
-                _print_tool_call(tool_name, tool_input, result, verbose)
+                # Check if this invokes a subagent
+                subagent = None
+                for agent in agent_sessions.values():
+                    if agent.parent_tool_use_id == tool_id:
+                        subagent = agent
+                        break
+
+                _print_tool_call(
+                    tool_name,
+                    tool_input,
+                    result,
+                    verbose,
+                    show_timing,
+                    subagent,
+                    lookups,
+                )
 
             console.print()
 
         elif isinstance(entry, ToolResultEntry):
             if entry.tool_use_id not in tool_uses:
                 status = "[green]✓[/green]" if entry.success else "[red]✗ failed[/red]"
-                console.print(f"  [bold magenta]🔧 tool call[/bold magenta] {status}")
+                duration = ""
+                if show_timing and entry.duration_ms:
+                    duration = f" {_format_duration(entry.duration_ms)}"
+                console.print(
+                    f"  [bold magenta]🔧 tool call[/bold magenta] {status}{duration}"
+                )
                 _print_output_lines(entry.output, verbose)
                 console.print()
 
@@ -319,6 +664,258 @@ async def _sessions_view(query: str, verbose: bool) -> None:
             console.print()
 
     dim(f"\nTotal entries: {len(entries)}")
+
+
+async def _sessions_events(
+    query: str,
+    entry_types: list[str] | None = None,
+    json_output: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Show all entries chronologically with full metadata."""
+    from ash.sessions.types import (
+        AgentSessionEntry,
+        CompactionEntry,
+        MessageEntry,
+        SessionHeader,
+        ToolResultEntry,
+        ToolUseEntry,
+    )
+
+    session_dir = _find_session_dir(query)
+    if not session_dir:
+        return
+
+    timeline = await _load_timeline(session_dir)
+
+    if not timeline:
+        warning(f"Session '{session_dir.name}' is empty")
+        return
+
+    # Filter by entry types if specified
+    if entry_types:
+        type_set = set(entry_types)
+        timeline = [
+            te for te in timeline if getattr(te.entry, "type", None) in type_set
+        ]
+
+    if json_output:
+        # Output as JSON array
+        output = []
+        for te in timeline:
+            entry_dict = te.entry.to_dict()
+            entry_dict["_depth"] = te.depth
+            entry_dict["_agent_session_id"] = te.agent_session_id
+            output.append(entry_dict)
+        console.print(json.dumps(output, indent=2, default=str))
+        return
+
+    # Build agent session lookup for display
+    agent_sessions: dict[str, AgentSessionEntry] = {}
+    for te in timeline:
+        if isinstance(te.entry, AgentSessionEntry):
+            agent_sessions[te.entry.id] = te.entry
+
+    # Human-readable timeline
+    for te in timeline:
+        entry = te.entry
+        ts = te.timestamp.strftime("%H:%M:%S.%f")[:-3]
+        indent = "  │ " * te.depth
+
+        if isinstance(entry, SessionHeader):
+            console.print(
+                f"[dim]{ts}[/dim] {indent}[bold blue]SESSION[/bold blue]     "
+                f"[cyan]{entry.provider}[/cyan]"
+            )
+
+        elif isinstance(entry, AgentSessionEntry):
+            console.print(
+                f"[dim]{ts}[/dim] {indent}[bold yellow]AGENT[/bold yellow]       "
+                f"{entry.agent_type}:{entry.agent_name}"
+            )
+
+        elif isinstance(entry, MessageEntry):
+            role = entry.role.upper()
+            role_style = {
+                "user": "green",
+                "assistant": "cyan",
+                "system": "yellow",
+            }.get(entry.role, "white")
+
+            tokens = f"{entry.token_count} tokens" if entry.token_count else ""
+            text = _extract_message_text(entry.content)
+            if len(text) > 60 and not verbose:
+                text = text[:60] + "..."
+            text = text.replace("\n", " ")
+
+            console.print(
+                f"[dim]{ts}[/dim] {indent}[bold {role_style}]MESSAGE[/bold {role_style}]     "
+                f'{role:9} [dim]{tokens:>10}[/dim]   "{text}"'
+            )
+
+        elif isinstance(entry, ToolUseEntry):
+            input_summary = _format_tool_input(entry.name, entry.input, verbose)
+            if len(input_summary) > 50 and not verbose:
+                input_summary = input_summary[:50] + "..."
+
+            console.print(
+                f"[dim]{ts}[/dim] {indent}[bold magenta]TOOL_USE[/bold magenta]    "
+                f"{entry.name:12} id={entry.id[:12]}... {input_summary}"
+            )
+
+        elif isinstance(entry, ToolResultEntry):
+            status = "[green]ok[/green]" if entry.success else "[red]failed[/red]"
+            duration = f"{entry.duration_ms}ms" if entry.duration_ms else ""
+            output_preview = entry.output[:40].replace("\n", " ") if not verbose else ""
+            if len(entry.output) > 40 and not verbose:
+                output_preview += "..."
+
+            console.print(
+                f"[dim]{ts}[/dim] {indent}[bold magenta]TOOL_RESULT[/bold magenta] "
+                f'{duration:>6} {status:8} "{output_preview}"'
+            )
+
+        elif isinstance(entry, CompactionEntry):
+            console.print(
+                f"[dim]{ts}[/dim] {indent}[bold dim]COMPACTION[/bold dim]  "
+                f"{entry.tokens_before} → {entry.tokens_after} tokens"
+            )
+
+    dim(f"\nTotal entries: {len(timeline)}")
+
+
+async def _sessions_tools(
+    query: str,
+    tool_name: str | None = None,
+    failed_only: bool = False,
+    slow_threshold_ms: int | None = None,
+    summary_only: bool = False,
+    json_output: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Show tool analysis with filtering and aggregation."""
+    from rich.table import Table
+
+    session_dir = _find_session_dir(query)
+    if not session_dir:
+        return
+
+    lookups = await _load_entries_with_lookups(session_dir)
+    stats = _compute_tool_stats_from_lookups(
+        lookups,
+        tool_filter=tool_name,
+        failed_only=failed_only,
+        slow_threshold_ms=slow_threshold_ms,
+    )
+
+    if not stats:
+        warning("No matching tool calls found")
+        return
+
+    if json_output:
+        if summary_only:
+            output = {
+                name: {
+                    "calls": s.calls,
+                    "successes": s.successes,
+                    "failures": s.failures,
+                    "avg_duration_ms": s.avg_duration_ms,
+                }
+                for name, s in stats.items()
+            }
+        else:
+            calls = _get_tool_calls_from_lookups(
+                lookups,
+                tool_filter=tool_name,
+                failed_only=failed_only,
+                slow_threshold_ms=slow_threshold_ms,
+            )
+            output = []
+            for tool_use, result, agent in calls:
+                call_data = {
+                    "id": tool_use.id,
+                    "name": tool_use.name,
+                    "input": tool_use.input,
+                }
+                if result:
+                    call_data["success"] = result.success
+                    call_data["duration_ms"] = result.duration_ms
+                    call_data["output"] = result.output if verbose else None
+                if agent:
+                    call_data["agent"] = f"{agent.agent_type}:{agent.agent_name}"
+                output.append(call_data)
+        console.print(json.dumps(output, indent=2, default=str))
+        return
+
+    if summary_only:
+        # Summary table
+        table = Table(title="Tool Summary")
+        table.add_column("Tool", style="magenta")
+        table.add_column("Calls", justify="right")
+        table.add_column("Success", justify="right", style="green")
+        table.add_column("Failed", justify="right", style="red")
+        table.add_column("Avg Duration", justify="right", style="dim")
+
+        for name, s in sorted(stats.items(), key=lambda x: x[1].calls, reverse=True):
+            table.add_row(
+                name,
+                str(s.calls),
+                str(s.successes),
+                str(s.failures),
+                _format_duration(s.avg_duration_ms) if s.avg_duration_ms else "-",
+            )
+
+        console.print(table)
+    else:
+        # Detailed list
+        calls = _get_tool_calls_from_lookups(
+            lookups,
+            tool_filter=tool_name,
+            failed_only=failed_only,
+            slow_threshold_ms=slow_threshold_ms,
+        )
+
+        for tool_use, result, agent in calls:
+            if result:
+                status = "[green]✓[/green]" if result.success else "[red]✗[/red]"
+                duration = (
+                    _format_duration(result.duration_ms) if result.duration_ms else ""
+                )
+            else:
+                status = "[yellow]⏳[/yellow]"
+                duration = ""
+
+            agent_info = ""
+            if agent:
+                agent_info = f" [dim]({agent.agent_type}:{agent.agent_name})[/dim]"
+
+            console.print(
+                f"[bold magenta]{tool_use.name}[/bold magenta] {status} {duration}{agent_info}"
+            )
+
+            input_summary = _format_tool_input(tool_use.name, tool_use.input, verbose)
+            console.print(f"  [dim]{input_summary}[/dim]")
+
+            if verbose and result:
+                _print_output_lines(result.output, verbose)
+
+            console.print()
+
+        # Print summary at the end
+        dim(f"\nTotal: {len(calls)} tool calls")
+
+
+def _format_duration(ms: int | None) -> str:
+    """Format duration in human-readable form."""
+    if ms is None:
+        return ""
+    if ms < 1000:
+        return f"{ms}ms"
+    seconds = ms / 1000
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = seconds / 60
+    return f"{minutes:.1f}m"
 
 
 def _print_output_lines(output_text: str, verbose: bool) -> None:
@@ -343,27 +940,93 @@ def _print_tool_call(
     input_data: dict[str, Any],
     result: Any | None,
     verbose: bool,
+    show_timing: bool = False,
+    subagent: Any | None = None,
+    lookups: EntryLookups | None = None,
 ) -> None:
-    """Print a tool call with its result."""
+    """Print a tool call with its result and optional subagent box."""
     input_summary = _format_tool_input(name, input_data, verbose)
 
     if result is None:
         status = "[yellow]⏳ pending[/yellow]"
         output_text = None
+        duration = ""
     elif result.success:
         status = "[green]✓[/green]"
         output_text = result.output
+        duration = (
+            f" {_format_duration(result.duration_ms)}"
+            if show_timing and result.duration_ms
+            else ""
+        )
     else:
         status = "[red]✗ failed[/red]"
         output_text = result.output
+        duration = (
+            f" {_format_duration(result.duration_ms)}"
+            if show_timing and result.duration_ms
+            else ""
+        )
 
-    console.print(f"  [bold magenta]🔧 {name}[/bold magenta] {status}")
+    console.print(f"  [bold magenta]🔧 {name}[/bold magenta] {status}{duration}")
 
     if input_summary:
         console.print(f"     [dim]{input_summary}[/dim]")
 
-    if output_text:
+    # If this tool invokes a subagent, show a box with nested content
+    if subagent and lookups:
+        _print_subagent_box(subagent, lookups, verbose, show_timing)
+    elif output_text and not subagent:
         _print_output_lines(output_text, verbose)
+
+
+def _print_subagent_box(
+    agent: Any,
+    lookups: EntryLookups,
+    verbose: bool,
+    show_timing: bool,
+) -> None:
+    """Print a box showing subagent activity."""
+    from ash.sessions.types import MessageEntry, ToolResultEntry, ToolUseEntry
+
+    agent_id = agent.id
+    agent_label = f"{agent.agent_type}:{agent.agent_name}"
+
+    # Collect entries belonging to this agent session
+    agent_entries = [
+        e
+        for e in lookups.entries
+        if (
+            (isinstance(e, MessageEntry) and e.agent_session_id == agent_id)
+            or (isinstance(e, ToolUseEntry) and e.agent_session_id == agent_id)
+            or (isinstance(e, ToolResultEntry) and e.agent_session_id == agent_id)
+        )
+    ]
+
+    if not agent_entries:
+        console.print(f"     ┌─ {agent_label} ─────────────────────┐")
+        console.print("     │ [dim](no entries)[/dim]")
+        console.print("     └────────────────────────────────────────┘")
+        return
+
+    console.print(f"     ┌─ {agent_label} ────────────────────┐")
+
+    for e in agent_entries:
+        if isinstance(e, ToolUseEntry):
+            result = lookups.tool_results.get(e.id)
+            if result:
+                status = "[green]✓[/green]" if result.success else "[red]✗[/red]"
+                duration = (
+                    f" {_format_duration(result.duration_ms)}"
+                    if show_timing and result.duration_ms
+                    else ""
+                )
+            else:
+                status = "[yellow]⏳[/yellow]"
+                duration = ""
+            console.print(f"     │ 🔧 {e.name} {status}{duration}")
+
+    console.print("     └────────────────────────────────────────┘")
 
 
 def _format_tool_input(name: str, input_data: dict[str, Any], verbose: bool) -> str:
@@ -387,8 +1050,9 @@ def _format_tool_input(name: str, input_data: dict[str, Any], verbose: bool) -> 
             return f"{len(facts)} facts"
         content = input_data.get("content", "")
         return content[:50] + "..." if len(content) > 50 else content
-    if name == "use_agent":
-        return input_data.get("agent", "")
+    if name in ("use_agent", "use_skill"):
+        agent = input_data.get("agent", "") or input_data.get("skill", "")
+        return agent
 
     if verbose:
         return json.dumps(input_data, indent=2)[:500]

@@ -108,19 +108,21 @@ class TestSessionsCommand:
         # Sessions command reads from JSONL files, no config needed
         result = cli_runner.invoke(app, ["sessions", "search"])
         assert result.exit_code == 1
-        assert "--query" in result.stdout or "required" in result.stdout.lower()
+        assert "query" in result.stdout.lower() or "required" in result.stdout.lower()
 
-    def test_sessions_unknown_action(self, cli_runner):
-        # Sessions command reads from JSONL files, no config needed
-        result = cli_runner.invoke(app, ["sessions", "unknown"])
-        assert result.exit_code == 1
+    def test_sessions_unknown_session(self, cli_runner):
+        # Unknown session key should give "No session found" error
+        result = cli_runner.invoke(app, ["sessions", "nonexistent_session_xyz"])
+        assert result.exit_code == 0  # exits normally, just prints error
+        assert "no session found" in result.stdout.lower()
 
     def test_sessions_help(self, cli_runner):
         result = cli_runner.invoke(app, ["sessions", "--help"])
         assert result.exit_code == 0
-        assert "list" in result.stdout
+        # Check for key features in the help/examples
+        assert "events" in result.stdout
+        assert "tools" in result.stdout
         assert "search" in result.stdout
-        assert "view" in result.stdout
         assert "clear" in result.stdout
 
 
