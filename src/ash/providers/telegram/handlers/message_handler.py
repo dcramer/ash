@@ -418,13 +418,10 @@ class TelegramMessageHandler:
             memories = [r.content for r in results if r.similarity >= threshold]
 
             if memories:
-                logger.info(
-                    "Memory lookup found %d relevant memories: %s",
+                logger.debug(
+                    "Memory lookup found %d relevant memories",
                     len(memories),
-                    memories[:2],  # Log first 2 for debugging
                 )
-            else:
-                logger.info("Memory lookup found no relevant memories")
 
             return memories if memories else None
 
