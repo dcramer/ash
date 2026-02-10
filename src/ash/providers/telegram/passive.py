@@ -280,6 +280,12 @@ class PassiveEngagementDecider:
             memories_section=memories_section,
         )
 
+        logger.info(
+            "Engagement prompt: memories=%d, context=%d msgs",
+            len(relevant_memories) if relevant_memories else 0,
+            len(recent_messages),
+        )
+
         try:
             response = await asyncio.wait_for(
                 self._llm.complete(
