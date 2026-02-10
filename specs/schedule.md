@@ -39,12 +39,16 @@ After execution:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `id` | string | No | Stable 8-char hex identifier |
 | `message` | string | Yes | Task/message to execute |
 | `trigger_at` | ISO 8601 | One-shot | When to trigger (UTC) |
 | `cron` | string | Periodic | Cron expression (5-field) |
+| `timezone` | string | No | IANA timezone name for cron evaluation |
 | `chat_id` | string | Yes | Chat to send response to |
+| `chat_title` | string | No | Friendly name for the chat |
 | `provider` | string | Yes | Provider name (e.g., "telegram") |
 | `user_id` | string | No | User who scheduled the task |
+| `username` | string | No | @mention name for responses |
 | `created_at` | ISO 8601 | No | When the task was created |
 | `last_run` | ISO 8601 | No | Last execution time (periodic only) |
 
@@ -98,6 +102,47 @@ The commands automatically inject `chat_id`, `user_id`, and `provider` from envi
 5. Response sent back to original chat
 6. `last_run` updated in file, entry preserved for next run
 
+## Task Execution Wrapper
+
+When a scheduled task executes, the handler wraps it with timing context so the agent can decide whether the task is still relevant.
+
+### Wrapper Format
+
+The task message is wrapped with XML tags:
+
+- `<context>` - Entry ID, schedule type, scheduled by
+- `<timing>` - Current time, scheduled fire time, delay
+- `<decision-guidance>` - Rules for skip vs execute
+- `<task>` - The original task message
+
+### Time-Sensitive vs Time-Independent
+
+**Time-sensitive tasks** depend on being run close to schedule:
+- Greetings tied to time of day ("good morning")
+- Reminders for specific moments ("remind me at 2pm")
+- Event prompts ("daily standup reminder")
+
+**Time-independent tasks** provide value regardless of delay:
+- Data fetching (weather, transit, stocks)
+- Reports and summaries
+- Backups and syncs
+
+### Skip Decision
+
+The agent uses these thresholds for time-sensitive tasks:
+- Delay > 2 hours AND meaning has passed: Skip
+- Delay > 4 hours: Almost always skip
+- Delay 30 min - 2 hours: Use judgment
+
+Time-independent tasks always execute.
+
+### Output Rules
+
+**If executing:** Run normally, don't mention the delay.
+
+**If skipping:** Brief explanation + next scheduled time if recurring.
+Example: "Skipping morning greeting - it's now 3:45 PM. This runs daily at 8 AM."
+
 ## Integration
 
 ```python
@@ -144,3 +189,5 @@ cat workspace/schedule.jsonl
 6. **Fresh context per task** - Each task runs in ephemeral session
 7. **UTC times** - Avoids timezone confusion
 8. **Ownership filtering** - Users can only see/cancel their own tasks
+9. **Time-aware execution** - Agent can skip stale time-sensitive tasks
+10. **Timing context** - Handler provides current time, fire time, and delay

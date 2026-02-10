@@ -187,7 +187,9 @@ async def _run_server(
 
     # Create and register handler if we have senders
     if senders:
-        schedule_handler = ScheduledTaskHandler(agent, senders, registrars)
+        schedule_handler = ScheduledTaskHandler(
+            agent, senders, registrars, timezone=ash_config.timezone
+        )
         schedule_watcher.add_handler(schedule_handler.handle)
         logger.debug(f"Schedule watcher: {schedule_file}")
     else:

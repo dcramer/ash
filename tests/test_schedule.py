@@ -978,3 +978,281 @@ class TestScheduleEntryTimezone:
 
         # Should be due since next fire time is in the past
         assert entry.is_due() is True
+
+
+class TestPreviousFireTime:
+    """Tests for ScheduleEntry.previous_fire_time()."""
+
+    def test_one_shot_returns_trigger_at(self):
+        """One-shot entries return their trigger_at as previous fire time."""
+        trigger = datetime(2026, 1, 15, 9, 0, 0, tzinfo=UTC)
+        entry = ScheduleEntry(
+            message="Test",
+            trigger_at=trigger,
+        )
+        assert entry.previous_fire_time() == trigger
+
+    def test_cron_returns_most_recent_occurrence(self):
+        """Cron entries return the most recent scheduled time before now."""
+        entry = ScheduleEntry(
+            message="Daily task",
+            cron="0 8 * * *",  # 8 AM daily
+            timezone="UTC",
+        )
+        prev = entry.previous_fire_time()
+        assert prev is not None
+        # Previous fire time should be in the past
+        assert prev < datetime.now(UTC)
+        # Should be at 8:00 AM UTC
+        assert prev.hour == 8
+        assert prev.minute == 0
+
+    def test_cron_respects_timezone(self):
+        """Previous fire time is calculated in entry's timezone."""
+        from zoneinfo import ZoneInfo
+
+        la_tz = ZoneInfo("America/Los_Angeles")
+
+        entry = ScheduleEntry(
+            message="LA task",
+            cron="0 8 * * *",  # 8 AM LA time
+            timezone="America/Los_Angeles",
+        )
+        prev = entry.previous_fire_time()
+        assert prev is not None
+
+        # Convert to LA time - should be 8:00 AM local
+        prev_la = prev.astimezone(la_tz)
+        assert prev_la.hour == 8
+        assert prev_la.minute == 0
+
+    def test_no_trigger_returns_none(self):
+        """Entry with neither trigger_at nor cron returns None."""
+        entry = ScheduleEntry(message="Test")
+        # Manually set both to None to test edge case
+        entry.trigger_at = None
+        entry.cron = None
+        assert entry.previous_fire_time() is None
+
+    def test_fallback_timezone_used(self):
+        """Fallback timezone is used when entry has no stored timezone."""
+        entry = ScheduleEntry(
+            message="Test",
+            cron="0 8 * * *",
+            timezone=None,  # No stored timezone
+        )
+        # Pass fallback timezone
+        prev_utc = entry.previous_fire_time("UTC")
+        prev_la = entry.previous_fire_time("America/Los_Angeles")
+
+        assert prev_utc is not None
+        assert prev_la is not None
+        # Different fallback timezones should give different UTC times
+        # (8 AM UTC vs 8 AM LA = different UTC instants)
+        assert prev_utc != prev_la
+
+
+class TestFormatDelay:
+    """Tests for format_delay() helper function."""
+
+    def test_just_now(self):
+        """Delays under 1 minute show as 'just now'."""
+        from ash.events.handler import format_delay
+
+        assert format_delay(0) == "just now"
+        assert format_delay(30) == "just now"
+        assert format_delay(59) == "just now"
+
+    def test_minutes(self):
+        """Delays between 1-60 minutes show as '~N minutes'."""
+        from ash.events.handler import format_delay
+
+        assert format_delay(60) == "~1 minutes"
+        assert format_delay(120) == "~2 minutes"
+        assert format_delay(5 * 60) == "~5 minutes"
+        assert format_delay(59 * 60) == "~59 minutes"
+
+    def test_hours(self):
+        """Delays between 1-24 hours show as '~N.N hours'."""
+        from ash.events.handler import format_delay
+
+        assert format_delay(60 * 60) == "~1.0 hours"
+        assert format_delay(90 * 60) == "~1.5 hours"
+        assert format_delay(2 * 60 * 60) == "~2.0 hours"
+        assert format_delay(23 * 60 * 60) == "~23.0 hours"
+
+    def test_days(self):
+        """Delays over 24 hours show as '~N.N days'."""
+        from ash.events.handler import format_delay
+
+        assert format_delay(24 * 60 * 60) == "~1.0 days"
+        assert format_delay(36 * 60 * 60) == "~1.5 days"
+        assert format_delay(48 * 60 * 60) == "~2.0 days"
+
+
+class TestScheduledTaskWrapper:
+    """Tests for scheduled task wrapper formatting."""
+
+    @pytest.mark.asyncio
+    async def test_wrapper_contains_timing_context(self):
+        """Handler wraps message with timing context."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.events.handler import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Response"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        handler = ScheduledTaskHandler(
+            agent=mock_agent,
+            senders={"telegram": mock_sender},
+            timezone="UTC",
+        )
+
+        entry = ScheduleEntry(
+            id="abc12345",
+            message="Check the weather",
+            trigger_at=datetime.now(UTC) - timedelta(minutes=5),
+            provider="telegram",
+            chat_id="123",
+            username="alice",
+        )
+
+        await handler.handle(entry)
+
+        # Get the message passed to agent
+        call_args = mock_agent.process_message.call_args
+        wrapped_message = call_args[0][0]
+
+        # Verify wrapper structure
+        assert "<context>" in wrapped_message
+        assert "Entry ID: abc12345" in wrapped_message
+        assert "Scheduled by: @alice" in wrapped_message
+        assert "</context>" in wrapped_message
+
+        assert "<timing>" in wrapped_message
+        assert "Current time:" in wrapped_message
+        assert "Scheduled fire time:" in wrapped_message
+        assert "Delay:" in wrapped_message
+        assert "</timing>" in wrapped_message
+
+        assert "<decision-guidance>" in wrapped_message
+        assert "TIME-SENSITIVE" in wrapped_message
+        assert "TIME-INDEPENDENT" in wrapped_message
+        assert "</decision-guidance>" in wrapped_message
+
+        assert "<task>" in wrapped_message
+        assert "Check the weather" in wrapped_message
+        assert "</task>" in wrapped_message
+
+    @pytest.mark.asyncio
+    async def test_wrapper_shows_cron_schedule(self):
+        """Wrapper shows cron expression for periodic entries."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.events.handler import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Response"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        handler = ScheduledTaskHandler(
+            agent=mock_agent,
+            senders={"telegram": mock_sender},
+            timezone="UTC",
+        )
+
+        entry = ScheduleEntry(
+            id="cron1234",
+            message="Daily report",
+            cron="0 8 * * *",
+            provider="telegram",
+            chat_id="123",
+        )
+
+        await handler.handle(entry)
+
+        call_args = mock_agent.process_message.call_args
+        wrapped_message = call_args[0][0]
+
+        assert "Schedule: 0 8 * * * (recurring)" in wrapped_message
+
+    @pytest.mark.asyncio
+    async def test_wrapper_shows_one_shot_trigger(self):
+        """Wrapper shows trigger time for one-shot entries."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.events.handler import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Response"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        handler = ScheduledTaskHandler(
+            agent=mock_agent,
+            senders={"telegram": mock_sender},
+            timezone="UTC",
+        )
+
+        trigger_time = datetime(2026, 2, 9, 14, 30, 0, tzinfo=UTC)
+        entry = ScheduleEntry(
+            id="oneshot1",
+            message="Reminder",
+            trigger_at=trigger_time,
+            provider="telegram",
+            chat_id="123",
+        )
+
+        await handler.handle(entry)
+
+        call_args = mock_agent.process_message.call_args
+        wrapped_message = call_args[0][0]
+
+        assert "Trigger:" in wrapped_message
+        assert "(one-shot)" in wrapped_message
+        assert "2026-02-09 14:30" in wrapped_message
+
+    @pytest.mark.asyncio
+    async def test_handler_uses_configured_timezone(self):
+        """Handler formats times in its configured timezone."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.events.handler import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Response"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        handler = ScheduledTaskHandler(
+            agent=mock_agent,
+            senders={"telegram": mock_sender},
+            timezone="America/Los_Angeles",  # LA timezone
+        )
+
+        # Entry in LA timezone too
+        entry = ScheduleEntry(
+            id="tz_test",
+            message="Test",
+            cron="0 8 * * *",
+            timezone="America/Los_Angeles",
+            provider="telegram",
+            chat_id="123",
+        )
+
+        await handler.handle(entry)
+
+        call_args = mock_agent.process_message.call_args
+        wrapped_message = call_args[0][0]
+
+        # Times should be formatted in LA timezone
+        # The previous 8 AM LA should show as 08:00, not UTC equivalent
+        assert "08:00" in wrapped_message

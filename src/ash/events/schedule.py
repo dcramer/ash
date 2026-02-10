@@ -80,6 +80,56 @@ class ScheduleEntry:
 
         return None
 
+    def previous_fire_time(self, timezone: str = "UTC") -> datetime | None:
+        """Get the scheduled fire time for this execution.
+
+        For one-shot: returns trigger_at
+        For periodic: returns the most recent cron occurrence before now
+
+        Args:
+            timezone: Fallback IANA timezone name for evaluating cron expressions.
+                      If the entry has a stored timezone, that takes precedence.
+
+        Returns:
+            The previous/scheduled fire time in UTC, or None if not computable.
+        """
+        if self.trigger_at:
+            return self.trigger_at
+
+        if self.cron:
+            tz = self.timezone or timezone
+            return self._prev_run_time(tz)
+
+        return None
+
+    def _prev_run_time(self, timezone: str = "UTC") -> datetime | None:
+        """Calculate the most recent cron occurrence before now.
+
+        Args:
+            timezone: IANA timezone name for evaluating the cron expression.
+
+        Returns:
+            The most recent scheduled time in UTC, or None on error.
+        """
+        if not self.cron:
+            return None
+        try:
+            from zoneinfo import ZoneInfo
+
+            from croniter import croniter
+
+            try:
+                tz = ZoneInfo(timezone)
+            except Exception:
+                tz = ZoneInfo("UTC")
+
+            now = datetime.now(tz)
+            prev_local = croniter(self.cron, now).get_prev(datetime)
+            return prev_local.astimezone(UTC)
+        except Exception as e:
+            logger.warning(f"Failed to compute prev fire time for '{self.cron}': {e}")
+            return None
+
     def is_due(self, timezone: str = "UTC") -> bool:
         """Check if this entry is due for execution.
 

@@ -2,8 +2,10 @@
 
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from ash.core.session import SessionState
 from ash.events.schedule import ScheduleEntry
@@ -12,6 +14,78 @@ if TYPE_CHECKING:
     from ash.core.agent import Agent
 
 logger = logging.getLogger(__name__)
+
+SCHEDULED_TASK_WRAPPER = """\
+You are executing a scheduled task. Before running the task, evaluate whether it's still relevant given the delay.
+
+<context>
+Entry ID: {entry_id}
+{schedule_line}
+Scheduled by: {scheduled_by}
+</context>
+
+<timing>
+Current time: {current_time}
+Scheduled fire time: {fire_time}
+Delay: {delay_human}
+</timing>
+
+<decision-guidance>
+## Step 1: Classify the task
+
+TIME-SENSITIVE tasks depend on being run close to their scheduled time:
+- Greetings tied to time of day ("good morning", "good night")
+- Reminders for specific moments ("remind me at 2pm to call")
+- Event prompts ("daily standup", "weekly sync reminder")
+
+TIME-INDEPENDENT tasks provide value regardless of when they run:
+- Data fetching (weather, transit, stocks, news)
+- Reports and summaries
+- Backups and syncs
+- General reminders without time context
+
+## Step 2: Decide whether to execute
+
+For TIME-SENSITIVE tasks:
+- If delay > 2 hours AND the task's meaning has passed: SKIP
+- If delay > 4 hours: Almost certainly SKIP unless task is clearly still useful
+- Use judgment for delays between 30 min - 2 hours
+
+For TIME-INDEPENDENT tasks:
+- Always EXECUTE regardless of delay
+
+## Step 3: What to output
+
+If EXECUTING:
+- Run the task normally
+- Do NOT mention the delay unless it affects the task content
+
+If SKIPPING:
+- Briefly explain why (one sentence)
+- If recurring, mention it will run at the next scheduled time
+- Example: "Skipping morning greeting - it's now 3:45 PM. This runs daily at 8 AM."
+
+Do NOT apologize for delays or explain scheduling mechanics.
+</decision-guidance>
+
+<task>
+{message}
+</task>"""
+
+
+def format_delay(seconds: float) -> str:
+    """Format delay in human-readable form."""
+    minutes = seconds / 60
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"~{int(minutes)} minutes"
+    hours = minutes / 60
+    if hours < 24:
+        return f"~{hours:.1f} hours"
+    days = hours / 24
+    return f"~{days:.1f} days"
+
 
 # Type for message sender: (chat_id, text) -> message_id
 MessageSender = Callable[[str, str], Awaitable[str]]
@@ -35,6 +109,7 @@ class ScheduledTaskHandler:
         agent: "Agent",
         senders: dict[str, MessageSender],
         registrars: dict[str, MessageRegistrar] | None = None,
+        timezone: str = "UTC",
     ):
         """Initialize the handler.
 
@@ -42,10 +117,12 @@ class ScheduledTaskHandler:
             agent: Agent instance to process tasks.
             senders: Map of provider name -> send function.
             registrars: Map of provider name -> message registrar for thread tracking.
+            timezone: Fallback IANA timezone for computing fire times.
         """
         self._agent = agent
         self._senders = senders
         self._registrars = registrars or {}
+        self._timezone = timezone
 
     async def handle(self, entry: ScheduleEntry) -> None:
         """Process a scheduled task.
@@ -74,27 +151,31 @@ class ScheduledTaskHandler:
             f"(provider={entry.provider}, chat={chat_display})"
         )
 
-        # Build schedule context as facts (system prompt handles instructions)
+        # Compute fire time and delay
+        fire_time = entry.previous_fire_time(self._timezone) or datetime.now(UTC)
+        delay_seconds = (datetime.now(UTC) - fire_time).total_seconds()
+
+        # Format times in entry's timezone
+        tz = ZoneInfo(entry.timezone or self._timezone or "UTC")
+        current_time_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
+        fire_time_str = fire_time.astimezone(tz).strftime("%Y-%m-%d %H:%M")
+
+        # Build schedule line
         if entry.cron:
             schedule_line = f"Schedule: {entry.cron} (recurring)"
         else:
-            trigger_str = (
-                entry.trigger_at.isoformat() if entry.trigger_at else "unknown"
-            )
-            schedule_line = f"Trigger: {trigger_str} (one-shot)"
+            schedule_line = f"Trigger: {fire_time_str} (one-shot)"
 
-        scheduled_by = f"@{entry.username}" if entry.username else "unknown"
-
-        # Present as context facts, similar to system prompt sections
-        schedule_context = (
-            f"[Scheduled Task]\n"
-            f"Entry ID: {entry.id}\n"
-            f"{schedule_line}\n"
-            f"Scheduled by: {scheduled_by}\n"
+        # Build wrapped message with timing context
+        prefixed_message = SCHEDULED_TASK_WRAPPER.format(
+            entry_id=entry.id,
+            schedule_line=schedule_line,
+            scheduled_by=f"@{entry.username}" if entry.username else "unknown",
+            current_time=current_time_str,
+            fire_time=fire_time_str,
+            delay_human=format_delay(delay_seconds),
+            message=entry.message,
         )
-
-        # User message is just the task - system prompt handles behavior
-        prefixed_message = f"{schedule_context}\n{entry.message}"
 
         # Create ephemeral session for this task
         session = SessionState(
