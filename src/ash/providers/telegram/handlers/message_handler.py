@@ -274,38 +274,44 @@ class TelegramMessageHandler:
         if name_mentioned:
             should_engage = True
         elif not self._passive_decider:
-            logger.debug("No passive decider - skipping engagement decision")
+            logger.warning("No passive decider - skipping engagement decision")
             return
         else:
-            # Query relevant memories (with timeout)
-            relevant_memories: list[str] | None = None
-            passive_config = self._provider.passive_config
-            if (
-                passive_config
-                and passive_config.memory_lookup_enabled
-                and self._memory_manager
-                and message.text
-            ):
-                relevant_memories = await self._query_relevant_memories(
-                    query=message.text,
-                    user_id=message.user_id,
-                    chat_id=chat_id,
-                    lookup_timeout=passive_config.memory_lookup_timeout,
-                    threshold=passive_config.memory_similarity_threshold,
+            try:
+                # Query relevant memories (with timeout)
+                relevant_memories: list[str] | None = None
+                passive_config = self._provider.passive_config
+                if (
+                    passive_config
+                    and passive_config.memory_lookup_enabled
+                    and self._memory_manager
+                    and message.text
+                ):
+                    relevant_memories = await self._query_relevant_memories(
+                        query=message.text,
+                        user_id=message.user_id,
+                        chat_id=chat_id,
+                        lookup_timeout=passive_config.memory_lookup_timeout,
+                        threshold=passive_config.memory_similarity_threshold,
+                    )
+                elif not self._memory_manager:
+                    logger.warning(
+                        "Memory lookup skipped: memory manager not available"
+                    )
+
+                # Get recent messages for context
+                recent_messages = await self._get_recent_message_texts(chat_id, limit=5)
+
+                should_engage = await self._passive_decider.decide(
+                    message=message,
+                    recent_messages=recent_messages,
+                    chat_title=chat_title,
+                    bot_context=bot_context,
+                    relevant_memories=relevant_memories,
                 )
-            elif not self._memory_manager:
-                logger.info("Memory lookup skipped: memory manager not available")
-
-            # Get recent messages for context
-            recent_messages = await self._get_recent_message_texts(chat_id, limit=5)
-
-            should_engage = await self._passive_decider.decide(
-                message=message,
-                recent_messages=recent_messages,
-                chat_title=chat_title,
-                bot_context=bot_context,
-                relevant_memories=relevant_memories,
-            )
+            except Exception as e:
+                logger.exception("Passive engagement decision failed: %s", e)
+                return
 
         # Note: The engagement decision could be recorded to incoming.jsonl here
         # to update the original record. For now, the decision is implicit in
