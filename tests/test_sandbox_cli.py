@@ -219,6 +219,32 @@ class TestNaturalLanguageTime:
         cli_runner.env["ASH_TIMEZONE"] = "America/Los_Angeles"
         return cli_runner
 
+    @pytest.mark.parametrize(
+        "time_input,message",
+        [
+            ("3pm", "Afternoon check"),
+            ("at 3pm", "Meeting reminder"),
+            ("9am", "Morning standup"),
+            ("noon", "Lunch break"),
+            ("midnight", "End of day"),
+        ],
+    )
+    def test_create_with_clock_time_variants(
+        self, cli_runner_with_tz, schedule_file, time_input, message
+    ):
+        """Test creating tasks with various clock time formats."""
+        result = cli_runner_with_tz.invoke(app, ["create", message, "--at", time_input])
+
+        assert result.exit_code == 0
+        assert "Scheduled reminder" in result.stdout
+
+        entries = [
+            json.loads(line) for line in schedule_file.read_text().strip().split("\n")
+        ]
+        assert len(entries) == 1
+        assert entries[0]["message"] == message
+        assert "trigger_at" in entries[0]
+
     def test_create_with_natural_language_time(self, cli_runner_with_tz, schedule_file):
         """Test creating a task with 'in 2 hours'."""
         result = cli_runner_with_tz.invoke(

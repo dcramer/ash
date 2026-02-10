@@ -296,6 +296,7 @@ class ScheduleWatcher:
         self._handlers: list[ScheduleHandler] = []
         self._running = False
         self._task: asyncio.Task | None = None
+        self._poll_count = 0  # For heartbeat logging
 
     @property
     def schedule_file(self) -> Path:
@@ -345,8 +346,16 @@ class ScheduleWatcher:
             self._task = None
 
     async def _poll_loop(self) -> None:
+        # Heartbeat every 60 polls (~5 min at 5s interval)
+        heartbeat_interval = 60
         while self._running:
             try:
+                self._poll_count += 1
+                if self._poll_count % heartbeat_interval == 0:
+                    logger.info(
+                        f"Schedule watcher heartbeat: poll #{self._poll_count}, "
+                        f"file={self._schedule_file}"
+                    )
                 await self._check_schedule()
             except Exception as e:
                 logger.error(f"Error checking schedule: {e}")
@@ -370,11 +379,23 @@ class ScheduleWatcher:
             if entry:
                 entries.append(entry)
 
-        logger.debug(
-            f"Checking schedule: {len(entries)} entries found (tz={self._timezone})"
-        )
+        # Log entry details at DEBUG level for diagnostics
+        for entry in entries:
+            next_fire = entry.next_fire_time(self._timezone)
+            next_fire_str = next_fire.isoformat() if next_fire else "None"
+            entry_tz = entry.timezone or self._timezone
+            entry_type = "cron" if entry.cron else "one-shot"
+            last_run_str = entry.last_run.isoformat() if entry.last_run else "never"
+            logger.debug(
+                f"Schedule entry {entry.id or '?'}: type={entry_type}, "
+                f"tz={entry_tz}, next_fire={next_fire_str}, "
+                f"last_run={last_run_str}"
+            )
 
         due = [e for e in entries if e.is_due(self._timezone)]
+        logger.debug(
+            f"Schedule check: {len(entries)} entries, {len(due)} due (watcher_tz={self._timezone})"
+        )
         if not due:
             return
 

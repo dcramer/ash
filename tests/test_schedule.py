@@ -567,3 +567,157 @@ class TestScheduleEntryTimezone:
         assert next_fire is not None
         assert next_fire.tzinfo == UTC
         assert next_fire.hour == 15  # 3 PM UTC
+
+    def test_timezone_cron_no_last_run_fires_at_scheduled_time(self):
+        """Test cron entry with timezone but no last_run fires correctly.
+
+        This tests the exact scenario that was failing: a cron entry created
+        with a timezone like "America/Los_Angeles", with no last_run (first
+        execution), should fire when the scheduled time arrives.
+        """
+        from zoneinfo import ZoneInfo
+
+        # Create entry for 7:45 AM Mon/Tue/Thu in LA timezone (like user's entry)
+        entry = ScheduleEntry(
+            id="test1234",
+            message="Test weekly meeting reminder",
+            cron="45 7 * * 1,2,4",  # 7:45 AM Mon/Tue/Thu
+            timezone="America/Los_Angeles",
+            last_run=None,  # First execution - no last_run
+        )
+
+        # Calculate next fire time
+        next_fire = entry.next_fire_time()
+        assert next_fire is not None
+        assert next_fire.tzinfo == UTC
+
+        # Convert to LA time to verify it's 7:45 AM local
+        la_tz = ZoneInfo("America/Los_Angeles")
+        next_fire_la = next_fire.astimezone(la_tz)
+        assert next_fire_la.hour == 7
+        assert next_fire_la.minute == 45
+        # Should be Mon(0), Tue(1), or Thu(3)
+        assert next_fire_la.weekday() in (0, 1, 3)
+
+    def test_timezone_cron_is_due_with_old_last_run(self):
+        """Test is_due returns True for cron entries with old last_run.
+
+        A cron entry with a last_run in the past should be due if the
+        next scheduled time has passed.
+        """
+        # Entry for every minute with last_run 2 days ago
+        # This ensures next fire time is in the past
+        entry = ScheduleEntry(
+            id="test5678",
+            message="Morning check",
+            cron="* * * * *",  # Every minute
+            timezone="America/Los_Angeles",
+            last_run=datetime.now(UTC) - timedelta(days=2),
+        )
+
+        # With last_run 2 days ago and cron "every minute",
+        # the next fire time is definitely in the past
+        next_fire = entry.next_fire_time()
+        assert next_fire is not None
+        assert next_fire < datetime.now(UTC)
+
+        # Should be due since next fire time is in the past
+        assert entry.is_due() is True
+
+    def test_first_cron_run_waits_for_next_occurrence(self):
+        """Test that a new cron entry waits for the next occurrence, not now.
+
+        A cron entry with no last_run should calculate its next fire time
+        from now, meaning it should not be immediately due.
+        """
+        # Create entry for 8 AM daily - this should calculate next 8 AM
+        entry = ScheduleEntry(
+            message="Daily task",
+            cron="0 8 * * *",
+            timezone="UTC",
+            last_run=None,
+        )
+
+        # Next fire should be in the future (next 8 AM)
+        next_fire = entry.next_fire_time()
+        assert next_fire is not None
+        assert next_fire > datetime.now(UTC)
+
+        # Therefore should NOT be due yet
+        assert entry.is_due() is False
+
+    def test_weekly_cron_fires_at_scheduled_time(self):
+        """Test Monday 8am cron calculates next fire correctly with timezone.
+
+        Verifies that a weekly cron expression like '0 8 * * 1' (Monday 8am)
+        correctly calculates the next fire time in the specified timezone.
+        """
+        from zoneinfo import ZoneInfo
+
+        la_tz = ZoneInfo("America/Los_Angeles")
+
+        # Monday 8am LA time - last ran a week ago
+        # Set last_run to a known Monday 8am LA time
+        last_monday_8am_la = datetime(2026, 2, 2, 8, 0, 0, tzinfo=la_tz)  # Mon Feb 2
+        last_run_utc = last_monday_8am_la.astimezone(UTC)
+
+        entry = ScheduleEntry(
+            message="Weekly standup",
+            cron="0 8 * * 1",  # Monday 8am
+            timezone="America/Los_Angeles",
+            last_run=last_run_utc,
+        )
+
+        next_fire = entry.next_fire_time()
+        assert next_fire is not None
+
+        # Convert to LA time and verify it's Monday 8am
+        next_fire_la = next_fire.astimezone(la_tz)
+        assert next_fire_la.weekday() == 0  # Monday
+        assert next_fire_la.hour == 8
+        assert next_fire_la.minute == 0
+
+        # Should be exactly one week after last_run
+        expected_next = datetime(2026, 2, 9, 8, 0, 0, tzinfo=la_tz)  # Mon Feb 9
+        assert next_fire_la == expected_next
+
+    def test_weekly_cron_is_due_after_scheduled_time(self):
+        """Test Monday 8am cron is due when scheduled time has passed.
+
+        Sets last_run to previous week and verifies is_due() returns True
+        when the next scheduled Monday 8am has passed.
+        """
+        from zoneinfo import ZoneInfo
+
+        la_tz = ZoneInfo("America/Los_Angeles")
+
+        # Last ran Monday Feb 2 at 8am LA
+        last_monday_8am_la = datetime(2026, 2, 2, 8, 0, 0, tzinfo=la_tz)
+        last_run_utc = last_monday_8am_la.astimezone(UTC)
+
+        # Next fire would be Monday Feb 9 at 8am LA
+        # If current time is after that, it should be due
+
+        entry = ScheduleEntry(
+            message="Weekly standup",
+            cron="0 8 * * 1",  # Monday 8am
+            timezone="America/Los_Angeles",
+            last_run=last_run_utc,
+        )
+
+        next_fire = entry.next_fire_time()
+        assert next_fire is not None
+
+        # Verify next fire is Feb 9 8am LA
+        next_fire_la = next_fire.astimezone(la_tz)
+        assert next_fire_la.day == 9
+        assert next_fire_la.month == 2
+
+        # If now is after Feb 9 8am LA (Feb 9 4pm UTC for PST), should be due
+        # Since today is Feb 9 2026, check if we're past 8am LA
+        now = datetime.now(UTC)
+        if now > next_fire:
+            assert entry.is_due() is True
+        else:
+            # If we're before the scheduled time, it should not be due
+            assert entry.is_due() is False
