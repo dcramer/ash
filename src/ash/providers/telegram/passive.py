@@ -42,25 +42,35 @@ def _format_speaker_label(username: str | None, display_name: str | None) -> str
     return ""
 
 
-ENGAGEMENT_DECISION_PROMPT = """You are deciding whether to engage in a group chat.
+@dataclass
+class BotContext:
+    """Context about the bot's identity for engagement decisions."""
+
+    name: str  # e.g., "Ash"
+    username: str | None = None  # e.g., "ash_bot"
+
+
+ENGAGEMENT_DECISION_PROMPT = """You are {bot_name}, deciding whether to engage in a group chat.
 You were NOT mentioned or replied to. Review the message and context.
 
-## Guidelines
-ENGAGE only if you can add genuine value:
-- A question you can answer (about topics you know)
-- Someone asking for help with something you can do
-- A factual error you can correct
-- Relevant expertise to share
+## Your Identity
+- Name: {bot_name}
+- Username: @{bot_username}
 
-SILENT in most cases:
+## ENGAGE when:
+- Someone addresses you by name ("{bot_name}" or "@{bot_username}")
+- A question you can answer based on your knowledge
+- You have relevant memories about the topic
+- Someone needs help with something you can do
+
+## SILENT when:
 - Casual conversation between others
-- Messages directed at specific people
+- Messages directed at specific people (not you)
 - Small talk, jokes, or social banter
 - Topics where you have nothing useful to add
 - Reactions, emoji, or short messages
-
-## Context
-Chat: {chat_title}
+{memories_section}
+## Chat: {chat_title}
 Recent messages:
 {context_messages}
 
@@ -198,11 +208,33 @@ class PassiveEngagementDecider:
         self._model = model
         self._timeout = timeout
 
+    def _check_name_mention(self, text: str, bot_context: BotContext | None) -> bool:
+        """Check if the message mentions the bot by name.
+
+        Returns True if bot name or username is mentioned (case-insensitive).
+        """
+        if not bot_context:
+            return False
+
+        text_lower = text.lower()
+
+        # Check bot name (e.g., "ash")
+        if bot_context.name.lower() in text_lower:
+            return True
+
+        # Check @username (e.g., "@ash_bot")
+        if bot_context.username and f"@{bot_context.username}".lower() in text_lower:
+            return True
+
+        return False
+
     async def decide(
         self,
         message: IncomingMessage,
         recent_messages: list[str],
         chat_title: str | None = None,
+        bot_context: BotContext | None = None,
+        relevant_memories: list[str] | None = None,
     ) -> bool:
         """Decide whether to engage with this message.
 
@@ -210,6 +242,8 @@ class PassiveEngagementDecider:
             message: The current message to evaluate.
             recent_messages: Recent message texts for context.
             chat_title: Title of the chat/group.
+            bot_context: Bot identity information (name, username).
+            relevant_memories: List of relevant memories about the topic.
 
         Returns:
             True to engage, False to stay silent.
@@ -220,14 +254,33 @@ class PassiveEngagementDecider:
             logger.debug("Skipping engagement decision: message too short")
             return False
 
+        # Fast path: if bot name is mentioned, engage immediately
+        if self._check_name_mention(text, bot_context):
+            logger.info("Fast path: bot name mentioned in message")
+            return True
+
         # Format context
         context = "\n".join(recent_messages[-5:]) if recent_messages else "(no context)"
 
+        # Format memories section
+        if relevant_memories:
+            memories_text = "\n".join(f"- {m}" for m in relevant_memories)
+            memories_section = f"\n## Your relevant memories:\n{memories_text}\n"
+        else:
+            memories_section = ""
+
+        # Get bot identity for prompt
+        bot_name = bot_context.name if bot_context else "Assistant"
+        bot_username = bot_context.username if bot_context else "assistant"
+
         prompt = ENGAGEMENT_DECISION_PROMPT.format(
+            bot_name=bot_name,
+            bot_username=bot_username,
             chat_title=chat_title or "Unknown",
             context_messages=context,
             username=message.username or message.user_id,
             message_text=text,
+            memories_section=memories_section,
         )
 
         try:

@@ -187,15 +187,28 @@ class TelegramMessageHandler:
 
         logger.info("Passive listening initialized")
 
+    def _get_bot_display_name(self) -> str:
+        """Extract display name from bot username.
+
+        Converts "ash_bot" or "ash_noe_bot" -> "Ash".
+        Falls back to "Assistant" if no username.
+        """
+        if username := self._provider.bot_username:
+            # Take the first part before underscore and title-case it
+            return username.split("_")[0].title()
+        return "Assistant"
+
     async def handle_passive_message(self, message: IncomingMessage) -> None:
         """Handle a passively observed message (not mentioned or replied to).
 
         This method:
         1. Checks throttling - skips if cooldown/rate limit applies
         2. Runs memory extraction in background (if enabled)
-        3. Makes engagement decision via LLM
-        4. If ENGAGE, promotes to full message processing
+        3. Queries relevant memories for engagement context
+        4. Makes engagement decision via LLM (with bot identity context)
+        5. If ENGAGE, promotes to full message processing
         """
+        from ash.providers.telegram.passive import BotContext
 
         chat_id = message.chat_id
         chat_title = message.metadata.get("chat_title")
@@ -224,6 +237,29 @@ class TelegramMessageHandler:
             logger.debug("No passive decider - skipping engagement decision")
             return
 
+        # Build bot context for identity awareness
+        bot_context = BotContext(
+            name=self._get_bot_display_name(),
+            username=self._provider.bot_username,
+        )
+
+        # Query relevant memories (with timeout)
+        relevant_memories: list[str] | None = None
+        passive_config = self._provider.passive_config
+        if (
+            passive_config
+            and passive_config.memory_lookup_enabled
+            and self._memory_manager
+            and message.text
+        ):
+            relevant_memories = await self._query_relevant_memories(
+                query=message.text,
+                user_id=message.user_id,
+                chat_id=chat_id,
+                lookup_timeout=passive_config.memory_lookup_timeout,
+                threshold=passive_config.memory_similarity_threshold,
+            )
+
         # Get recent messages for context
         recent_messages = await self._get_recent_message_texts(chat_id, limit=5)
 
@@ -231,6 +267,8 @@ class TelegramMessageHandler:
             message=message,
             recent_messages=recent_messages,
             chat_title=chat_title,
+            bot_context=bot_context,
+            relevant_memories=relevant_memories,
         )
 
         # Note: The engagement decision could be recorded to incoming.jsonl here
@@ -353,6 +391,58 @@ class TelegramMessageHandler:
             if text:
                 texts.append(f"@{username}: {text}")
         return texts
+
+    async def _query_relevant_memories(
+        self,
+        query: str,
+        user_id: str,
+        chat_id: str,
+        lookup_timeout: float = 2.0,
+        threshold: float = 0.4,
+    ) -> list[str] | None:
+        """Query memory for facts relevant to the message.
+
+        Args:
+            query: The message text to search for relevant memories.
+            user_id: The user who sent the message.
+            chat_id: The chat where the message was sent.
+            lookup_timeout: Maximum time to wait for memory search.
+            threshold: Minimum similarity score to include a memory.
+
+        Returns:
+            List of relevant memory contents, or None if lookup fails/times out.
+        """
+        if not self._memory_manager:
+            return None
+
+        try:
+            results = await asyncio.wait_for(
+                self._memory_manager.search(
+                    query=query,
+                    limit=5,
+                    owner_user_id=user_id,
+                    chat_id=chat_id,
+                ),
+                timeout=lookup_timeout,
+            )
+
+            # Filter by similarity threshold and extract content
+            memories = [r.memory.content for r in results if r.similarity >= threshold]
+
+            if memories:
+                logger.debug(
+                    "Found %d relevant memories for passive engagement",
+                    len(memories),
+                )
+
+            return memories if memories else None
+
+        except TimeoutError:
+            logger.debug("Memory lookup timed out for passive engagement")
+            return None
+        except Exception as e:
+            logger.debug("Memory lookup failed for passive engagement: %s", e)
+            return None
 
     def _get_thread_index(self, chat_id: str) -> ThreadIndex:
         """Get or create a ThreadIndex for a chat."""

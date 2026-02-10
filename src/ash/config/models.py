@@ -79,6 +79,11 @@ class PassiveListeningConfig(BaseModel):
     extraction_enabled: bool = True  # Run memory extraction on passive messages
     context_messages: int = 5  # Number of recent messages to include for context
 
+    # Memory lookup for engagement decisions
+    memory_lookup_enabled: bool = True
+    memory_lookup_timeout: float = 2.0  # seconds
+    memory_similarity_threshold: float = 0.4
+
 
 class TelegramConfig(BaseModel):
     """Configuration for Telegram provider."""
