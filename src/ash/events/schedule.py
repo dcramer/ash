@@ -121,6 +121,7 @@ class ScheduleEntry:
             try:
                 tz = ZoneInfo(timezone)
             except Exception:
+                logger.warning(f"Invalid timezone '{timezone}', falling back to UTC")
                 tz = ZoneInfo("UTC")
 
             now = datetime.now(tz)
@@ -187,6 +188,7 @@ class ScheduleEntry:
             try:
                 tz = ZoneInfo(timezone)
             except Exception:
+                logger.warning(f"Invalid timezone '{timezone}', falling back to UTC")
                 tz = ZoneInfo("UTC")
 
             # Convert base time to local timezone for cron evaluation
