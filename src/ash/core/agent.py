@@ -1043,6 +1043,7 @@ class AgentComponents:
     prompt_builder: SystemPromptBuilder
     skill_registry: SkillRegistry
     memory_manager: MemoryManager | None
+    memory_extractor: MemoryExtractor | None = None
     sandbox_executor: SandboxExecutor | None = None
     agent_registry: AgentRegistry | None = None
 
@@ -1245,6 +1246,7 @@ async def create_agent(
         prompt_builder=prompt_builder,
         skill_registry=skill_registry,
         memory_manager=memory_manager,
+        memory_extractor=memory_extractor,
         sandbox_executor=shared_executor,
         agent_registry=agent_registry,
     )

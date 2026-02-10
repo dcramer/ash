@@ -206,6 +206,9 @@ async def _run_server(
         agent_registry=components.agent_registry,
         skill_registry=components.skill_registry,
         tool_registry=components.tool_registry,
+        llm_provider=components.llm,
+        memory_manager=components.memory_manager,
+        memory_extractor=components.memory_extractor,
     )
 
     # Start server

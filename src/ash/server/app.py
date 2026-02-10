@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from ash.config import AshConfig
     from ash.core import Agent
     from ash.db import Database
+    from ash.llm import LLMProvider
+    from ash.memory import MemoryManager
+    from ash.memory.extractor import MemoryExtractor
     from ash.providers.telegram import TelegramMessageHandler, TelegramProvider
     from ash.skills import SkillRegistry
     from ash.tools.registry import ToolRegistry
@@ -37,6 +40,9 @@ class AshServer:
         agent_registry: "AgentRegistry | None" = None,
         skill_registry: "SkillRegistry | None" = None,
         tool_registry: "ToolRegistry | None" = None,
+        llm_provider: "LLMProvider | None" = None,
+        memory_manager: "MemoryManager | None" = None,
+        memory_extractor: "MemoryExtractor | None" = None,
     ):
         self._database = database
         self._agent = agent
@@ -45,6 +51,9 @@ class AshServer:
         self._agent_registry = agent_registry
         self._skill_registry = skill_registry
         self._tool_registry = tool_registry
+        self._llm_provider = llm_provider
+        self._memory_manager = memory_manager
+        self._memory_extractor = memory_extractor
         self._telegram_handler: TelegramMessageHandler | None = None
 
         self._app = self._create_app()
@@ -75,6 +84,9 @@ class AshServer:
                     agent_registry=self._agent_registry,
                     skill_registry=self._skill_registry,
                     tool_registry=self._tool_registry,
+                    llm_provider=self._llm_provider,
+                    memory_manager=self._memory_manager,
+                    memory_extractor=self._memory_extractor,
                 )
                 # Wire up callback handler for checkpoint inline keyboards
                 self._telegram_provider.set_callback_handler(
@@ -133,6 +145,9 @@ def create_app(
     agent_registry: "AgentRegistry | None" = None,
     skill_registry: "SkillRegistry | None" = None,
     tool_registry: "ToolRegistry | None" = None,
+    llm_provider: "LLMProvider | None" = None,
+    memory_manager: "MemoryManager | None" = None,
+    memory_extractor: "MemoryExtractor | None" = None,
 ) -> FastAPI:
     """Create the FastAPI application."""
     server = AshServer(
@@ -143,5 +158,8 @@ def create_app(
         agent_registry=agent_registry,
         skill_registry=skill_registry,
         tool_registry=tool_registry,
+        llm_provider=llm_provider,
+        memory_manager=memory_manager,
+        memory_extractor=memory_extractor,
     )
     return server.app
