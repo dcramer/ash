@@ -444,12 +444,12 @@ class TelegramMessageHandler:
             memories = [r.content for r in results if r.similarity >= threshold]
 
             if memories:
-                logger.info(
+                logger.debug(
                     "Memory lookup found %d relevant memories for engagement",
                     len(memories),
                 )
             else:
-                logger.info("Memory lookup found no relevant memories")
+                logger.debug("Memory lookup found no relevant memories")
 
             return memories if memories else None
 
