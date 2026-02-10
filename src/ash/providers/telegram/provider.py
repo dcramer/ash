@@ -382,8 +382,8 @@ class TelegramProvider(Provider):
         else:
             # Polling mode
             logger.info("Starting Telegram bot in polling mode")
-            # Don't drop pending updates - we'll check for duplicates in the handler
-            await self._bot.delete_webhook(drop_pending_updates=False)
+            # Drop pending updates to avoid replaying old messages on restart
+            await self._bot.delete_webhook(drop_pending_updates=True)
             # Disable aiogram's signal handling - let the app handle SIGINT/SIGTERM
             await self._dp.start_polling(
                 self._bot,
