@@ -186,12 +186,19 @@ class UseAgentTool(Tool):
             # Clear the checkpoint since we're resuming (executor validates ownership)
             await self.clear_checkpoint(resume_checkpoint_id)
 
+        # Get session info from context for subagent logging
+        session_manager, tool_use_id = (
+            context.get_session_info() if context else (None, None)
+        )
+
         result = await self._executor.execute(
             agent,
             message,
             agent_context,
             resume_from=resume_from,
             user_response=checkpoint_response,
+            session_manager=session_manager,
+            parent_tool_use_id=tool_use_id,
         )
 
         # Handle interrupted result (checkpoint)

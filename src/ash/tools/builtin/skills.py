@@ -334,8 +334,18 @@ class UseSkillTool(Tool):
 
         logger.info(f"Invoking skill '{skill_name}' with message: {message[:100]}...")
 
+        # Get session info from context for subagent logging
+        session_manager, tool_use_id = (
+            context.get_session_info() if context else (None, None)
+        )
+
         result = await self._executor.execute(
-            agent, message, agent_context, environment=env
+            agent,
+            message,
+            agent_context,
+            environment=env,
+            session_manager=session_manager,
+            parent_tool_use_id=tool_use_id,
         )
 
         if result.is_error:

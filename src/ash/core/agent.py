@@ -590,10 +590,13 @@ class Agent:
             if on_tool_start:
                 await on_tool_start(tool_use.name, tool_use.input)
 
+            # Create per-tool context with the tool_use_id for subagent logging
+            per_tool_context = replace(tool_context, tool_use_id=tool_use.id)
+
             result = await self._tools.execute(
                 tool_use.name,
                 tool_use.input,
-                tool_context,
+                per_tool_context,
             )
 
             tool_calls.append(
@@ -646,6 +649,7 @@ class Agent:
         on_tool_start: OnToolStartCallback | None = None,
         get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_path: str | None = None,
+        session_manager: Any = None,  # Type: SessionManager | None
     ) -> AgentResponse:
         setup = await self._prepare_message_context(
             user_message, session, user_id, session_path
@@ -675,6 +679,13 @@ class Agent:
             session.add_assistant_message(response.message.content)
 
             pending_tools = session.get_pending_tool_uses()
+            text_len = len(response.message.get_text() or "")
+            tool_names = [t.name for t in pending_tools]
+            logger.info(
+                f"Main agent iteration {iterations}: text_len={text_len}, "
+                f"tools={tool_names}"
+            )
+
             if not pending_tools:
                 self._maybe_spawn_memory_extraction(
                     user_message, setup.effective_user_id, session
@@ -697,6 +708,7 @@ class Agent:
                 env=_build_routing_env(
                     session, setup.effective_user_id, timezone=self._timezone
                 ),
+                session_manager=session_manager,
             )
 
             new_calls, steering = await self._execute_pending_tools(
@@ -749,6 +761,7 @@ class Agent:
         on_tool_start: OnToolStartCallback | None = None,
         get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_path: str | None = None,
+        session_manager: Any = None,  # Type: SessionManager | None
     ) -> AsyncIterator[str]:
         setup = await self._prepare_message_context(
             user_message, session, user_id, session_path
@@ -820,6 +833,7 @@ class Agent:
                 env=_build_routing_env(
                     session, setup.effective_user_id, timezone=self._timezone
                 ),
+                session_manager=session_manager,
             )
 
             _, steering = await self._execute_pending_tools(

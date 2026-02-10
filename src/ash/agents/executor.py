@@ -12,6 +12,7 @@ from ash.tools.base import ToolContext
 if TYPE_CHECKING:
     from ash.config import AshConfig
     from ash.llm.base import LLMProvider
+    from ash.sessions.manager import SessionManager
     from ash.tools import ToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,41 @@ class AgentExecutor:
 
         return [d for d in all_defs if d.name not in excluded]
 
+    async def _log_assistant_message(
+        self,
+        session_manager: "SessionManager",
+        agent_session_id: str,
+        content: str | list,
+        iteration: int,
+    ) -> None:
+        """Log assistant message and any tool uses to the session.
+
+        Args:
+            session_manager: Session manager for logging.
+            agent_session_id: The subagent session ID.
+            content: The message content blocks.
+            iteration: Current iteration number.
+        """
+        from ash.sessions.utils import content_block_to_dict
+
+        # Handle string content (simple text response)
+        if isinstance(content, str):
+            await session_manager.add_assistant_message(
+                content=content,
+                metadata={"iteration": iteration},
+                agent_session_id=agent_session_id,
+            )
+            return
+
+        # Convert content blocks to serializable format and log
+        # add_assistant_message handles tool use extraction automatically
+        serialized = [content_block_to_dict(b) for b in content]
+        await session_manager.add_assistant_message(
+            content=serialized,
+            metadata={"iteration": iteration},
+            agent_session_id=agent_session_id,
+        )
+
     async def execute(
         self,
         agent: Agent,
@@ -70,6 +106,8 @@ class AgentExecutor:
         environment: dict[str, str] | None = None,
         resume_from: CheckpointState | None = None,
         user_response: str | None = None,
+        session_manager: "SessionManager | None" = None,
+        parent_tool_use_id: str | None = None,
     ) -> AgentResult:
         """Execute an agent.
 
@@ -80,6 +118,8 @@ class AgentExecutor:
             environment: Optional environment variables for tools.
             resume_from: Optional checkpoint to resume from.
             user_response: User's response when resuming from checkpoint.
+            session_manager: Optional session manager for logging subagent activity.
+            parent_tool_use_id: Tool use ID that invoked this subagent (for logging).
 
         Returns:
             AgentResult with content, or interrupted result with checkpoint.
@@ -94,6 +134,8 @@ class AgentExecutor:
                 environment=environment,
                 resume_from=resume_from,
                 user_response=user_response,
+                session_manager=session_manager,
+                parent_tool_use_id=parent_tool_use_id,
             )
 
     async def _execute_inner(
@@ -104,9 +146,25 @@ class AgentExecutor:
         environment: dict[str, str] | None = None,
         resume_from: CheckpointState | None = None,
         user_response: str | None = None,
+        session_manager: "SessionManager | None" = None,
+        parent_tool_use_id: str | None = None,
     ) -> AgentResult:
         """Inner implementation of execute (runs with log context)."""
         agent_config = agent.config
+        agent_session_id: str | None = None
+
+        # Start subagent session logging if session_manager is provided
+        if session_manager and parent_tool_use_id:
+            agent_type = "skill" if agent_config.is_skill_agent else "agent"
+            agent_session_id = await session_manager.start_agent_session(
+                parent_tool_use_id=parent_tool_use_id,
+                agent_type=agent_type,
+                agent_name=agent_config.name,
+            )
+            logger.debug(
+                f"Started agent session {agent_session_id} for {agent_type} "
+                f"'{agent_config.name}'"
+            )
 
         # Handle passthrough agents - they bypass the LLM loop entirely
         if agent_config.is_passthrough:
@@ -164,6 +222,13 @@ class AgentExecutor:
             )
             session.add_user_message(input_message)
 
+            # Log the input message to session
+            if session_manager and agent_session_id:
+                await session_manager.add_user_message(
+                    content=input_message,
+                    agent_session_id=agent_session_id,
+                )
+
         overrides = self._config.agents.get(agent_config.name)
         model_alias = (overrides.model if overrides else None) or agent_config.model
         max_iterations = (
@@ -214,6 +279,12 @@ class AgentExecutor:
 
             message = response.message
             session.add_assistant_message(message.content)
+
+            # Log assistant message to session
+            if session_manager and agent_session_id:
+                await self._log_assistant_message(
+                    session_manager, agent_session_id, message.content, iteration
+                )
 
             tool_uses = message.get_tool_uses()
             if not tool_uses:
@@ -281,17 +352,20 @@ class AgentExecutor:
                         tool_use.input,
                         context=tool_context,
                     )
-                    session.add_tool_result(
-                        tool_use.id,
-                        result.content,
-                        is_error=result.is_error,
-                    )
+                    output = result.content
+                    is_error = result.is_error
                 except Exception as e:
                     logger.error(f"Agent tool execution error: {e}")
-                    session.add_tool_result(
-                        tool_use.id,
-                        f"Tool error: {e}",
-                        is_error=True,
+                    output = f"Tool error: {e}"
+                    is_error = True
+
+                session.add_tool_result(tool_use.id, output, is_error=is_error)
+                if session_manager and agent_session_id:
+                    await session_manager.add_tool_result(
+                        tool_use_id=tool_use.id,
+                        output=output,
+                        success=not is_error,
+                        agent_session_id=agent_session_id,
                     )
 
         logger.warning(

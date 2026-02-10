@@ -10,6 +10,7 @@ import aiofiles
 
 if TYPE_CHECKING:
     from ash.sessions.types import (
+        AgentSessionEntry,
         CompactionEntry,
         MessageEntry,
         SessionHeader,
@@ -65,35 +66,30 @@ class SessionWriter:
         # Write to history.jsonl (simplified format)
         await self._append_history(entry.to_history_dict())
 
-    async def write_tool_use(self, entry: ToolUseEntry) -> None:
-        """Write a tool use entry to context.jsonl only.
-
-        Args:
-            entry: Tool use entry to write.
-        """
+    async def _write_context_entry(
+        self,
+        entry: ToolUseEntry | ToolResultEntry | CompactionEntry | AgentSessionEntry,
+    ) -> None:
+        """Write an entry to context.jsonl only."""
         if not self._initialized:
             await self.ensure_directory()
         await self._append_context(entry.to_dict())
+
+    async def write_tool_use(self, entry: ToolUseEntry) -> None:
+        """Write a tool use entry to context.jsonl only."""
+        await self._write_context_entry(entry)
 
     async def write_tool_result(self, entry: ToolResultEntry) -> None:
-        """Write a tool result entry to context.jsonl only.
-
-        Args:
-            entry: Tool result entry to write.
-        """
-        if not self._initialized:
-            await self.ensure_directory()
-        await self._append_context(entry.to_dict())
+        """Write a tool result entry to context.jsonl only."""
+        await self._write_context_entry(entry)
 
     async def write_compaction(self, entry: CompactionEntry) -> None:
-        """Write a compaction entry to context.jsonl only.
+        """Write a compaction entry to context.jsonl only."""
+        await self._write_context_entry(entry)
 
-        Args:
-            entry: Compaction entry to write.
-        """
-        if not self._initialized:
-            await self.ensure_directory()
-        await self._append_context(entry.to_dict())
+    async def write_agent_session(self, entry: AgentSessionEntry) -> None:
+        """Write an agent session entry to context.jsonl only."""
+        await self._write_context_entry(entry)
 
     async def _append_context(self, data: dict) -> None:
         """Append a JSON line to context.jsonl.

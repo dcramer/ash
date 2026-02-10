@@ -6,12 +6,13 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ash.config.paths import get_ash_home
 from ash.llm.types import ContentBlock, Message, ToolUse
 from ash.sessions.reader import SessionReader
 from ash.sessions.types import (
+    AgentSessionEntry,
     CompactionEntry,
     MessageEntry,
     SessionHeader,
@@ -113,6 +114,7 @@ class SessionManager:
         user_id: str | None = None,
         username: str | None = None,
         display_name: str | None = None,
+        agent_session_id: str | None = None,
     ) -> str:
         await self.ensure_session()
         entry = MessageEntry.create(
@@ -123,6 +125,7 @@ class SessionManager:
             username=username,
             display_name=display_name,
             metadata=metadata,
+            agent_session_id=agent_session_id,
         )
         await self._writer.write_message(entry)
         self._current_message_id = entry.id
@@ -130,26 +133,38 @@ class SessionManager:
 
     async def add_assistant_message(
         self,
-        content: str | list[ContentBlock],
+        content: str | list[ContentBlock] | list[dict[str, Any]],
         token_count: int | None = None,
         metadata: dict[str, Any] | None = None,
+        agent_session_id: str | None = None,
     ) -> str:
         await self.ensure_session()
-        stored_content: str | list[dict[str, Any]] = (
-            content
-            if isinstance(content, str)
-            else [content_block_to_dict(b) for b in content]
-        )
+        stored_content: str | list[dict[str, Any]]
+        if isinstance(content, str):
+            stored_content = content
+        elif content and isinstance(content[0], dict):
+            # Already serialized dicts (from subagent logging)
+            stored_content = content  # type: ignore[assignment]
+        else:
+            # ContentBlock objects need serialization
+            stored_content = [content_block_to_dict(b) for b in content]  # type: ignore[arg-type]
+
         entry = MessageEntry.create(
             role="assistant",
             content=stored_content,
             token_count=token_count,
             metadata=metadata,
+            agent_session_id=agent_session_id,
         )
         await self._writer.write_message(entry)
         self._current_message_id = entry.id
 
-        if not isinstance(content, str):
+        # Auto-extract tool uses from ContentBlock content
+        if (
+            not isinstance(content, str)
+            and content
+            and not isinstance(content[0], dict)
+        ):
             for block in content:
                 if isinstance(block, ToolUse):
                     tool_entry = ToolUseEntry.create(
@@ -157,6 +172,7 @@ class SessionManager:
                         message_id=entry.id,
                         name=block.name,
                         input_data=block.input,
+                        agent_session_id=agent_session_id,
                     )
                     await self._writer.write_tool_use(tool_entry)
 
@@ -167,6 +183,7 @@ class SessionManager:
         tool_use_id: str,
         name: str,
         input_data: dict[str, Any],
+        agent_session_id: str | None = None,
     ) -> None:
         await self.ensure_session()
         entry = ToolUseEntry.create(
@@ -174,6 +191,7 @@ class SessionManager:
             message_id=self._current_message_id or "",
             name=name,
             input_data=input_data,
+            agent_session_id=agent_session_id,
         )
         await self._writer.write_tool_use(entry)
 
@@ -184,6 +202,7 @@ class SessionManager:
         success: bool = True,
         duration_ms: int | None = None,
         metadata: dict[str, Any] | None = None,
+        agent_session_id: str | None = None,
     ) -> None:
         await self.ensure_session()
         entry = ToolResultEntry.create(
@@ -192,6 +211,7 @@ class SessionManager:
             success=success,
             duration_ms=duration_ms,
             metadata=metadata,
+            agent_session_id=agent_session_id,
         )
         await self._writer.write_tool_result(entry)
 
@@ -210,6 +230,22 @@ class SessionManager:
             first_kept_entry_id=first_kept_entry_id,
         )
         await self._writer.write_compaction(entry)
+
+    async def start_agent_session(
+        self,
+        parent_tool_use_id: str,
+        agent_type: Literal["skill", "agent"],
+        agent_name: str,
+    ) -> str:
+        """Start a new subagent session and log it."""
+        await self.ensure_session()
+        entry = AgentSessionEntry.create(
+            parent_tool_use_id=parent_tool_use_id,
+            agent_type=agent_type,
+            agent_name=agent_name,
+        )
+        await self._writer.write_agent_session(entry)
+        return entry.id
 
     async def load_messages_for_llm(
         self,

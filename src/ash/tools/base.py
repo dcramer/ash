@@ -26,11 +26,19 @@ class ToolContext:
     # e.g., {"SKILL_API_KEY": "abc123"}
     env: dict[str, str] = field(default_factory=dict)
 
+    # Session manager for logging subagent activity (optional)
+    session_manager: Any = None  # Type: SessionManager | None
+
+    # Current tool use ID (for linking subagent sessions to their invoking tool)
+    tool_use_id: str | None = None
+
     @classmethod
     def from_agent_context(
         cls,
         ctx: "AgentContext",
         env: dict[str, str] | None = None,
+        session_manager: Any = None,
+        tool_use_id: str | None = None,
     ) -> "ToolContext":
         """Create ToolContext from AgentContext, preserving all shared fields."""
         return cls(
@@ -41,7 +49,13 @@ class ToolContext:
             provider=ctx.provider,
             metadata=dict(ctx.metadata) if ctx.metadata else {},
             env=env or {},
+            session_manager=session_manager,
+            tool_use_id=tool_use_id,
         )
+
+    def get_session_info(self) -> tuple[Any, str | None]:
+        """Return (session_manager, tool_use_id) for subagent logging."""
+        return self.session_manager, self.tool_use_id
 
 
 @dataclass
@@ -79,7 +93,10 @@ def format_subagent_result(content: str, source_type: str, source_name: str) -> 
     """
     return f"""<instruction>
 This is the result from the "{source_name}" {source_type}.
-The user has NOT seen this output. Interpret and include relevant parts in your response.
+The user has NOT seen this output.
+
+CRITICAL: You MUST include the actual {source_type} output in your response.
+The content below is what the user asked for - relay it directly, don't just summarize.
 </instruction>
 <output>
 {content}
