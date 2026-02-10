@@ -23,6 +23,12 @@ def register(app: typer.Typer) -> None:
                 help="Action: list, show, add, remove, clear, gc, rebuild-index, history"
             ),
         ] = None,
+        target: Annotated[
+            str | None,
+            typer.Argument(
+                help="Target ID for show/history commands",
+            ),
+        ] = None,
         query: Annotated[
             str | None,
             typer.Option(
@@ -35,7 +41,7 @@ def register(app: typer.Typer) -> None:
             str | None,
             typer.Option(
                 "--id",
-                help="Memory entry ID (for remove)",
+                help="Memory entry ID (for remove, deprecated: use positional arg)",
             ),
         ] = None,
         source: Annotated[
@@ -123,26 +129,29 @@ def register(app: typer.Typer) -> None:
             ash memory list --scope personal   # List personal memories only
             ash memory list --scope shared     # List shared/group memories
             ash memory list --user bob         # List memories owned by bob
-            ash memory show --id <uuid>        # Show full details of a memory
+            ash memory show <id>               # Show full details of a memory
             ash memory add -q "User prefers dark mode"
-            ash memory remove --id <uuid>      # Remove specific entry
+            ash memory remove <id>             # Remove specific entry
             ash memory remove --all            # Remove all entries
             ash memory clear                   # Clear all memory entries
             ash memory gc                      # Garbage collect expired/superseded
             ash memory rebuild-index           # Rebuild vector index from JSONL
-            ash memory history --id <uuid>     # Show supersession chain
+            ash memory history <id>            # Show supersession chain
         """
         if action is None:
             ctx = click.get_current_context()
             click.echo(ctx.get_help())
             raise typer.Exit(0)
 
+        # Use target (positional) or entry_id (--id flag) for ID-based commands
+        resolved_id = target or entry_id
+
         try:
             asyncio.run(
                 _run_memory_action(
                     action=action,
                     query=query,
-                    entry_id=entry_id,
+                    entry_id=resolved_id,
                     source=source,
                     expires_days=expires_days,
                     include_expired=include_expired,
@@ -205,12 +214,12 @@ async def _run_memory_action(
                 await _memory_rebuild_index(session)
             elif action == "show":
                 if not entry_id:
-                    error("--id is required for show action")
+                    error("Usage: ash memory show <id>")
                     raise typer.Exit(1)
                 await _memory_show(entry_id)
             elif action == "history":
                 if not entry_id:
-                    error("--id is required for history action")
+                    error("Usage: ash memory history <id>")
                     raise typer.Exit(1)
                 await _memory_history(entry_id)
             else:
