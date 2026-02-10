@@ -261,6 +261,7 @@ class TelegramMessageHandler:
                 chat_id
             ):
                 return
+            logger.info("Passive engagement: throttle passed, evaluating message")
 
         # Run memory extraction in background (if enabled)
         if self._passive_extractor:
@@ -292,6 +293,8 @@ class TelegramMessageHandler:
                     lookup_timeout=passive_config.memory_lookup_timeout,
                     threshold=passive_config.memory_similarity_threshold,
                 )
+            elif not self._memory_manager:
+                logger.info("Memory lookup skipped: memory manager not available")
 
             # Get recent messages for context
             recent_messages = await self._get_recent_message_texts(chat_id, limit=5)
@@ -463,10 +466,12 @@ class TelegramMessageHandler:
             memories = [r.memory.content for r in results if r.similarity >= threshold]
 
             if memories:
-                logger.debug(
-                    "Found %d relevant memories for passive engagement",
+                logger.info(
+                    "Memory lookup found %d relevant memories for engagement",
                     len(memories),
                 )
+            else:
+                logger.info("Memory lookup found no relevant memories")
 
             return memories if memories else None
 
