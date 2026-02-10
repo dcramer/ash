@@ -430,12 +430,12 @@ class TelegramMessageHandler:
         assert self._memory_manager is not None
 
         try:
+            # Search across all user's memories, not just current chat
             results = await asyncio.wait_for(
                 self._memory_manager.search(
                     query=query,
                     limit=5,
                     owner_user_id=user_id,
-                    chat_id=chat_id,
                 ),
                 timeout=lookup_timeout,
             )
