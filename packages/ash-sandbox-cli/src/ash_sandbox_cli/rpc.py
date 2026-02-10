@@ -99,9 +99,11 @@ def get_context_params() -> dict[str, str | None]:
     """Get user/chat context from environment variables.
 
     Returns:
-        Dict with user_id and chat_id from environment.
+        Dict with user_id, chat_id, and speaker attribution from environment.
     """
     return {
         "user_id": os.environ.get("ASH_USER_ID"),
         "chat_id": os.environ.get("ASH_CHAT_ID"),
+        "source_user_id": os.environ.get("ASH_USERNAME"),
+        "source_user_name": os.environ.get("ASH_DISPLAY_NAME"),
     }

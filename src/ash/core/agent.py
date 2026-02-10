@@ -670,7 +670,7 @@ class Agent:
                         else None
                     )
 
-                    await self._memory.add_memory(
+                    new_memory = await self._memory.add_memory(
                         content=fact.content,
                         source="background_extraction",
                         memory_type=fact.memory_type,
@@ -688,6 +688,26 @@ class Agent:
                         fact.confidence,
                         source_user_id,
                     )
+
+                    # Check for hearsay to supersede when this is a FACT
+                    # (user speaking about themselves = no subject_person_ids)
+                    if not subject_person_ids and source_user_id:
+                        try:
+                            superseded = await self._memory.supersede_confirmed_hearsay(
+                                new_memory=new_memory,
+                                source_user_id=source_user_id,
+                                owner_user_id=user_id,
+                            )
+                            if superseded > 0:
+                                logger.debug(
+                                    "Superseded %d hearsay memories with confirmed fact",
+                                    superseded,
+                                )
+                        except Exception:
+                            logger.debug(
+                                "Failed to check for hearsay supersession",
+                                exc_info=True,
+                            )
                 except Exception:
                     logger.debug(
                         "Failed to store extracted fact: %s",

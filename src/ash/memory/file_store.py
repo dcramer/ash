@@ -289,6 +289,80 @@ class FileMemoryStore:
         result = [m for m in memories if person_id in m.subject_person_ids]
         return result[:limit]
 
+    async def find_hearsay_about_user(
+        self,
+        user_id: str,
+        owner_user_id: str | None = None,
+        limit: int = 50,
+    ) -> list[MemoryEntry]:
+        """Find hearsay memories where user_id is a subject.
+
+        Hearsay = someone else spoke about this user. This is used to find
+        memories that could potentially be superseded when the user confirms
+        the information themselves (converting hearsay to fact).
+
+        Args:
+            user_id: User ID/username to find hearsay about.
+            owner_user_id: Filter to memories owned by this user.
+            limit: Maximum entries.
+
+        Returns:
+            List of hearsay memories about this user.
+        """
+        memories = await self.get_memories(
+            limit=1000,  # Get more to filter
+            include_expired=False,
+            include_superseded=False,
+            owner_user_id=owner_user_id,
+        )
+
+        # Load people to match user_id to person_ids
+        people = await self._ensure_people_loaded()
+
+        # Find person IDs that match this user_id
+        matching_person_ids: set[str] = set()
+        user_lower = user_id.lower()
+        for person in people:
+            if person.owner_user_id != owner_user_id:
+                continue
+            # Check if user_id matches person name or aliases
+            if person.name.lower() == user_lower:
+                matching_person_ids.add(person.id)
+            elif person.aliases:
+                for alias in person.aliases:
+                    if alias.lower() == user_lower:
+                        matching_person_ids.add(person.id)
+                        break
+
+        if not matching_person_ids:
+            return []
+
+        # Find memories where:
+        # 1. User is a subject (in subject_person_ids)
+        # 2. Source user is different from the user (hearsay, not fact)
+        result: list[MemoryEntry] = []
+        for memory in memories:
+            # Check if user is a subject
+            if not memory.subject_person_ids:
+                continue
+            has_user_as_subject = any(
+                pid in matching_person_ids for pid in memory.subject_person_ids
+            )
+            if not has_user_as_subject:
+                continue
+
+            # Check if source is different (hearsay)
+            source_lower = (memory.source_user_id or "").lower()
+            if source_lower == user_lower:
+                # This is a fact (user speaking about themselves), not hearsay
+                continue
+
+            result.append(memory)
+            if len(result) >= limit:
+                break
+
+        return result
+
     async def mark_memory_superseded(
         self,
         memory_id: str,

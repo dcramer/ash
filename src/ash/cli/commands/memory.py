@@ -178,6 +178,13 @@ def register(app: typer.Typer) -> None:
                 help="Filter by scope: personal, shared, or global",
             ),
         ] = None,
+        fix_attribution: Annotated[
+            bool,
+            typer.Option(
+                "--fix-attribution",
+                help="Fix memories missing source_user_id attribution (doctor action)",
+            ),
+        ] = False,
     ) -> None:
         """Manage memory entries.
 
@@ -220,6 +227,7 @@ def register(app: typer.Typer) -> None:
                     user_id=user_id,
                     chat_id=chat_id,
                     scope=scope,
+                    fix_attribution=fix_attribution,
                 )
             )
         except KeyboardInterrupt:
@@ -240,6 +248,7 @@ async def _run_memory_action(
     user_id: str | None,
     chat_id: str | None,
     scope: str | None,
+    fix_attribution: bool = False,
 ) -> None:
     """Run memory action asynchronously."""
     if scope and scope not in ("personal", "shared", "global"):
@@ -281,7 +290,7 @@ async def _run_memory_action(
                     raise typer.Exit(1)
                 await _memory_history(entry_id)
             elif action == "doctor":
-                await _memory_doctor(config, force)
+                await _memory_doctor(config, force, fix_attribution)
             else:
                 error(f"Unknown action: {action}")
                 console.print(
@@ -805,6 +814,77 @@ async def _memory_history(memory_id: str) -> None:
     dim(f"\n{len(chain)} superseded entries")
 
 
+async def _memory_doctor_attribution(force: bool) -> None:
+    """Fix memories missing source_user_id attribution.
+
+    For personal memories created by agent/cli without source_user_id,
+    infers the speaker from owner_user_id (personal memories = owner spoke).
+    """
+    from rich.table import Table
+
+    store = _get_memory_store()
+    memories = await store.get_all_memories()
+
+    # Find memories that need attribution fix:
+    # - source is "agent" or "cli" (created through sandbox or CLI)
+    # - no source_user_id set
+    # - has owner_user_id (personal memory scope)
+    to_fix = [
+        m
+        for m in memories
+        if m.source in ("agent", "cli", "rpc")
+        and not m.source_user_id
+        and m.owner_user_id
+    ]
+
+    if not to_fix:
+        success("No memories need attribution fix")
+        return
+
+    console.print(f"Found {len(to_fix)} memories missing source_user_id attribution")
+
+    if not force:
+        # Show preview
+        table = Table(title="Memories to Fix")
+        table.add_column("ID", style="dim", max_width=8)
+        table.add_column("Source", style="cyan")
+        table.add_column("Owner", style="green")
+        table.add_column("Content", style="white", max_width=40)
+
+        for memory in to_fix[:10]:
+            content = (
+                memory.content[:60] + "..."
+                if len(memory.content) > 60
+                else memory.content
+            )
+            content = content.replace("\n", " ")
+            table.add_row(
+                memory.id[:8],
+                memory.source or "-",
+                memory.owner_user_id or "-",
+                content,
+            )
+
+        if len(to_fix) > 10:
+            table.add_row("...", "...", "...", f"... and {len(to_fix) - 10} more")
+
+        console.print(table)
+
+        if not typer.confirm("Fix attribution for these memories?"):
+            dim("Cancelled")
+            return
+
+    # Apply fixes
+    fixed_count = 0
+    for memory in to_fix:
+        # For personal memories, owner is the speaker
+        memory.source_user_id = memory.owner_user_id
+        await store.update_memory(memory)
+        fixed_count += 1
+
+    success(f"Fixed attribution for {fixed_count} memories")
+
+
 # Classification prompt for doctor command
 CLASSIFY_PROMPT = """Classify each memory into the correct type based on its content.
 
@@ -830,8 +910,8 @@ Example: {{"abc123": "preference", "def456": "identity"}}
 If all memories are correctly classified, return: {{}}"""
 
 
-async def _memory_doctor(config, force: bool) -> None:
-    """Reclassify memory types using LLM."""
+async def _memory_doctor(config, force: bool, fix_attribution: bool = False) -> None:
+    """Reclassify memory types using LLM, or fix attribution."""
     import json
 
     from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -842,6 +922,11 @@ async def _memory_doctor(config, force: bool) -> None:
     from ash.memory.types import MemoryType
 
     config: AshConfig
+
+    # Handle --fix-attribution flag
+    if fix_attribution:
+        await _memory_doctor_attribution(force)
+        return
 
     store = _get_memory_store()
     memories = await store.get_all_memories()

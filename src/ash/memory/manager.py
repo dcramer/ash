@@ -713,6 +713,93 @@ class MemoryManager:
         """
         return await self._store.get_supersession_chain(memory_id)
 
+    async def supersede_confirmed_hearsay(
+        self,
+        new_memory: MemoryEntry,
+        source_user_id: str,
+        owner_user_id: str,
+        similarity_threshold: float = 0.80,
+    ) -> int:
+        """Supersede hearsay memories when user confirms a fact about themselves.
+
+        When a user states a fact about themselves that was previously reported
+        as hearsay by someone else, this method finds and supersedes the hearsay
+        memories with the new first-person fact.
+
+        Args:
+            new_memory: The new FACT memory (user speaking about themselves).
+            source_user_id: The user who stated the fact (their username).
+            owner_user_id: Owner user ID for scoping.
+            similarity_threshold: Minimum similarity score to supersede (default 0.80).
+
+        Returns:
+            Number of hearsay memories superseded.
+        """
+        # Find hearsay about this user
+        hearsay_candidates = await self._store.find_hearsay_about_user(
+            user_id=source_user_id,
+            owner_user_id=owner_user_id,
+        )
+
+        if not hearsay_candidates:
+            return 0
+
+        count = 0
+        for hearsay in hearsay_candidates:
+            if hearsay.id == new_memory.id:
+                continue
+
+            # Check similarity using vector search
+            try:
+                similar = await self._index.search(hearsay.content, limit=5)
+                similarity = 0.0
+                for result in similar:
+                    if result.memory_id == new_memory.id:
+                        similarity = result.similarity
+                        break
+
+                if similarity < similarity_threshold:
+                    continue
+
+                # Use LLM verification for borderline cases
+                if similarity < 0.85 and self._llm:
+                    if not await self._verify_conflict_with_llm(
+                        old_content=hearsay.content,
+                        new_content=new_memory.content,
+                    ):
+                        continue
+
+                success = await self._store.mark_memory_superseded(
+                    memory_id=hearsay.id,
+                    superseded_by_id=new_memory.id,
+                )
+                if success:
+                    try:
+                        await self._index.delete_embedding(hearsay.id)
+                    except Exception:
+                        logger.warning(
+                            "Failed to delete superseded hearsay embedding",
+                            extra={"memory_id": hearsay.id},
+                            exc_info=True,
+                        )
+                    count += 1
+                    logger.info(
+                        "Hearsay superseded by fact",
+                        extra={
+                            "hearsay_id": hearsay.id,
+                            "fact_id": new_memory.id,
+                            "similarity": similarity,
+                        },
+                    )
+            except Exception:
+                logger.debug(
+                    "Failed to check hearsay similarity",
+                    extra={"hearsay_id": hearsay.id},
+                    exc_info=True,
+                )
+
+        return count
+
 
 async def create_memory_manager(
     db_session: AsyncSession,

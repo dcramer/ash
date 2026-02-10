@@ -69,6 +69,8 @@ def register_memory_methods(
             chat_id: Chat ID (for group memories when shared=True)
             shared: If True and chat_id set, creates group memory (default False)
             subjects: List of subject person references
+            source_user_id: Who provided this fact (username/handle)
+            source_user_name: Display name of the source user
         """
         content = params.get("content")
         if not content:
@@ -80,6 +82,8 @@ def register_memory_methods(
         chat_id = params.get("chat_id")
         shared = params.get("shared", False)
         subjects = params.get("subjects", [])
+        source_user_id = params.get("source_user_id")
+        source_user_name = params.get("source_user_name")
 
         # Apply scoping rules:
         # - Group memory: shared=True with chat_id → owner_user_id=None, chat_id=chat_id
@@ -112,6 +116,8 @@ def register_memory_methods(
             owner_user_id=owner_user_id,
             chat_id=effective_chat_id,
             subject_person_ids=subject_person_ids if subject_person_ids else None,
+            source_user_id=source_user_id,
+            source_user_name=source_user_name,
         )
 
         return {"id": memory.id}
