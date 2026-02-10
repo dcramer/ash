@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from ash.memory import MemoryManager
     from ash.memory.extractor import MemoryExtractor
     from ash.providers.telegram.passive import (
+        BotContext,
         PassiveEngagementDecider,
         PassiveEngagementThrottler,
         PassiveMemoryExtractor,
@@ -198,15 +199,38 @@ class TelegramMessageHandler:
             return username.split("_")[0].title()
         return "Assistant"
 
+    def _check_bot_name_mention(self, text: str, bot_context: "BotContext") -> bool:
+        """Check if the message mentions the bot by name.
+
+        Returns True if bot name or @username is mentioned (case-insensitive).
+        """
+        from ash.providers.telegram.passive import BotContext
+
+        if not isinstance(bot_context, BotContext):
+            return False
+
+        text_lower = text.lower()
+
+        # Check bot name (e.g., "ash")
+        if bot_context.name.lower() in text_lower:
+            return True
+
+        # Check @username (e.g., "@ash_bot")
+        if bot_context.username and f"@{bot_context.username}".lower() in text_lower:
+            return True
+
+        return False
+
     async def handle_passive_message(self, message: IncomingMessage) -> None:
         """Handle a passively observed message (not mentioned or replied to).
 
         This method:
-        1. Checks throttling - skips if cooldown/rate limit applies
-        2. Runs memory extraction in background (if enabled)
-        3. Queries relevant memories for engagement context
-        4. Makes engagement decision via LLM (with bot identity context)
-        5. If ENGAGE, promotes to full message processing
+        1. Checks for direct name mention (bypasses throttling)
+        2. Checks throttling - skips if cooldown/rate limit applies
+        3. Runs memory extraction in background (if enabled)
+        4. Queries relevant memories for engagement context
+        5. Makes engagement decision via LLM (with bot identity context)
+        6. If ENGAGE, promotes to full message processing
         """
         from ash.providers.telegram.passive import BotContext
 
@@ -219,11 +243,24 @@ class TelegramMessageHandler:
             chat_title or chat_id[:8],
         )
 
-        # Check throttler
-        if self._passive_throttler and not self._passive_throttler.should_consider(
-            chat_id
-        ):
-            return
+        # Build bot context for identity awareness (needed for name check)
+        bot_context = BotContext(
+            name=self._get_bot_display_name(),
+            username=self._provider.bot_username,
+        )
+
+        # Fast path: check if bot is addressed by name (bypasses throttling)
+        text = message.text or ""
+        name_mentioned = self._check_bot_name_mention(text, bot_context)
+
+        if name_mentioned:
+            logger.info("Fast path: bot name mentioned, bypassing throttle")
+        else:
+            # Check throttler (only if not directly addressed)
+            if self._passive_throttler and not self._passive_throttler.should_consider(
+                chat_id
+            ):
+                return
 
         # Run memory extraction in background (if enabled)
         if self._passive_extractor:
@@ -232,44 +269,40 @@ class TelegramMessageHandler:
                 name=f"passive_extract_{message.id}",
             )
 
-        # Make engagement decision (if decider is available)
-        if not self._passive_decider:
+        # If name mentioned, engage immediately without LLM decision
+        if name_mentioned:
+            should_engage = True
+        elif not self._passive_decider:
             logger.debug("No passive decider - skipping engagement decision")
             return
+        else:
+            # Query relevant memories (with timeout)
+            relevant_memories: list[str] | None = None
+            passive_config = self._provider.passive_config
+            if (
+                passive_config
+                and passive_config.memory_lookup_enabled
+                and self._memory_manager
+                and message.text
+            ):
+                relevant_memories = await self._query_relevant_memories(
+                    query=message.text,
+                    user_id=message.user_id,
+                    chat_id=chat_id,
+                    lookup_timeout=passive_config.memory_lookup_timeout,
+                    threshold=passive_config.memory_similarity_threshold,
+                )
 
-        # Build bot context for identity awareness
-        bot_context = BotContext(
-            name=self._get_bot_display_name(),
-            username=self._provider.bot_username,
-        )
+            # Get recent messages for context
+            recent_messages = await self._get_recent_message_texts(chat_id, limit=5)
 
-        # Query relevant memories (with timeout)
-        relevant_memories: list[str] | None = None
-        passive_config = self._provider.passive_config
-        if (
-            passive_config
-            and passive_config.memory_lookup_enabled
-            and self._memory_manager
-            and message.text
-        ):
-            relevant_memories = await self._query_relevant_memories(
-                query=message.text,
-                user_id=message.user_id,
-                chat_id=chat_id,
-                lookup_timeout=passive_config.memory_lookup_timeout,
-                threshold=passive_config.memory_similarity_threshold,
+            should_engage = await self._passive_decider.decide(
+                message=message,
+                recent_messages=recent_messages,
+                chat_title=chat_title,
+                bot_context=bot_context,
+                relevant_memories=relevant_memories,
             )
-
-        # Get recent messages for context
-        recent_messages = await self._get_recent_message_texts(chat_id, limit=5)
-
-        should_engage = await self._passive_decider.decide(
-            message=message,
-            recent_messages=recent_messages,
-            chat_title=chat_title,
-            bot_context=bot_context,
-            relevant_memories=relevant_memories,
-        )
 
         # Note: The engagement decision could be recorded to incoming.jsonl here
         # to update the original record. For now, the decision is implicit in
@@ -438,10 +471,10 @@ class TelegramMessageHandler:
             return memories if memories else None
 
         except TimeoutError:
-            logger.debug("Memory lookup timed out for passive engagement")
+            logger.warning("Memory lookup timed out for passive engagement")
             return None
         except Exception as e:
-            logger.debug("Memory lookup failed for passive engagement: %s", e)
+            logger.warning("Memory lookup failed for passive engagement: %s", e)
             return None
 
     def _get_thread_index(self, chat_id: str) -> ThreadIndex:

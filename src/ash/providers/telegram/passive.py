@@ -136,8 +136,8 @@ class PassiveEngagementThrottler:
         # Check per-chat cooldown
         cooldown_seconds = self._config.chat_cooldown_minutes * 60
         if now - state.last_engagement_time < cooldown_seconds:
-            logger.debug(
-                "Skipping passive: chat %s still in cooldown (%.0fs remaining)",
+            logger.info(
+                "Passive throttled: chat %s in cooldown (%.0fs remaining)",
                 chat_id[:8],
                 cooldown_seconds - (now - state.last_engagement_time),
             )
@@ -145,8 +145,8 @@ class PassiveEngagementThrottler:
 
         # Check if too many recent active messages
         if state.recent_active_count >= self._config.skip_after_active_messages:
-            logger.debug(
-                "Skipping passive: %d active messages since last passive in chat %s",
+            logger.info(
+                "Passive throttled: %d active messages since last passive in chat %s",
                 state.recent_active_count,
                 chat_id[:8],
             )
@@ -157,8 +157,8 @@ class PassiveEngagementThrottler:
             self._global_state.count_last_hour()
             >= self._config.max_engagements_per_hour
         ):
-            logger.debug(
-                "Skipping passive: global hourly limit reached (%d/%d)",
+            logger.info(
+                "Passive throttled: global hourly limit reached (%d/%d)",
                 self._global_state.count_last_hour(),
                 self._config.max_engagements_per_hour,
             )
@@ -297,16 +297,15 @@ class PassiveEngagementDecider:
             decision = response.message.get_text().strip().upper()
             should_engage = decision.startswith("ENGAGE")
 
-            logger.debug(
-                "Engagement decision for '%s': %s -> %s",
-                text[:30],
-                decision,
+            logger.info(
+                "Engagement decision: %s (message: '%s')",
                 "ENGAGE" if should_engage else "SILENT",
+                text[:50],
             )
             return should_engage
 
         except TimeoutError:
-            logger.debug("Engagement decision timed out, defaulting to SILENT")
+            logger.warning("Engagement decision timed out, defaulting to SILENT")
             return False
         except Exception as e:
             logger.warning("Engagement decision failed: %s, defaulting to SILENT", e)
