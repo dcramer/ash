@@ -527,10 +527,12 @@ class Agent:
                 speaker_info=speaker_info,
             )
 
-            # Normalize owner names for comparison
-            owner_names_lower = (
-                {n.lower() for n in owner_names} if owner_names else set()
-            )
+            # Normalize owner names for comparison (strip @ prefix)
+            owner_names_lower = set()
+            if owner_names:
+                for name in owner_names:
+                    normalized = name.lower().lstrip("@")
+                    owner_names_lower.add(normalized)
 
             for fact in facts:
                 if fact.confidence < self._config.extraction_confidence_threshold:
@@ -541,8 +543,10 @@ class Agent:
                     if fact.subjects:
                         subject_person_ids = []
                         for subject in fact.subjects:
+                            # Normalize subject for comparison (strip @ prefix)
+                            subject_normalized = subject.lower().lstrip("@")
                             # Skip subjects that are the owner themselves
-                            if subject.lower() in owner_names_lower:
+                            if subject_normalized in owner_names_lower:
                                 logger.debug("Skipping owner as subject: %s", subject)
                                 continue
                             try:

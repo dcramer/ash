@@ -364,11 +364,31 @@ async def _memory_list(
             source_display = "[dim]-[/dim]"
 
         # Trust: fact (speaking about self) vs hearsay (speaking about others)
-        if subject_names:
-            # Has subjects - check if source is speaking about someone else
+        # Check if source user matches any subject person (self-reference)
+        source_is_subject = False
+        if entry.source_user_id and entry.subject_person_ids:
+            source_id = entry.source_user_id.lower()
+            # Check each subject person's name and aliases
+            for person_id in entry.subject_person_ids:
+                person = people_by_id.get(person_id)
+                if person:
+                    # Check name
+                    if person.name.lower() == source_id:
+                        source_is_subject = True
+                        break
+                    # Check aliases
+                    for alias in person.aliases or []:
+                        if alias.lower() == source_id:
+                            source_is_subject = True
+                            break
+                    if source_is_subject:
+                        break
+
+        if subject_names and not source_is_subject:
+            # Has subjects that aren't the source - speaking about others
             trust = "[yellow]hearsay[/yellow]"
         else:
-            # No subjects - speaking about self
+            # No subjects or source is the subject - speaking about self
             trust = "[green]fact[/green]"
 
         created = entry.created_at.strftime("%Y-%m-%d") if entry.created_at else "-"
@@ -635,8 +655,24 @@ async def _memory_show(memory_id: str) -> None:
     else:
         table.add_row("About", "-")
 
-    # Trust level
-    if memory.subject_person_ids:
+    # Trust level - check if source user matches any subject person (self-reference)
+    source_is_subject = False
+    if memory.source_user_id and memory.subject_person_ids:
+        source_id = memory.source_user_id.lower()
+        for person_id in memory.subject_person_ids:
+            person = await store.get_person(person_id)
+            if person:
+                if person.name.lower() == source_id:
+                    source_is_subject = True
+                    break
+                for alias in person.aliases or []:
+                    if alias.lower() == source_id:
+                        source_is_subject = True
+                        break
+                if source_is_subject:
+                    break
+
+    if memory.subject_person_ids and not source_is_subject:
         table.add_row("Trust", "hearsay (source speaking about others)")
     else:
         table.add_row("Trust", "fact (source speaking about themselves)")
