@@ -29,6 +29,14 @@ if TYPE_CHECKING:
 
     from ash.agents import AgentRegistry
     from ash.config import AshConfig
+    from ash.llm import LLMProvider
+    from ash.memory import MemoryManager
+    from ash.memory.extractor import MemoryExtractor
+    from ash.providers.telegram.passive import (
+        PassiveEngagementDecider,
+        PassiveEngagementThrottler,
+        PassiveMemoryExtractor,
+    )
     from ash.providers.telegram.provider import TelegramProvider
     from ash.skills import SkillRegistry
     from ash.tools.registry import ToolRegistry
@@ -495,6 +503,9 @@ class TelegramMessageHandler:
         agent_registry: "AgentRegistry | None" = None,
         skill_registry: "SkillRegistry | None" = None,
         tool_registry: "ToolRegistry | None" = None,
+        llm_provider: "LLMProvider | None" = None,
+        memory_manager: "MemoryManager | None" = None,
+        memory_extractor: "MemoryExtractor | None" = None,
     ):
         self._provider = provider
         self._agent = agent
@@ -505,6 +516,9 @@ class TelegramMessageHandler:
         self._agent_registry = agent_registry
         self._skill_registry = skill_registry
         self._tool_registry = tool_registry
+        self._llm_provider = llm_provider
+        self._memory_manager = memory_manager
+        self._memory_extractor = memory_extractor
         self._session_managers: dict[str, SessionManager] = {}
         self._session_contexts: dict[str, SessionContext] = {}
         self._thread_indexes: dict[str, ThreadIndex] = {}
@@ -513,8 +527,16 @@ class TelegramMessageHandler:
         # Pending checkpoints keyed by truncated checkpoint_id
         self._pending_checkpoints: dict[str, dict[str, Any]] = {}
 
+        # Passive listening components (initialized lazily)
+        self._passive_throttler: PassiveEngagementThrottler | None = None
+        self._passive_decider: PassiveEngagementDecider | None = None
+        self._passive_extractor: PassiveMemoryExtractor | None = None
+
         # Register provider-specific tools
         self._register_provider_tools()
+
+        # Initialize passive listening if configured
+        self._init_passive_listening()
 
     def _register_provider_tools(self) -> None:
         """Register provider-specific tools that need access to the provider."""
@@ -530,6 +552,219 @@ class TelegramMessageHandler:
             )
             self._tool_registry.register(send_message_tool)
             logger.debug("Registered send_message tool for Telegram provider")
+
+    def _init_passive_listening(self) -> None:
+        """Initialize passive listening components if configured."""
+        passive_config = self._provider.passive_config
+        if not passive_config or not passive_config.enabled:
+            return
+
+        from ash.providers.telegram.passive import (
+            PassiveEngagementDecider,
+            PassiveEngagementThrottler,
+            PassiveMemoryExtractor,
+        )
+
+        # Initialize throttler
+        self._passive_throttler = PassiveEngagementThrottler(passive_config)
+
+        # Initialize decider (requires LLM provider)
+        if self._llm_provider:
+            self._passive_decider = PassiveEngagementDecider(
+                llm=self._llm_provider,
+                model=passive_config.model,
+            )
+        else:
+            logger.warning(
+                "Passive listening enabled but no LLM provider - "
+                "engagement decisions will be skipped"
+            )
+
+        # Initialize memory extractor (requires both extractor and manager)
+        if (
+            passive_config.extraction_enabled
+            and self._memory_extractor
+            and self._memory_manager
+        ):
+            self._passive_extractor = PassiveMemoryExtractor(
+                extractor=self._memory_extractor,
+                memory_manager=self._memory_manager,
+                context_messages=passive_config.context_messages,
+            )
+        elif passive_config.extraction_enabled:
+            logger.warning(
+                "Passive extraction enabled but missing memory components - "
+                "extraction will be skipped"
+            )
+
+        logger.info("Passive listening initialized")
+
+    async def handle_passive_message(self, message: IncomingMessage) -> None:
+        """Handle a passively observed message (not mentioned or replied to).
+
+        This method:
+        1. Checks throttling - skips if cooldown/rate limit applies
+        2. Runs memory extraction in background (if enabled)
+        3. Makes engagement decision via LLM
+        4. If ENGAGE, promotes to full message processing
+        """
+
+        chat_id = message.chat_id
+        chat_title = message.metadata.get("chat_title")
+
+        logger.debug(
+            "Handling passive message from %s in %s",
+            message.username or message.user_id,
+            chat_title or chat_id[:8],
+        )
+
+        # Check throttler
+        if self._passive_throttler and not self._passive_throttler.should_consider(
+            chat_id
+        ):
+            return
+
+        # Run memory extraction in background (if enabled)
+        if self._passive_extractor:
+            asyncio.create_task(
+                self._extract_passive_memories(message),
+                name=f"passive_extract_{message.id}",
+            )
+
+        # Make engagement decision (if decider is available)
+        if not self._passive_decider:
+            logger.debug("No passive decider - skipping engagement decision")
+            return
+
+        # Get recent messages for context
+        recent_messages = await self._get_recent_message_texts(chat_id, limit=5)
+
+        should_engage = await self._passive_decider.decide(
+            message=message,
+            recent_messages=recent_messages,
+            chat_title=chat_title,
+        )
+
+        # Note: The engagement decision could be recorded to incoming.jsonl here
+        # to update the original record. For now, the decision is implicit in
+        # whether we promote to active processing.
+
+        if should_engage:
+            logger.info(
+                "Passive engagement: engaging with message from %s",
+                message.username or message.user_id,
+            )
+
+            # Record the engagement
+            if self._passive_throttler:
+                self._passive_throttler.record_engagement(chat_id)
+
+            # Update metadata to indicate this was a passive engagement
+            message.metadata["passive_engagement"] = True
+
+            # Promote to active processing
+            await self.handle_message(message)
+        else:
+            logger.debug(
+                "Passive engagement: staying silent for message from %s",
+                message.username or message.user_id,
+            )
+
+    async def _extract_passive_memories(self, message: IncomingMessage) -> None:
+        """Extract memories from a passive message in the background."""
+        if not self._passive_extractor:
+            return
+
+        try:
+            from ash.chats import IncomingMessageRecord
+            from ash.memory.extractor import SpeakerInfo
+
+            # Load recent incoming records for context
+            passive_config = self._provider.passive_config
+            context_count = passive_config.context_messages if passive_config else 5
+            raw_records = self._read_recent_incoming_records(
+                message.chat_id, context_count
+            )
+
+            recent_records: list[IncomingMessageRecord] = []
+            for data in raw_records:
+                recent_records.append(
+                    IncomingMessageRecord(
+                        external_id=data.get("external_id", ""),
+                        chat_id=data.get("chat_id", ""),
+                        user_id=data.get("user_id"),
+                        username=data.get("username"),
+                        display_name=data.get("display_name"),
+                        text=data.get("text"),
+                        timestamp=data.get("timestamp", ""),
+                        was_processed=data.get("was_processed", False),
+                        skip_reason=data.get("skip_reason"),
+                    )
+                )
+
+            # Create speaker info for the current message
+            speaker_info = SpeakerInfo(
+                user_id=message.user_id,
+                username=message.username,
+                display_name=message.display_name,
+            )
+
+            # Run extraction
+            count = await self._passive_extractor.extract_from_message(
+                message=message,
+                recent_records=recent_records,
+                speaker_info=speaker_info,
+            )
+
+            if count > 0:
+                logger.debug(
+                    "Passive extraction: stored %d facts from message %s",
+                    count,
+                    message.id,
+                )
+
+        except Exception as e:
+            logger.warning("Passive memory extraction failed: %s", e)
+
+    def _read_recent_incoming_records(
+        self, chat_id: str, limit: int
+    ) -> list[dict[str, Any]]:
+        """Read recent records from incoming.jsonl as raw dicts."""
+        import json
+
+        from ash.config.paths import get_chat_dir
+
+        chat_dir = get_chat_dir(self._provider.name, chat_id)
+        incoming_file = chat_dir / "incoming.jsonl"
+
+        if not incoming_file.exists():
+            return []
+
+        try:
+            lines = incoming_file.read_text().strip().split("\n")
+            records = []
+            for line in lines[-limit:]:
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            return records
+        except Exception as e:
+            logger.debug("Failed to load incoming records: %s", e)
+            return []
+
+    async def _get_recent_message_texts(
+        self, chat_id: str, limit: int = 5
+    ) -> list[str]:
+        """Get recent message texts from incoming.jsonl for context."""
+        records = self._read_recent_incoming_records(chat_id, limit)
+        texts = []
+        for data in records:
+            text = data.get("text")
+            username = data.get("username") or data.get("display_name", "User")
+            if text:
+                texts.append(f"@{username}: {text}")
+        return texts
 
     def _get_thread_index(self, chat_id: str) -> ThreadIndex:
         """Get or create a ThreadIndex for a chat."""
@@ -940,6 +1175,8 @@ class TelegramMessageHandler:
             session.metadata["chat_type"] = chat_type
         if chat_title := message.metadata.get("chat_title"):
             session.metadata["chat_title"] = chat_title
+        if message.metadata.get("passive_engagement"):
+            session.metadata["passive_engagement"] = True
 
         session.metadata["session_path"] = f"/sessions/{session_key}/context.jsonl"
         session.metadata["session_mode"] = session_mode

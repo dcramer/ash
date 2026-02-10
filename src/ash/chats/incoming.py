@@ -42,6 +42,8 @@ class IncomingMessageRecord:
     was_processed: bool
     skip_reason: str | None
     metadata: dict[str, Any] | None = None
+    # Passive listening field
+    processing_mode: str | None = None  # "active", "passive", or None
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}

@@ -95,6 +95,8 @@ class PromptContext:
     chat_title: str | None = None
     chat_type: str | None = None  # "group", "supergroup", "private"
     is_scheduled_task: bool = False  # True when executing a scheduled task
+    # Passive engagement context
+    is_passive_engagement: bool = False  # True when engaging via passive listening
 
 
 class SystemPromptBuilder:
@@ -129,6 +131,7 @@ class SystemPromptBuilder:
             self._build_sandbox_section(context),
             self._build_runtime_section(context.runtime) if context.runtime else "",
             self._build_sender_section(context),
+            self._build_passive_engagement_section(context),
             self._build_people_section(context.known_people)
             if context.known_people
             else "",
@@ -549,6 +552,28 @@ class SystemPromptBuilder:
                 )
 
         return "\n".join(lines)
+
+    def _build_passive_engagement_section(self, context: PromptContext) -> str:
+        """Build section for passive engagement context."""
+        if not context.is_passive_engagement:
+            return ""
+
+        return "\n".join(
+            [
+                "## Passive Engagement",
+                "",
+                "You joined this conversation based on passive listening - you were **not**",
+                "directly mentioned or replied to. The system determined your input could",
+                "add value to this discussion.",
+                "",
+                "**Guidelines for passive engagement:**",
+                "- Be helpful but not intrusive",
+                "- Keep responses concise if your contribution is brief",
+                "- Don't insert yourself into personal conversations",
+                "- Add genuine value - answer questions, share relevant expertise",
+                "- If you realize you have nothing useful to add, a brief acknowledgment is fine",
+            ]
+        )
 
     def _build_session_section(self, context: PromptContext) -> str:
         if not context.session_path:

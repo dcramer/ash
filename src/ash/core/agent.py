@@ -327,6 +327,7 @@ class Agent:
         chat_state_path: str | None = None,
         thread_state_path: str | None = None,
         is_scheduled_task: bool = False,
+        is_passive_engagement: bool = False,
     ) -> str:
         """Build system prompt with optional memory context.
 
@@ -342,6 +343,7 @@ class Agent:
             chat_title: Title of the chat (for group chats).
             chat_type: Type of chat ("group", "supergroup", "private").
             chat_state_path: Path to chat-level state.json.
+            is_passive_engagement: Whether this is a passive engagement (not mentioned).
             thread_state_path: Path to thread-specific state.json (when in thread).
             is_scheduled_task: Whether this is a scheduled task execution.
 
@@ -363,6 +365,7 @@ class Agent:
             chat_title=chat_title,
             chat_type=chat_type,
             is_scheduled_task=is_scheduled_task,
+            is_passive_engagement=is_passive_engagement,
         )
         return self._prompt_builder.build(prompt_context)
 
@@ -482,6 +485,7 @@ class Agent:
                 else None
             ),
             is_scheduled_task=session.metadata.get("is_scheduled_task", False),
+            is_passive_engagement=session.metadata.get("passive_engagement", False),
         )
 
         system_tokens = estimate_tokens(system_prompt)

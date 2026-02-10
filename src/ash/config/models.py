@@ -56,6 +56,30 @@ class LLMConfig(BaseModel):
     max_tokens: int = 4096
 
 
+class PassiveListeningConfig(BaseModel):
+    """Configuration for passive listening in group chats.
+
+    When enabled, the bot observes all group messages (even when not mentioned),
+    extracts memories in the background, and decides whether to engage.
+    """
+
+    enabled: bool = False
+    model: str | None = (
+        None  # Model for engagement decisions (default: uses cheap model)
+    )
+
+    # Throttling
+    chat_cooldown_minutes: int = (
+        5  # Minimum minutes between passive engagements per chat
+    )
+    max_engagements_per_hour: int = 10  # Global rate limit across all chats
+    skip_after_active_messages: int = 3  # Skip passive if N active messages recently
+
+    # Extraction
+    extraction_enabled: bool = True  # Run memory extraction on passive messages
+    context_messages: int = 5  # Number of recent messages to include for context
+
+
 class TelegramConfig(BaseModel):
     """Configuration for Telegram provider."""
 
@@ -67,6 +91,8 @@ class TelegramConfig(BaseModel):
         str
     ] = []  # Group IDs (empty = all groups; authorized groups imply user auth)
     group_mode: Literal["mention", "always"] = "mention"  # How to respond in groups
+    # Passive listening (observe group messages without @mention)
+    passive: PassiveListeningConfig = Field(default_factory=PassiveListeningConfig)
 
 
 class SandboxConfig(BaseModel):

@@ -6,12 +6,13 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from aiogram import Bot, Dispatcher, F
 
 if TYPE_CHECKING:
     from ash.chats import ChatStateManager
+
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
@@ -19,6 +20,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, ReactionTypeEmoji
 from aiogram.types import Message as TelegramMessage
 
+from ash.config.models import PassiveListeningConfig
 from ash.providers.base import (
     ImageAttachment,
     IncomingMessage,
@@ -26,6 +28,9 @@ from ash.providers.base import (
     OutgoingMessage,
     Provider,
 )
+
+# Type alias for message processing result
+ProcessingResult = tuple[Literal["active", "passive"], int, str | None] | None
 
 CallbackHandler = Callable[[CallbackQuery], Awaitable[None]]
 
@@ -65,6 +70,7 @@ class TelegramProvider(Provider):
         webhook_path: str = "/telegram/webhook",
         allowed_groups: list[str] | None = None,
         group_mode: str = "mention",
+        passive_config: PassiveListeningConfig | None = None,
     ):
         self._token = bot_token
         self._allowed_users = set(allowed_users or [])
@@ -72,6 +78,7 @@ class TelegramProvider(Provider):
         self._webhook_path = webhook_path
         self._allowed_groups = set(allowed_groups or [])
         self._group_mode = group_mode
+        self._passive_config = passive_config
 
         self._bot = Bot(
             token=bot_token,
@@ -79,6 +86,7 @@ class TelegramProvider(Provider):
         )
         self._dp = Dispatcher()
         self._handler: MessageHandler | None = None
+        self._passive_handler: MessageHandler | None = None
         self._callback_handler: CallbackHandler | None = None
         self._running = False
         self._bot_username: str | None = None
@@ -99,9 +107,17 @@ class TelegramProvider(Provider):
     def bot_username(self) -> str | None:
         return self._bot_username
 
+    @property
+    def passive_config(self) -> PassiveListeningConfig | None:
+        return self._passive_config
+
     def set_callback_handler(self, handler: CallbackHandler) -> None:
         """Set the callback query handler for interactive UI elements."""
         self._callback_handler = handler
+
+    def set_passive_handler(self, handler: MessageHandler) -> None:
+        """Set the handler for passive (non-mentioned) messages."""
+        self._passive_handler = handler
 
     def _is_user_allowed(self, user_id: int, username: str | None) -> bool:
         if not self._allowed_users:
@@ -217,22 +233,24 @@ class TelegramProvider(Provider):
             logger.debug(f"Edit failed: {e}")
             return False
 
-    def _should_process_message(
-        self, message: TelegramMessage
-    ) -> tuple[int, str | None] | None:
+    def _should_process_message(self, message: TelegramMessage) -> ProcessingResult:
         """Check if a message should be processed, log and record all incoming messages.
 
         This method:
         1. Evaluates whether the message should trigger a bot response
-        2. Logs ALL incoming messages with metadata about the processing decision
-        3. Records ALL incoming messages to per-chat JSONL files for observability
+        2. Determines processing mode (active vs passive)
+        3. Logs ALL incoming messages with metadata about the processing decision
+        4. Records ALL incoming messages to per-chat JSONL files for observability
 
         Returns:
-            (user_id, username) if message should be processed, None otherwise
+            ("active", user_id, username) for mentioned/replied messages
+            ("passive", user_id, username) for group messages eligible for passive listening
+            None if message should not be processed
         """
         from ash.chats import IncomingMessageRecord, IncomingMessageWriter
 
         skip_reason: str | None = None
+        processing_mode: Literal["active", "passive"] | None = None
         user_id = message.from_user.id if message.from_user else None
         username = message.from_user.username if message.from_user else None
         display_name = message.from_user.full_name if message.from_user else None
@@ -245,11 +263,27 @@ class TelegramProvider(Provider):
                 if not self._is_group_allowed(message.chat.id):
                     skip_reason = "group_not_allowed"
                 elif self._group_mode == "mention":
-                    if not self._is_mentioned(message) and not self._is_reply(message):
+                    is_mentioned = self._is_mentioned(message)
+                    is_reply = self._is_reply(message)
+                    if is_mentioned or is_reply:
+                        processing_mode = "active"
+                    elif (
+                        self._passive_config
+                        and self._passive_config.enabled
+                        and self._passive_handler
+                    ):
+                        # Eligible for passive processing
+                        processing_mode = "passive"
+                    else:
                         skip_reason = "not_mentioned_or_reply"
+                else:
+                    # group_mode == "always"
+                    processing_mode = "active"
             else:
                 if not self._is_user_allowed(user_id, username):  # type: ignore[arg-type]
                     skip_reason = "user_not_allowed"
+                else:
+                    processing_mode = "active"
 
         # Log ALL incoming messages with processing decision
         logger.info(
@@ -263,7 +297,8 @@ class TelegramProvider(Provider):
                 "user_id": str(user_id) if user_id else None,
                 "username": username,
                 "chat_type": message.chat.type,
-                "was_processed": skip_reason is None,
+                "was_processed": processing_mode is not None,
+                "processing_mode": processing_mode,
                 "skip_reason": skip_reason,
             },
         )
@@ -278,15 +313,16 @@ class TelegramProvider(Provider):
             display_name=display_name,
             text=message.text or message.caption,
             timestamp=message.date.isoformat() if message.date else "",
-            was_processed=skip_reason is None,
+            was_processed=processing_mode is not None,
             skip_reason=skip_reason,
+            processing_mode=processing_mode,
             metadata={"chat_type": message.chat.type},
         )
         writer.record(record)
 
-        if skip_reason:
+        if skip_reason or processing_mode is None:
             return None
-        return user_id, username  # type: ignore[return-value]
+        return processing_mode, user_id, username  # type: ignore[return-value]
 
     def _to_incoming_message(
         self,
@@ -386,8 +422,8 @@ class TelegramProvider(Provider):
         @self._dp.message(Command("start"))
         async def handle_start(message: TelegramMessage) -> None:
             """Handle /start command."""
-            access = self._should_process_message(message)
-            if not access:
+            result = self._should_process_message(message)
+            if not result or result[0] != "active":
                 return
 
             name = message.from_user.first_name if message.from_user else "there"
@@ -401,7 +437,8 @@ class TelegramProvider(Provider):
         @self._dp.message(Command("help"))
         async def handle_help(message: TelegramMessage) -> None:
             """Handle /help command."""
-            if not self._should_process_message(message):
+            result = self._should_process_message(message)
+            if not result or result[0] != "active":
                 return
 
             await message.answer(
@@ -417,10 +454,10 @@ class TelegramProvider(Provider):
         @self._dp.message(F.photo)
         async def handle_photo(message: TelegramMessage) -> None:
             """Handle photo messages."""
-            access = self._should_process_message(message)
-            if not access:
+            result = self._should_process_message(message)
+            if not result or result[0] != "active":
                 return
-            user_id, username = access
+            _, user_id, username = result
 
             # Get the largest photo (best quality)
             photo = message.photo[-1] if message.photo else None
@@ -476,10 +513,11 @@ class TelegramProvider(Provider):
             if not message.text:
                 return
 
-            access = self._should_process_message(message)
-            if not access:
+            result = self._should_process_message(message)
+            if not result:
                 return
-            user_id, username = access
+
+            processing_mode, user_id, username = result
 
             # Strip bot mention from text if in group
             is_group = message.chat.type in ("group", "supergroup")
@@ -489,8 +527,17 @@ class TelegramProvider(Provider):
             incoming = self._to_incoming_message(
                 message, user_id, username, text, was_mentioned=was_mentioned
             )
+            # Add processing mode to metadata
+            incoming.metadata["processing_mode"] = processing_mode
 
-            if self._handler:
+            if processing_mode == "passive":
+                # Handle passive messages (not mentioned)
+                if self._passive_handler:
+                    try:
+                        await self._passive_handler(incoming)
+                    except Exception:
+                        logger.exception("Error handling passive message")
+            elif self._handler:
                 try:
                     await self._handler(incoming)
                 except Exception:
