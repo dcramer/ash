@@ -55,6 +55,8 @@ EXTRACTION_PROMPT = """You are a memory extraction system. Analyze this conversa
 - Corrections to previously known information
 
 ## What NOT to extract:
+- Facts stated BY the assistant (only extract facts from user messages)
+- The assistant's summaries, clarifications, or restatements of user facts
 - Actions the assistant took
 - Temporary task context ("working on X project")
 - Generic conversation flow
@@ -84,8 +86,12 @@ Each message in the conversation shows who said it. Track WHO provided each fact
 The subjects array should contain people the fact is PRIMARILY ABOUT:
 - "I own a Grand Seiko" -> subjects: [] (about the speaker)
 - "My wife gave me a watch" -> subjects: [] (fact is about speaker owning watch; wife is just context)
+- "The watch my wife got me" -> subjects: [] (speaker OWNS the watch, wife GAVE it)
 - "My wife loves watches" -> subjects: ["wife's name"] (fact is about the wife)
 - "Sarah and I went to dinner" -> subjects: ["Sarah"] if fact is about Sarah, [] if about speaker's experience
+
+WRONG: "My wife got me a Grand Seiko" -> extracting that wife owns a Grand Seiko (she GAVE it, speaker owns it)
+RIGHT: "My wife got me a Grand Seiko" -> speaker owns Grand Seiko, subjects: []
 
 {existing_memories_section}
 
