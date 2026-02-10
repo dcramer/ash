@@ -158,6 +158,7 @@ async def _run_server(
             webhook_url=webhook_url,
             allowed_groups=ash_config.telegram.allowed_groups,
             group_mode=ash_config.telegram.group_mode,
+            passive_config=ash_config.telegram.passive,
         )
 
     # Set up schedule watcher
