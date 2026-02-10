@@ -67,11 +67,25 @@ Convert pronouns and references to concrete facts:
 - "She's visiting next week" -> Find who "she" is, store "[Person name] is visiting [date]"
 - "Yes, that one" -> Don't extract - too ambiguous
 
+## CRITICAL: Ownership and perspective
+Facts should be attributed to who they're ABOUT, not who performed an action:
+- "My wife got me a watch" -> The SPEAKER owns the watch (subjects: []), wife gave it (mentioned in relationship context)
+- "I bought Sarah a gift" -> SARAH received the gift - if relevant, fact is about Sarah (subjects: ["Sarah"])
+- "The watch my wife gave me" -> SPEAKER owns the watch, wife is the giver
+- Be precise: "gave", "got for", "bought for" means the OTHER person receives/owns it
+
 ## Speaker Attribution
 Each message in the conversation shows who said it. Track WHO provided each fact:
 - If @david says "I like pizza" -> speaker is "david"
 - If @bob says "David likes pasta" -> speaker is "bob", subjects is ["David"]
 - The speaker field should contain the username (without @) of who stated the fact
+
+## Subjects field
+The subjects array should contain people the fact is PRIMARILY ABOUT:
+- "I own a Grand Seiko" -> subjects: [] (about the speaker)
+- "My wife gave me a watch" -> subjects: [] (fact is about speaker owning watch; wife is just context)
+- "My wife loves watches" -> subjects: ["wife's name"] (fact is about the wife)
+- "Sarah and I went to dinner" -> subjects: ["Sarah"] if fact is about Sarah, [] if about speaker's experience
 
 {existing_memories_section}
 
