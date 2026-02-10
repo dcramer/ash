@@ -143,7 +143,12 @@ async def memory_doctor(config, force: bool, fix_attribution: bool = False) -> N
             return
 
     # Create LLM provider
-    llm = create_llm_provider(config.default_llm)
+    model_config = config.default_model
+    api_key = config.resolve_api_key("default")
+    llm = create_llm_provider(
+        model_config.provider,
+        api_key=api_key.get_secret_value() if api_key else None,
+    )
 
     # Process in batches of 20
     batch_size = 20
@@ -170,6 +175,7 @@ async def memory_doctor(config, force: bool, fix_attribution: bool = False) -> N
             try:
                 response = await llm.complete(
                     messages=[Message(role=Role.USER, content=prompt)],
+                    model=model_config.model,
                     max_tokens=1024,
                     temperature=0.1,
                 )
