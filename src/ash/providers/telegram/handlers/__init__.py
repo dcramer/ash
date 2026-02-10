@@ -16,9 +16,10 @@ Utilities:
 """
 
 from ash.providers.telegram.handlers.checkpoint_handler import CheckpointHandler
-from ash.providers.telegram.handlers.message_handler import (
+from ash.providers.telegram.handlers.message_handler import TelegramMessageHandler
+from ash.providers.telegram.handlers.session_handler import (
     SessionContext,
-    TelegramMessageHandler,
+    SessionHandler,
 )
 from ash.providers.telegram.handlers.tool_tracker import (
     ProgressMessageTool,
@@ -45,6 +46,7 @@ __all__ = [
     "CheckpointHandler",
     "ProgressMessageTool",
     "SessionContext",
+    "SessionHandler",
     "TelegramMessageHandler",
     "ToolTracker",
     # Constants

@@ -125,7 +125,9 @@ class TestTelegramMessageHandler:
             user_id="789",
             sessions_path=handler._test_sessions_path,
         )
-        handler._session_managers[session_manager.session_key] = session_manager
+        handler._session_handler._session_managers[session_manager.session_key] = (
+            session_manager
+        )
 
         # Create fresh async generator for this test
         async def mock_stream():
@@ -154,7 +156,9 @@ class TestTelegramMessageHandler:
             user_id="789",
             sessions_path=handler._test_sessions_path,
         )
-        handler._session_managers[session_manager.session_key] = session_manager
+        handler._session_handler._session_managers[session_manager.session_key] = (
+            session_manager
+        )
 
         # Create fresh async generator for this test
         async def mock_stream():
@@ -194,7 +198,9 @@ class TestTelegramMessageHandler:
             user_id="789",
             sessions_path=tmp_path,
         )
-        handler._session_managers[session_manager.session_key] = session_manager
+        handler._session_handler._session_managers[session_manager.session_key] = (
+            session_manager
+        )
 
         await handler.handle_message(incoming_message)
 
@@ -212,9 +218,11 @@ class TestTelegramMessageHandler:
             user_id="789",
             sessions_path=handler._test_sessions_path,
         )
-        handler._session_managers[session_manager.session_key] = session_manager
+        handler._session_handler._session_managers[session_manager.session_key] = (
+            session_manager
+        )
 
-        session = await handler._get_or_create_session(incoming_message)
+        session = await handler._session_handler.get_or_create_session(incoming_message)
 
         assert session.chat_id == "456"
         assert session.user_id == "789"
@@ -242,10 +250,12 @@ class TestTelegramMessageHandler:
         )
 
         # Override the handler's session manager cache to use our temp path
-        handler._session_managers[session_manager.session_key] = session_manager
+        handler._session_handler._session_managers[session_manager.session_key] = (
+            session_manager
+        )
 
         # Get session - should restore messages from JSONL
-        session = await handler._get_or_create_session(incoming_message)
+        session = await handler._session_handler.get_or_create_session(incoming_message)
 
         assert len(session.messages) == 2
         # Messages are in LLM format (Message objects)
@@ -265,15 +275,15 @@ class TestTelegramMessageHandler:
             sessions_path=handler._test_sessions_path,
         )
         session_key = session_manager.session_key
-        handler._session_managers[session_key] = session_manager
-        handler._session_contexts[session_key] = SessionContext()
+        handler._session_handler._session_managers[session_key] = session_manager
+        handler._session_handler._session_contexts[session_key] = SessionContext()
 
-        assert len(handler._session_contexts) == 1
-        assert len(handler._session_managers) == 1
+        assert len(handler._session_handler._session_contexts) == 1
+        assert len(handler._session_handler._session_managers) == 1
 
         handler.clear_session("456")
-        assert len(handler._session_contexts) == 0
-        assert len(handler._session_managers) == 0
+        assert len(handler._session_handler._session_contexts) == 0
+        assert len(handler._session_handler._session_managers) == 0
 
     async def test_clear_all_sessions(self, handler, incoming_message):
         """Test clearing all sessions."""
@@ -287,8 +297,12 @@ class TestTelegramMessageHandler:
             user_id="789",
             sessions_path=handler._test_sessions_path,
         )
-        handler._session_managers[session_manager1.session_key] = session_manager1
-        handler._session_contexts[session_manager1.session_key] = SessionContext()
+        handler._session_handler._session_managers[session_manager1.session_key] = (
+            session_manager1
+        )
+        handler._session_handler._session_contexts[session_manager1.session_key] = (
+            SessionContext()
+        )
 
         session_manager2 = SessionManager(
             provider="telegram",
@@ -296,15 +310,19 @@ class TestTelegramMessageHandler:
             user_id="888",
             sessions_path=handler._test_sessions_path,
         )
-        handler._session_managers[session_manager2.session_key] = session_manager2
-        handler._session_contexts[session_manager2.session_key] = SessionContext()
+        handler._session_handler._session_managers[session_manager2.session_key] = (
+            session_manager2
+        )
+        handler._session_handler._session_contexts[session_manager2.session_key] = (
+            SessionContext()
+        )
 
-        assert len(handler._session_contexts) == 2
-        assert len(handler._session_managers) == 2
+        assert len(handler._session_handler._session_contexts) == 2
+        assert len(handler._session_handler._session_managers) == 2
 
         handler.clear_all_sessions()
-        assert len(handler._session_contexts) == 0
-        assert len(handler._session_managers) == 0
+        assert len(handler._session_handler._session_contexts) == 0
+        assert len(handler._session_handler._session_managers) == 0
 
     async def test_message_persistence(self, handler, incoming_message, tmp_path):
         """Test messages are persisted to JSONL files."""
@@ -317,7 +335,9 @@ class TestTelegramMessageHandler:
             user_id="789",
             sessions_path=tmp_path,
         )
-        handler._session_managers[session_manager.session_key] = session_manager
+        handler._session_handler._session_managers[session_manager.session_key] = (
+            session_manager
+        )
 
         # Handle the message
         await handler.handle_message(incoming_message)

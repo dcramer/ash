@@ -364,13 +364,12 @@ class TestTelegramChatStateIntegration:
     ):
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
-        from ash.providers.telegram.handlers import TelegramMessageHandler
+        from ash.providers.telegram.handlers import SessionHandler
 
-        handler = MagicMock(spec=TelegramMessageHandler)
-        handler._provider = MagicMock()
-        handler._provider.name = "telegram"
+        handler = MagicMock(spec=SessionHandler)
+        handler._provider_name = "telegram"
 
-        TelegramMessageHandler._update_chat_state(
+        SessionHandler._update_chat_state(
             handler, telegram_private_message, thread_id=None
         )
 
@@ -400,13 +399,12 @@ class TestTelegramChatStateIntegration:
     ):
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
-        from ash.providers.telegram.handlers import TelegramMessageHandler
+        from ash.providers.telegram.handlers import SessionHandler
 
-        handler = MagicMock(spec=TelegramMessageHandler)
-        handler._provider = MagicMock()
-        handler._provider.name = "telegram"
+        handler = MagicMock(spec=SessionHandler)
+        handler._provider_name = "telegram"
 
-        TelegramMessageHandler._update_chat_state(
+        SessionHandler._update_chat_state(
             handler, telegram_group_message, thread_id=None
         )
 
@@ -435,14 +433,13 @@ class TestTelegramChatStateIntegration:
     ):
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
-        from ash.providers.telegram.handlers import TelegramMessageHandler
+        from ash.providers.telegram.handlers import SessionHandler
 
-        handler = MagicMock(spec=TelegramMessageHandler)
-        handler._provider = MagicMock()
-        handler._provider.name = "telegram"
+        handler = MagicMock(spec=SessionHandler)
+        handler._provider_name = "telegram"
 
         thread_id = telegram_thread_message.metadata.get("thread_id")
-        TelegramMessageHandler._update_chat_state(
+        SessionHandler._update_chat_state(
             handler, telegram_thread_message, thread_id=thread_id
         )
 
@@ -469,13 +466,12 @@ class TestTelegramChatStateIntegration:
     ):
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
-        from ash.providers.telegram.handlers import TelegramMessageHandler
+        from ash.providers.telegram.handlers import SessionHandler
 
-        handler = MagicMock(spec=TelegramMessageHandler)
-        handler._provider = MagicMock()
-        handler._provider.name = "telegram"
+        handler = MagicMock(spec=SessionHandler)
+        handler._provider_name = "telegram"
 
-        TelegramMessageHandler._update_chat_state(
+        SessionHandler._update_chat_state(
             handler, telegram_message_no_username, thread_id=None
         )
 
@@ -500,11 +496,10 @@ class TestTelegramChatStateIntegration:
     ):
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
-        from ash.providers.telegram.handlers import TelegramMessageHandler
+        from ash.providers.telegram.handlers import SessionHandler
 
-        handler = MagicMock(spec=TelegramMessageHandler)
-        handler._provider = MagicMock()
-        handler._provider.name = "telegram"
+        handler = MagicMock(spec=SessionHandler)
+        handler._provider_name = "telegram"
 
         chat_id = "-100999888777"
         users = [
@@ -525,7 +520,7 @@ class TestTelegramChatStateIntegration:
                 display_name=display_name,
                 metadata={"chat_type": "supergroup", "chat_title": "Test Group"},
             )
-            TelegramMessageHandler._update_chat_state(handler, message, thread_id=None)
+            SessionHandler._update_chat_state(handler, message, thread_id=None)
 
         state_path = ash_home / "chats" / "telegram" / chat_id / "state.json"
         data = json.loads(state_path.read_text())
@@ -615,13 +610,12 @@ class TestBidirectionalReferences:
     ):
         monkeypatch.setattr("ash.chats.manager.get_chat_dir", mock_get_chat_dir)
 
-        from ash.providers.telegram.handlers import TelegramMessageHandler
+        from ash.providers.telegram.handlers import SessionHandler
 
-        handler = MagicMock(spec=TelegramMessageHandler)
-        handler._provider = MagicMock()
-        handler._provider.name = "telegram"
+        handler = MagicMock(spec=SessionHandler)
+        handler._provider_name = "telegram"
 
-        TelegramMessageHandler._update_chat_state(
+        SessionHandler._update_chat_state(
             handler, telegram_group_message, thread_id=None
         )
 
