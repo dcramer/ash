@@ -255,20 +255,63 @@ class JSONLHandler(logging.Handler):
                 entry["exception"] = _redactor.redact(exception_text)
 
             # Add extra fields from record (also redacted)
-            if hasattr(record, "extra") and record.extra:
-                extra_str = json.dumps(record.extra)
+            # Python logging merges extra={} into record.__dict__, not record.extra
+            extra = self._extract_extra(record)
+            if extra:
+                extra_str = json.dumps(extra)
                 redacted_str = _redactor.redact(extra_str)
                 try:
-                    entry["extra"] = json.loads(redacted_str)
+                    entry.update(json.loads(redacted_str))
                 except json.JSONDecodeError:
-                    # Redaction broke JSON structure - use raw redacted string
-                    entry["extra"] = {"_redacted_raw": redacted_str}
+                    entry["_redacted_raw"] = redacted_str
 
             log_file = self._get_log_file()
             log_file.write(json.dumps(entry) + "\n")
             log_file.flush()
         except Exception:
             self.handleError(record)
+
+    # Standard LogRecord attributes to exclude from extra extraction
+    _STANDARD_ATTRS = frozenset(
+        {
+            "name",
+            "msg",
+            "args",
+            "created",
+            "filename",
+            "funcName",
+            "levelname",
+            "levelno",
+            "lineno",
+            "module",
+            "msecs",
+            "pathname",
+            "process",
+            "processName",
+            "relativeCreated",
+            "stack_info",
+            "exc_info",
+            "exc_text",
+            "thread",
+            "threadName",
+            "taskName",
+            "message",
+        }
+    )
+
+    def _extract_extra(self, record: logging.LogRecord) -> dict:
+        """Extract non-standard attributes as extra fields."""
+        extra = {}
+        for key, value in record.__dict__.items():
+            if key.startswith("_") or key in self._STANDARD_ATTRS:
+                continue
+            # Only include JSON-serializable values
+            try:
+                json.dumps(value)
+                extra[key] = value
+            except (TypeError, ValueError):
+                pass
+        return extra
 
     def close(self) -> None:
         """Close the log file."""
