@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import text
@@ -22,6 +23,24 @@ from ash.memory.jsonl import MemoryJSONL, PersonJSONL
 from ash.memory.types import MemoryEntry, MemoryType, PersonEntry
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_datetime(value: str | datetime | None) -> datetime | None:
+    """Parse a datetime from SQLite (may be string or datetime)."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    # SQLite stores as ISO format string
+    try:
+        # Try with timezone
+        return datetime.fromisoformat(value)
+    except ValueError:
+        # Try without timezone, assume UTC
+        try:
+            return datetime.fromisoformat(value).replace(tzinfo=UTC)
+        except ValueError:
+            return None
 
 
 async def migrate_db_to_jsonl(
@@ -132,20 +151,29 @@ async def _migrate_memories(
         # Infer memory type from content (defaults to KNOWLEDGE)
         memory_type = _infer_memory_type(row[1])
 
+        # Parse datetime fields (SQLite returns strings)
+        created_at = _parse_datetime(row[3])
+        if created_at is None:
+            # created_at is required, skip this entry if missing
+            logger.warning(
+                "Skipping memory with missing created_at", extra={"id": row[0]}
+            )
+            continue
+
         entry = MemoryEntry(
             id=row[0],
             version=1,
             content=row[1] or "",
             memory_type=memory_type,
             embedding=embedding_b64,
-            created_at=row[3],
-            observed_at=row[3],  # Set observed_at = created_at for historical entries
+            created_at=created_at,
+            observed_at=created_at,  # Set observed_at = created_at for historical entries
             owner_user_id=row[6],
             chat_id=row[7],
             subject_person_ids=subject_ids,
             source=row[2] or "user",
-            expires_at=row[4],
-            superseded_at=row[9],
+            expires_at=_parse_datetime(row[4]),
+            superseded_at=_parse_datetime(row[9]),
             superseded_by_id=row[10],
             metadata=metadata,
         )
@@ -219,6 +247,14 @@ async def _migrate_people(
             except json.JSONDecodeError:
                 pass
 
+        # Parse datetime fields (SQLite returns strings)
+        created_at = _parse_datetime(row[6])
+        if created_at is None:
+            logger.warning(
+                "Skipping person with missing created_at", extra={"id": row[0]}
+            )
+            continue
+
         entry = PersonEntry(
             id=row[0],
             version=1,
@@ -226,8 +262,8 @@ async def _migrate_people(
             name=row[2] or "",
             relation=row[3],
             aliases=aliases,
-            created_at=row[6],
-            updated_at=row[7],
+            created_at=created_at,
+            updated_at=_parse_datetime(row[7]),
             metadata=metadata,
         )
         entries.append(entry)
