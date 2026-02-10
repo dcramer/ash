@@ -13,7 +13,7 @@ from ash_rpc_protocol import (
     read_message_sync,
 )
 
-DEFAULT_SOCKET_PATH = "/run/ash/rpc.sock"
+DEFAULT_SOCKET_PATH = "/opt/ash/rpc.sock"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 0.5  # seconds
 

@@ -204,11 +204,12 @@ class SandboxManager:
             volumes[str(self._config.logs_path)] = {"bind": "/logs", "mode": "ro"}
 
         if self._config.rpc_socket_path and self._config.rpc_socket_path.exists():
+            # Mount to /opt/ash instead of /run/ash to avoid conflict with tmpfs at /run
             volumes[str(self._config.rpc_socket_path)] = {
-                "bind": "/run/ash/rpc.sock",
+                "bind": "/opt/ash/rpc.sock",
                 "mode": "rw",
             }
-            env["ASH_RPC_SOCKET"] = "/run/ash/rpc.sock"
+            env["ASH_RPC_SOCKET"] = "/opt/ash/rpc.sock"
 
         if self._config.uv_cache_path:
             self._config.uv_cache_path.mkdir(parents=True, exist_ok=True)
