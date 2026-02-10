@@ -80,6 +80,10 @@ class AshServer:
                 self._telegram_provider.set_callback_handler(
                     self._telegram_handler.handle_callback_query
                 )
+                # Wire up passive message handler for group listening
+                self._telegram_provider.set_passive_handler(
+                    self._telegram_handler.handle_passive_message
+                )
                 # Start in polling mode if no webhook
                 # Webhook mode is handled via the routes
 
