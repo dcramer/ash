@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING
 from ash.llm.types import Message, Role
 
 if TYPE_CHECKING:
-    from ash.chats import IncomingMessageRecord
     from ash.config.models import PassiveListeningConfig
     from ash.llm import LLMProvider
     from ash.memory import MemoryManager
@@ -326,51 +325,36 @@ class PassiveMemoryExtractor:
         self,
         extractor: MemoryExtractor,
         memory_manager: MemoryManager,
-        context_messages: int = 5,
     ):
         """Initialize the passive extractor.
 
         Args:
             extractor: The memory extractor to use.
             memory_manager: Memory manager for storing extracted facts.
-            context_messages: Number of recent messages to include.
         """
         self._extractor = extractor
         self._memory_manager = memory_manager
-        self._context_messages = context_messages
 
     async def extract_from_message(
         self,
         message: IncomingMessage,
-        recent_records: list[IncomingMessageRecord],
         speaker_info: SpeakerInfo | None = None,
     ) -> int:
-        """Extract memories from a passive message and its context.
+        """Extract memories from a passive message.
 
         Args:
             message: The current message.
-            recent_records: Recent incoming message records for context.
             speaker_info: Information about the message sender.
 
         Returns:
             Number of facts extracted and stored.
         """
-        # Build conversation from recent records
-        messages: list[Message] = []
-
-        for record in recent_records[-self._context_messages :]:
-            if record.text:
-                label = _format_speaker_label(record.username, record.display_name)
-                messages.append(
-                    Message(role=Role.USER, content=f"{label}{record.text}")
-                )
-
-        # Add the current message
-        label = _format_speaker_label(message.username, message.display_name)
-        messages.append(Message(role=Role.USER, content=f"{label}{message.text or ''}"))
-
-        if not messages:
+        if not message.text:
             return 0
+
+        # Only extract from the current message (same as active extraction)
+        label = _format_speaker_label(message.username, message.display_name)
+        messages = [Message(role=Role.USER, content=f"{label}{message.text}")]
 
         try:
             facts = await self._extractor.extract_from_conversation(

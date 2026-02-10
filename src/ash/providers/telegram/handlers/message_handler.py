@@ -180,7 +180,6 @@ class TelegramMessageHandler:
             self._passive_extractor = PassiveMemoryExtractor(
                 extractor=self._memory_extractor,
                 memory_manager=self._memory_manager,
-                context_messages=passive_config.context_messages,
             )
 
         logger.info("Passive listening initialized")
@@ -317,31 +316,7 @@ class TelegramMessageHandler:
             return
 
         try:
-            from ash.chats import IncomingMessageRecord
             from ash.memory.extractor import SpeakerInfo
-
-            # Load recent incoming records for context
-            passive_config = self._provider.passive_config
-            context_count = passive_config.context_messages if passive_config else 5
-            raw_records = self._read_recent_incoming_records(
-                message.chat_id, context_count
-            )
-
-            recent_records: list[IncomingMessageRecord] = []
-            for data in raw_records:
-                recent_records.append(
-                    IncomingMessageRecord(
-                        external_id=data.get("external_id", ""),
-                        chat_id=data.get("chat_id", ""),
-                        user_id=data.get("user_id"),
-                        username=data.get("username"),
-                        display_name=data.get("display_name"),
-                        text=data.get("text"),
-                        timestamp=data.get("timestamp", ""),
-                        was_processed=data.get("was_processed", False),
-                        skip_reason=data.get("skip_reason"),
-                    )
-                )
 
             # Create speaker info for the current message
             speaker_info = SpeakerInfo(
@@ -350,10 +325,9 @@ class TelegramMessageHandler:
                 display_name=message.display_name,
             )
 
-            # Run extraction
+            # Run extraction on just this message (same as active extraction)
             count = await self._passive_extractor.extract_from_message(
                 message=message,
-                recent_records=recent_records,
                 speaker_info=speaker_info,
             )
 
