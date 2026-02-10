@@ -77,11 +77,10 @@ You were NOT mentioned or replied to. Review the message and context.
 ## Your Identity
 - Name: {bot_name}
 - Username: @{bot_username}
-
+{memories_section}
 ## ENGAGE when:
+- Someone asks a question you can answer (especially if you have relevant memories)
 - Someone addresses you by name ("{bot_name}" or "@{bot_username}")
-- A question you can answer based on your knowledge
-- You have relevant memories about the topic
 - Someone needs help with something you can do
 
 ## SILENT when:
@@ -89,8 +88,7 @@ You were NOT mentioned or replied to. Review the message and context.
 - Messages directed at specific people (not you)
 - Small talk, jokes, or social banter
 - Topics where you have nothing useful to add
-- Reactions, emoji, or short messages
-{memories_section}
+
 ## Chat: {chat_title}
 Recent messages:
 {context_messages}
@@ -99,9 +97,7 @@ Recent messages:
 {message_text}
 
 ## Decision
-Respond with EXACTLY one word: ENGAGE or SILENT
-
-If uncertain, default to SILENT. Being helpful means knowing when not to interrupt."""
+Respond with EXACTLY one word: ENGAGE or SILENT"""
 
 
 @dataclass
