@@ -207,6 +207,10 @@ class TelegramMessageHandler:
         5. Makes engagement decision via LLM (with bot identity context)
         6. If ENGAGE, promotes to full message processing
         """
+        # Guard: passive listening must be fully initialized
+        if not self._passive_decider or not self._memory_manager:
+            return
+
         from ash.providers.telegram.passive import BotContext, check_bot_name_mention
 
         chat_id = message.chat_id
