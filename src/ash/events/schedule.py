@@ -140,8 +140,12 @@ class ScheduleEntry:
                 tz = ZoneInfo("UTC")
 
             # Convert base time to local timezone for cron evaluation
+            # Use last_run if available, otherwise created_at to anchor the first
+            # scheduled occurrence after creation (not recalculated on each poll)
             if self.last_run:
                 base_time = self.last_run.astimezone(tz)
+            elif self.created_at:
+                base_time = self.created_at.astimezone(tz)
             else:
                 base_time = datetime.now(tz)
 
@@ -507,3 +511,112 @@ class ScheduleWatcher:
         count = len(entries)
         self._schedule_file.write_text("")
         return count
+
+    def update_entry(
+        self,
+        entry_id: str,
+        message: str | None = None,
+        trigger_at: datetime | None = None,
+        cron: str | None = None,
+        timezone: str | None = None,
+    ) -> ScheduleEntry | None:
+        """Update an existing entry by ID.
+
+        Args:
+            entry_id: The stable ID of the entry to update.
+            message: New message text (optional).
+            trigger_at: New trigger time for one-shot entries (optional).
+            cron: New cron expression for periodic entries (optional).
+            timezone: New timezone (optional).
+
+        Returns:
+            The updated entry if found, None if not found.
+
+        Raises:
+            ValueError: If update is invalid (e.g., switching trigger types,
+                        past trigger_at, invalid cron, or no fields provided).
+        """
+        # Validate at least one updatable field is provided
+        if message is None and trigger_at is None and cron is None and timezone is None:
+            raise ValueError("At least one updatable field must be provided")
+
+        if not self._schedule_file.exists():
+            return None
+
+        lines = self._schedule_file.read_text().splitlines()
+        updated_entry = None
+        new_lines = []
+
+        for line in lines:
+            entry = ScheduleEntry.from_line(line)
+            if entry and entry.id == entry_id:
+                # Apply updates with validation
+                updated_entry = self._apply_updates(
+                    entry,
+                    message=message,
+                    trigger_at=trigger_at,
+                    cron=cron,
+                    timezone=timezone,
+                )
+                new_lines.append(updated_entry.to_json_line())
+            else:
+                new_lines.append(line)
+
+        if updated_entry:
+            self._write_lines(new_lines)
+
+        return updated_entry
+
+    def _apply_updates(
+        self,
+        entry: ScheduleEntry,
+        message: str | None = None,
+        trigger_at: datetime | None = None,
+        cron: str | None = None,
+        timezone: str | None = None,
+    ) -> ScheduleEntry:
+        """Apply updates to an entry with validation.
+
+        Args:
+            entry: The entry to update.
+            message: New message text (optional).
+            trigger_at: New trigger time (optional).
+            cron: New cron expression (optional).
+            timezone: New timezone (optional).
+
+        Returns:
+            The updated entry.
+
+        Raises:
+            ValueError: If the update is invalid.
+        """
+        # Prevent switching trigger types
+        if trigger_at is not None and entry.cron is not None:
+            raise ValueError("Cannot change periodic entry to one-shot")
+        if cron is not None and entry.trigger_at is not None:
+            raise ValueError("Cannot change one-shot entry to periodic")
+
+        # Validate trigger_at is in future
+        if trigger_at is not None and trigger_at <= datetime.now(UTC):
+            raise ValueError("trigger_at must be in the future")
+
+        # Validate cron expression
+        if cron is not None:
+            try:
+                from croniter import croniter
+
+                croniter(cron)
+            except Exception as e:
+                raise ValueError(f"Invalid cron expression: {e}") from e
+
+        # Apply updates
+        if message is not None:
+            entry.message = message
+        if trigger_at is not None:
+            entry.trigger_at = trigger_at
+        if cron is not None:
+            entry.cron = cron
+        if timezone is not None:
+            entry.timezone = timezone
+
+        return entry

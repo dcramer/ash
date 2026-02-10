@@ -364,3 +364,132 @@ def cancel(
     _write_entries(remaining)
 
     typer.echo(f"Cancelled: {_truncate(found.get('message', ''))}")
+
+
+@app.command()
+def update(
+    entry_id: Annotated[
+        str, typer.Option("--id", "-i", help="Entry ID to update (8-char hex)")
+    ],
+    message: Annotated[
+        str | None,
+        typer.Option("--message", "-m", help="New message/prompt"),
+    ] = None,
+    at: Annotated[
+        str | None,
+        typer.Option(
+            "--at",
+            help="New trigger time (e.g., '7:45am', 'tomorrow at 9am')",
+        ),
+    ] = None,
+    cron: Annotated[
+        str | None,
+        typer.Option("--cron", help="New cron expression"),
+    ] = None,
+    timezone: Annotated[
+        str | None,
+        typer.Option("--tz", help="New timezone (IANA name)"),
+    ] = None,
+) -> None:
+    """Update a scheduled task by ID.
+
+    Examples:
+        ash-sb schedule update --id a1b2c3d4 --message "New reminder text"
+        ash-sb schedule update --id a1b2c3d4 --at "tomorrow at 10am"
+        ash-sb schedule update --id a1b2c3d4 --cron "0 9 * * *"
+    """
+    user_id = os.environ.get("ASH_USER_ID")
+    ctx = _get_context()
+    entries = _read_entries()
+
+    # Find entry
+    found = None
+    found_idx = -1
+    for i, entry in enumerate(entries):
+        if entry.get("id") == entry_id:
+            found = entry
+            found_idx = i
+            break
+
+    if not found:
+        typer.echo(f"Error: No task found with ID {entry_id}", err=True)
+        raise typer.Exit(1)
+
+    # Check ownership if user context is available
+    if user_id and found.get("user_id") != user_id:
+        typer.echo(f"Error: Task {entry_id} does not belong to you", err=True)
+        raise typer.Exit(1)
+
+    # Validate at least one update field is provided
+    if message is None and at is None and cron is None and timezone is None:
+        typer.echo(
+            "Error: At least one of --message, --at, --cron, or --tz required", err=True
+        )
+        raise typer.Exit(1)
+
+    # Validate trigger type consistency
+    is_periodic = "cron" in found
+    if at is not None and is_periodic:
+        typer.echo("Error: Cannot change periodic entry to one-shot", err=True)
+        raise typer.Exit(1)
+    if cron is not None and not is_periodic:
+        typer.echo("Error: Cannot change one-shot entry to periodic", err=True)
+        raise typer.Exit(1)
+
+    # Parse and validate --at time
+    trigger_time: datetime | None = None
+    if at is not None:
+        trigger_time = _parse_time(at, ctx["timezone"])
+        if trigger_time is None:
+            typer.echo(f"Error: Could not parse time: {at}", err=True)
+            raise typer.Exit(1)
+        if trigger_time <= datetime.now(UTC):
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(ctx["timezone"])
+            local_str = trigger_time.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z")
+            typer.echo(
+                f"Error: Time '{at}' parsed as {local_str} which is in the past",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+    # Validate cron format
+    if cron is not None:
+        try:
+            from croniter import croniter
+
+            croniter(cron)
+        except ImportError:
+            # croniter not available in sandbox - accept the cron and let server validate
+            pass
+        except Exception as e:
+            typer.echo(f"Error: Invalid cron expression: {e}", err=True)
+            raise typer.Exit(1) from None
+
+    # Apply updates
+    if message is not None:
+        found["message"] = message
+    if trigger_time is not None:
+        found["trigger_at"] = trigger_time.isoformat().replace("+00:00", "Z")
+    if cron is not None:
+        found["cron"] = cron
+    if timezone is not None:
+        found["timezone"] = timezone
+
+    # Write updated entries
+    entries[found_idx] = found
+    _write_entries(entries)
+
+    # Confirmation
+    preview = _truncate(found.get("message", ""))
+    if is_periodic:
+        typer.echo(f"Updated recurring task (id={entry_id})")
+        typer.echo(f"  Cron: {found.get('cron')}")
+        typer.echo(f"  Task: {preview}")
+    else:
+        local_time = _format_time_local(found["trigger_at"], ctx["timezone"])
+        typer.echo(f"Updated reminder (id={entry_id})")
+        typer.echo(f"  Time: {local_time} ({ctx['timezone']})")
+        typer.echo(f"  UTC:  {found['trigger_at']}")
+        typer.echo(f"  Task: {preview}")

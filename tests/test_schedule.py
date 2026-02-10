@@ -351,6 +351,176 @@ class TestScheduleWatcher:
 
         assert count == 0
 
+    def test_update_entry_message_only(self, tmp_path: Path):
+        """Test updating only the message of an entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Original"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        result = watcher.update_entry("task0001", message="Updated message")
+
+        assert result is not None
+        assert result.message == "Updated message"
+        assert result.id == "task0001"
+
+        # Verify file was updated
+        content = schedule_file.read_text()
+        assert "Updated message" in content
+        assert "Original" not in content
+
+    def test_update_entry_trigger_at(self, tmp_path: Path):
+        """Test updating trigger_at for a one-shot entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        new_time = datetime.now(UTC) + timedelta(hours=2)
+        result = watcher.update_entry("task0001", trigger_at=new_time)
+
+        assert result is not None
+        assert result.trigger_at == new_time
+
+    def test_update_entry_cron(self, tmp_path: Path):
+        """Test updating cron expression for a periodic entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        result = watcher.update_entry("task0001", cron="0 9 * * *")
+
+        assert result is not None
+        assert result.cron == "0 9 * * *"
+
+        # Verify file was updated
+        content = schedule_file.read_text()
+        assert "0 9 * * *" in content
+
+    def test_update_entry_timezone(self, tmp_path: Path):
+        """Test updating timezone of an entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily", "timezone": "UTC"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        result = watcher.update_entry("task0001", timezone="America/Los_Angeles")
+
+        assert result is not None
+        assert result.timezone == "America/Los_Angeles"
+
+    def test_update_entry_not_found(self, tmp_path: Path):
+        """Test updating non-existent entry returns None."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        result = watcher.update_entry("nonexistent", message="Updated")
+
+        assert result is None
+
+    def test_update_entry_switch_oneshot_to_periodic_fails(self, tmp_path: Path):
+        """Test that switching from one-shot to periodic fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+
+        with pytest.raises(
+            ValueError, match="Cannot change one-shot entry to periodic"
+        ):
+            watcher.update_entry("task0001", cron="0 8 * * *")
+
+    def test_update_entry_switch_periodic_to_oneshot_fails(self, tmp_path: Path):
+        """Test that switching from periodic to one-shot fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        future_time = datetime.now(UTC) + timedelta(hours=2)
+
+        with pytest.raises(
+            ValueError, match="Cannot change periodic entry to one-shot"
+        ):
+            watcher.update_entry("task0001", trigger_at=future_time)
+
+    def test_update_entry_trigger_at_in_past_fails(self, tmp_path: Path):
+        """Test that setting trigger_at to past time fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        past_time = datetime.now(UTC) - timedelta(hours=1)
+
+        with pytest.raises(ValueError, match="trigger_at must be in the future"):
+            watcher.update_entry("task0001", trigger_at=past_time)
+
+    def test_update_entry_invalid_cron_fails(self, tmp_path: Path):
+        """Test that invalid cron expression fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+
+        with pytest.raises(ValueError, match="Invalid cron expression"):
+            watcher.update_entry("task0001", cron="invalid cron")
+
+    def test_update_entry_no_fields_fails(self, tmp_path: Path):
+        """Test that updating with no fields fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+
+        with pytest.raises(ValueError, match="At least one updatable field"):
+            watcher.update_entry("task0001")
+
+    def test_update_entry_missing_file(self, tmp_path: Path):
+        """Test updating from non-existent file returns None."""
+        watcher = ScheduleWatcher(tmp_path / "schedule.jsonl")
+        result = watcher.update_entry("task0001", message="Updated")
+
+        assert result is None
+
+    def test_update_entry_preserves_other_entries(self, tmp_path: Path):
+        """Test that updating one entry doesn't affect others."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"id": "task0002", "trigger_at": "2026-12-13T09:00:00+00:00", "message": "Original message"}\n'
+            '{"id": "task0003", "trigger_at": "2026-12-14T09:00:00+00:00", "message": "Task 3"}\n'
+        )
+
+        watcher = ScheduleWatcher(schedule_file)
+        result = watcher.update_entry("task0002", message="Updated message")
+
+        assert result is not None
+        assert result.message == "Updated message"
+
+        # Verify all entries are still present
+        content = schedule_file.read_text()
+        assert "Task 1" in content
+        assert "Updated message" in content
+        assert "Task 3" in content
+        assert "Original message" not in content  # Old message should be gone
+
     @pytest.mark.asyncio
     async def test_failed_one_shot_removed(self, tmp_path: Path):
         """Test that failed one-shot entries are removed (not retried forever)."""
@@ -721,3 +891,90 @@ class TestScheduleEntryTimezone:
         else:
             # If we're before the scheduled time, it should not be due
             assert entry.is_due() is False
+
+    def test_cron_with_created_at_fires_on_first_occurrence(self):
+        """Test cron entry with created_at (no last_run) fires at first scheduled time.
+
+        This tests the fix for: scheduler tasks not firing at scheduled time.
+
+        Bug scenario:
+        - Task created at 6:50 PM Monday for `0 19 * * 1` (7pm Monday)
+        - At 7:00:13 PM, without the fix, get_next(7:00:13 PM) → 7pm NEXT Monday
+        - With the fix, get_next(created_at at 6:50pm) → 7pm current Monday
+
+        The fix uses created_at as the base time for entries without last_run,
+        ensuring the first scheduled occurrence after creation is captured.
+        """
+        from zoneinfo import ZoneInfo
+
+        la_tz = ZoneInfo("America/Los_Angeles")
+
+        # Simulate: task created at 6:50 PM for 7 PM schedule
+        # created_at is 10 minutes before scheduled time
+        created_time = datetime(2026, 2, 9, 18, 50, 0, tzinfo=la_tz)  # 6:50 PM LA
+
+        entry = ScheduleEntry(
+            id="weekly01",
+            message="Weekly reminder",
+            cron="0 19 * * 1",  # 7 PM Monday
+            timezone="America/Los_Angeles",
+            created_at=created_time.astimezone(UTC),
+            last_run=None,  # First execution - no last_run
+        )
+
+        # With the fix, next_fire should be 7 PM on the same day (Feb 9)
+        # because we use created_at (6:50 PM) as base, and get_next gives 7 PM
+        next_fire = entry.next_fire_time()
+        assert next_fire is not None
+
+        next_fire_la = next_fire.astimezone(la_tz)
+        # Should be 7 PM on Feb 9 (Monday), not Feb 16 (next Monday)
+        assert next_fire_la.month == 2
+        assert next_fire_la.day == 9
+        assert next_fire_la.hour == 19
+        assert next_fire_la.minute == 0
+
+    def test_cron_without_created_at_or_last_run_uses_now(self):
+        """Test cron entry without created_at or last_run uses datetime.now() as fallback.
+
+        This ensures backward compatibility for entries that don't have created_at.
+        """
+        entry = ScheduleEntry(
+            message="Legacy entry",
+            cron="0 8 * * *",  # 8 AM daily
+            timezone="UTC",
+            created_at=None,
+            last_run=None,
+        )
+
+        # Should calculate from now, so next fire is in the future
+        next_fire = entry.next_fire_time()
+        assert next_fire is not None
+        assert next_fire > datetime.now(UTC)
+        assert entry.is_due() is False
+
+    def test_cron_past_scheduled_time_with_created_at_is_due(self):
+        """Test cron entry is due when current time is past scheduled time.
+
+        Scenario: created well in the past, scheduled for every minute.
+        Should be due because the next scheduled time has passed.
+        """
+        # Created 2 days ago, so any "every minute" schedule should be past
+        created_time = datetime.now(UTC) - timedelta(days=2)
+
+        entry = ScheduleEntry(
+            id="weekly02",
+            message="Frequent reminder",
+            cron="* * * * *",  # Every minute
+            timezone="UTC",
+            created_at=created_time,
+            last_run=None,
+        )
+
+        # Next fire from 2 days ago + 1 minute is definitely in the past
+        next_fire = entry.next_fire_time()
+        assert next_fire is not None
+        assert next_fire < datetime.now(UTC)
+
+        # Should be due since next fire time is in the past
+        assert entry.is_due() is True

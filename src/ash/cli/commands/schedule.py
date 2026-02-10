@@ -49,14 +49,43 @@ def register(app: typer.Typer) -> None:
     def schedule(
         action: Annotated[
             str | None,
-            typer.Argument(help="Action: list, cancel, clear"),
+            typer.Argument(help="Action: list, update, cancel, clear"),
         ] = None,
         entry_id: Annotated[
             str | None,
             typer.Option(
                 "--id",
                 "-i",
-                help="Entry ID (8-char hex) for cancel",
+                help="Entry ID (8-char hex) for update/cancel",
+            ),
+        ] = None,
+        message: Annotated[
+            str | None,
+            typer.Option(
+                "--message",
+                "-m",
+                help="New message (for update)",
+            ),
+        ] = None,
+        at: Annotated[
+            str | None,
+            typer.Option(
+                "--at",
+                help="New trigger time (for update)",
+            ),
+        ] = None,
+        cron: Annotated[
+            str | None,
+            typer.Option(
+                "--cron",
+                help="New cron expression (for update)",
+            ),
+        ] = None,
+        tz: Annotated[
+            str | None,
+            typer.Option(
+                "--tz",
+                help="New timezone (for update)",
             ),
         ] = None,
         force: Annotated[
@@ -74,6 +103,7 @@ def register(app: typer.Typer) -> None:
 
         Examples:
             ash schedule list                  # List all scheduled tasks
+            ash schedule update --id a1b2c3d4 --message "New text"  # Update task
             ash schedule cancel --id a1b2c3d4  # Cancel task by ID
             ash schedule clear                 # Clear all scheduled tasks
         """
@@ -89,6 +119,12 @@ def register(app: typer.Typer) -> None:
         if action == "list":
             _schedule_list(schedule_file)
 
+        elif action == "update":
+            if entry_id is None:
+                error("--id is required for update")
+                raise typer.Exit(1)
+            _schedule_update(schedule_file, entry_id, message, at, cron, tz)
+
         elif action == "cancel":
             if entry_id is None:
                 error("--id is required for cancel")
@@ -100,7 +136,7 @@ def register(app: typer.Typer) -> None:
 
         else:
             error(f"Unknown action: {action}")
-            console.print("Valid actions: list, cancel, clear")
+            console.print("Valid actions: list, update, cancel, clear")
             raise typer.Exit(1)
 
 
@@ -186,6 +222,84 @@ def _schedule_cancel(schedule_file, entry_id: str) -> None:
     else:
         error(f"Failed to cancel task {entry_id}")
         raise typer.Exit(1)
+
+
+def _schedule_update(
+    schedule_file,
+    entry_id: str,
+    message: str | None,
+    at: str | None,
+    cron: str | None,
+    tz: str | None,
+) -> None:
+    """Update a scheduled task by ID."""
+    from ash.config import load_config
+    from ash.events.schedule import ScheduleWatcher
+
+    config = load_config()
+    watcher = ScheduleWatcher(schedule_file, timezone=config.timezone)
+
+    # Parse --at time if provided
+    trigger_at: datetime | None = None
+    if at is not None:
+        trigger_at = _parse_time(at, config.timezone)
+        if trigger_at is None:
+            error(f"Could not parse time: {at}")
+            raise typer.Exit(1)
+
+    try:
+        updated = watcher.update_entry(
+            entry_id,
+            message=message,
+            trigger_at=trigger_at,
+            cron=cron,
+            timezone=tz,
+        )
+    except ValueError as e:
+        error(str(e))
+        raise typer.Exit(1) from None
+
+    if updated:
+        success(f"Updated: {updated.message[:50]}...")
+        if updated.is_periodic:
+            console.print(f"  Cron: {updated.cron}")
+        elif updated.trigger_at:
+            console.print(f"  Trigger: {updated.trigger_at.isoformat()}")
+        if updated.timezone:
+            console.print(f"  Timezone: {updated.timezone}")
+    else:
+        error(f"Failed to update task {entry_id}")
+        raise typer.Exit(1)
+
+
+def _parse_time(time_str: str, timezone: str) -> datetime | None:
+    """Parse time string to UTC datetime.
+
+    Args:
+        time_str: Time string to parse (ISO 8601 or natural language).
+        timezone: User's IANA timezone for interpreting local times.
+
+    Returns:
+        UTC datetime if parsing succeeds, None otherwise.
+    """
+    # Fast path: ISO 8601
+    try:
+        return datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+
+    # Natural language fallback
+    import dateparser
+
+    settings: dict = {
+        "TIMEZONE": timezone,
+        "RETURN_AS_TIMEZONE_AWARE": True,
+        "PREFER_DATES_FROM": "future",
+    }
+    parsed = dateparser.parse(time_str, settings=settings)
+    if parsed:
+        return parsed.astimezone(UTC)
+    return None
 
 
 def _schedule_clear(schedule_file, force: bool) -> None:
