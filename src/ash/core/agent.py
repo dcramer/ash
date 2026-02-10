@@ -64,6 +64,53 @@ def _extract_checkpoint(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | No
     return None
 
 
+@dataclass
+class _OwnerMatchers:
+    """Compiled matchers for owner name filtering."""
+
+    exact: set[str]  # Exact matches (username, full name)
+    parts: set[str]  # Name parts (first name, last name)
+
+
+def _build_owner_matchers(owner_names: list[str] | None) -> _OwnerMatchers:
+    """Build matchers for filtering owner names from subjects."""
+    exact: set[str] = set()
+    parts: set[str] = set()
+    if owner_names:
+        for name in owner_names:
+            normalized = name.lower().lstrip("@")
+            exact.add(normalized)
+            # Add name parts for partial matching (e.g., "David Cramer" -> "david", "cramer")
+            for part in normalized.split():
+                if len(part) >= 3:
+                    parts.add(part)
+    return _OwnerMatchers(exact=exact, parts=parts)
+
+
+def _is_owner_name(subject: str, matchers: _OwnerMatchers) -> bool:
+    """Check if a subject name refers to the owner."""
+    normalized = subject.lower().lstrip("@")
+    return normalized in matchers.exact or normalized in matchers.parts
+
+
+# Invalid speaker values that indicate assistant attribution
+_INVALID_SPEAKERS = frozenset({"agent", "assistant", "bot", "system", "ash"})
+
+
+def _validate_speaker(speaker: str | None) -> str | None:
+    """Validate and normalize speaker, filtering out invalid values.
+
+    Returns None for invalid speakers (agent, assistant, etc.) or empty values.
+    """
+    if not speaker:
+        return None
+    normalized = speaker.lower()
+    if normalized in _INVALID_SPEAKERS:
+        logger.debug("Filtering invalid speaker: %s", speaker)
+        return None
+    return normalized
+
+
 def _build_routing_env(
     session: SessionState,
     effective_user_id: str | None,
@@ -449,6 +496,57 @@ class Agent:
             message_budget=message_budget,
         )
 
+    async def _ensure_self_person(
+        self,
+        user_id: str,
+        username: str,
+        display_name: str,
+    ) -> None:
+        """Ensure a self-Person exists for the user with username as alias.
+
+        This enables proper trust determination by linking the username
+        (used as source_user_id) to the display name (used for display).
+
+        Args:
+            user_id: The owner user ID for the person record.
+            username: The user's handle/username (e.g., "notzeeg").
+            display_name: The user's display name (e.g., "David Cramer").
+        """
+        if not self._memory:
+            return
+
+        try:
+            # Check if self-person already exists by display name
+            existing = await self._memory.find_person(user_id, display_name)
+            if existing and existing.relationship == "self":
+                # Add username to aliases if not present
+                username_lower = username.lower()
+                aliases_lower = [a.lower() for a in (existing.aliases or [])]
+                if username_lower not in aliases_lower:
+                    await self._memory._store.add_person_alias(
+                        existing.id, username, user_id
+                    )
+                return
+
+            # Check by username
+            existing = await self._memory.find_person(user_id, username)
+            if existing and existing.relationship == "self":
+                return
+
+            # Create self-person with username as alias
+            await self._memory._store.create_person(
+                owner_user_id=user_id,
+                name=display_name,
+                relationship="self",
+                aliases=[username],
+            )
+            logger.debug(
+                "Created self-person for user",
+                extra={"user_id": user_id, "name": display_name, "username": username},
+            )
+        except Exception:
+            logger.debug("Failed to ensure self-person", exc_info=True)
+
     def _should_extract_memories(self, user_message: str) -> bool:
         if not self._config.extraction_enabled:
             return False
@@ -520,6 +618,14 @@ class Agent:
                 display_name=speaker_display_name,
             )
 
+            # Ensure self-person exists for proper trust determination
+            if speaker_username and speaker_display_name:
+                await self._ensure_self_person(
+                    user_id=user_id,
+                    username=speaker_username,
+                    display_name=speaker_display_name,
+                )
+
             facts = await self._extractor.extract_from_conversation(
                 messages=llm_messages,
                 existing_memories=existing_memories,
@@ -527,12 +633,8 @@ class Agent:
                 speaker_info=speaker_info,
             )
 
-            # Normalize owner names for comparison (strip @ prefix)
-            owner_names_lower = set()
-            if owner_names:
-                for name in owner_names:
-                    normalized = name.lower().lstrip("@")
-                    owner_names_lower.add(normalized)
+            # Build owner name matchers for filtering self-references
+            owner_matchers = _build_owner_matchers(owner_names)
 
             for fact in facts:
                 if fact.confidence < self._config.extraction_confidence_threshold:
@@ -543,10 +645,7 @@ class Agent:
                     if fact.subjects:
                         subject_person_ids = []
                         for subject in fact.subjects:
-                            # Normalize subject for comparison (strip @ prefix)
-                            subject_normalized = subject.lower().lstrip("@")
-                            # Skip subjects that are the owner themselves
-                            if subject_normalized in owner_names_lower:
+                            if _is_owner_name(subject, owner_matchers):
                                 logger.debug("Skipping owner as subject: %s", subject)
                                 continue
                             try:
@@ -559,8 +658,11 @@ class Agent:
                             except Exception:
                                 logger.debug("Failed to resolve subject: %s", subject)
 
+                    # Filter out invalid speaker values that indicate assistant attribution
+                    speaker = _validate_speaker(fact.speaker)
+
                     # Determine source user from extracted speaker or session
-                    source_user_id = fact.speaker or speaker_username or user_id
+                    source_user_id = speaker or speaker_username or user_id
                     source_user_name = (
                         speaker_display_name
                         if source_user_id == speaker_username

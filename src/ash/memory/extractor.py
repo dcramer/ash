@@ -47,6 +47,18 @@ class SpeakerInfo:
 # Default extraction prompt template
 EXTRACTION_PROMPT = """You are a memory extraction system. Analyze this conversation and identify facts worth remembering about the user(s).
 {owner_section}
+## Conversation format
+The conversation uses XML tags to clearly separate speakers:
+- <user> contains what the USER said (may include "@username (Name):" prefix)
+- <assistant> contains what the ASSISTANT said
+
+## CRITICAL: Only extract from <user> tags
+- ONLY extract facts from content inside <user> tags
+- NEVER extract facts from <assistant> tags
+- The assistant may summarize or restate user info - ignore this completely
+- If the assistant says "You mentioned you like pizza", do NOT extract that
+- Only the user's own words inside <user> tags are valid sources
+
 ## What to extract:
 - User preferences (likes, dislikes, habits)
 - Facts about people in their life (names, relationships, details)
@@ -55,8 +67,8 @@ EXTRACTION_PROMPT = """You are a memory extraction system. Analyze this conversa
 - Corrections to previously known information
 
 ## What NOT to extract:
-- Facts stated BY the assistant (only extract facts from user messages)
-- The assistant's summaries, clarifications, or restatements of user facts
+- Anything inside <assistant> tags
+- Information restated or summarized by the assistant
 - Actions the assistant took
 - Temporary task context ("working on X project")
 - Generic conversation flow
@@ -77,10 +89,11 @@ Facts should be attributed to who they're ABOUT, not who performed an action:
 - Be precise: "gave", "got for", "bought for" means the OTHER person receives/owns it
 
 ## Speaker Attribution
-Each message in the conversation shows who said it. Track WHO provided each fact:
-- If @david says "I like pizza" -> speaker is "david"
-- If @bob says "David likes pasta" -> speaker is "bob", subjects is ["David"]
-- The speaker field should contain the username (without @) of who stated the fact
+Look for the @username prefix in <user> content to determine the speaker:
+- "@david (David Cramer): I like pizza" -> speaker is "david"
+- "@bob: David likes pasta" -> speaker is "bob", subjects is ["David"]
+- Never use "agent", "assistant", "bot", or "system" as speaker
+- If no @username prefix in <user> content, set speaker to null
 
 ## Subjects field
 The subjects array should contain people the fact is PRIMARILY ABOUT:
@@ -235,12 +248,15 @@ Do NOT put the user's own name in subjects - subjects is for OTHER people in the
     ) -> str:
         """Format messages into a readable conversation transcript.
 
+        Uses XML tags to clearly separate user and assistant messages,
+        making it unambiguous which content comes from which speaker.
+
         Args:
             messages: Messages to format.
             speaker_info: Optional speaker info for user messages.
 
         Returns:
-            Formatted conversation text with speaker attribution.
+            Formatted conversation text with XML tags for speaker separation.
         """
         lines = []
         for msg in messages:
@@ -256,15 +272,16 @@ Do NOT put the user's own name in subjects - subjects is for OTHER people in the
             if len(text) > 2000:
                 text = text[:2000] + "..."
 
-            # Format speaker label with identity if available
-            if msg.role == Role.USER and speaker_info:
-                role_label = speaker_info.format_label()
-            elif msg.role == Role.USER:
-                role_label = "User"
+            # Use XML tags to clearly separate speakers
+            if msg.role == Role.USER:
+                # Include speaker info in the content for attribution
+                if speaker_info:
+                    label = speaker_info.format_label()
+                    lines.append(f"<user>\n{label}: {text}\n</user>")
+                else:
+                    lines.append(f"<user>\n{text}\n</user>")
             else:
-                role_label = "Assistant"
-
-            lines.append(f"{role_label}: {text}")
+                lines.append(f"<assistant>\n{text}\n</assistant>")
 
         return "\n\n".join(lines)
 

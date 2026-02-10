@@ -26,6 +26,50 @@ def _get_memory_store() -> "FileMemoryStore":
     return FileMemoryStore()
 
 
+def _matches_person(source_id: str, person) -> bool:
+    """Check if source_id matches a person's name or aliases."""
+    if person.name.lower() == source_id:
+        return True
+    for alias in person.aliases or []:
+        if alias.lower() == source_id:
+            return True
+    return False
+
+
+def _is_source_self_reference(
+    source_user_id: str | None,
+    owner_user_id: str | None,
+    subject_person_ids: list[str] | None,
+    all_people: list,
+    people_by_id: dict,
+) -> bool:
+    """Determine if the source user is speaking about themselves.
+
+    Returns True if:
+    - source matches a self-person (owner speaking about themselves)
+    - source matches any subject person (source is the subject)
+    """
+    if not source_user_id:
+        return False
+
+    source_id = source_user_id.lower()
+
+    # Check if source matches a self-person
+    for person in all_people:
+        if person.owner_user_id == owner_user_id and person.relationship == "self":
+            if _matches_person(source_id, person):
+                return True
+
+    # Check if source matches any subject person
+    if subject_person_ids:
+        for person_id in subject_person_ids:
+            person = people_by_id.get(person_id)
+            if person and _matches_person(source_id, person):
+                return True
+
+    return False
+
+
 def register(app: typer.Typer) -> None:
     """Register the memory command."""
 
@@ -347,13 +391,14 @@ async def _memory_list(
             else:
                 subject_names.append(person_id[:8])
 
-        # About: subjects if present, otherwise source user (speaking about self)
+        # About: subjects if present, otherwise show username for self-referential facts
         if subject_names:
             about = ", ".join(subject_names)
+        elif entry.source_user_id:
+            # Self-referential fact - show username to match source column
+            about = f"@{entry.source_user_id}"
         elif entry.source_user_name:
             about = entry.source_user_name
-        elif entry.source_user_id:
-            about = entry.source_user_id[:8]
         else:
             about = "[dim]-[/dim]"
 
@@ -366,32 +411,17 @@ async def _memory_list(
             source_display = "[dim]-[/dim]"
 
         # Trust: fact (speaking about self) vs hearsay (speaking about others)
-        # Check if source user matches any subject person (self-reference)
-        source_is_subject = False
-        if entry.source_user_id and entry.subject_person_ids:
-            source_id = entry.source_user_id.lower()
-            # Check each subject person's name and aliases
-            for person_id in entry.subject_person_ids:
-                person = people_by_id.get(person_id)
-                if person:
-                    # Check name
-                    if person.name.lower() == source_id:
-                        source_is_subject = True
-                        break
-                    # Check aliases
-                    for alias in person.aliases or []:
-                        if alias.lower() == source_id:
-                            source_is_subject = True
-                            break
-                    if source_is_subject:
-                        break
-
-        if subject_names and not source_is_subject:
-            # Has subjects that aren't the source - speaking about others
-            trust = "[yellow]hearsay[/yellow]"
-        else:
-            # No subjects or source is the subject - speaking about self
+        is_self_reference = _is_source_self_reference(
+            entry.source_user_id,
+            entry.owner_user_id,
+            entry.subject_person_ids,
+            people,
+            people_by_id,
+        )
+        if not subject_names or is_self_reference:
             trust = "[green]fact[/green]"
+        else:
+            trust = "[yellow]hearsay[/yellow]"
 
         created = entry.created_at.strftime("%Y-%m-%d") if entry.created_at else "-"
 
@@ -658,26 +688,19 @@ async def _memory_show(memory_id: str) -> None:
         table.add_row("About", "-")
 
     # Trust level - check if source user matches any subject person (self-reference)
-    source_is_subject = False
-    if memory.source_user_id and memory.subject_person_ids:
-        source_id = memory.source_user_id.lower()
-        for person_id in memory.subject_person_ids:
-            person = await store.get_person(person_id)
-            if person:
-                if person.name.lower() == source_id:
-                    source_is_subject = True
-                    break
-                for alias in person.aliases or []:
-                    if alias.lower() == source_id:
-                        source_is_subject = True
-                        break
-                if source_is_subject:
-                    break
-
-    if memory.subject_person_ids and not source_is_subject:
-        table.add_row("Trust", "hearsay (source speaking about others)")
-    else:
+    all_people = await store.get_people_for_user(memory.owner_user_id or "")
+    people_by_id_show = {p.id: p for p in all_people}
+    is_self_reference = _is_source_self_reference(
+        memory.source_user_id,
+        memory.owner_user_id,
+        memory.subject_person_ids,
+        all_people,
+        people_by_id_show,
+    )
+    if not subject_names or is_self_reference:
         table.add_row("Trust", "fact (source speaking about themselves)")
+    else:
+        table.add_row("Trust", "hearsay (source speaking about others)")
 
     # Timestamps
     if memory.created_at:
