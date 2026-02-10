@@ -42,6 +42,27 @@ def _format_speaker_label(username: str | None, display_name: str | None) -> str
     return ""
 
 
+def check_bot_name_mention(text: str, bot_context: BotContext | None) -> bool:
+    """Check if the message mentions the bot by name.
+
+    Returns True if bot name or @username is mentioned (case-insensitive).
+    """
+    if not bot_context:
+        return False
+
+    text_lower = text.lower()
+
+    # Check bot name (e.g., "ash")
+    if bot_context.name.lower() in text_lower:
+        return True
+
+    # Check @username (e.g., "@ash_bot")
+    if bot_context.username and f"@{bot_context.username}".lower() in text_lower:
+        return True
+
+    return False
+
+
 @dataclass
 class BotContext:
     """Context about the bot's identity for engagement decisions."""
@@ -208,26 +229,6 @@ class PassiveEngagementDecider:
         self._model = model
         self._timeout = timeout
 
-    def _check_name_mention(self, text: str, bot_context: BotContext | None) -> bool:
-        """Check if the message mentions the bot by name.
-
-        Returns True if bot name or username is mentioned (case-insensitive).
-        """
-        if not bot_context:
-            return False
-
-        text_lower = text.lower()
-
-        # Check bot name (e.g., "ash")
-        if bot_context.name.lower() in text_lower:
-            return True
-
-        # Check @username (e.g., "@ash_bot")
-        if bot_context.username and f"@{bot_context.username}".lower() in text_lower:
-            return True
-
-        return False
-
     async def decide(
         self,
         message: IncomingMessage,
@@ -255,7 +256,7 @@ class PassiveEngagementDecider:
             return False
 
         # Fast path: if bot name is mentioned, engage immediately
-        if self._check_name_mention(text, bot_context):
+        if check_bot_name_mention(text, bot_context):
             logger.info("Fast path: bot name mentioned in message")
             return True
 

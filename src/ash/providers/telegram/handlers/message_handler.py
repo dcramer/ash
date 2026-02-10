@@ -42,7 +42,6 @@ if TYPE_CHECKING:
     from ash.memory import MemoryManager
     from ash.memory.extractor import MemoryExtractor
     from ash.providers.telegram.passive import (
-        BotContext,
         PassiveEngagementDecider,
         PassiveEngagementThrottler,
         PassiveMemoryExtractor,
@@ -154,44 +153,37 @@ class TelegramMessageHandler:
             PassiveMemoryExtractor,
         )
 
-        # Initialize throttler
-        self._passive_throttler = PassiveEngagementThrottler(passive_config)
-
-        # Initialize decider (requires LLM provider)
-        if self._llm_provider:
-            self._passive_decider = PassiveEngagementDecider(
-                llm=self._llm_provider,
-                model=passive_config.model,
-            )
-        else:
-            logger.warning(
+        # Validate required components
+        if not self._llm_provider:
+            logger.error(
                 "Passive listening enabled but no LLM provider - "
-                "engagement decisions will be skipped"
+                "passive listening will be disabled"
             )
+            return
 
-        # Initialize memory extractor (requires both extractor and manager)
-        if (
-            passive_config.extraction_enabled
-            and self._memory_extractor
-            and self._memory_manager
-        ):
+        if not self._memory_manager:
+            logger.error(
+                "Passive listening enabled but no memory manager - "
+                "passive listening will be disabled"
+            )
+            return
+
+        # Initialize components
+        self._passive_throttler = PassiveEngagementThrottler(passive_config)
+        self._passive_decider = PassiveEngagementDecider(
+            llm=self._llm_provider,
+            model=passive_config.model,
+        )
+
+        # Initialize memory extractor if enabled
+        if passive_config.extraction_enabled and self._memory_extractor:
             self._passive_extractor = PassiveMemoryExtractor(
                 extractor=self._memory_extractor,
                 memory_manager=self._memory_manager,
                 context_messages=passive_config.context_messages,
             )
-        elif passive_config.extraction_enabled:
-            logger.warning(
-                "Passive extraction enabled but missing memory components - "
-                "extraction will be skipped"
-            )
 
-        logger.info(
-            "Passive listening initialized (llm=%s, memory=%s, extractor=%s)",
-            self._llm_provider is not None,
-            self._memory_manager is not None,
-            self._memory_extractor is not None,
-        )
+        logger.info("Passive listening initialized")
 
     def _get_bot_display_name(self) -> str:
         """Extract display name from bot username.
@@ -204,28 +196,6 @@ class TelegramMessageHandler:
             return username.split("_")[0].title()
         return "Assistant"
 
-    def _check_bot_name_mention(self, text: str, bot_context: "BotContext") -> bool:
-        """Check if the message mentions the bot by name.
-
-        Returns True if bot name or @username is mentioned (case-insensitive).
-        """
-        from ash.providers.telegram.passive import BotContext
-
-        if not isinstance(bot_context, BotContext):
-            return False
-
-        text_lower = text.lower()
-
-        # Check bot name (e.g., "ash")
-        if bot_context.name.lower() in text_lower:
-            return True
-
-        # Check @username (e.g., "@ash_bot")
-        if bot_context.username and f"@{bot_context.username}".lower() in text_lower:
-            return True
-
-        return False
-
     async def handle_passive_message(self, message: IncomingMessage) -> None:
         """Handle a passively observed message (not mentioned or replied to).
 
@@ -237,7 +207,7 @@ class TelegramMessageHandler:
         5. Makes engagement decision via LLM (with bot identity context)
         6. If ENGAGE, promotes to full message processing
         """
-        from ash.providers.telegram.passive import BotContext
+        from ash.providers.telegram.passive import BotContext, check_bot_name_mention
 
         chat_id = message.chat_id
         chat_title = message.metadata.get("chat_title")
@@ -256,7 +226,7 @@ class TelegramMessageHandler:
 
         # Fast path: check if bot is addressed by name (bypasses throttling)
         text = message.text or ""
-        name_mentioned = self._check_bot_name_mention(text, bot_context)
+        name_mentioned = check_bot_name_mention(text, bot_context)
 
         if name_mentioned:
             logger.info("Fast path: bot name mentioned, bypassing throttle")
@@ -278,18 +248,14 @@ class TelegramMessageHandler:
         # If name mentioned, engage immediately without LLM decision
         if name_mentioned:
             should_engage = True
-        elif not self._passive_decider:
-            logger.warning("No passive decider - skipping engagement decision")
-            return
         else:
             try:
-                # Query relevant memories (with timeout)
-                relevant_memories: list[str] | None = None
+                # Query relevant memories for context
                 passive_config = self._provider.passive_config
+                relevant_memories: list[str] | None = None
                 if (
                     passive_config
                     and passive_config.memory_lookup_enabled
-                    and self._memory_manager
                     and message.text
                 ):
                     relevant_memories = await self._query_relevant_memories(
@@ -299,14 +265,12 @@ class TelegramMessageHandler:
                         lookup_timeout=passive_config.memory_lookup_timeout,
                         threshold=passive_config.memory_similarity_threshold,
                     )
-                elif not self._memory_manager:
-                    logger.warning(
-                        "Memory lookup skipped: memory manager not available"
-                    )
 
                 # Get recent messages for context
                 recent_messages = await self._get_recent_message_texts(chat_id, limit=5)
 
+                # _passive_decider is guaranteed to exist (checked in _init_passive_listening)
+                assert self._passive_decider is not None
                 should_engage = await self._passive_decider.decide(
                     message=message,
                     recent_messages=recent_messages,
@@ -459,8 +423,7 @@ class TelegramMessageHandler:
         Returns:
             List of relevant memory contents, or None if lookup fails/times out.
         """
-        if not self._memory_manager:
-            return None
+        assert self._memory_manager is not None
 
         try:
             results = await asyncio.wait_for(
