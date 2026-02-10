@@ -570,11 +570,13 @@ class Agent:
                     await self._memory.add_memory(
                         content=fact.content,
                         source="background_extraction",
+                        memory_type=fact.memory_type,
                         owner_user_id=user_id if not fact.shared else None,
                         chat_id=chat_id if fact.shared else None,
                         subject_person_ids=subject_person_ids or None,
                         source_user_id=source_user_id,
                         source_user_name=source_user_name,
+                        extraction_confidence=fact.confidence,
                     )
 
                     logger.debug(
