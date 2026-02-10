@@ -900,7 +900,7 @@ class TelegramMessageHandler:
         if message.metadata.get("passive_engagement"):
             session.metadata["passive_engagement"] = True
 
-        session.metadata["session_path"] = f"/sessions/{session_key}/context.jsonl"
+        session.metadata["session_path"] = f"/sessions/{session_key}/history.jsonl"
         session.metadata["session_mode"] = session_mode
 
         if thread_id:
@@ -909,7 +909,7 @@ class TelegramMessageHandler:
                 self._provider.name, message.chat_id, message.user_id
             )
             session.metadata["chat_session_path"] = (
-                f"/sessions/{chat_key}/context.jsonl"
+                f"/sessions/{chat_key}/history.jsonl"
             )
 
         if session_mode == "fresh":

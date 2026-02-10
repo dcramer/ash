@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -590,9 +590,10 @@ class SystemPromptBuilder:
                     "",
                     f"Chat history file: {context.session_path}",
                     "",
-                    "**IMPORTANT**: When asked about previous messages or chat history,",
-                    "you MUST read the file using bash (e.g., `cat` or `grep`).",
-                    "Do NOT assume the file is empty - always check it.",
+                    "For questions about what was said in THIS conversation,",
+                    "read the file using bash (e.g., `grep` or `tail`).",
+                    "For questions about people's knowledge/opinions/facts,",
+                    "use `ash-sb memory search 'topic'` instead.",
                 ]
             )
         else:
@@ -600,23 +601,21 @@ class SystemPromptBuilder:
                 [
                     f"Conversation history file: {context.session_path}",
                     "",
-                    "When asked about specific people, past messages, or events in the chat,",
-                    "SEARCH the file using bash/grep to verify rather than guessing.",
+                    "This file contains only THIS conversation session, not long-term knowledge.",
+                    "Only search it for 'what did X say earlier in this chat' type questions.",
                 ]
             )
 
         lines.extend(
             [
                 "",
-                "This JSONL file contains messages with fields:",
-                "- id, role, content, created_at (ISO timestamp)",
-                "- user_id, username, display_name (for user messages)",
+                "**When to use what:**",
+                "- Questions about people's opinions, preferences, facts about them:",
+                "  Use `ash-sb memory search 'topic'` (NOT session file grep)",
+                "- Questions about what was said earlier in THIS conversation:",
+                f"  Search session file: `grep -i 'term' {context.session_path}`",
                 "",
-                "**How to search (USE THESE COMMANDS):**",
-                f"- Search by name: `grep -i 'evan' {context.session_path}`",
-                f"- Search by date: `grep '{date.today().isoformat()}' {context.session_path}`",
-                f"- Recent messages: `tail -20 {context.session_path}`",
-                "- Or use `read_file` to review the file directly",
+                "Session file format: JSONL with id, role, content, created_at, user_id, username",
             ]
         )
 
