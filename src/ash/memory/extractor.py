@@ -9,7 +9,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from ash.llm.types import Message, Role
-from ash.memory.types import ExtractedFact
+from ash.memory.types import ExtractedFact, MemoryType
 
 if TYPE_CHECKING:
     from ash.llm import LLMProvider
@@ -50,13 +50,27 @@ Return a JSON array of facts. Each fact has:
 - subjects: Names of people this is about (empty array if about user themselves)
 - shared: true if this is group/team knowledge, false if personal
 - confidence: 0.0-1.0 how confident this should be stored
+- type: One of: "preference", "identity", "relationship", "knowledge", "context", "event", "task", "observation"
+
+## Memory Types:
+Long-lived (no automatic expiration):
+- preference: likes, dislikes, habits (e.g., "prefers dark mode", "hates olives")
+- identity: facts about user (e.g., "works as engineer", "lives in SF")
+- relationship: people in user's life (e.g., "Sarah is my wife", "boss is John")
+- knowledge: factual info (e.g., "project uses Python", "company uses Slack")
+
+Ephemeral (decay over time):
+- context: current situation (e.g., "working on project X", "feeling stressed")
+- event: past occurrences (e.g., "had dinner with Sarah Tuesday")
+- task: things to do (e.g., "needs to call dentist")
+- observation: fleeting observations (e.g., "seemed tired today")
 
 Only include facts with confidence >= 0.7. If you cannot resolve a reference, do not extract it.
 
 Return ONLY valid JSON, no other text. Example:
 [
-  {{"content": "User prefers dark mode", "subjects": [], "shared": false, "confidence": 0.9}},
-  {{"content": "Sarah's birthday is March 15", "subjects": ["Sarah"], "shared": false, "confidence": 0.85}}
+  {{"content": "User prefers dark mode", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference"}},
+  {{"content": "Sarah's birthday is March 15", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship"}}
 ]
 
 If there are no facts worth extracting, return an empty array: []"""
@@ -224,12 +238,20 @@ class MemoryExtractor:
 
             shared = bool(item.get("shared", False))
 
+            # Parse memory type - fall back to KNOWLEDGE for invalid values
+            type_str = item.get("type", "knowledge")
+            try:
+                memory_type = MemoryType(type_str)
+            except ValueError:
+                memory_type = MemoryType.KNOWLEDGE
+
             facts.append(
                 ExtractedFact(
                     content=content,
                     subjects=subjects,
                     shared=shared,
                     confidence=confidence,
+                    memory_type=memory_type,
                 )
             )
 

@@ -1,0 +1,366 @@
+"""Migration from SQLite to JSONL storage.
+
+Exports existing memories and people from SQLite database to JSONL files,
+preserving all data including embeddings.
+"""
+
+from __future__ import annotations
+
+import base64
+import logging
+from pathlib import Path
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ash.config.paths import (
+    get_database_path,
+    get_memories_jsonl_path,
+    get_people_jsonl_path,
+)
+from ash.memory.jsonl import MemoryJSONL, PersonJSONL
+from ash.memory.types import MemoryEntry, MemoryType, PersonEntry
+
+logger = logging.getLogger(__name__)
+
+
+async def migrate_db_to_jsonl(
+    session: AsyncSession,
+    memories_path: Path | None = None,
+    people_path: Path | None = None,
+) -> tuple[int, int]:
+    """Migrate memories and people from SQLite to JSONL.
+
+    Args:
+        session: Database session with existing data.
+        memories_path: Path for memories.jsonl (default: standard location).
+        people_path: Path for people.jsonl (default: standard location).
+
+    Returns:
+        Tuple of (memories_migrated, people_migrated).
+    """
+    if memories_path is None:
+        memories_path = get_memories_jsonl_path()
+    if people_path is None:
+        people_path = get_people_jsonl_path()
+
+    # Migrate memories
+    memories_count = await _migrate_memories(session, memories_path)
+
+    # Migrate people
+    people_count = await _migrate_people(session, people_path)
+
+    logger.info(
+        "migration_complete",
+        extra={
+            "memories_migrated": memories_count,
+            "people_migrated": people_count,
+        },
+    )
+
+    return (memories_count, people_count)
+
+
+async def _migrate_memories(
+    session: AsyncSession,
+    memories_path: Path,
+) -> int:
+    """Migrate memories from SQLite to JSONL.
+
+    Args:
+        session: Database session.
+        memories_path: Path for memories.jsonl.
+
+    Returns:
+        Number of memories migrated.
+    """
+    # Query all memories with their embeddings
+    result = await session.execute(
+        text("""
+            SELECT
+                m.id,
+                m.content,
+                m.source,
+                m.created_at,
+                m.expires_at,
+                m.metadata,
+                m.owner_user_id,
+                m.chat_id,
+                m.subject_person_ids,
+                m.superseded_at,
+                m.superseded_by_id,
+                e.embedding
+            FROM memories m
+            LEFT JOIN memory_embeddings e ON m.id = e.memory_id
+            ORDER BY m.created_at ASC
+        """)
+    )
+
+    rows = result.fetchall()
+    if not rows:
+        return 0
+
+    jsonl = MemoryJSONL(memories_path)
+    entries: list[MemoryEntry] = []
+
+    for row in rows:
+        # Parse embedding from bytes to base64
+        embedding_b64 = ""
+        if row[11]:
+            embedding_b64 = base64.b64encode(row[11]).decode("ascii")
+
+        # Parse subject_person_ids from JSON
+        subject_ids = []
+        if row[8]:
+            import json
+
+            try:
+                subject_ids = json.loads(row[8])
+            except json.JSONDecodeError:
+                pass
+
+        # Parse metadata from JSON
+        metadata = None
+        if row[5]:
+            import json
+
+            try:
+                metadata = json.loads(row[5])
+            except json.JSONDecodeError:
+                pass
+
+        # Infer memory type from content (defaults to KNOWLEDGE)
+        memory_type = _infer_memory_type(row[1])
+
+        entry = MemoryEntry(
+            id=row[0],
+            version=1,
+            content=row[1] or "",
+            memory_type=memory_type,
+            embedding=embedding_b64,
+            created_at=row[3],
+            observed_at=row[3],  # Set observed_at = created_at for historical entries
+            owner_user_id=row[6],
+            chat_id=row[7],
+            subject_person_ids=subject_ids,
+            source=row[2] or "user",
+            expires_at=row[4],
+            superseded_at=row[9],
+            superseded_by_id=row[10],
+            metadata=metadata,
+        )
+        entries.append(entry)
+
+    # Write all entries
+    await jsonl.rewrite(entries)
+
+    logger.info(
+        "memories_migrated",
+        extra={"count": len(entries), "path": str(memories_path)},
+    )
+
+    return len(entries)
+
+
+async def _migrate_people(
+    session: AsyncSession,
+    people_path: Path,
+) -> int:
+    """Migrate people from SQLite to JSONL.
+
+    Args:
+        session: Database session.
+        people_path: Path for people.jsonl.
+
+    Returns:
+        Number of people migrated.
+    """
+    result = await session.execute(
+        text("""
+            SELECT
+                id,
+                owner_user_id,
+                name,
+                relation,
+                aliases,
+                metadata,
+                created_at,
+                updated_at
+            FROM people
+            ORDER BY created_at ASC
+        """)
+    )
+
+    rows = result.fetchall()
+    if not rows:
+        return 0
+
+    jsonl = PersonJSONL(people_path)
+    entries: list[PersonEntry] = []
+
+    for row in rows:
+        # Parse aliases from JSON
+        aliases = []
+        if row[4]:
+            import json
+
+            try:
+                aliases = json.loads(row[4])
+            except json.JSONDecodeError:
+                pass
+
+        # Parse metadata from JSON
+        metadata = None
+        if row[5]:
+            import json
+
+            try:
+                metadata = json.loads(row[5])
+            except json.JSONDecodeError:
+                pass
+
+        entry = PersonEntry(
+            id=row[0],
+            version=1,
+            owner_user_id=row[1] or "",
+            name=row[2] or "",
+            relation=row[3],
+            aliases=aliases,
+            created_at=row[6],
+            updated_at=row[7],
+            metadata=metadata,
+        )
+        entries.append(entry)
+
+    # Write all entries
+    await jsonl.rewrite(entries)
+
+    logger.info(
+        "people_migrated",
+        extra={"count": len(entries), "path": str(people_path)},
+    )
+
+    return len(entries)
+
+
+def _infer_memory_type(content: str) -> MemoryType:
+    """Infer memory type from content for migration.
+
+    This is a best-effort classification for historical data.
+
+    Args:
+        content: Memory content.
+
+    Returns:
+        Inferred memory type.
+    """
+    content_lower = content.lower() if content else ""
+
+    # Preference indicators
+    preference_words = [
+        "prefer",
+        "like",
+        "love",
+        "hate",
+        "dislike",
+        "favorite",
+        "favourite",
+    ]
+    if any(word in content_lower for word in preference_words):
+        return MemoryType.PREFERENCE
+
+    # Identity indicators
+    identity_words = [
+        "i am",
+        "i'm",
+        "my name is",
+        "i work",
+        "i live",
+        "born in",
+        "years old",
+    ]
+    if any(word in content_lower for word in identity_words):
+        return MemoryType.IDENTITY
+
+    # Relationship indicators (mentions of other people)
+    relationship_words = [
+        "wife",
+        "husband",
+        "partner",
+        "mother",
+        "father",
+        "sister",
+        "brother",
+        "friend",
+        "boss",
+        "colleague",
+        "coworker",
+    ]
+    if any(word in content_lower for word in relationship_words):
+        return MemoryType.RELATIONSHIP
+
+    # Task indicators
+    task_words = [
+        "need to",
+        "should",
+        "must",
+        "have to",
+        "remind me",
+        "don't forget",
+        "remember to",
+    ]
+    if any(word in content_lower for word in task_words):
+        return MemoryType.TASK
+
+    # Event indicators
+    event_words = [
+        "yesterday",
+        "last week",
+        "last month",
+        "happened",
+        "went to",
+        "attended",
+    ]
+    if any(word in content_lower for word in event_words):
+        return MemoryType.EVENT
+
+    # Default to knowledge
+    return MemoryType.KNOWLEDGE
+
+
+def needs_migration() -> bool:
+    """Check if migration is needed.
+
+    Migration is needed if:
+    - SQLite database exists with memories
+    - JSONL files don't exist
+
+    Returns:
+        True if migration is needed.
+    """
+    db_path = get_database_path()
+    memories_path = get_memories_jsonl_path()
+
+    # No migration needed if JSONL already exists
+    if memories_path.exists():
+        return False
+
+    # Migration needed if database exists
+    return db_path.exists()
+
+
+async def check_db_has_memories(session: AsyncSession) -> bool:
+    """Check if database has any memories.
+
+    Args:
+        session: Database session.
+
+    Returns:
+        True if database has memories.
+    """
+    try:
+        result = await session.execute(text("SELECT COUNT(*) FROM memories"))
+        count = result.scalar() or 0
+        return count > 0
+    except Exception:
+        return False

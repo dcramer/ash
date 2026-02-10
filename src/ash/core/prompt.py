@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ash.agents import AgentRegistry
     from ash.config import AshConfig, Workspace
-    from ash.db.models import Person
     from ash.memory import RetrievedContext
+    from ash.memory.types import PersonEntry
     from ash.skills import SkillRegistry
     from ash.tools import ToolRegistry
 
@@ -76,7 +76,7 @@ class PromptContext:
 
     runtime: RuntimeInfo | None = None
     memory: RetrievedContext | None = None
-    known_people: list[Person] | None = None
+    known_people: list[PersonEntry] | None = None
     extra_context: dict[str, Any] = field(default_factory=dict)
     # Conversation context
     conversation_gap_minutes: float | None = None
@@ -432,7 +432,7 @@ class SystemPromptBuilder:
 
         return "\n".join(lines)
 
-    def _build_people_section(self, people: list[Person]) -> str:
+    def _build_people_section(self, people: list[PersonEntry]) -> str:
         if not people:
             return ""
 

@@ -30,8 +30,8 @@ if TYPE_CHECKING:
     from ash.agents import AgentRegistry
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
-    from ash.db.models import Person
     from ash.memory import MemoryExtractor, MemoryManager, RetrievedContext
+    from ash.memory.types import PersonEntry
     from ash.providers.base import IncomingMessage
     from ash.sandbox import SandboxExecutor
     from ash.skills import SkillRegistry
@@ -267,7 +267,7 @@ class Agent:
     def _build_system_prompt(
         self,
         context: RetrievedContext | None = None,
-        known_people: list[Person] | None = None,
+        known_people: list[PersonEntry] | None = None,
         conversation_gap_minutes: float | None = None,
         has_reply_context: bool = False,
         session_path: str | None = None,
@@ -384,7 +384,7 @@ class Agent:
         effective_user_id = user_id or session.user_id
 
         memory_context: RetrievedContext | None = None
-        known_people: list[Person] | None = None
+        known_people: list[PersonEntry] | None = None
 
         if self._memory:
             try:

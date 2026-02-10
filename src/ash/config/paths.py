@@ -81,6 +81,26 @@ def get_database_path() -> Path:
     return get_ash_home() / "data" / "memory.db"
 
 
+def get_memory_dir() -> Path:
+    """Get the memory directory path."""
+    return get_ash_home() / "memory"
+
+
+def get_memories_jsonl_path() -> Path:
+    """Get the memories JSONL file path (source of truth)."""
+    return get_memory_dir() / "memories.jsonl"
+
+
+def get_memory_archive_path() -> Path:
+    """Get the memory archive file path (append-only safety net)."""
+    return get_memory_dir() / "archive.jsonl"
+
+
+def get_people_jsonl_path() -> Path:
+    """Get the people JSONL file path."""
+    return get_ash_home() / "people.jsonl"
+
+
 def get_workspace_path() -> Path:
     """Get the default workspace directory path."""
     return get_ash_home() / "workspace"
@@ -199,6 +219,10 @@ def get_all_paths() -> dict[str, Path]:
         "home": get_ash_home(),
         "config": get_config_path(),
         "database": get_database_path(),
+        "memory": get_memory_dir(),
+        "memories_jsonl": get_memories_jsonl_path(),
+        "memory_archive": get_memory_archive_path(),
+        "people_jsonl": get_people_jsonl_path(),
         "workspace": get_workspace_path(),
         "schedule": get_schedule_file(),
         "logs": get_logs_path(),

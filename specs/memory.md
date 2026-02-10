@@ -10,11 +10,72 @@ The memory subsystem solves a fundamental problem: conversations are ephemeral, 
 2. **Explicit storage** - Users can tell the agent to remember specific things
 3. **Person awareness** - Facts can be attributed to people in the user's life
 4. **Knowledge evolution** - New information supersedes outdated facts
+5. **Smart decay** - Ephemeral facts expire naturally based on their type
 
 Memory is NOT for:
 - Conversation history (that's sessions)
 - Temporary task state (that's session context)
 - Credentials or secrets (security risk)
+
+## Storage Architecture
+
+Memory uses a **filesystem-primary** architecture where JSONL files are the source of truth:
+
+```
+~/.ash/
+├── people.jsonl                # Person entities (global)
+├── memory/
+│   ├── memories.jsonl          # Active memories (source of truth)
+│   └── archive.jsonl           # Archived memories (append-only safety net)
+└── data/
+    └── memory.db               # Vector index only (rebuildable)
+```
+
+### Design Principles
+
+| Principle | Rationale |
+|-----------|-----------|
+| JSONL is source of truth | Human-readable, version-controllable, survives DB corruption |
+| SQLite for vectors only | sqlite-vec provides fast similarity search, fully rebuildable |
+| Embeddings in JSONL | Avoids API costs on rebuild; OpenAI embeddings aren't deterministic |
+| Append-only archive | Never lose data; safety net for recovery |
+| Atomic file writes | Write to temp file, then rename; prevents corruption on crash |
+
+### Auto-Migration
+
+On first run, if SQLite database exists but JSONL files don't, the system automatically migrates:
+1. Exports all memories and people from SQLite to JSONL
+2. Rebuilds the vector index
+3. Original SQLite preserved as backup
+
+## Memory Types
+
+Memories are classified into types that determine their lifecycle:
+
+### Long-Lived Types (no automatic expiration)
+
+| Type | Description | Examples |
+|------|-------------|----------|
+| `preference` | User likes, dislikes, preferences | "prefers dark mode", "favorite color is blue" |
+| `identity` | Facts about the user themselves | "works as a software engineer", "lives in SF" |
+| `relationship` | People in user's life | "Sarah is my wife", "has a dog named Max" |
+| `knowledge` | Factual information | "project X uses Python", "company uses Slack" |
+
+### Ephemeral Types (decay over time)
+
+| Type | Default TTL | Description | Examples |
+|------|-------------|-------------|----------|
+| `context` | 7 days | Current situation/state | "working on project X" |
+| `event` | 30 days | Past occurrences | "had dinner with Sarah Tuesday" |
+| `task` | 14 days | Things to do/remember | "needs to call dentist" |
+| `observation` | 3 days | Fleeting observations | "mentioned being tired" |
+
+### Type Assignment
+
+Types are assigned during:
+1. **Explicit remember**: User says "remember X" → LLM infers type from content
+2. **Background extraction**: LLM extracts and classifies during conversation
+3. **CLI/RPC add**: Optional `type` parameter, defaults to `knowledge`
 
 ## Outcomes
 
@@ -60,14 +121,30 @@ When facts relate to people in the user's life:
 
 When new information conflicts with old:
 - "Favorite color is red" then "favorite color is blue" → only blue is retrieved
-- Superseded facts preserved for audit but excluded from search
+- Superseded facts preserved in archive but excluded from active search
 - Subject-specific facts don't conflict with general facts
+
+**Supersession process:**
+1. Vector search finds candidates with similarity ≥ 0.75
+2. LLM verifies that memories actually conflict (reduces false positives)
+3. Old memory marked as superseded with reference to replacement
+4. GC later archives superseded memory to `archive.jsonl`
 
 ### Memory doesn't grow unbounded
 
 - Optional `max_entries` cap with smart eviction
 - Expired memories cleaned up automatically
 - Garbage collection removes superseded/expired entries
+- Ephemeral types decay based on their TTL
+
+**GC algorithm:**
+1. Identify memories to archive:
+   - Explicit expiration (`expires_at` passed)
+   - Superseded memories (`superseded_at` set)
+   - Ephemeral types past their default TTL
+2. Append each to `archive.jsonl` with reason
+3. Rewrite `memories.jsonl` without archived entries (atomic)
+4. Remove embeddings from vector index
 
 ## Scoping
 
@@ -113,6 +190,73 @@ Optionally, facts are extracted automatically from conversations:
 - Skips assistant actions, temporary context, credentials
 - Confidence threshold filters low-quality extractions
 
+## JSONL Schema
+
+### Memory Entry
+
+```json
+{
+  "id": "abc-123",
+  "version": 1,
+  "content": "User prefers dark mode",
+  "memory_type": "preference",
+  "embedding": "BASE64_ENCODED_FLOAT32_ARRAY",
+  "created_at": "2026-02-09T10:00:00+00:00",
+  "observed_at": null,
+  "owner_user_id": "user-1",
+  "chat_id": null,
+  "subject_person_ids": [],
+  "source": "user",
+  "source_session_id": null,
+  "source_message_id": null,
+  "extraction_confidence": null,
+  "expires_at": null,
+  "superseded_at": null,
+  "superseded_by_id": null,
+  "archived_at": null,
+  "archive_reason": null,
+  "metadata": null
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Yes | UUID primary key |
+| `version` | Yes | Schema version (currently 1) |
+| `content` | Yes | The memory text |
+| `memory_type` | Yes | Type classification |
+| `embedding` | Yes | Base64-encoded float32 array for vector search |
+| `created_at` | Yes | When written to storage |
+| `observed_at` | No | When fact was observed (for delayed extraction) |
+| `owner_user_id` | One of these | Personal scope |
+| `chat_id` | required | Group scope |
+| `subject_person_ids` | Yes | Who this is about (empty list if nobody) |
+| `source` | Yes | "user" / "extraction" / "cli" / "rpc" |
+| `source_session_id` | No | Session ID for extraction tracing |
+| `source_message_id` | No | Message UUID for extraction tracing |
+| `extraction_confidence` | No | 0.0-1.0 confidence score |
+| `expires_at` | No | Explicit TTL |
+| `superseded_at` | No | When marked superseded |
+| `superseded_by_id` | No | What memory replaced this one |
+| `archived_at` | No | When moved to archive (archive only) |
+| `archive_reason` | No | "superseded" / "expired" / "ephemeral_decay" |
+
+### Person Entry
+
+```json
+{
+  "id": "person-456",
+  "version": 1,
+  "owner_user_id": "user-1",
+  "name": "Sarah",
+  "relation": "wife",
+  "aliases": ["my wife"],
+  "created_at": "2026-01-15T10:00:00+00:00",
+  "updated_at": null,
+  "metadata": null
+}
+```
+
 ## Configuration
 
 ```toml
@@ -136,11 +280,37 @@ Tools running in the sandbox can access memory via RPC:
 
 The sandbox CLI (`ash-sb memory`) wraps these RPC calls with environment-provided `ASH_USER_ID` and `ASH_CHAT_ID`. Authorization checks use these values to verify ownership before mutations.
 
+## Rebuild & Repair
+
+If the SQLite vector index is corrupted or missing, it can be rebuilt entirely from the JSONL source of truth:
+
+```bash
+# Rebuild vector index from JSONL
+uv run ash memory rebuild-index
+```
+
+**How rebuild works:**
+1. Delete existing SQLite database (if corrupted)
+2. Create fresh database with sqlite-vec virtual table
+3. Load all active memories from `memories.jsonl`
+4. Insert embeddings (from stored base64, no API calls needed)
+
+**Auto-recovery:** On startup, if SQLite is missing but JSONL exists, the index is automatically rebuilt.
+
+### Supersession History
+
+View the chain of memories that led to a current memory:
+
+```bash
+# Show supersession history for a memory
+uv run ash memory history <memory-id>
+```
+
 ## Verification
 
 ```bash
 # Unit tests
-uv run pytest tests/test_memory.py tests/test_memory_extractor.py -v
+uv run pytest tests/test_memory.py tests/test_memory_extractor.py tests/test_memory_file_store.py -v
 
 # Integration test
 uv run ash chat "Remember my favorite color is blue"
@@ -155,6 +325,24 @@ uv run ash chat "What does my wife like?"
 uv run ash memory list
 uv run ash memory search "favorite"
 uv run ash memory gc
+
+# Verify JSONL storage
+cat ~/.ash/memory/memories.jsonl | head -3
+
+# Check supersession removes old memory
+uv run ash chat "Remember my favorite color is red"
+cat ~/.ash/memory/memories.jsonl | grep -c "favorite color"  # 1
+uv run ash chat "Remember my favorite color is blue"
+uv run ash memory gc
+cat ~/.ash/memory/memories.jsonl | grep -c "favorite color"  # 1 (red archived)
+
+# Verify extraction attribution
+uv run ash chat "I really love hiking in the mountains"
+cat ~/.ash/memory/memories.jsonl | grep source_session
+
+# Rebuild index after corruption
+rm ~/.ash/data/memory.db
+uv run ash memory rebuild-index
 ```
 
 ### Checklist
@@ -165,9 +353,15 @@ uv run ash memory gc
 - [ ] Person entities created for "my wife", "Sarah", etc.
 - [ ] Known people appear in system prompt
 - [ ] Memory results show subject attribution ("about Sarah")
-- [ ] Conflicting facts supersede old versions
-- [ ] Superseded facts excluded from default retrieval
+- [ ] Conflicting facts supersede old versions (with LLM verification)
+- [ ] Superseded facts archived but excluded from retrieval
 - [ ] `max_entries` evicts oldest when exceeded
-- [ ] `ash memory gc` removes expired/superseded entries
+- [ ] `ash memory gc` removes expired/superseded/decayed entries
 - [ ] Background extraction captures facts from conversations
+- [ ] Extraction assigns memory types (preference, identity, etc.)
 - [ ] Extraction skips low-confidence and duplicate facts
+- [ ] Ephemeral memory types decay based on their TTL
+- [ ] `memories.jsonl` is the source of truth
+- [ ] `ash memory rebuild-index` rebuilds SQLite from JSONL
+- [ ] `ash memory history <id>` shows supersession chain
+- [ ] Auto-migration from SQLite to JSONL on first run

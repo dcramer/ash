@@ -19,7 +19,7 @@ from ash.core.prompt import format_gap_duration
 from ash.core.tokens import estimate_tokens
 from ash.db import Database
 from ash.llm.types import Message, Role
-from ash.memory import MemoryStore
+from ash.memory.store import MemoryStore
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.provider import _truncate
 from ash.sessions import MessageEntry, SessionManager

@@ -19,7 +19,9 @@ def register(app: typer.Typer) -> None:
     def memory(
         action: Annotated[
             str | None,
-            typer.Argument(help="Action: list, add, remove, clear"),
+            typer.Argument(
+                help="Action: list, add, remove, clear, gc, rebuild-index, history"
+            ),
         ] = None,
         query: Annotated[
             str | None,
@@ -125,6 +127,9 @@ def register(app: typer.Typer) -> None:
             ash memory remove --id <uuid>      # Remove specific entry
             ash memory remove --all            # Remove all entries
             ash memory clear                   # Clear all memory entries
+            ash memory gc                      # Garbage collect expired/superseded
+            ash memory rebuild-index           # Rebuild vector index from JSONL
+            ash memory history --id <uuid>     # Show supersession chain
         """
         if action is None:
             ctx = click.get_current_context()
@@ -193,9 +198,20 @@ async def _run_memory_action(
                 )
             elif action == "clear":
                 await _memory_clear(session, force)
+            elif action == "gc":
+                await _memory_gc()
+            elif action == "rebuild-index":
+                await _memory_rebuild_index(session)
+            elif action == "history":
+                if not entry_id:
+                    error("--id is required for history action")
+                    raise typer.Exit(1)
+                await _memory_history(entry_id)
             else:
                 error(f"Unknown action: {action}")
-                console.print("Valid actions: list, add, remove, clear")
+                console.print(
+                    "Valid actions: list, add, remove, clear, gc, rebuild-index, history"
+                )
                 raise typer.Exit(1)
     finally:
         await database.disconnect()
@@ -229,27 +245,58 @@ async def _memory_list(
 ) -> None:
     """List memory entries."""
     from rich.table import Table
-    from sqlalchemy import select
 
-    from ash.db.models import Memory as MemoryModel
+    from ash.memory.file_store import FileMemoryStore
 
-    stmt = select(MemoryModel).order_by(MemoryModel.created_at.desc()).limit(limit)
+    store = FileMemoryStore()
 
-    if query:
-        stmt = stmt.where(MemoryModel.content.ilike(f"%{query}%"))
+    # Apply scope-based filters
+    owner_user_id = None
+    filter_chat_id = None
 
+    if scope == "personal":
+        if user_id:
+            owner_user_id = user_id
+        else:
+            # Need to show all personal memories - get all and filter
+            pass
+    elif scope == "shared":
+        if chat_id:
+            filter_chat_id = chat_id
+    elif user_id:
+        owner_user_id = user_id
+    elif chat_id:
+        filter_chat_id = chat_id
+
+    entries = await store.get_memories(
+        limit=limit * 2,  # Get more to filter
+        include_expired=include_expired,
+        include_superseded=False,
+        owner_user_id=owner_user_id,
+        chat_id=filter_chat_id,
+    )
+
+    # Apply additional filters
     now = datetime.now(UTC)
-    if not include_expired:
-        stmt = stmt.where(
-            (MemoryModel.expires_at.is_(None)) | (MemoryModel.expires_at > now)
-        )
+    filtered_entries = []
+    for entry in entries:
+        # Scope filter
+        if scope == "personal" and not entry.owner_user_id:
+            continue
+        if scope == "shared" and entry.owner_user_id:
+            continue
+        if scope == "global" and (entry.owner_user_id or entry.chat_id):
+            continue
 
-    stmt = _apply_scope_filters(stmt, MemoryModel, user_id, chat_id, scope)
+        # Content filter
+        if query and query.lower() not in entry.content.lower():
+            continue
 
-    result = await session.execute(stmt)
-    entries = result.scalars().all()
+        filtered_entries.append(entry)
+        if len(filtered_entries) >= limit:
+            break
 
-    if not entries:
+    if not filtered_entries:
         if query:
             warning(f"No memories found matching '{query}'")
         else:
@@ -259,15 +306,16 @@ async def _memory_list(
     title = f"Memory Search: '{query}'" if query else "Memory Entries"
     table = Table(title=title)
     table.add_column("ID", style="dim", max_width=8)
+    table.add_column("Type", style="blue", max_width=10)
     table.add_column("Scope", style="magenta", max_width=10)
     table.add_column("Created", style="dim")
     table.add_column("Source", style="cyan")
     table.add_column("Expires", style="yellow")
-    table.add_column("Content", style="white", max_width=45)
+    table.add_column("Content", style="white", max_width=40)
 
-    for entry in entries:
+    for entry in filtered_entries:
         content = (
-            entry.content[:70] + "..." if len(entry.content) > 70 else entry.content
+            entry.content[:60] + "..." if len(entry.content) > 60 else entry.content
         )
         content = content.replace("\n", " ")
 
@@ -288,26 +336,30 @@ async def _memory_list(
         else:
             expires = "[dim]never[/dim]"
 
+        created = entry.created_at.strftime("%Y-%m-%d") if entry.created_at else "-"
+
         table.add_row(
             entry.id[:8],
+            entry.memory_type.value,
             entry_scope,
-            entry.created_at.strftime("%Y-%m-%d"),
+            created,
             entry.source or "[dim]-[/dim]",
             expires,
             content,
         )
 
     console.print(table)
-    dim(f"\nShowing {len(entries)} entries")
+    dim(f"\nShowing {len(filtered_entries)} entries")
 
 
 async def _memory_add(
     session, content: str, source: str | None, expires_days: int | None
 ) -> None:
     """Add a memory entry."""
-    from ash.memory import MemoryStore
+    from ash.memory.file_store import FileMemoryStore
+    from ash.memory.types import MemoryType
 
-    store = MemoryStore(session)
+    store = FileMemoryStore()
 
     expires_at = None
     if expires_days:
@@ -315,12 +367,13 @@ async def _memory_add(
 
     entry = await store.add_memory(
         content=content,
-        source=source,
+        source=source or "cli",
+        memory_type=MemoryType.KNOWLEDGE,
         expires_at=expires_at,
     )
-    await session.commit()
 
     success(f"Added memory entry: {entry.id[:8]}")
+    dim(f"Type: {entry.memory_type.value}")
     if expires_at:
         dim(f"Expires: {expires_at.strftime('%Y-%m-%d')}")
 
@@ -335,13 +388,15 @@ async def _memory_remove(
     scope: str | None,
 ) -> None:
     """Remove memory entries."""
-    from sqlalchemy import delete, select, text
+    from sqlalchemy import text
 
-    from ash.db.models import Memory as MemoryModel
+    from ash.memory.file_store import FileMemoryStore
 
     if not entry_id and not all_entries:
         error("--id or --all is required to remove entries")
         raise typer.Exit(1)
+
+    store = FileMemoryStore()
 
     if all_entries:
         filter_desc = [
@@ -357,40 +412,43 @@ async def _memory_remove(
                 dim("Cancelled")
                 return
 
-        delete_stmt = _apply_scope_filters(
-            delete(MemoryModel), MemoryModel, user_id, chat_id, scope
-        )
+        # Get all entries and filter
+        entries = await store.get_all_memories()
+        to_remove = []
 
-        if not (user_id or chat_id or scope):
+        for entry in entries:
+            if scope == "personal" and not entry.owner_user_id:
+                continue
+            if scope == "shared" and entry.owner_user_id:
+                continue
+            if scope == "global" and (entry.owner_user_id or entry.chat_id):
+                continue
+            if user_id and entry.owner_user_id != user_id:
+                continue
+            if chat_id and entry.chat_id != chat_id:
+                continue
+            to_remove.append(entry)
+
+        for entry in to_remove:
+            await store.delete_memory(entry.id)
             try:
-                await session.execute(text("DELETE FROM memory_embeddings"))
+                await session.execute(
+                    text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
+                    {"id": entry.id},
+                )
             except Exception:  # noqa: S110
                 pass
 
-        result = await session.execute(delete_stmt)
         await session.commit()
-
-        success(f"Removed {result.rowcount} memory entries")
+        success(f"Removed {len(to_remove)} memory entries")
     else:
-        # Find entries matching the ID prefix
-        stmt = select(MemoryModel).where(MemoryModel.id.startswith(entry_id))
-        result = await session.execute(stmt)
-        entries = result.scalars().all()
+        # Find entry by ID prefix
+        assert entry_id is not None  # Guaranteed by check above
+        entry = await store.get_memory_by_prefix(entry_id)
 
-        if not entries:
+        if not entry:
             error(f"No memory entry found with ID: {entry_id}")
             raise typer.Exit(1)
-
-        if len(entries) > 1:
-            error(
-                f"Multiple entries match '{entry_id}'. "
-                "Please provide a more specific ID."
-            )
-            for e in entries:
-                console.print(f"  - {e.id}")
-            raise typer.Exit(1)
-
-        entry = entries[0]
 
         if not force:
             warning(f"Content: {entry.content[:100]}...")
@@ -399,27 +457,30 @@ async def _memory_remove(
                 dim("Cancelled")
                 return
 
-        # Delete embedding if exists
-        try:
-            await session.execute(
-                text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
-                {"id": entry.id},
-            )
-        except Exception:  # noqa: S110
-            pass
-
         # Delete the memory entry
-        await session.execute(delete(MemoryModel).where(MemoryModel.id == entry.id))
-        await session.commit()
+        deleted = await store.delete_memory(entry.id)
 
-        success(f"Removed memory entry: {entry.id[:8]}")
+        if deleted:
+            # Delete embedding if exists
+            try:
+                await session.execute(
+                    text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
+                    {"id": entry.id},
+                )
+                await session.commit()
+            except Exception:  # noqa: S110
+                pass
+
+            success(f"Removed memory entry: {entry.id[:8]}")
+        else:
+            error(f"Failed to remove memory entry: {entry.id[:8]}")
 
 
 async def _memory_clear(session, force: bool) -> None:
     """Clear all memory entries."""
-    from sqlalchemy import delete, text
+    from sqlalchemy import text
 
-    from ash.db.models import Memory as MemoryModel
+    from ash.memory.file_store import FileMemoryStore
 
     if not force:
         warning("This will delete ALL memory entries.")
@@ -428,13 +489,116 @@ async def _memory_clear(session, force: bool) -> None:
             dim("Cancelled")
             return
 
-    # Clear embeddings first
+    store = FileMemoryStore()
+    entries = await store.get_all_memories()
+
+    # Delete all entries
+    for entry in entries:
+        await store.delete_memory(entry.id)
+
+    # Clear embeddings
     try:
         await session.execute(text("DELETE FROM memory_embeddings"))
+        await session.commit()
     except Exception:  # noqa: S110
         pass
 
-    result = await session.execute(delete(MemoryModel))
-    await session.commit()
+    success(f"Cleared {len(entries)} memory entries")
 
-    success(f"Cleared {result.rowcount} memory entries")
+
+async def _memory_gc() -> None:
+    """Garbage collect expired and superseded memories."""
+    from ash.memory.file_store import FileMemoryStore
+
+    store = FileMemoryStore()
+    result = await store.gc()
+
+    if result.removed_count == 0:
+        dim("No memories to clean up")
+    else:
+        success(f"Archived and removed {result.removed_count} memories")
+        if result.archived_ids:
+            dim(f"Archived IDs: {', '.join(id[:8] for id in result.archived_ids[:5])}")
+            if len(result.archived_ids) > 5:
+                dim(f"  ... and {len(result.archived_ids) - 5} more")
+
+
+async def _memory_rebuild_index(session) -> None:
+    """Rebuild vector index from JSONL source of truth."""
+    from ash.config.paths import get_memories_jsonl_path
+    from ash.memory.index import rebuild_vector_index_from_jsonl
+
+    memories_path = get_memories_jsonl_path()
+
+    if not memories_path.exists():
+        warning("No memories.jsonl file found")
+        return
+
+    dim(f"Rebuilding index from {memories_path}")
+    count = await rebuild_vector_index_from_jsonl(memories_path)
+
+    success(f"Rebuilt index with {count} embeddings")
+
+
+async def _memory_history(memory_id: str) -> None:
+    """Show supersession chain for a memory."""
+    from rich.table import Table
+
+    from ash.memory.file_store import FileMemoryStore
+
+    store = FileMemoryStore()
+
+    # First, find the memory
+    memory = await store.get_memory_by_prefix(memory_id)
+    if not memory:
+        error(f"No memory found with ID: {memory_id}")
+        raise typer.Exit(1)
+
+    # Get the supersession chain
+    chain = await store.get_supersession_chain(memory.id)
+
+    if not chain:
+        dim("No supersession history for this memory")
+        console.print(f"\nCurrent: {memory.content[:100]}")
+        return
+
+    table = Table(title=f"Supersession Chain for {memory.id[:8]}")
+    table.add_column("ID", style="dim", max_width=8)
+    table.add_column("Created", style="dim")
+    table.add_column("Archived", style="yellow")
+    table.add_column("Reason", style="cyan")
+    table.add_column("Content", style="white", max_width=50)
+
+    for entry in chain:
+        content = (
+            entry.content[:50] + "..." if len(entry.content) > 50 else entry.content
+        )
+        content = content.replace("\n", " ")
+
+        archived_at = (
+            entry.archived_at.strftime("%Y-%m-%d") if entry.archived_at else "-"
+        )
+
+        table.add_row(
+            entry.id[:8],
+            entry.created_at.strftime("%Y-%m-%d") if entry.created_at else "-",
+            archived_at,
+            entry.archive_reason or "-",
+            content,
+        )
+
+    # Add current memory at the end
+    current_content = (
+        memory.content[:50] + "..." if len(memory.content) > 50 else memory.content
+    )
+    current_content = current_content.replace("\n", " ")
+    table.add_row(
+        memory.id[:8],
+        memory.created_at.strftime("%Y-%m-%d") if memory.created_at else "-",
+        "[green]current[/green]",
+        "-",
+        f"[green]{current_content}[/green]",
+    )
+
+    console.print(table)
+    dim(f"\n{len(chain)} superseded entries")

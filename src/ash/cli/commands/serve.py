@@ -128,11 +128,9 @@ async def _run_server(
     # Run memory garbage collection on startup if enabled
     if ash_config.memory.auto_gc and components.memory_manager:
         logger.debug("Running memory garbage collection")
-        expired, superseded = await components.memory_manager.gc()
-        if expired or superseded:
-            logger.info(
-                f"Cleaned up {expired} expired, {superseded} superseded memories"
-            )
+        gc_result = await components.memory_manager.gc()
+        if gc_result.removed_count > 0:
+            logger.info(f"Cleaned up {gc_result.removed_count} memories")
 
     # Start RPC server for sandbox communication
     rpc_server: RPCServer | None = None

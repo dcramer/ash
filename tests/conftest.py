@@ -23,7 +23,7 @@ from ash.llm.types import (
     ToolUse,
     Usage,
 )
-from ash.memory import MemoryStore
+from ash.memory.store import MemoryStore
 from ash.tools.base import Tool, ToolContext, ToolResult
 from ash.tools.registry import ToolRegistry
 
@@ -115,6 +115,22 @@ async def db_session(database: Database) -> AsyncGenerator[AsyncSession, None]:
 async def memory_store(db_session: AsyncSession) -> MemoryStore:
     """Create a memory store with test session."""
     return MemoryStore(db_session)
+
+
+@pytest.fixture
+async def file_memory_store(tmp_path: Path):
+    """Create a FileMemoryStore with temporary paths."""
+    from ash.memory.file_store import FileMemoryStore
+
+    memories_path = tmp_path / "memories.jsonl"
+    archive_path = tmp_path / "archive.jsonl"
+    people_path = tmp_path / "people.jsonl"
+
+    return FileMemoryStore(
+        memories_path=memories_path,
+        archive_path=archive_path,
+        people_path=people_path,
+    )
 
 
 # =============================================================================

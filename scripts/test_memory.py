@@ -22,10 +22,7 @@ async def main():
     from ash.config.paths import get_database_path
     from ash.db.engine import Database
     from ash.llm import create_registry
-    from ash.memory.embeddings import EmbeddingGenerator
-    from ash.memory.manager import MemoryManager
-    from ash.memory.retrieval import SemanticRetriever
-    from ash.memory.store import MemoryStore
+    from ash.memory.manager import create_memory_manager
 
     print("=" * 60)
     print("Memory System QA Test")
@@ -77,17 +74,13 @@ async def main():
             else None,
         )
 
-        # Create components
-        embedding_generator = EmbeddingGenerator(
-            registry=llm_registry,
-            model=config.embeddings.model,
-            provider=config.embeddings.provider,
+        # Create memory manager (handles JSONL storage + vector index)
+        memory = await create_memory_manager(
+            db_session=session,
+            llm_registry=llm_registry,
+            embedding_model=config.embeddings.model,
+            embedding_provider=config.embeddings.provider,
         )
-
-        store = MemoryStore(session)
-        retriever = SemanticRetriever(session, embedding_generator)
-        await retriever.initialize_vector_tables()
-        memory = MemoryManager(store, retriever, session)
 
         print("-" * 60)
         print("Test 1: Store memory")
@@ -99,10 +92,6 @@ async def main():
         )
         print(f"[OK] Stored: '{test_content}'")
         print(f"    ID: {memory_entry.id}")
-
-        # Commit explicitly
-        await session.commit()
-        print("[OK] Database committed")
 
         print("-" * 60)
         print("Test 2: Search for knowledge")
@@ -148,19 +137,18 @@ async def main():
             )
 
         print("-" * 60)
-        print("Test 4: Check database directly")
+        print("Test 4: Check JSONL storage")
         print("-" * 60)
 
-        # Check memories table
-        from sqlalchemy import text
+        from ash.config.paths import get_memories_jsonl_path
 
-        result = await session.execute(text("SELECT COUNT(*) FROM memories"))
-        count = result.scalar()
-        print(f"Memory entries: {count}")
-
-        result = await session.execute(text("SELECT COUNT(*) FROM memory_embeddings"))
-        count = result.scalar()
-        print(f"Memory embeddings: {count}")
+        memories_path = get_memories_jsonl_path()
+        if memories_path.exists():
+            line_count = sum(1 for _ in memories_path.read_text().splitlines())
+            print(f"JSONL file: {memories_path}")
+            print(f"Memory entries: {line_count}")
+        else:
+            print(f"JSONL file not found: {memories_path}")
 
     await database.disconnect()
     print("-" * 60)

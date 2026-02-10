@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ash.memory import MemoryManager
+from ash.memory.embeddings import EmbeddingGenerator
+from ash.memory.index import VectorIndex
 from ash.rpc.methods.memory import register_memory_methods
 
 
@@ -26,22 +28,32 @@ class MockRPCServer:
 
 
 @pytest.fixture
-def mock_retriever():
-    """Create a mock semantic retriever."""
-    retriever = MagicMock()
-    retriever.search_memories = AsyncMock(return_value=[])
-    retriever.search = AsyncMock(return_value=[])
-    retriever.index_memory = AsyncMock()
-    retriever.delete_memory_embedding = AsyncMock()
-    return retriever
+def mock_embedding_generator():
+    """Create a mock embedding generator."""
+    generator = MagicMock(spec=EmbeddingGenerator)
+    generator.generate = AsyncMock(return_value=[0.1] * 1536)
+    return generator
 
 
 @pytest.fixture
-async def memory_manager(memory_store, mock_retriever, db_session):
-    """Create a memory manager with mocked retriever."""
+def mock_index():
+    """Create a mock vector index."""
+    index = MagicMock(spec=VectorIndex)
+    index.search = AsyncMock(return_value=[])
+    index.add_embedding = AsyncMock()
+    index.delete_embedding = AsyncMock()
+    return index
+
+
+@pytest.fixture
+async def memory_manager(
+    file_memory_store, mock_index, mock_embedding_generator, db_session
+):
+    """Create a memory manager with mocked components."""
     return MemoryManager(
-        store=memory_store,
-        retriever=mock_retriever,
+        store=file_memory_store,
+        index=mock_index,
+        embedding_generator=mock_embedding_generator,
         db_session=db_session,
     )
 
@@ -83,18 +95,21 @@ class TestRPCScoping:
     """Tests for memory scoping through RPC interface."""
 
     async def test_add_creates_personal_memory_by_default(
-        self, rpc_server, memory_store
+        self, rpc_server, file_memory_store
     ):
         """Test that memory.add creates a personal memory by default."""
         handler = rpc_server.methods["memory.add"]
 
         result = await handler({"content": "Personal fact", "user_id": "user-1"})
 
-        memory = await memory_store.get_memory(result["id"])
+        memory = await file_memory_store.get_memory(result["id"])
+        assert memory is not None
         assert memory.owner_user_id == "user-1"
         assert memory.chat_id is None
 
-    async def test_add_creates_group_memory_when_shared(self, rpc_server, memory_store):
+    async def test_add_creates_group_memory_when_shared(
+        self, rpc_server, file_memory_store
+    ):
         """Test that memory.add creates a group memory when shared=True."""
         handler = rpc_server.methods["memory.add"]
 
@@ -107,11 +122,12 @@ class TestRPCScoping:
             }
         )
 
-        memory = await memory_store.get_memory(result["id"])
+        memory = await file_memory_store.get_memory(result["id"])
+        assert memory is not None
         assert memory.owner_user_id is None  # Group memory has no owner
         assert memory.chat_id == "chat-1"
 
-    async def test_add_personal_when_shared_false(self, rpc_server, memory_store):
+    async def test_add_personal_when_shared_false(self, rpc_server, file_memory_store):
         """Test that shared=False creates personal memory even with chat_id."""
         handler = rpc_server.methods["memory.add"]
 
@@ -124,6 +140,7 @@ class TestRPCScoping:
             }
         )
 
-        memory = await memory_store.get_memory(result["id"])
+        memory = await file_memory_store.get_memory(result["id"])
+        assert memory is not None
         assert memory.owner_user_id == "user-1"
         assert memory.chat_id is None
