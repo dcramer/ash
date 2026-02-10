@@ -320,19 +320,12 @@ class FileMemoryStore:
         people = await self._ensure_people_loaded()
 
         # Find person IDs that match this user_id
-        matching_person_ids: set[str] = set()
-        user_lower = user_id.lower()
-        for person in people:
-            if person.owner_user_id != owner_user_id:
-                continue
-            # Check if user_id matches person name or aliases
-            if person.name.lower() == user_lower:
-                matching_person_ids.add(person.id)
-            elif person.aliases:
-                for alias in person.aliases:
-                    if alias.lower() == user_lower:
-                        matching_person_ids.add(person.id)
-                        break
+        matching_person_ids = {
+            person.id
+            for person in people
+            if person.owner_user_id == owner_user_id
+            and self._person_matches_username(person, user_id)
+        }
 
         if not matching_person_ids:
             return []
@@ -340,21 +333,21 @@ class FileMemoryStore:
         # Find memories where:
         # 1. User is a subject (in subject_person_ids)
         # 2. Source user is different from the user (hearsay, not fact)
+        user_lower = user_id.lower()
         result: list[MemoryEntry] = []
         for memory in memories:
-            # Check if user is a subject
             if not memory.subject_person_ids:
                 continue
-            has_user_as_subject = any(
+
+            # Check if user is a subject
+            is_subject = any(
                 pid in matching_person_ids for pid in memory.subject_person_ids
             )
-            if not has_user_as_subject:
+            if not is_subject:
                 continue
 
-            # Check if source is different (hearsay)
-            source_lower = (memory.source_user_id or "").lower()
-            if source_lower == user_lower:
-                # This is a fact (user speaking about themselves), not hearsay
+            # Skip facts (user speaking about themselves)
+            if (memory.source_user_id or "").lower() == user_lower:
                 continue
 
             result.append(memory)
@@ -614,6 +607,23 @@ class FileMemoryStore:
             if result.startswith(prefix):
                 return result[len(prefix) :]
         return result
+
+    def _person_matches_username(self, person: PersonEntry, username: str) -> bool:
+        """Check if a person matches a username (case-insensitive).
+
+        Args:
+            person: Person entry to check.
+            username: Username to match against.
+
+        Returns:
+            True if person's name or any alias matches the username.
+        """
+        username_lower = username.lower()
+        if person.name.lower() == username_lower:
+            return True
+        if person.aliases:
+            return any(alias.lower() == username_lower for alias in person.aliases)
+        return False
 
     async def find_person_by_reference(
         self,

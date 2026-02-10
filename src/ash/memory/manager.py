@@ -393,22 +393,39 @@ class MemoryManager:
                 ):
                     continue
 
-            success = await self._store.mark_memory_superseded(
-                memory_id=memory.id,
-                superseded_by_id=new_memory.id,
-            )
-            if success:
-                try:
-                    await self._index.delete_embedding(memory.id)
-                except Exception:
-                    logger.warning(
-                        "Failed to delete superseded memory embedding",
-                        extra={"memory_id": memory.id},
-                        exc_info=True,
-                    )
+            if await self._mark_superseded(memory.id, new_memory.id):
                 count += 1
 
         return count
+
+    async def _mark_superseded(
+        self,
+        old_memory_id: str,
+        new_memory_id: str,
+    ) -> bool:
+        """Mark a memory as superseded and clean up its embedding.
+
+        Args:
+            old_memory_id: Memory to supersede.
+            new_memory_id: Memory that supersedes it.
+
+        Returns:
+            True if successfully superseded.
+        """
+        success = await self._store.mark_memory_superseded(
+            memory_id=old_memory_id,
+            superseded_by_id=new_memory_id,
+        )
+        if success:
+            try:
+                await self._index.delete_embedding(old_memory_id)
+            except Exception:
+                logger.warning(
+                    "Failed to delete superseded memory embedding",
+                    extra={"memory_id": old_memory_id},
+                    exc_info=True,
+                )
+        return success
 
     async def search(
         self,
@@ -769,19 +786,7 @@ class MemoryManager:
                     ):
                         continue
 
-                success = await self._store.mark_memory_superseded(
-                    memory_id=hearsay.id,
-                    superseded_by_id=new_memory.id,
-                )
-                if success:
-                    try:
-                        await self._index.delete_embedding(hearsay.id)
-                    except Exception:
-                        logger.warning(
-                            "Failed to delete superseded hearsay embedding",
-                            extra={"memory_id": hearsay.id},
-                            exc_info=True,
-                        )
+                if await self._mark_superseded(hearsay.id, new_memory.id):
                     count += 1
                     logger.info(
                         "Hearsay superseded by fact",

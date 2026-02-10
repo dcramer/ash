@@ -45,19 +45,6 @@ Use `/dex-plan` to create tasks from planning docs (specs, roadmaps).
 | `/create-skill` | Create Ash skills in workspace |
 | `/eval` | Run or write behavior evals |
 
-## Development Roles
-
-Use `/role-master` to coordinate project reviews.
-
-| Role | Purpose |
-|------|---------|
-| `/role-master` | Coordinate work, delegate, verify |
-| `/role-arch` | Architecture, dependencies |
-| `/role-eval` | Write evals, coverage gaps |
-| `/role-spec` | Spec quality, completeness |
-| `/role-ux` | Aggregate conversation patterns |
-| `/role-debug` | Single session deep analysis |
-
 ## Specs
 
 | Spec | When to read |
