@@ -469,7 +469,7 @@ class TelegramMessageHandler:
             )
 
             # Filter by similarity threshold and extract content
-            memories = [r.memory.content for r in results if r.similarity >= threshold]
+            memories = [r.content for r in results if r.similarity >= threshold]
 
             if memories:
                 logger.info(
