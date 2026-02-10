@@ -63,6 +63,29 @@ class ToolResult:
         return cls(content=message, is_error=True, metadata=metadata)
 
 
+def format_subagent_result(content: str, source_type: str, source_name: str) -> str:
+    """Format subagent result with structured tags for LLM clarity.
+
+    The structured format makes it unambiguous where instructions end
+    and subagent output begins. LLMs are well-trained on tag patterns.
+
+    Args:
+        content: The subagent's output content.
+        source_type: Type of source ("skill" or "agent").
+        source_name: Name of the skill or agent that produced this result.
+
+    Returns:
+        Tag-structured string with instruction and output sections.
+    """
+    return f"""<instruction>
+This is the result from the "{source_name}" {source_type}.
+The user has NOT seen this output. Interpret and include relevant parts in your response.
+</instruction>
+<output>
+{content}
+</output>"""
+
+
 class Tool(ABC):
     """Abstract base class for tools.
 

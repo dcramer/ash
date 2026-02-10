@@ -51,14 +51,25 @@ If the skill is broken, say so and stop. That's useful information.
 
 ## Output
 
-Your response goes back to the main agent, who relays it to the user.
+Your final response is the skill's output - this is how results reach the user.
+
 - Include actual command output, not just summaries
 - If something failed, include the error message
 - Be concise - the user wants results, not a narrative
 
+For long-running tasks, use `send_message` for progress updates only (e.g., "Processing file 3 of 10...").
+Never use `send_message` for the final result - that must be in your response.
+
 ---
 
 """
+
+
+def format_skill_result(content: str, skill_name: str) -> str:
+    """Format skill result with structured tags for LLM clarity."""
+    from ash.tools.base import format_subagent_result
+
+    return format_subagent_result(content, "skill", skill_name)
 
 
 class SkillAgent(Agent):
@@ -257,7 +268,10 @@ class UseSkillTool(Tool):
         if result.is_error:
             return ToolResult.error(result.content)
 
-        return ToolResult.success(result.content, skill="claude-code")
+        return ToolResult.success(
+            format_skill_result(result.content, "claude-code"),
+            skill="claude-code",
+        )
 
     async def execute(
         self,
@@ -328,5 +342,7 @@ class UseSkillTool(Tool):
             return ToolResult.error(result.content)
 
         return ToolResult.success(
-            result.content, iterations=result.iterations, skill=skill_name
+            format_skill_result(result.content, skill_name),
+            iterations=result.iterations,
+            skill=skill_name,
         )

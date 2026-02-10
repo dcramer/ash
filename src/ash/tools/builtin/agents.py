@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 CHECKPOINT_METADATA_KEY = "checkpoint"
 
 
+def format_agent_result(content: str, agent_name: str) -> str:
+    """Format agent result with structured tags for LLM clarity."""
+    from ash.tools.base import format_subagent_result
+
+    return format_subagent_result(content, "agent", agent_name)
+
+
 class UseAgentTool(Tool):
     """Invoke a built-in agent for complex tasks.
 
@@ -214,4 +221,4 @@ class UseAgentTool(Tool):
         if result.is_error:
             return ToolResult.error(result.content)
 
-        return ToolResult.success(result.content)
+        return ToolResult.success(format_agent_result(result.content, agent_name))

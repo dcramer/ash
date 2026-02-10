@@ -186,7 +186,8 @@ class SystemPromptBuilder:
                 "### Presenting Results",
                 "",
                 "The user cannot see tool/skill/agent results - only your response.",
-                "After tool use, summarize what happened and include relevant output.",
+                "Subagent results arrive wrapped in `<instruction>` and `<output>` tags.",
+                "Read the content, interpret it, and include relevant parts in your response.",
                 "",
                 "### Handling Failures",
                 "",
@@ -221,12 +222,7 @@ class SystemPromptBuilder:
         for skill in sorted(available_skills, key=lambda s: s.name):
             lines.append(f"- **{skill.name}**: {skill.description}")
 
-        lines.extend(
-            [
-                "",
-                "Skill results are not visible to the user - include them in your response.",
-            ]
-        )
+        lines.append("")
 
         return "\n".join(lines)
 
@@ -255,7 +251,6 @@ class SystemPromptBuilder:
                 "### When to Delegate",
                 "",
                 "- **Creating tools, scripts, or reusable functionality** → use `skill-writer`",
-                "- Agent results are not visible to the user - include them in your response",
                 "",
                 "### Handling Agent Checkpoints",
                 "",

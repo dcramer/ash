@@ -176,11 +176,15 @@ class TestUseSkillToolExecution:
 
     @pytest.mark.asyncio
     async def test_returns_agent_result_content(self, tool):
-        """Should return the agent's result content."""
+        """Should return the agent's result content in structured tag format."""
         result = await tool.execute({"skill": "test", "message": "do it"})
 
         assert not result.is_error
-        assert result.content == "Done!"
+        assert "<instruction>" in result.content
+        assert '"test" skill' in result.content
+        assert "<output>" in result.content
+        assert "Done!" in result.content
+        assert "</output>" in result.content
 
     @pytest.mark.asyncio
     async def test_propagates_agent_error(self, tool):
@@ -304,7 +308,10 @@ class TestClaudeCodeSkill:
             result = await tool.execute({"skill": "claude-code", "message": "do thing"})
 
         assert not result.is_error
-        assert result.content == "CLI result"
+        assert "<instruction>" in result.content
+        assert '"claude-code" skill' in result.content
+        assert "<output>" in result.content
+        assert "CLI result" in result.content
         mock_agent.execute_passthrough.assert_called_once()
         # Check message and default model were passed
         call_args = mock_agent.execute_passthrough.call_args

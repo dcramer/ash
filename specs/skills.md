@@ -125,12 +125,20 @@ Use the `use_skill` tool to invoke a skill with context.
     }
 }
 
-# Returns
+# Returns (structured for LLM clarity)
 {
-    "content": "Python 3.13 introduces several async improvements...",
+    "content": """<instruction>
+This is the result from running the "research" skill.
+The user has NOT seen this output. Interpret and include it in your response.
+</instruction>
+<output>
+Python 3.13 introduces several async improvements...
+</output>""",
     "iterations": 3
 }
 ```
+
+See `specs/agent-prompts.md#structured-content-formatting` for the rationale behind this format.
 
 ### CLI Commands
 

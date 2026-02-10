@@ -137,6 +137,64 @@ grep -A 30 "SKILL_AGENT_WRAPPER" src/ash/tools/builtin/skills.py
 - All agents specify output format
 - SKILL_AGENT_WRAPPER covers execution, errors, and output
 
+## Structured Content Formatting
+
+When prompts or tool results contain concrete sections, use HTML-like tags to delineate them. This helps the LLM parse content boundaries accurately.
+
+### Why Tags?
+
+Based on [Anthropic's XML tag guidance](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/use-xml-tags):
+
+- **Clarity**: Separate different parts unambiguously
+- **Accuracy**: Reduce misinterpretation (e.g., examples vs instructions)
+- **Parseability**: Easy to extract sections post-processing
+- **Training alignment**: Claude was trained on structured prompts
+
+### Tag Style
+
+Use plain tags for each section - no outer wrapper needed:
+
+```
+<instruction>
+This is the result from running the "translator" skill.
+The user has NOT seen this output. Interpret and include it in your response.
+</instruction>
+<output>
+La traducción es: "Hola mundo"
+</output>
+```
+
+Keep it minimal - just tag each distinct section.
+
+### When to Use Tags
+
+| Scenario | Tags | Example |
+|----------|------|---------|
+| Subagent results | `<instruction>`, `<output>` | Skill and agent tool results |
+| Multi-part prompts | `<instructions>`, `<context>`, `<examples>` | Complex system prompts |
+| Chain of thought | `<thinking>`, `<answer>` | Structured reasoning |
+| Code with explanation | `<code>`, `<explanation>` | Teaching contexts |
+
+### Implementation
+
+Files: `src/ash/tools/base.py` (shared), `src/ash/tools/builtin/skills.py`, `src/ash/tools/builtin/agents.py`
+
+```python
+# Shared function in tools/base.py
+def format_subagent_result(content: str, source_type: str, source_name: str) -> str:
+    return f"""<instruction>
+This is the result from the "{source_name}" {source_type}.
+The user has NOT seen this output. Interpret and include relevant parts in your response.
+</instruction>
+<output>
+{content}
+</output>"""
+
+# Thin wrappers in skills.py and agents.py
+def format_skill_result(content: str, skill_name: str) -> str:
+    return format_subagent_result(content, "skill", skill_name)
+```
+
 ## Result Visibility
 
 ### MUST
