@@ -20,7 +20,7 @@ def register(app: typer.Typer) -> None:
         action: Annotated[
             str | None,
             typer.Argument(
-                help="Action: list, add, remove, clear, gc, rebuild-index, history"
+                help="Action: list, show, add, remove, clear, gc, rebuild-index, history"
             ),
         ] = None,
         query: Annotated[
@@ -123,6 +123,7 @@ def register(app: typer.Typer) -> None:
             ash memory list --scope personal   # List personal memories only
             ash memory list --scope shared     # List shared/group memories
             ash memory list --user bob         # List memories owned by bob
+            ash memory show --id <uuid>        # Show full details of a memory
             ash memory add -q "User prefers dark mode"
             ash memory remove --id <uuid>      # Remove specific entry
             ash memory remove --all            # Remove all entries
@@ -202,6 +203,11 @@ async def _run_memory_action(
                 await _memory_gc()
             elif action == "rebuild-index":
                 await _memory_rebuild_index(session)
+            elif action == "show":
+                if not entry_id:
+                    error("--id is required for show action")
+                    raise typer.Exit(1)
+                await _memory_show(entry_id)
             elif action == "history":
                 if not entry_id:
                     error("--id is required for history action")
@@ -210,7 +216,7 @@ async def _run_memory_action(
             else:
                 error(f"Unknown action: {action}")
                 console.print(
-                    "Valid actions: list, add, remove, clear, gc, rebuild-index, history"
+                    "Valid actions: list, show, add, remove, clear, gc, rebuild-index, history"
                 )
                 raise typer.Exit(1)
     finally:
@@ -296,6 +302,14 @@ async def _memory_list(
         if len(filtered_entries) >= limit:
             break
 
+    # Load people for name lookup
+    from ash.config.paths import get_people_jsonl_path
+    from ash.memory.jsonl import PersonJSONL
+
+    people_jsonl = PersonJSONL(get_people_jsonl_path())
+    people = await people_jsonl.load_all()
+    people_by_id = {p.id: p for p in people}
+
     if not filtered_entries:
         if query:
             warning(f"No memories found matching '{query}'")
@@ -307,6 +321,7 @@ async def _memory_list(
     table = Table(title=title)
     table.add_column("ID", style="dim", max_width=8)
     table.add_column("Type", style="blue", max_width=10)
+    table.add_column("About", style="green", max_width=12)
     table.add_column("Scope", style="magenta", max_width=10)
     table.add_column("Created", style="dim")
     table.add_column("Source", style="cyan")
@@ -318,6 +333,16 @@ async def _memory_list(
             entry.content[:60] + "..." if len(entry.content) > 60 else entry.content
         )
         content = content.replace("\n", " ")
+
+        # Resolve subject person names
+        subject_names = []
+        for person_id in entry.subject_person_ids or []:
+            person = people_by_id.get(person_id)
+            if person:
+                subject_names.append(person.name)
+            else:
+                subject_names.append(person_id[:8])
+        about = ", ".join(subject_names) if subject_names else "[dim]-[/dim]"
 
         # Determine scope
         if entry.owner_user_id:
@@ -341,6 +366,7 @@ async def _memory_list(
         table.add_row(
             entry.id[:8],
             entry.memory_type.value,
+            about,
             entry_scope,
             created,
             entry.source or "[dim]-[/dim]",
@@ -538,6 +564,87 @@ async def _memory_rebuild_index(session) -> None:
     count = await rebuild_vector_index_from_jsonl(memories_path)
 
     success(f"Rebuilt index with {count} embeddings")
+
+
+async def _memory_show(memory_id: str) -> None:
+    """Show full details of a memory entry."""
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from ash.config.paths import get_people_jsonl_path
+    from ash.memory.file_store import FileMemoryStore
+    from ash.memory.jsonl import PersonJSONL
+
+    store = FileMemoryStore()
+
+    # Find the memory by prefix
+    memory = await store.get_memory_by_prefix(memory_id)
+    if not memory:
+        error(f"No memory found with ID: {memory_id}")
+        raise typer.Exit(1)
+
+    # Load people for name lookup
+    people_jsonl = PersonJSONL(get_people_jsonl_path())
+    people = await people_jsonl.load_all()
+    people_by_id = {p.id: p for p in people}
+
+    # Build details table
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="white")
+
+    table.add_row("ID", memory.id)
+    table.add_row("Type", memory.memory_type.value)
+    table.add_row("Source", memory.source or "-")
+
+    # Scope
+    if memory.owner_user_id:
+        table.add_row("Scope", f"Personal ({memory.owner_user_id})")
+    elif memory.chat_id:
+        table.add_row("Scope", f"Group ({memory.chat_id})")
+    else:
+        table.add_row("Scope", "Global")
+
+    # Subjects
+    if memory.subject_person_ids:
+        subject_names = []
+        for person_id in memory.subject_person_ids:
+            person = people_by_id.get(person_id)
+            if person:
+                subject_names.append(f"{person.name} ({person_id[:8]})")
+            else:
+                subject_names.append(person_id)
+        table.add_row("About", ", ".join(subject_names))
+    else:
+        table.add_row("About", "-")
+
+    # Timestamps
+    if memory.created_at:
+        table.add_row("Created", memory.created_at.isoformat())
+    if memory.observed_at and memory.observed_at != memory.created_at:
+        table.add_row("Observed", memory.observed_at.isoformat())
+    if memory.expires_at:
+        table.add_row("Expires", memory.expires_at.isoformat())
+    if memory.superseded_at:
+        table.add_row("Superseded", memory.superseded_at.isoformat())
+    if memory.superseded_by_id:
+        table.add_row("Superseded By", memory.superseded_by_id)
+
+    # Source attribution
+    if memory.source_session_id:
+        table.add_row("Session", memory.source_session_id)
+    if memory.source_message_id:
+        table.add_row("Message", memory.source_message_id)
+    if memory.extraction_confidence is not None:
+        table.add_row("Confidence", f"{memory.extraction_confidence:.2f}")
+
+    # Embedding info
+    if memory.embedding:
+        table.add_row("Embedding", f"{len(memory.embedding)} chars (base64)")
+
+    console.print(Panel(table, title=f"Memory {memory.id[:8]}"))
+    console.print()
+    console.print(Panel(memory.content, title="Content"))
 
 
 async def _memory_history(memory_id: str) -> None:
