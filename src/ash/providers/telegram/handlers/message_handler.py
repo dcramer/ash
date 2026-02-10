@@ -186,7 +186,12 @@ class TelegramMessageHandler:
                 "extraction will be skipped"
             )
 
-        logger.info("Passive listening initialized")
+        logger.info(
+            "Passive listening initialized (llm=%s, memory=%s, extractor=%s)",
+            self._llm_provider is not None,
+            self._memory_manager is not None,
+            self._memory_extractor is not None,
+        )
 
     def _get_bot_display_name(self) -> str:
         """Extract display name from bot username.
