@@ -1135,7 +1135,12 @@ async def create_agent(
                 )
                 raise ValueError("Embeddings API key required for memory")
 
+            # Create registry with both embedding provider and Anthropic (for LLM verification)
+            anthropic_key = config.resolve_api_key("anthropic")
             llm_registry = create_registry(
+                anthropic_api_key=anthropic_key.get_secret_value()
+                if anthropic_key
+                else None,
                 openai_api_key=embeddings_key.get_secret_value()
                 if config.embeddings.provider == "openai"
                 else None,
