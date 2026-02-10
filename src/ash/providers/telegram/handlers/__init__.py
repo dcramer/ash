@@ -4,6 +4,7 @@ This package provides message handling for Telegram provider.
 
 Public API:
 - TelegramMessageHandler: Main message handler class
+- CheckpointHandler: Handles checkpoint storage and callback resumption
 - ToolTracker: Tracks tool calls and manages thinking messages
 - ProgressMessageTool: Per-run send_message tool for progress updates
 
@@ -14,6 +15,7 @@ Utilities:
 - format_tool_brief: Format individual tool execution
 """
 
+from ash.providers.telegram.handlers.checkpoint_handler import CheckpointHandler
 from ash.providers.telegram.handlers.message_handler import (
     SessionContext,
     TelegramMessageHandler,
@@ -40,6 +42,7 @@ from ash.providers.telegram.handlers.utils import (
 
 __all__ = [
     # Main classes
+    "CheckpointHandler",
     "ProgressMessageTool",
     "SessionContext",
     "TelegramMessageHandler",
