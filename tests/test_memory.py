@@ -82,6 +82,7 @@ class TestMemorySupersession:
 
         assert result is True
         old_refreshed = await file_memory_store.get_memory(old_memory.id)
+        assert old_refreshed is not None
         assert old_refreshed.superseded_at is not None
         assert old_refreshed.superseded_by_id == new_memory.id
 

@@ -126,6 +126,7 @@ class TestMemorySupersession:
 
         assert result is True
         old_refreshed = await file_memory_store.get_memory(old_memory.id)
+        assert old_refreshed is not None
         assert old_refreshed.superseded_at is not None
         assert old_refreshed.superseded_by_id == new_memory.id
 
@@ -356,6 +357,7 @@ class TestMemoryTypes:
             file_memory_store._invalidate_memories_cache()
 
             retrieved = await file_memory_store.get_memory(memory.id)
+            assert retrieved is not None
             assert retrieved.memory_type == memory_type
 
     async def test_memory_entry_to_dict(self):
