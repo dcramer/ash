@@ -11,7 +11,6 @@ import uuid
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
-from ash.core.tokens import estimate_tokens
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.provider import _truncate
 from ash.sessions.types import session_key as make_session_key
@@ -184,74 +183,57 @@ class CheckpointHandler:
         4. Formats and sends the result to the user
         5. Handles nested checkpoints if the resumed agent pauses again
         """
-        from ash.providers.telegram.checkpoint_ui import parse_callback_data
+        from .checkpoint_callback import CallbackValidator
 
-        if not callback_query.data:
-            logger.warning("Callback query has no data")
-            await callback_query.answer("Invalid callback data")
+        # Parse callback data
+        context, error = CallbackValidator.parse_callback_data(callback_query)
+        if context is None:
+            await callback_query.answer(error or "Invalid callback data")
             return
 
-        parsed = parse_callback_data(callback_query.data)
-        if parsed is None:
-            logger.warning("Failed to parse callback data: %s", callback_query.data)
-            await callback_query.answer("Invalid callback format")
-            return
-
-        truncated_id, option_index = parsed
-
-        # Get context from callback for recovery lookup
-        bot_response_id = (
-            str(callback_query.message.message_id) if callback_query.message else None
-        )
-        callback_chat_id = (
-            str(callback_query.message.chat.id) if callback_query.message else None
-        )
-        callback_user_id = (
-            str(callback_query.from_user.id) if callback_query.from_user else None
-        )
-
-        # Use get_checkpoint to check memory, loaded sessions, and disk
+        # Retrieve checkpoint
         routing, checkpoint = await self.get_checkpoint(
-            truncated_id,
-            bot_response_id,
-            chat_id=callback_chat_id,
-            user_id=callback_user_id,
+            context.truncated_id,
+            context.bot_response_id,
+            chat_id=context.chat_id,
+            user_id=context.user_id,
         )
         if checkpoint is None or routing is None:
-            logger.warning("Checkpoint not found: %s", truncated_id)
+            logger.warning("Checkpoint not found: %s", context.truncated_id)
             await callback_query.answer(
                 "Checkpoint not found. It may have expired or the session was lost.",
                 show_alert=True,
             )
             return
 
+        # Validate option selection
         options = checkpoint.get("options") or ["Proceed", "Cancel"]
-        if option_index < 0 or option_index >= len(options):
-            logger.warning("Invalid option index: %d", option_index)
-            await callback_query.answer("Invalid option selected")
-            return
-
-        selected_option = options[option_index]
-
-        # Extract routing data needed for validation and logging
-        chat_id = routing.get("chat_id", "")
-        user_id = routing.get("user_id", "")
-        session_key = routing.get("session_key", "")
-
-        # Validate that the user clicking is the one who was asked
-        from_user = callback_query.from_user
-        if not from_user:
-            logger.warning("Callback query has no from_user, rejecting")
-            await callback_query.answer("Unable to verify user.", show_alert=True)
-            return
-        if str(from_user.id) != user_id:
+        options_result = CallbackValidator.validate_options(
+            context.option_index, options
+        )
+        if not options_result.success:
             await callback_query.answer(
-                "This question was asked to another user.", show_alert=True
+                options_result.error_message or "Invalid option"
+            )
+            return
+
+        selected_option = options[context.option_index]
+
+        # Validate user authorization
+        user_id = routing.get("user_id", "")
+        user_result = CallbackValidator.validate_user(callback_query, user_id)
+        if not user_result.success:
+            await callback_query.answer(
+                user_result.error_message or "Unauthorized",
+                show_alert=user_result.show_alert,
             )
             return
 
         # Process with log context for traceability
         from ash.logging import log_context
+
+        chat_id = routing.get("chat_id", "")
+        session_key = routing.get("session_key", "")
 
         with log_context(chat_id=chat_id, session_id=session_key):
             await self._handle_callback_query_inner(
@@ -259,7 +241,7 @@ class CheckpointHandler:
                 routing=routing,
                 checkpoint=checkpoint,
                 selected_option=selected_option,
-                truncated_id=truncated_id,
+                truncated_id=context.truncated_id,
             )
 
     async def _handle_callback_query_inner(
@@ -271,12 +253,9 @@ class CheckpointHandler:
         truncated_id: str,
     ) -> None:
         """Inner implementation of callback query handling (runs with log context)."""
-        from ash.providers.telegram.checkpoint_ui import (
-            create_checkpoint_keyboard,
-            format_checkpoint_message,
-        )
         from ash.tools.base import ToolContext
-        from ash.tools.builtin.agents import CHECKPOINT_METADATA_KEY
+
+        from .checkpoint_callback import ResponseFinalizer
 
         # Extract routing data
         chat_id = routing.get("chat_id", "")
@@ -331,9 +310,7 @@ class CheckpointHandler:
 
         assert self._tool_registry is not None  # Checked above via has_tool_registry
 
-        # Restore CheckpointState to UseAgentTool's cache before calling execute.
-        # The checkpoint data comes from the session log, but UseAgentTool.execute()
-        # looks up from its own in-memory cache. We need to restore it there.
+        # Restore CheckpointState to UseAgentTool's cache before calling execute
         from ash.agents.base import CheckpointState
         from ash.tools.builtin.agents import UseAgentTool
 
@@ -361,7 +338,6 @@ class CheckpointHandler:
             )
 
         # Create tracker for resume flow (reply to checkpoint message)
-        # This enables send_message tool calls and "Thinking..." indicator
         tracker = ToolTracker(
             provider=self._provider,
             chat_id=chat_id,
@@ -381,8 +357,6 @@ class CheckpointHandler:
             metadata={"current_message_id": checkpoint_message_id},
         )
 
-        # Generate a tool_use_id for persistence
-
         tool_use_id = f"callback_{uuid.uuid4().hex[:12]}"
         tool_input = {
             "agent": agent_name,
@@ -395,13 +369,11 @@ class CheckpointHandler:
             result = await use_agent_tool.execute(tool_input, tool_context)
         except Exception as e:
             logger.exception("Error calling use_agent tool directly")
-            # Clean up thinking message if it was created
             if tracker.thinking_msg_id:
                 try:
                     await self._provider.delete(chat_id, tracker.thinking_msg_id)
                 except Exception as delete_err:
                     logger.debug("Failed to delete thinking message: %s", delete_err)
-            # Don't clear checkpoint on error - user can retry
             await self._provider.send(
                 OutgoingMessage(
                     chat_id=chat_id,
@@ -414,121 +386,35 @@ class CheckpointHandler:
         # Clear the checkpoint now that processing succeeded
         self.clear_checkpoint(truncated_id)
 
-        # Check for nested checkpoint in the result
-        reply_markup = None
-        response_text = result.content
-        if CHECKPOINT_METADATA_KEY in result.metadata:
-            new_checkpoint = result.metadata[CHECKPOINT_METADATA_KEY]
+        # Finalize response using ResponseFinalizer
+        session_manager = self._get_session_manager(chat_id, user_id, thread_id)
+        thread_index = self._get_thread_index(chat_id) if thread_id else None
 
-            # Create a synthetic message to reuse store_checkpoint
-            # This preserves the metadata from the original routing info
-            synthetic_msg = IncomingMessage(
-                id="",
-                chat_id=chat_id,
-                user_id=user_id,
-                text="",
-                username=routing.get("username"),
-                display_name=routing.get("display_name"),
-                metadata={
-                    "thread_id": thread_id,
-                    "chat_type": routing.get("chat_type"),
-                    "chat_title": routing.get("chat_title"),
-                },
-            )
-            new_truncated_id = self.store_checkpoint(
-                new_checkpoint,
-                synthetic_msg,
-                agent_name=agent_name,
-                original_message=original_message,
-            )
+        finalizer = ResponseFinalizer(
+            provider=self._provider,
+            session_manager=session_manager,
+            thread_index=thread_index,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            routing=routing,
+        )
 
-            reply_markup = create_checkpoint_keyboard(new_checkpoint)
-            response_text = format_checkpoint_message(new_checkpoint)
-            logger.info(
-                "Nested checkpoint detected, showing new keyboard (id=%s)",
-                new_truncated_id,
-            )
+        sent_message_id = await finalizer.finalize(
+            result=result,
+            tracker=tracker,
+            checkpoint_message_id=checkpoint_message_id,
+            checkpoint_id=checkpoint_id,
+            selected_option=selected_option,
+            user_id=user_id,
+            tool_use_id=tool_use_id,
+            tool_input=tool_input,
+            agent_name=agent_name,
+            original_message=original_message,
+            store_checkpoint_fn=self.store_checkpoint,
+        )
 
-        # Finalize response using tracker
-        sent_message_id: str | None = None
-        if response_text.strip():
-            if reply_markup:
-                # Nested checkpoint: need keyboard, delete thinking msg and send new
-                if tracker.thinking_msg_id:
-                    try:
-                        await self._provider.delete(chat_id, tracker.thinking_msg_id)
-                    except Exception as delete_err:
-                        logger.debug(
-                            "Failed to delete thinking message: %s", delete_err
-                        )
-                # Send new message with keyboard
-                sent_message_id = await self._provider.send(
-                    OutgoingMessage(
-                        chat_id=chat_id,
-                        text=response_text,
-                        reply_to_message_id=checkpoint_message_id,
-                        reply_markup=reply_markup,
-                    )
-                )
-            else:
-                # No nested checkpoint - use tracker finalization
-                sent_message_id = await tracker.finalize_response(response_text)
-
-            # Persist the interaction to session
-            session_manager = self._get_session_manager(chat_id, user_id, thread_id)
-            await session_manager.add_user_message(
-                content=f"[Checkpoint response: {selected_option}]",
-                token_count=estimate_tokens(selected_option),
-                metadata={
-                    "is_checkpoint_response": True,
-                    "checkpoint_id": checkpoint_id,
-                },
-                user_id=user_id,
-                username=routing.get("username"),
-                display_name=routing.get("display_name"),
-            )
-            await session_manager.add_assistant_message(
-                content=response_text,
-                token_count=estimate_tokens(response_text),
-                metadata={"bot_response_id": sent_message_id}
-                if sent_message_id
-                else None,
-            )
-
-            # Persist tool_use and tool_result for session consistency
-            await session_manager.add_tool_use(
-                tool_use_id=tool_use_id,
-                name="use_agent",
-                input_data=tool_input,
-            )
-            await session_manager.add_tool_result(
-                tool_use_id=tool_use_id,
-                output=result.content,
-                success=not result.is_error,
-                metadata=result.metadata,
-            )
-
-            # Register bot response in thread index for reply routing
-            if sent_message_id and thread_id:
-                thread_index = self._get_thread_index(chat_id)
-                thread_index.register_message(sent_message_id, thread_id)
-
-            self._log_response(response_text)
-        else:
-            # Still persist tool_use/result even for empty responses
-            session_manager = self._get_session_manager(chat_id, user_id, thread_id)
-            await session_manager.add_tool_use(
-                tool_use_id=tool_use_id,
-                name="use_agent",
-                input_data=tool_input,
-            )
-            await session_manager.add_tool_result(
-                tool_use_id=tool_use_id,
-                output=result.content,
-                success=not result.is_error,
-                metadata=result.metadata,
-            )
-            logger.debug("Empty response from resumed agent")
+        if sent_message_id and result.content.strip():
+            self._log_response(result.content)
 
     async def _handle_checkpoint_via_message(
         self,
