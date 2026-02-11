@@ -646,11 +646,11 @@ class TestTelegramMessageHandler:
         # Manually inject a throttler that always blocks
         mock_throttler = MagicMock(spec=PassiveEngagementThrottler)
         mock_throttler.should_consider.return_value = False
-        handler._passive_throttler = mock_throttler
+        handler._passive_handler._passive_throttler = mock_throttler  # type: ignore[union-attr]
 
         # Also need decider and memory_manager for the handler to proceed
-        handler._passive_decider = MagicMock()
-        handler._memory_manager = MagicMock()
+        handler._passive_handler._passive_decider = MagicMock()  # type: ignore[union-attr]
+        handler._passive_handler._memory_manager = MagicMock()  # type: ignore[union-attr]
 
         # Message that does NOT mention the bot (won't bypass throttle)
         passive_message = IncomingMessage(
@@ -707,11 +707,11 @@ class TestTelegramMessageHandler:
         mock_throttler = MagicMock(spec=PassiveEngagementThrottler)
         mock_throttler.should_consider.return_value = False
         mock_throttler.record_engagement = MagicMock()
-        handler._passive_throttler = mock_throttler
+        handler._passive_handler._passive_throttler = mock_throttler  # type: ignore[union-attr]
 
         # Need decider and memory_manager
-        handler._passive_decider = MagicMock()
-        handler._memory_manager = MagicMock()
+        handler._passive_handler._passive_decider = MagicMock()  # type: ignore[union-attr]
+        handler._passive_handler._memory_manager = MagicMock()  # type: ignore[union-attr]
 
         # Set up session manager for the processing
         session_manager = SessionManager(

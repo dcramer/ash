@@ -17,6 +17,7 @@ Utilities:
 
 from ash.providers.telegram.handlers.checkpoint_handler import CheckpointHandler
 from ash.providers.telegram.handlers.message_handler import TelegramMessageHandler
+from ash.providers.telegram.handlers.passive_handler import PassiveHandler
 from ash.providers.telegram.handlers.session_handler import (
     SessionContext,
     SessionHandler,
@@ -44,6 +45,7 @@ from ash.providers.telegram.handlers.utils import (
 __all__ = [
     # Main classes
     "CheckpointHandler",
+    "PassiveHandler",
     "ProgressMessageTool",
     "SessionContext",
     "SessionHandler",
