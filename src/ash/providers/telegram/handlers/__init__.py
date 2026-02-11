@@ -22,6 +22,7 @@ from ash.providers.telegram.handlers.session_handler import (
     SessionContext,
     SessionHandler,
 )
+from ash.providers.telegram.handlers.sync_handler import SyncHandler
 from ash.providers.telegram.handlers.tool_tracker import (
     ProgressMessageTool,
     ToolTracker,
@@ -49,6 +50,7 @@ __all__ = [
     "ProgressMessageTool",
     "SessionContext",
     "SessionHandler",
+    "SyncHandler",
     "TelegramMessageHandler",
     "ToolTracker",
     # Constants
