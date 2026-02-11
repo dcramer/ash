@@ -106,7 +106,7 @@ class TelegramMessageHandler:
         )
 
         # Sync handler for non-streaming responses
-        from ash.providers.telegram.handlers.sync_handler import SyncHandler
+        from ash.providers.telegram.handlers.sync import SyncHandler
 
         self._sync_handler = SyncHandler(
             provider=provider,
