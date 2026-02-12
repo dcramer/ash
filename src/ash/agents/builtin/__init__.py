@@ -1,7 +1,7 @@
 """Built-in agents shipped with Ash."""
 
 from ash.agents.builtin.claude_code import ClaudeCodeAgent
-from ash.agents.builtin.debug import DebugAgent
+from ash.agents.builtin.debug_self import DebugAgent
 from ash.agents.builtin.plan import PlanAgent
 from ash.agents.builtin.research import ResearchAgent
 from ash.agents.builtin.skill_writer import SkillWriterAgent

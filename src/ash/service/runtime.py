@@ -97,11 +97,8 @@ def create_runtime_state_from_config(
         RuntimeState populated from config.
     """
     sandbox = config.sandbox
-
-    # Get default model name
-    model_name = "default"
-    if "default" in config.models:
-        model_name = config.models["default"].model
+    default_model = config.models.get("default")
+    model_name = default_model.model if default_model else "default"
 
     return RuntimeState(
         started_at=datetime.now(UTC).isoformat(),

@@ -133,14 +133,8 @@ async def _run_server(
 
     sandbox = ash_config.sandbox
     logger.info(
-        f"Sandbox: image={sandbox.image}, "
-        f"network={sandbox.network_mode}, "
-        f"runtime={sandbox.runtime}"
-    )
-    logger.info(
-        f"Sandbox mounts: workspace: {workspace.path} ({sandbox.workspace_access}), "
-        f"source: ({sandbox.source_access}), "
-        f"sessions: ({sandbox.sessions_access})"
+        f"Sandbox: image={sandbox.image}, network={sandbox.network_mode}, "
+        f"runtime={sandbox.runtime}, workspace={workspace.path} ({sandbox.workspace_access})"
     )
 
     # Write runtime state for service status
