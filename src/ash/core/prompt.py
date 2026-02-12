@@ -123,19 +123,18 @@ class SystemPromptBuilder:
 
         sections = [
             self._build_core_principles_section(),
+            self._build_proactive_search_section(),
             self._build_tools_section(),
             self._build_skills_section(),
             self._build_agents_section(),
             self._build_model_aliases_section(),
             self._build_workspace_section(),
             self._build_sandbox_section(context),
-            self._build_runtime_section(context.runtime) if context.runtime else "",
+            self._build_runtime_section(context.runtime),
             self._build_sender_section(context),
             self._build_passive_engagement_section(context),
-            self._build_people_section(context.known_people)
-            if context.known_people
-            else "",
-            self._build_memory_section(context.memory) if context.memory else "",
+            self._build_people_section(context.known_people),
+            self._build_memory_section(context.memory),
             self._build_conversation_context_section(context),
             self._build_session_section(context),
         ]
@@ -151,10 +150,43 @@ class SystemPromptBuilder:
             [
                 "## Core Principles",
                 "",
+                "You are a knowledgeable, resourceful assistant who proactively helps.",
+                "Act like a smart friend who happens to have access to powerful tools.",
+                "",
+                "### Verification",
                 "- NEVER claim success without verification - check tool output before reporting completion",
                 "- NEVER attempt a task yourself after an agent fails - report the failure and ask the user",
-                "- ALWAYS use tools for lookups - never assume or guess answers",
                 "- Report failures explicitly with actual error messages",
+                "",
+                "### Proactive Tool Use",
+                "- ALWAYS use tools for lookups - never assume or guess answers",
+                "- When uncertain about facts, dates, or current info: search first, answer second",
+                "- Don't wait for permission to be helpful - if a search would improve your answer, do it",
+            ]
+        )
+
+    def _build_proactive_search_section(self) -> str:
+        return "\n".join(
+            [
+                "## When to Search the Web",
+                "",
+                "Use `web_search` proactively in these situations:",
+                "",
+                "**Always search for:**",
+                "- Current events, news, recent happenings",
+                "- Facts you're unsure about (dates, statistics, claims)",
+                "- Technical documentation or API references",
+                "- Product info, prices, availability",
+                "- Local businesses, services, locations",
+                "- Anything after your knowledge cutoff",
+                "",
+                "**Search first, don't guess:**",
+                "- If asked 'what happened with X' or 'latest on Y' - search",
+                "- If asked about a person, company, or event you're not certain about - search",
+                "- If you'd normally say 'I don't have current info' - search instead",
+                "",
+                "**For deeper research:** delegate to the `research` agent for topics needing",
+                "multiple sources, synthesis, or comprehensive coverage.",
             ]
         )
 
@@ -253,6 +285,7 @@ class SystemPromptBuilder:
                 "",
                 "### When to Delegate",
                 "",
+                "- **Deep research requiring multiple sources** → use `research` agent",
                 "- **Creating tools, scripts, or reusable functionality** → use `skill-writer`",
                 "",
                 "### Handling Agent Checkpoints",
@@ -410,7 +443,10 @@ class SystemPromptBuilder:
 
         return "\n".join(lines)
 
-    def _build_runtime_section(self, runtime: RuntimeInfo) -> str:
+    def _build_runtime_section(self, runtime: RuntimeInfo | None) -> str:
+        if not runtime:
+            return ""
+
         lines = ["## Runtime", ""]
 
         info_parts = []
@@ -435,7 +471,7 @@ class SystemPromptBuilder:
 
         return "\n".join(lines)
 
-    def _build_people_section(self, people: list[PersonEntry]) -> str:
+    def _build_people_section(self, people: list[PersonEntry] | None) -> str:
         if not people:
             return ""
 
@@ -459,7 +495,10 @@ class SystemPromptBuilder:
 
         return "\n".join(lines)
 
-    def _build_memory_section(self, memory: RetrievedContext) -> str:
+    def _build_memory_section(self, memory: RetrievedContext | None) -> str:
+        if not memory:
+            return ""
+
         guidance = (
             "## Memory\n\n"
             "Your memory works automatically. Facts about users, their preferences, "
