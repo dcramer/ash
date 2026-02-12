@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -14,8 +13,20 @@ from ash.core.compaction import CompactionSettings, compact_messages, should_com
 from ash.core.prompt import PromptContext, SystemPromptBuilder
 from ash.core.session import SessionState
 from ash.core.tokens import estimate_tokens
+from ash.core.types import (
+    CHECKPOINT_METADATA_KEY,
+    AgentComponents,
+    AgentConfig,
+    AgentResponse,
+    CompactionInfo,
+    GetSteeringMessagesCallback,
+    OnToolStartCallback,
+    _MessageSetup,
+    _OwnerMatchers,
+    _StreamToolAccumulator,
+)
 from ash.llm import LLMProvider, ToolDefinition
-from ash.llm.thinking import ThinkingConfig, resolve_thinking
+from ash.llm.thinking import resolve_thinking
 from ash.llm.types import (
     ContentBlock,
     StreamEventType,
@@ -27,28 +38,13 @@ from ash.tools import ToolContext, ToolExecutor, ToolRegistry
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ash.agents import AgentRegistry
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
     from ash.memory import MemoryExtractor, MemoryManager, RetrievedContext
     from ash.memory.types import PersonEntry
     from ash.providers.base import IncomingMessage
-    from ash.sandbox import SandboxExecutor
-    from ash.skills import SkillRegistry
 
 logger = logging.getLogger(__name__)
-
-# Callback type for tool start notifications
-OnToolStartCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
-
-# Callback to check for steering messages during tool execution
-# Returns list of IncomingMessage objects, or empty list to continue normally
-GetSteeringMessagesCallback = Callable[[], Awaitable[list["IncomingMessage"]]]
-
-MAX_TOOL_ITERATIONS = 25
-
-# Metadata key for checkpoint data in tool results (from use_agent tool)
-CHECKPOINT_METADATA_KEY = "checkpoint"
 
 
 def _extract_checkpoint(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -62,14 +58,6 @@ def _extract_checkpoint(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | No
             if CHECKPOINT_METADATA_KEY in metadata:
                 return metadata[CHECKPOINT_METADATA_KEY]
     return None
-
-
-@dataclass
-class _OwnerMatchers:
-    """Compiled matchers for owner name filtering."""
-
-    exact: set[str]  # Exact matches (username, full name)
-    parts: set[str]  # Name parts (first name, last name)
 
 
 def _build_owner_matchers(owner_names: list[str] | None) -> _OwnerMatchers:
@@ -144,110 +132,6 @@ def _build_routing_env(
             )
 
     return env
-
-
-@dataclass
-class AgentConfig:
-    """Configuration for the agent.
-
-    Temperature is optional - if None, the provider's default is used.
-    Omit temperature for reasoning models that don't support it.
-
-    Thinking is optional - enables extended thinking for complex reasoning.
-    Only supported by Anthropic Claude models.
-    """
-
-    model: str | None = None
-    max_tokens: int = 4096
-    temperature: float | None = None  # None = use provider default
-    thinking: ThinkingConfig | None = None  # Extended thinking config
-    max_tool_iterations: int = MAX_TOOL_ITERATIONS
-    # Smart pruning configuration
-    context_token_budget: int = 100000  # Target context window size
-    recency_window: int = 10  # Always keep last N messages
-    system_prompt_buffer: int = 8000  # Reserve for system prompt
-    # Compaction configuration (summarizes old messages instead of dropping)
-    compaction_enabled: bool = True
-    compaction_reserve_tokens: int = 16384  # Buffer to trigger compaction
-    compaction_keep_recent_tokens: int = 20000  # Always keep recent context
-    compaction_summary_max_tokens: int = 2000  # Max tokens for summary
-    # Memory extraction configuration
-    extraction_enabled: bool = True  # Enable background memory extraction
-    extraction_min_message_length: int = 20  # Skip for short messages
-    extraction_debounce_seconds: int = 30  # Min seconds between extractions
-    extraction_confidence_threshold: float = 0.7  # Min confidence to store
-
-
-@dataclass
-class CompactionInfo:
-    """Information about a compaction that occurred."""
-
-    summary: str
-    tokens_before: int
-    tokens_after: int
-    messages_removed: int
-
-
-@dataclass
-class _MessageSetup:
-    """Internal setup data prepared before processing a message."""
-
-    effective_user_id: str
-    system_prompt: str
-    message_budget: int
-
-
-@dataclass
-class _StreamToolAccumulator:
-    """Accumulates tool use data from stream events."""
-
-    _tool_id: str | None = field(default=None, repr=False)
-    _tool_name: str | None = field(default=None, repr=False)
-    _tool_args: str = field(default="", repr=False)
-
-    def start(self, tool_use_id: str, tool_name: str) -> None:
-        self._tool_id = tool_use_id
-        self._tool_name = tool_name
-        self._tool_args = ""
-
-    def add_delta(self, content: str) -> None:
-        self._tool_args += content
-
-    def finish(self) -> ToolUse | None:
-        if not self._tool_id or not self._tool_name:
-            logger.warning(
-                "Tool use end without start: id=%s, name=%s",
-                self._tool_id,
-                self._tool_name,
-            )
-            return None
-
-        try:
-            args = json.loads(self._tool_args) if self._tool_args else {}
-        except json.JSONDecodeError as e:
-            logger.warning("Invalid JSON in tool args for %s: %s", self._tool_name, e)
-            args = {}
-
-        tool_use = ToolUse(
-            id=self._tool_id,
-            name=self._tool_name,
-            input=args,
-        )
-        self._tool_id = None
-        self._tool_name = None
-        self._tool_args = ""
-        return tool_use
-
-
-@dataclass
-class AgentResponse:
-    """Response from the agent."""
-
-    text: str
-    tool_calls: list[dict[str, Any]]
-    iterations: int
-    compaction: CompactionInfo | None = None
-    checkpoint: dict[str, Any] | None = None
 
 
 class Agent:
@@ -1026,26 +910,6 @@ class Agent:
             user_message, setup.effective_user_id, session
         )
         yield "\n\n[Max tool iterations reached]"
-
-
-@dataclass
-class AgentComponents:
-    """All components needed for a fully-functional agent.
-
-    This provides access to individual components for cases where
-    direct access is needed (e.g., server routes, testing).
-    """
-
-    agent: Agent
-    llm: LLMProvider
-    tool_registry: ToolRegistry
-    tool_executor: ToolExecutor
-    prompt_builder: SystemPromptBuilder
-    skill_registry: SkillRegistry
-    memory_manager: MemoryManager | None
-    memory_extractor: MemoryExtractor | None = None
-    sandbox_executor: SandboxExecutor | None = None
-    agent_registry: AgentRegistry | None = None
 
 
 async def create_agent(

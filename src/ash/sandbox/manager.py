@@ -356,5 +356,7 @@ class SandboxManager:
         if self._client:
             try:
                 self._client.close()
-            except Exception:  # noqa: S110
-                pass
+            except Exception:
+                # Log at debug level - __del__ may run during interpreter shutdown
+                # when logging may not be available
+                logger.debug("Failed to close Docker client", exc_info=True)

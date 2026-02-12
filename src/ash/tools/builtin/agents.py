@@ -4,8 +4,8 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ash.agents.base import AgentContext, CheckpointState
 from ash.agents.executor import is_cancel_message
+from ash.agents.types import AgentContext, CheckpointState
 from ash.tools.base import Tool, ToolContext, ToolResult
 
 if TYPE_CHECKING:

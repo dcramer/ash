@@ -311,7 +311,7 @@ class CheckpointHandler:
         assert self._tool_registry is not None  # Checked above via has_tool_registry
 
         # Restore CheckpointState to UseAgentTool's cache before calling execute
-        from ash.agents.base import CheckpointState
+        from ash.agents.types import CheckpointState
         from ash.tools.builtin.agents import UseAgentTool
 
         use_agent_tool = self._tool_registry.get("use_agent")

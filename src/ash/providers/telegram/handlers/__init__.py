@@ -2,13 +2,19 @@
 
 This package provides message handling for Telegram provider.
 
-Public API:
-- TelegramMessageHandler: Main message handler class
-- CheckpointHandler: Handles checkpoint storage and callback resumption
+Handler Classes (*_handler.py):
+- TelegramMessageHandler: Main entry point, routes to sync/streaming handlers
+- CheckpointHandler: Handles checkpoint storage and callback button resumption
+- PassiveHandler: Handles passive engagement (messages not directly addressed)
+- SessionHandler: Manages session lifecycle and persistence
+- StreamingHandler: Handles streaming response generation and delivery
+- SyncHandler: Handles synchronous (non-streaming) response generation
+
+Other Classes:
 - ToolTracker: Tracks tool calls and manages thinking messages
 - ProgressMessageTool: Per-run send_message tool for progress updates
 
-Utilities:
+Utilities (utils.py):
 - escape_markdown_v2: Escape text for MarkdownV2 format
 - format_thinking_status: Format thinking status line
 - format_tool_summary: Format tool call summary
@@ -22,7 +28,6 @@ from ash.providers.telegram.handlers.session_handler import (
     SessionContext,
     SessionHandler,
 )
-from ash.providers.telegram.handlers.sync import SyncHandler
 from ash.providers.telegram.handlers.tool_tracker import (
     ProgressMessageTool,
     ToolTracker,
@@ -50,7 +55,6 @@ __all__ = [
     "ProgressMessageTool",
     "SessionContext",
     "SessionHandler",
-    "SyncHandler",
     "TelegramMessageHandler",
     "ToolTracker",
     # Constants

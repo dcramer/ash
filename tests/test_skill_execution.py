@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.agents.base import AgentContext, AgentResult
+from ash.agents.types import AgentContext, AgentResult
 from ash.config.models import AshConfig, SkillConfig
-from ash.skills.base import SkillDefinition
+from ash.skills.types import SkillDefinition
 from ash.tools.builtin.skills import SkillAgent, UseSkillTool
 
 

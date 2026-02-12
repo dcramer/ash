@@ -163,10 +163,30 @@ class TestAgent:
     async def test_system_prompt_from_workspace(self, agent):
         assert "test assistant" in agent.system_prompt.lower()
 
-    async def test_tool_definitions_conversion(self, agent):
-        definitions = agent._get_tool_definitions()
-        assert len(definitions) == 1
-        assert definitions[0].name == "test_tool"
+    async def test_registered_tool_is_available_to_agent(self, workspace):
+        """Verify tools registered in executor are usable by the agent."""
+        tool_use_response = Message(
+            role=Role.ASSISTANT,
+            content=[ToolUse(id="tool-1", name="test_tool", input={"value": "test"})],
+        )
+        final_response = Message(
+            role=Role.ASSISTANT,
+            content="Done.",
+        )
+
+        registry = make_tool_registry("test_tool")
+        agent = Agent(
+            llm=MockLLMProvider(responses=[tool_use_response, final_response]),
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
+        )
+
+        response = await agent.process_message("Use the tool", make_session())
+
+        # Tool was invoked successfully (not an error)
+        assert len(response.tool_calls) == 1
+        assert response.tool_calls[0]["name"] == "test_tool"
+        assert response.tool_calls[0]["is_error"] is False
 
     async def test_process_message_streaming(self, workspace):
         mock_llm = MockLLMProvider(

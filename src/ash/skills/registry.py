@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from ash.config.paths import get_user_skills_path
-from ash.skills.base import SkillDefinition, SkillSourceType
+from ash.skills.types import SkillDefinition, SkillSourceType
 
 if TYPE_CHECKING:
     from ash.config.models import SkillConfig  # noqa: F401

@@ -4,7 +4,8 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
-from ash.agents.base import Agent, AgentContext, AgentResult, CheckpointState
+from ash.agents.base import Agent
+from ash.agents.types import AgentContext, AgentResult, CheckpointState
 from ash.core.session import SessionState
 from ash.llm.types import Role, ToolDefinition
 from ash.tools.base import ToolContext

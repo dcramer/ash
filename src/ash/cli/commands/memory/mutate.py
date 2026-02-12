@@ -1,11 +1,14 @@
 """Mutation commands for memory entries (add, remove, clear)."""
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 import typer
 
 from ash.cli.commands.memory._helpers import get_memory_store
 from ash.cli.console import dim, error, success, warning
+
+logger = logging.getLogger(__name__)
 
 
 async def memory_add(
@@ -101,8 +104,10 @@ async def memory_remove(
                     text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
                     {"id": entry.id},
                 )
-            except Exception:  # noqa: S110
-                pass
+            except Exception:
+                logger.debug(
+                    "Failed to delete embedding for memory %s", entry.id, exc_info=True
+                )
 
         await session.commit()
         success(f"Removed {len(to_remove)} memory entries")
@@ -133,8 +138,10 @@ async def memory_remove(
                     {"id": entry.id},
                 )
                 await session.commit()
-            except Exception:  # noqa: S110
-                pass
+            except Exception:
+                logger.debug(
+                    "Failed to delete embedding for memory %s", entry.id, exc_info=True
+                )
 
             success(f"Removed memory entry: {entry.id[:8]}")
         else:
@@ -163,7 +170,7 @@ async def memory_clear(session, force: bool) -> None:
     try:
         await session.execute(text("DELETE FROM memory_embeddings"))
         await session.commit()
-    except Exception:  # noqa: S110
-        pass
+    except Exception:
+        logger.debug("Failed to clear embeddings table", exc_info=True)
 
     success(f"Cleared {len(entries)} memory entries")

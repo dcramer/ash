@@ -5,9 +5,15 @@ for complex multi-step tasks. Unlike skills (user-defined markdown
 files), agents provide built-in capabilities like research.
 """
 
-from ash.agents.base import Agent, AgentConfig, AgentContext, AgentResult
+from ash.agents.base import Agent
 from ash.agents.executor import AgentExecutor
 from ash.agents.registry import AgentRegistry
+from ash.agents.types import (
+    AgentConfig,
+    AgentContext,
+    AgentResult,
+    CheckpointState,
+)
 
 __all__ = [
     "Agent",
@@ -16,4 +22,5 @@ __all__ = [
     "AgentExecutor",
     "AgentRegistry",
     "AgentResult",
+    "CheckpointState",
 ]

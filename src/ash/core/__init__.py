@@ -2,9 +2,6 @@
 
 from ash.core.agent import (
     Agent,
-    AgentComponents,
-    AgentConfig,
-    AgentResponse,
     create_agent,
 )
 from ash.core.prompt import (
@@ -13,12 +10,19 @@ from ash.core.prompt import (
     SystemPromptBuilder,
 )
 from ash.core.session import SessionState
+from ash.core.types import (
+    AgentComponents,
+    AgentConfig,
+    AgentResponse,
+    CompactionInfo,
+)
 
 __all__ = [
     "Agent",
     "AgentComponents",
     "AgentConfig",
     "AgentResponse",
+    "CompactionInfo",
     "PromptContext",
     "RuntimeInfo",
     "SessionState",
