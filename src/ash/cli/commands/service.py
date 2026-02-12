@@ -27,6 +27,15 @@ def _run_service_action(action_name: str) -> None:
         raise typer.Exit(1)
 
 
+def _auto_build_sandbox() -> None:
+    """Build sandbox image if Dockerfile exists (skip silently if Docker unavailable)."""
+    from ash.cli.commands.sandbox import _get_dockerfile_path, _sandbox_build
+
+    dockerfile_path = _get_dockerfile_path()
+    if dockerfile_path:
+        _sandbox_build(dockerfile_path)
+
+
 def register(app: typer.Typer) -> None:
     """Register service subcommands."""
     service_app = typer.Typer(
@@ -46,12 +55,7 @@ def register(app: typer.Typer) -> None:
         ] = False,
     ) -> None:
         """Start the Ash service."""
-        # Auto-build sandbox image if Dockerfile exists (skip silently if Docker unavailable)
-        from ash.cli.commands.sandbox import _get_dockerfile_path, _sandbox_build
-
-        dockerfile_path = _get_dockerfile_path()
-        if dockerfile_path:
-            _sandbox_build(dockerfile_path)
+        _auto_build_sandbox()
 
         if foreground:
             from ash.cli.commands.serve import _run_server
@@ -72,13 +76,7 @@ def register(app: typer.Typer) -> None:
     @service_app.command("restart")
     def service_restart() -> None:
         """Restart the Ash service."""
-        # Auto-build sandbox image if Dockerfile exists (skip silently if Docker unavailable)
-        from ash.cli.commands.sandbox import _get_dockerfile_path, _sandbox_build
-
-        dockerfile_path = _get_dockerfile_path()
-        if dockerfile_path:
-            _sandbox_build(dockerfile_path)
-
+        _auto_build_sandbox()
         _run_service_action("restart")
 
     @service_app.command("status")
@@ -86,14 +84,11 @@ def register(app: typer.Typer) -> None:
         """Show Ash service status."""
         from rich.table import Table
 
-        from ash.service import ServiceManager, ServiceState
+        from ash.service import ServiceManager, ServiceState, read_runtime_state
 
         manager = ServiceManager()
-
-        async def do_status():
-            return await manager.status()
-
-        status = asyncio.run(do_status())
+        status = asyncio.run(manager.status())
+        runtime_state = read_runtime_state()
 
         # Build status display
         table = Table(title="Ash Service Status")
@@ -137,6 +132,22 @@ def register(app: typer.Typer) -> None:
 
         if status.message:
             table.add_row("Message", status.message)
+
+        # Configuration section from runtime state
+        if runtime_state:
+            table.add_row("", "")  # Empty row as separator
+            table.add_row("[bold]Configuration[/bold]", "")
+            table.add_row("Model", runtime_state.model)
+            table.add_row("Sandbox Image", runtime_state.sandbox_image)
+            table.add_row("Network", runtime_state.sandbox_network)
+            table.add_row("Runtime", runtime_state.sandbox_runtime)
+            table.add_row(
+                "Workspace",
+                f"{runtime_state.workspace_path} ({runtime_state.workspace_access})",
+            )
+            table.add_row("Source", f"mounted ({runtime_state.source_access})")
+            table.add_row("Sessions", f"mounted ({runtime_state.sessions_access})")
+            table.add_row("Chats", f"mounted ({runtime_state.chats_access})")
 
         console.print(table)
 

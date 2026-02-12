@@ -15,10 +15,22 @@ Example:
 
 from ash.service.base import ServiceBackend, ServiceState, ServiceStatus
 from ash.service.manager import ServiceManager
+from ash.service.runtime import (
+    RuntimeState,
+    create_runtime_state_from_config,
+    read_runtime_state,
+    remove_runtime_state,
+    write_runtime_state,
+)
 
 __all__ = [
+    "RuntimeState",
     "ServiceBackend",
     "ServiceManager",
     "ServiceState",
     "ServiceStatus",
+    "create_runtime_state_from_config",
+    "read_runtime_state",
+    "remove_runtime_state",
+    "write_runtime_state",
 ]

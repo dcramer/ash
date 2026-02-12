@@ -415,3 +415,148 @@ class TestServiceCLI:
         assert "logs" in result.output
         assert "install" in result.output
         assert "uninstall" in result.output
+
+
+# =============================================================================
+# Runtime State Tests
+# =============================================================================
+
+
+class TestRuntimeState:
+    """Tests for runtime state management."""
+
+    def test_runtime_state_to_json(self):
+        """Test serializing RuntimeState to JSON."""
+        from ash.service.runtime import RuntimeState
+
+        state = RuntimeState(
+            started_at="2024-01-01T00:00:00+00:00",
+            model="claude-sonnet-4-20250514",
+            sandbox_image="ash-sandbox:latest",
+            sandbox_network="bridge",
+            sandbox_runtime="runc",
+            workspace_path="/path/to/workspace",
+            workspace_access="rw",
+            source_access="none",
+            sessions_access="ro",
+            chats_access="ro",
+        )
+
+        json_str = state.to_json()
+        assert "claude-sonnet" in json_str
+        assert "ash-sandbox:latest" in json_str
+        assert "bridge" in json_str
+
+    def test_runtime_state_from_json(self):
+        """Test deserializing RuntimeState from JSON."""
+        from ash.service.runtime import RuntimeState
+
+        json_str = """{
+            "started_at": "2024-01-01T00:00:00+00:00",
+            "model": "claude-sonnet-4-20250514",
+            "sandbox_image": "ash-sandbox:latest",
+            "sandbox_network": "bridge",
+            "sandbox_runtime": "runc",
+            "workspace_path": "/path/to/workspace",
+            "workspace_access": "rw",
+            "source_access": "none",
+            "sessions_access": "ro",
+            "chats_access": "ro"
+        }"""
+
+        state = RuntimeState.from_json(json_str)
+        assert state.model == "claude-sonnet-4-20250514"
+        assert state.sandbox_image == "ash-sandbox:latest"
+        assert state.sandbox_network == "bridge"
+        assert state.workspace_access == "rw"
+
+    def test_write_and_read_runtime_state(self, tmp_path: Path, monkeypatch):
+        """Test writing and reading runtime state from disk."""
+        from ash.service.runtime import (
+            RuntimeState,
+            read_runtime_state,
+            write_runtime_state,
+        )
+
+        # Patch get_run_path to use tmp_path
+        monkeypatch.setattr(
+            "ash.service.runtime.get_run_path",
+            lambda: tmp_path / "run",
+        )
+
+        state = RuntimeState(
+            started_at="2024-01-01T00:00:00+00:00",
+            model="claude-sonnet-4-20250514",
+            sandbox_image="ash-sandbox:latest",
+            sandbox_network="bridge",
+            sandbox_runtime="runc",
+            workspace_path="/path/to/workspace",
+            workspace_access="rw",
+            source_access="none",
+            sessions_access="ro",
+            chats_access="ro",
+        )
+
+        write_runtime_state(state)
+        read_state = read_runtime_state()
+
+        assert read_state is not None
+        assert read_state.model == state.model
+        assert read_state.sandbox_image == state.sandbox_image
+
+    def test_read_runtime_state_not_exists(self, tmp_path: Path, monkeypatch):
+        """Test reading runtime state when file doesn't exist."""
+        from ash.service.runtime import read_runtime_state
+
+        monkeypatch.setattr(
+            "ash.service.runtime.get_run_path",
+            lambda: tmp_path / "nonexistent",
+        )
+
+        state = read_runtime_state()
+        assert state is None
+
+    def test_remove_runtime_state(self, tmp_path: Path, monkeypatch):
+        """Test removing runtime state file."""
+        from ash.service.runtime import (
+            RuntimeState,
+            read_runtime_state,
+            remove_runtime_state,
+            write_runtime_state,
+        )
+
+        monkeypatch.setattr(
+            "ash.service.runtime.get_run_path",
+            lambda: tmp_path / "run",
+        )
+
+        state = RuntimeState(
+            started_at="2024-01-01T00:00:00+00:00",
+            model="test",
+            sandbox_image="test",
+            sandbox_network="bridge",
+            sandbox_runtime="runc",
+            workspace_path="/path",
+            workspace_access="rw",
+            source_access="none",
+            sessions_access="ro",
+            chats_access="ro",
+        )
+
+        write_runtime_state(state)
+        assert read_runtime_state() is not None
+
+        remove_runtime_state()
+        assert read_runtime_state() is None
+
+    def test_remove_runtime_state_not_exists(self, tmp_path: Path, monkeypatch):
+        """Test removing runtime state when file doesn't exist."""
+        from ash.service.runtime import remove_runtime_state
+
+        monkeypatch.setattr(
+            "ash.service.runtime.get_run_path",
+            lambda: tmp_path / "nonexistent",
+        )
+
+        # Should not raise
+        remove_runtime_state()

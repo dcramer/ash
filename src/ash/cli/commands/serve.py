@@ -83,7 +83,7 @@ async def _run_server(
         register_memory_methods,
     )
     from ash.server.app import create_app
-    from ash.service.pid import remove_pid_file, write_pid_file
+    from ash.service.pid import write_pid_file
 
     # Write PID file for service management
     pid_path = get_pid_path()
@@ -124,6 +124,28 @@ async def _run_server(
         model_alias="default",
     )
     agent = components.agent
+
+    # Log sandbox configuration
+    from ash.service.runtime import (
+        create_runtime_state_from_config,
+        write_runtime_state,
+    )
+
+    sandbox = ash_config.sandbox
+    logger.info(
+        f"Sandbox: image={sandbox.image}, "
+        f"network={sandbox.network_mode}, "
+        f"runtime={sandbox.runtime}"
+    )
+    logger.info(
+        f"Sandbox mounts: workspace: {workspace.path} ({sandbox.workspace_access}), "
+        f"source: ({sandbox.source_access}), "
+        f"sessions: ({sandbox.sessions_access})"
+    )
+
+    # Write runtime state for service status
+    runtime_state = create_runtime_state_from_config(ash_config, workspace.path)
+    write_runtime_state(runtime_state)
 
     # Run memory garbage collection on startup if enabled
     if ash_config.memory.auto_gc and components.memory_manager:
@@ -298,7 +320,6 @@ async def _run_server(
             components.sandbox_executor,
             memory_session,
             pid_path,
-            remove_pid_file,
         )
 
 
@@ -308,10 +329,12 @@ async def _cleanup_server(
     rpc_server,
     sandbox_executor,
     memory_session,
-    pid_path,
-    remove_pid_file,
+    pid_path: Path,
 ) -> None:
     """Clean up server resources."""
+    from ash.service.pid import remove_pid_file
+    from ash.service.runtime import remove_runtime_state
+
     cleanup_timeout = 5.0  # Max seconds per cleanup operation
 
     for resource, method in [
@@ -332,3 +355,4 @@ async def _cleanup_server(
                 logger.warning(f"Error during {method}: {e}")
 
     remove_pid_file(pid_path)
+    remove_runtime_state()
