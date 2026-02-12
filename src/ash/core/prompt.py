@@ -226,6 +226,8 @@ class SystemPromptBuilder:
                 "### Presenting Results",
                 "",
                 "The user cannot see tool/skill/agent results - only your response.",
+                "You MUST always include text in your response - an empty response is silence to the user.",
+                "After using tools, briefly acknowledge what you did and share relevant results.",
                 "Subagent results arrive wrapped in `<instruction>` and `<output>` tags.",
                 "Read the content, interpret it, and include relevant parts in your response.",
                 "",
