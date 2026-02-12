@@ -162,6 +162,11 @@ class SystemPromptBuilder:
                 "- ALWAYS use tools for lookups - never assume or guess answers",
                 "- When uncertain about facts, dates, or current info: search first, answer second",
                 "- Don't wait for permission to be helpful - if a search would improve your answer, do it",
+                "",
+                "### Response Endings",
+                "- End responses when you've addressed the request - don't prompt for follow-up",
+                "- NEVER end with 'anything else?', 'let me know', or similar",
+                "- If you need clarification, ask. Otherwise, just answer and stop",
             ]
         )
 
