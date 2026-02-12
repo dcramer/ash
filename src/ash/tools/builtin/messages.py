@@ -79,8 +79,8 @@ class SendMessageTool(Tool):
         if not context.user_id:
             return ToolResult.error("No user context available")
 
-        # Get reply_to from context metadata (set by message handler)
-        reply_to = context.metadata.get("current_message_id")
+        # Use thread anchor if set, otherwise fall back to current message
+        reply_to = context.reply_to_message_id
 
         try:
             sent_id = await self._provider.send(
@@ -93,6 +93,10 @@ class SendMessageTool(Tool):
         except Exception as e:
             logger.exception("Failed to send message to chat %s", context.chat_id)
             return ToolResult.error(f"Failed to send message: {e}")
+
+        # Anchor thread to first sent message so subsequent sends reply to it
+        if not reply_to and sent_id:
+            context.reply_to_message_id = sent_id
 
         logger.debug(
             "Sent message to chat %s (id=%s): %s",

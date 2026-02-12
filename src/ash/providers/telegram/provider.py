@@ -660,11 +660,14 @@ class TelegramProvider(Provider):
         )
         return str(sent.message_id)
 
-    async def send_message(self, chat_id: str, text: str) -> str:
+    async def send_message(
+        self, chat_id: str, text: str, *, reply_to: str | None = None
+    ) -> str:
         """Send a simple text message to a chat."""
         sent = await self._send_with_fallback(
             chat_id=int(chat_id),
             text=text,
+            reply_to=int(reply_to) if reply_to else None,
         )
         logger.debug("Sent message to chat %s: %s", chat_id, _truncate(text))
         return str(sent.message_id)

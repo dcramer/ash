@@ -143,6 +143,7 @@ class AgentResult:
     is_error: bool = False
     iterations: int = 0
     checkpoint: CheckpointState | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_interrupted(self) -> bool:
@@ -150,8 +151,13 @@ class AgentResult:
         return self.checkpoint is not None
 
     @classmethod
-    def success(cls, content: str, iterations: int = 0) -> AgentResult:
-        return cls(content=content, iterations=iterations)
+    def success(
+        cls,
+        content: str,
+        iterations: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> AgentResult:
+        return cls(content=content, iterations=iterations, metadata=metadata or {})
 
     @classmethod
     def error(cls, message: str) -> AgentResult:

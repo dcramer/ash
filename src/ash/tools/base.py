@@ -53,6 +53,19 @@ class ToolContext:
             tool_use_id=tool_use_id,
         )
 
+    @property
+    def reply_to_message_id(self) -> str | None:
+        """Get the thread anchor message ID from metadata."""
+        return self.metadata.get("reply_to_message_id")
+
+    @reply_to_message_id.setter
+    def reply_to_message_id(self, value: str | None) -> None:
+        """Set or clear the thread anchor message ID in metadata."""
+        if value:
+            self.metadata["reply_to_message_id"] = value
+        else:
+            self.metadata.pop("reply_to_message_id", None)
+
     def get_session_info(self) -> tuple[Any, str | None]:
         """Return (session_manager, tool_use_id) for subagent logging."""
         return self.session_manager, self.tool_use_id

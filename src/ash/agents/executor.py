@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from ash.agents.base import Agent
 from ash.agents.types import AgentContext, AgentResult, CheckpointState
 from ash.core.session import SessionState
-from ash.llm.types import Role, ToolDefinition
+from ash.llm.types import ToolDefinition
 from ash.tools.base import ToolContext
 
 if TYPE_CHECKING:
@@ -39,6 +39,14 @@ class AgentExecutor:
         self._llm = llm_provider
         self._tools = tool_executor
         self._config = config
+
+    @staticmethod
+    def _build_result_metadata(tool_context: ToolContext) -> dict[str, str]:
+        """Extract metadata to propagate from tool context to agent result."""
+        metadata: dict[str, str] = {}
+        if reply_id := tool_context.reply_to_message_id:
+            metadata["reply_to_message_id"] = reply_id
+        return metadata
 
     def _get_tool_definitions(
         self,
@@ -294,7 +302,10 @@ class AgentExecutor:
                 logger.info(
                     f"Agent '{agent_config.name}' completed in {iteration} iterations"
                 )
-                return AgentResult.success(text, iterations=iteration)
+                result_metadata = self._build_result_metadata(tool_context)
+                return AgentResult.success(
+                    text, iterations=iteration, metadata=result_metadata
+                )
 
             # Check for interrupt tool first - it takes priority over other tools
             interrupt_tool = next((t for t in tool_uses if t.name == "interrupt"), None)
@@ -374,15 +385,13 @@ class AgentExecutor:
             f"Agent '{agent_config.name}' hit max iterations ({max_iterations})"
         )
 
-        last_text = ""
-        if session.messages:
-            last_msg = session.messages[-1]
-            if last_msg.role == Role.ASSISTANT:
-                last_text = last_msg.get_text()
+        last_text = session.get_last_text_response() or ""
+        result_metadata = self._build_result_metadata(tool_context)
 
         return AgentResult(
             content=last_text
             or "The agent couldn't complete within the allowed steps. It may have made partial progress.",
-            is_error=True,
+            is_error=not last_text,
             iterations=max_iterations,
+            metadata=result_metadata,
         )

@@ -89,7 +89,7 @@ class DebugAgent(Agent):
             description="Debug yourself or other Ash sessions by analyzing logs, history, and source code",
             system_prompt=DEBUG_SYSTEM_PROMPT,
             tools=["bash", "read_file"],
-            max_iterations=25,
+            max_iterations=50,
         )
 
     def _build_prompt_sections(self, context: AgentContext) -> list[str]:

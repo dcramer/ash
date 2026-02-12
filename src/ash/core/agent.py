@@ -649,6 +649,49 @@ class Agent:
         if self._should_extract_memories(user_message):
             self._spawn_memory_extraction(session, effective_user_id, session.chat_id)
 
+    def _build_tool_context(
+        self,
+        session: SessionState,
+        setup: _MessageSetup,
+        session_manager: Any = None,
+    ) -> ToolContext:
+        """Build a ToolContext for tool execution, with reply anchor initialized.
+
+        Args:
+            session: Current session state.
+            setup: Message setup with effective user ID.
+            session_manager: Optional session manager for subagent logging.
+
+        Returns:
+            ToolContext ready for tool execution.
+        """
+        tool_context = ToolContext(
+            session_id=session.session_id,
+            user_id=setup.effective_user_id,
+            chat_id=session.chat_id,
+            thread_id=session.metadata.get("thread_id"),
+            provider=session.provider,
+            metadata=dict(session.metadata),
+            env=_build_routing_env(
+                session, setup.effective_user_id, timezone=self._timezone
+            ),
+            session_manager=session_manager,
+        )
+
+        # Initialize reply anchor from incoming message context
+        if not tool_context.reply_to_message_id:
+            tool_context.reply_to_message_id = session.metadata.get(
+                "current_message_id"
+            )
+
+        return tool_context
+
+    @staticmethod
+    def _sync_reply_anchor(tool_context: ToolContext, session: SessionState) -> None:
+        """Sync thread anchor from tool context back to session metadata."""
+        if tool_context.reply_to_message_id:
+            session.metadata["reply_to_message_id"] = tool_context.reply_to_message_id
+
     async def _execute_pending_tools(
         self,
         pending_tools: list[ToolUse],
@@ -771,18 +814,7 @@ class Agent:
                     checkpoint=_extract_checkpoint(tool_calls),
                 )
 
-            tool_context = ToolContext(
-                session_id=session.session_id,
-                user_id=setup.effective_user_id,
-                chat_id=session.chat_id,
-                thread_id=session.metadata.get("thread_id"),
-                provider=session.provider,
-                metadata=dict(session.metadata),
-                env=_build_routing_env(
-                    session, setup.effective_user_id, timezone=self._timezone
-                ),
-                session_manager=session_manager,
-            )
+            tool_context = self._build_tool_context(session, setup, session_manager)
 
             new_calls, steering = await self._execute_pending_tools(
                 pending_tools,
@@ -792,6 +824,8 @@ class Agent:
                 get_steering_messages,
             )
             tool_calls.extend(new_calls)
+
+            self._sync_reply_anchor(tool_context, session)
 
             # Check if any tool returned a checkpoint - stop loop to wait for user input
             checkpoint = _extract_checkpoint(tool_calls)
@@ -896,18 +930,7 @@ class Agent:
                 )
                 return
 
-            tool_context = ToolContext(
-                session_id=session.session_id,
-                user_id=setup.effective_user_id,
-                chat_id=session.chat_id,
-                thread_id=session.metadata.get("thread_id"),
-                provider=session.provider,
-                metadata=dict(session.metadata),
-                env=_build_routing_env(
-                    session, setup.effective_user_id, timezone=self._timezone
-                ),
-                session_manager=session_manager,
-            )
+            tool_context = self._build_tool_context(session, setup, session_manager)
 
             _, steering = await self._execute_pending_tools(
                 pending_tools,
@@ -916,6 +939,8 @@ class Agent:
                 on_tool_start,
                 get_steering_messages,
             )
+
+            self._sync_reply_anchor(tool_context, session)
 
             if steering:
                 for msg in steering:

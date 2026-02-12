@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -87,8 +87,13 @@ def format_delay(seconds: float) -> str:
     return f"~{days:.1f} days"
 
 
-# Type for message sender: (chat_id, text) -> message_id
-MessageSender = Callable[[str, str], Awaitable[str]]
+class MessageSender(Protocol):
+    """Protocol for sending messages to a chat. Returns the sent message ID."""
+
+    async def __call__(
+        self, chat_id: str, text: str, *, reply_to: str | None = None
+    ) -> str: ...
+
 
 # Type for message registrar: (chat_id, message_id) -> None
 # Registers a sent message in the thread index so replies are tracked
@@ -209,7 +214,11 @@ class ScheduledTaskHandler:
                     if entry.username:
                         response_text = f"@{entry.username} {response_text}"
 
-                    message_id = await sender(entry.chat_id, response_text)
+                    # Thread final response to the same chain as skill messages
+                    reply_to = session.metadata.get("reply_to_message_id")
+                    message_id = await sender(
+                        entry.chat_id, response_text, reply_to=reply_to
+                    )
                     logger.info(
                         f"Sent scheduled response to {entry.provider}/{entry.chat_id}: "
                         f"{response_text[:50]}..."

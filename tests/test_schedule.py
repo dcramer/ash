@@ -610,8 +610,10 @@ class TestScheduledTaskHandler:
 
         # Verify agent was called
         mock_agent.process_message.assert_called_once()
-        # Verify response was sent
+        # Verify response was sent with reply_to kwarg
         mock_sender.assert_called_once()
+        call_kwargs = mock_sender.call_args
+        assert "reply_to" in call_kwargs.kwargs
 
     @pytest.mark.asyncio
     async def test_handle_calls_registrar(self):

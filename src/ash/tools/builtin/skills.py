@@ -348,6 +348,11 @@ class UseSkillTool(Tool):
             parent_tool_use_id=tool_use_id,
         )
 
+        # Propagate thread anchor from skill back to caller
+        if reply_id := result.metadata.get("reply_to_message_id"):
+            if context and not context.reply_to_message_id:
+                context.reply_to_message_id = reply_id
+
         if result.is_error:
             return ToolResult.error(result.content)
 
