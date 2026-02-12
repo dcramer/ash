@@ -18,7 +18,6 @@ from ash.providers.telegram.handlers.session_handler import (
     SessionHandler,
 )
 from ash.providers.telegram.handlers.tool_tracker import (
-    ProgressMessageTool,
     ToolTracker,
 )
 from ash.providers.telegram.provider import _truncate
@@ -101,7 +100,6 @@ class TelegramMessageHandler:
             agent=agent,
             session_handler=self._session_handler,
             create_tool_tracker=self._create_tool_tracker,
-            register_progress_tool=self._register_progress_tool,
             log_response=self._log_response,
         )
 
@@ -113,7 +111,6 @@ class TelegramMessageHandler:
             agent=agent,
             session_handler=self._session_handler,
             create_tool_tracker=self._create_tool_tracker,
-            register_progress_tool=self._register_progress_tool,
             log_response=self._log_response,
             store_checkpoint=self._store_checkpoint,
         )
@@ -166,24 +163,6 @@ class TelegramMessageHandler:
             skill_registry=self._skill_registry,
         )
 
-    def _register_progress_tool(self, tracker: ToolTracker) -> None:
-        """Register the per-run progress message tool.
-
-        This replaces the default send_message tool so progress updates
-        get consolidated into the thinking message.
-        """
-        if self._tool_registry is None:
-            return
-
-        # Unregister existing send_message if present
-        if self._tool_registry.has("send_message"):
-            self._tool_registry.unregister("send_message")
-
-        # Register the per-run progress tool
-        progress_tool = ProgressMessageTool(tracker)
-        self._tool_registry.register(progress_tool)  # type: ignore[arg-type]
-        logger.debug("Registered per-run progress message tool")
-
     def _log_response(self, text: str | None) -> None:
         bot_name = self._provider.bot_username or "bot"
         logger.info("[cyan]%s:[/cyan] %s", bot_name, _truncate(text or "(no response)"))
@@ -206,6 +185,7 @@ class TelegramMessageHandler:
             _truncate(message.text),
         )
 
+        ctx: SessionContext | None = None
         try:
             if message.timestamp:
                 age = datetime.now(UTC) - message.timestamp.replace(tzinfo=UTC)
@@ -232,10 +212,6 @@ class TelegramMessageHandler:
             if thread_id:
                 message.metadata["thread_id"] = thread_id
 
-            if message.has_images:
-                await self._handle_image_message(message)
-                return
-
             session_key = make_session_key(
                 self._provider.name, message.chat_id, message.user_id, thread_id
             )
@@ -256,6 +232,12 @@ class TelegramMessageHandler:
         except Exception:
             logger.exception("Error handling message")
             await self._provider.clear_reaction(message.chat_id, message.id)
+            # Clear reactions on any pending messages that were queued
+            if ctx is not None:
+                for pending_msg in ctx.pending_messages:
+                    await self._provider.clear_reaction(
+                        pending_msg.chat_id, pending_msg.id
+                    )
             await self._send_error(message.chat_id)
 
     async def _process_message_loop(
@@ -299,6 +281,14 @@ class TelegramMessageHandler:
     ) -> None:
         """Inner implementation of _process_single_message (runs with log context)."""
         await self._provider.set_reaction(message.chat_id, message.id, "👀")
+
+        if message.has_images:
+            try:
+                await self._handle_image_message(message)
+            finally:
+                await self._provider.clear_reaction(message.chat_id, message.id)
+            return
+
         session = await self._session_handler.get_or_create_session(message)
 
         if session.has_incomplete_tool_use():

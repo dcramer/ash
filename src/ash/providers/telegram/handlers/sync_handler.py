@@ -34,7 +34,6 @@ class SyncHandler:
         agent: Agent,
         session_handler: SessionHandler,
         create_tool_tracker: Callable[[IncomingMessage], ToolTracker],
-        register_progress_tool: Callable[[ToolTracker], None],
         log_response: Callable[[str | None], None],
         store_checkpoint: Callable[..., str],
     ):
@@ -42,7 +41,6 @@ class SyncHandler:
         self._agent = agent
         self._session_handler = session_handler
         self._create_tool_tracker = create_tool_tracker
-        self._register_progress_tool = register_progress_tool
         self._log_response = log_response
         self._store_checkpoint = store_checkpoint
 
@@ -53,10 +51,12 @@ class SyncHandler:
         ctx: SessionContext,
     ) -> None:
         """Handle message with synchronous response."""
+        from ash.providers.telegram.handlers.tool_tracker import ProgressMessageTool
+
         # Store current message ID so send_message tool can reply to it
         session.metadata["current_message_id"] = message.id
         tracker = self._create_tool_tracker(message)
-        self._register_progress_tool(tracker)
+        progress_tool = ProgressMessageTool(tracker)
 
         async def get_steering_messages() -> list[IncomingMessage]:
             pending = ctx.take_pending()
@@ -76,6 +76,7 @@ class SyncHandler:
                 on_tool_start=tracker.on_tool_start,
                 get_steering_messages=get_steering_messages,
                 session_path=session.metadata.get("session_path"),
+                tool_overrides={progress_tool.name: progress_tool},
             )
         finally:
             typing_task.cancel()
@@ -152,10 +153,19 @@ class SyncHandler:
                     )
                 )
                 # Delete the thinking message since we sent a new one
-                await self._provider.delete(message.chat_id, tracker.thinking_msg_id)
+                try:
+                    await self._provider.delete(
+                        message.chat_id, tracker.thinking_msg_id
+                    )
+                except Exception:
+                    logger.debug("Failed to delete thinking message")
         elif tracker.thinking_msg_id:
-            await self._provider.delete(message.chat_id, str(tracker.thinking_msg_id))
-            sent_message_id = None
+            # Empty response — edit thinking message to fallback instead of silent delete
+            fallback = "I processed your request but couldn't generate a response."
+            await self._provider.edit(
+                message.chat_id, tracker.thinking_msg_id, fallback
+            )
+            sent_message_id = tracker.thinking_msg_id
         elif final_content.strip():
             sent_message_id = await self._provider.send(
                 OutgoingMessage(

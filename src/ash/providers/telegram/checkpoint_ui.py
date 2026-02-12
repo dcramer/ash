@@ -13,6 +13,10 @@ CALLBACK_PREFIX = "chkpt"
 # Maximum length for Telegram callback data (64 bytes)
 MAX_CALLBACK_DATA_LEN = 64
 
+# Maximum length for truncated checkpoint IDs
+# Format: "chkpt:{id}:{index}" — reserve space for prefix, colons, and 2-digit index
+MAX_CHECKPOINT_ID_LEN = MAX_CALLBACK_DATA_LEN - len(CALLBACK_PREFIX) - 5
+
 
 def create_checkpoint_keyboard(checkpoint: dict[str, Any]) -> InlineKeyboardMarkup:
     """Create an inline keyboard from checkpoint options.
@@ -28,10 +32,7 @@ def create_checkpoint_keyboard(checkpoint: dict[str, Any]) -> InlineKeyboardMark
     checkpoint_id = checkpoint.get("checkpoint_id", "")
     options = checkpoint.get("options") or ["Proceed", "Cancel"]
 
-    # Truncate checkpoint_id to fit in callback data
-    # Format: "chkpt:{id}:{index}" - allow ~40 chars for ID
-    max_id_len = MAX_CALLBACK_DATA_LEN - len(CALLBACK_PREFIX) - 5  # ":" + ":" + "XX"
-    truncated_id = checkpoint_id[:max_id_len]
+    truncated_id = checkpoint_id[:MAX_CHECKPOINT_ID_LEN]
 
     buttons = []
     for idx, option in enumerate(options):

@@ -38,14 +38,12 @@ class StreamingHandler:
         agent: Agent,
         session_handler: SessionHandler,
         create_tool_tracker: Callable[[IncomingMessage], ToolTracker],
-        register_progress_tool: Callable[[ToolTracker], None],
         log_response: Callable[[str | None], None],
     ):
         self._provider = provider
         self._agent = agent
         self._session_handler = session_handler
         self._create_tool_tracker = create_tool_tracker
-        self._register_progress_tool = register_progress_tool
         self._log_response = log_response
 
     async def handle_streaming(
@@ -55,12 +53,14 @@ class StreamingHandler:
         ctx: SessionContext,
     ) -> None:
         """Handle message with streaming response."""
+        from ash.providers.telegram.handlers.tool_tracker import ProgressMessageTool
+
         # Store current message ID so send_message tool can reply to it
         session.metadata["current_message_id"] = message.id
         await self._provider.send_typing(message.chat_id)
 
         tracker = self._create_tool_tracker(message)
-        self._register_progress_tool(tracker)
+        progress_tool = ProgressMessageTool(tracker)
         response_msg_id: str | None = None
         response_content = ""
         start_time = time.time()
@@ -75,49 +75,60 @@ class StreamingHandler:
                 )
             return pending
 
-        async for chunk in self._agent.process_message_streaming(
-            message.text,
-            session,
-            user_id=message.user_id,
-            on_tool_start=tracker.on_tool_start,
-            get_steering_messages=get_steering_messages,
-            session_path=session.metadata.get("session_path"),
-        ):
-            response_content += chunk
-            elapsed = time.time() - start_time
-            since_last_edit = time.time() - last_edit_time
-
-            if (
-                elapsed > STREAM_DELAY
-                and response_content.strip()
-                and since_last_edit >= MIN_EDIT_INTERVAL
+        try:
+            async for chunk in self._agent.process_message_streaming(
+                message.text,
+                session,
+                user_id=message.user_id,
+                on_tool_start=tracker.on_tool_start,
+                get_steering_messages=get_steering_messages,
+                session_path=session.metadata.get("session_path"),
+                tool_overrides={progress_tool.name: progress_tool},
             ):
-                summary_prefix = (
-                    tracker.get_summary_prefix() if not response_msg_id else ""
-                )
-                display_content = summary_prefix + response_content
+                response_content += chunk
+                elapsed = time.time() - start_time
+                since_last_edit = time.time() - last_edit_time
 
-                if tracker.thinking_msg_id and response_msg_id is None:
-                    await self._provider.edit(
-                        message.chat_id, tracker.thinking_msg_id, display_content
+                if (
+                    elapsed > STREAM_DELAY
+                    and response_content.strip()
+                    and since_last_edit >= MIN_EDIT_INTERVAL
+                ):
+                    summary_prefix = (
+                        tracker.get_summary_prefix() if not response_msg_id else ""
                     )
-                    response_msg_id = tracker.thinking_msg_id
-                    tracker.thinking_msg_id = None
-                    last_edit_time = time.time()
-                elif response_msg_id is None:
-                    response_msg_id = await self._provider.send(
-                        OutgoingMessage(
-                            chat_id=message.chat_id,
-                            text=display_content,
-                            reply_to_message_id=message.id,
+                    display_content = summary_prefix + response_content
+
+                    if tracker.thinking_msg_id and response_msg_id is None:
+                        await self._provider.edit(
+                            message.chat_id, tracker.thinking_msg_id, display_content
                         )
-                    )
+                        response_msg_id = tracker.thinking_msg_id
+                        tracker.thinking_msg_id = None
+                    elif response_msg_id is None:
+                        response_msg_id = await self._provider.send(
+                            OutgoingMessage(
+                                chat_id=message.chat_id,
+                                text=display_content,
+                                reply_to_message_id=message.id,
+                            )
+                        )
+                    else:
+                        await self._provider.edit(
+                            message.chat_id, response_msg_id, display_content
+                        )
                     last_edit_time = time.time()
-                else:
-                    await self._provider.edit(
-                        message.chat_id, response_msg_id, display_content
+        except Exception:
+            # Clean up dangling thinking message on streaming errors
+            if tracker.thinking_msg_id:
+                try:
+                    await self._provider.delete(
+                        message.chat_id, tracker.thinking_msg_id
                     )
-                    last_edit_time = time.time()
+                except Exception:
+                    logger.debug("Failed to delete thinking message on error")
+                tracker.thinking_msg_id = None
+            raise
 
         summary = tracker.get_summary_prefix()
         if summary or tracker.progress_messages:
@@ -127,6 +138,10 @@ class StreamingHandler:
             )
         else:
             final_content = response_content
+
+        # Guard against empty content — use fallback message
+        if not final_content.strip():
+            final_content = "I processed your request but couldn't generate a response."
 
         if tracker.thinking_msg_id:
             await self._provider.edit(
@@ -140,7 +155,7 @@ class StreamingHandler:
             sent_message_id = await self._provider.send(
                 OutgoingMessage(
                     chat_id=message.chat_id,
-                    text=response_content,
+                    text=final_content,
                     reply_to_message_id=message.id,
                 )
             )

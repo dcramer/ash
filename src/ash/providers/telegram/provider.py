@@ -228,7 +228,9 @@ class TelegramProvider(Provider):
                 except Exception as e2:
                     logger.debug(f"Plain text edit also failed: {e2}")
                     return False
-            raise
+            # Handle other TelegramBadRequest errors gracefully (e.g., message not found)
+            logger.debug(f"Edit failed with TelegramBadRequest: {e}")
+            return False
         except Exception as e:
             logger.debug(f"Edit failed: {e}")
             return False

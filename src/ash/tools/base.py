@@ -32,6 +32,10 @@ class ToolContext:
     # Current tool use ID (for linking subagent sessions to their invoking tool)
     tool_use_id: str | None = None
 
+    # Per-session tool overrides (e.g., progress message tool)
+    # Checked before the global registry in ToolExecutor.execute()
+    tool_overrides: dict[str, Any] = field(default_factory=dict)
+
     @classmethod
     def from_agent_context(
         cls,

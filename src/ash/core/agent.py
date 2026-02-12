@@ -654,6 +654,7 @@ class Agent:
         session: SessionState,
         setup: _MessageSetup,
         session_manager: Any = None,
+        tool_overrides: dict[str, Any] | None = None,
     ) -> ToolContext:
         """Build a ToolContext for tool execution, with reply anchor initialized.
 
@@ -661,6 +662,7 @@ class Agent:
             session: Current session state.
             setup: Message setup with effective user ID.
             session_manager: Optional session manager for subagent logging.
+            tool_overrides: Per-session tool overrides (e.g., progress message tool).
 
         Returns:
             ToolContext ready for tool execution.
@@ -676,6 +678,7 @@ class Agent:
                 session, setup.effective_user_id, timezone=self._timezone
             ),
             session_manager=session_manager,
+            tool_overrides=tool_overrides or {},
         )
 
         # Initialize reply anchor from incoming message context
@@ -766,6 +769,7 @@ class Agent:
         get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_path: str | None = None,
         session_manager: Any = None,  # Type: SessionManager | None
+        tool_overrides: dict[str, Any] | None = None,
     ) -> AgentResponse:
         setup = await self._prepare_message_context(
             user_message, session, user_id, session_path
@@ -814,7 +818,9 @@ class Agent:
                     checkpoint=_extract_checkpoint(tool_calls),
                 )
 
-            tool_context = self._build_tool_context(session, setup, session_manager)
+            tool_context = self._build_tool_context(
+                session, setup, session_manager, tool_overrides
+            )
 
             new_calls, steering = await self._execute_pending_tools(
                 pending_tools,
@@ -869,6 +875,7 @@ class Agent:
         get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_path: str | None = None,
         session_manager: Any = None,  # Type: SessionManager | None
+        tool_overrides: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
         setup = await self._prepare_message_context(
             user_message, session, user_id, session_path
@@ -930,7 +937,9 @@ class Agent:
                 )
                 return
 
-            tool_context = self._build_tool_context(session, setup, session_manager)
+            tool_context = self._build_tool_context(
+                session, setup, session_manager, tool_overrides
+            )
 
             _, steering = await self._execute_pending_tools(
                 pending_tools,

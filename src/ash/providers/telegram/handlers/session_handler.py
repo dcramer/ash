@@ -478,11 +478,28 @@ class SessionHandler:
             )
 
     def clear_session(self, chat_id: str, user_id: str | None = None) -> None:
-        """Clear session data for a chat (optionally for a specific user)."""
+        """Clear session data for a chat (optionally for a specific user).
+
+        Uses the session key prefix format (provider_chatid) for exact matching
+        to avoid substring collisions (e.g., chat_id "123" matching "1234").
+        """
+        # Build the expected prefix: provider_sanitized_chat_id
+        prefix = make_session_key(self._provider_name, chat_id)
+        user_prefix = (
+            make_session_key(self._provider_name, chat_id, user_id)
+            if user_id is not None
+            else None
+        )
         keys_to_remove = []
         for key in self._session_managers:
-            if chat_id in key and (user_id is None or user_id in key):
-                keys_to_remove.append(key)
+            # Key must start with the prefix and either end there or have more segments
+            if not (key == prefix or key.startswith(prefix + "_")):
+                continue
+            if user_prefix is not None and not (
+                key == user_prefix or key.startswith(user_prefix + "_")
+            ):
+                continue
+            keys_to_remove.append(key)
         for key in keys_to_remove:
             self._session_managers.pop(key, None)
             self._session_contexts.pop(key, None)

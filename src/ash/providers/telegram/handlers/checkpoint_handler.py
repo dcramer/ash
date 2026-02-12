@@ -81,7 +81,9 @@ class CheckpointHandler:
         Stores routing info in-memory for fast lookup. Full checkpoint data is
         persisted in tool_result metadata in the session log.
         """
-        truncated_id = checkpoint.get("checkpoint_id", "")[:55]
+        from ash.providers.telegram.checkpoint_ui import MAX_CHECKPOINT_ID_LEN
+
+        truncated_id = checkpoint.get("checkpoint_id", "")[:MAX_CHECKPOINT_ID_LEN]
         thread_id = message.metadata.get("thread_id")
         session_key = make_session_key(
             self._provider.name, message.chat_id, message.user_id, thread_id
@@ -346,7 +348,7 @@ class CheckpointHandler:
             agent_registry=self._agent_registry,
             skill_registry=self._skill_registry,
         )
-        self._register_progress_tool(tracker)
+        progress_tool = ProgressMessageTool(tracker)
 
         tool_context = ToolContext(
             session_id=session_key,
@@ -355,6 +357,7 @@ class CheckpointHandler:
             thread_id=thread_id,
             provider=self._provider.name,
             metadata={"current_message_id": checkpoint_message_id},
+            tool_overrides={progress_tool.name: progress_tool},
         )
 
         tool_use_id = f"callback_{uuid.uuid4().hex[:12]}"
@@ -456,24 +459,6 @@ class CheckpointHandler:
         )
 
         await self._handle_message(synthetic_message)
-
-    def _register_progress_tool(self, tracker: ToolTracker) -> None:
-        """Register the per-run progress message tool.
-
-        This replaces the default send_message tool so progress updates
-        get consolidated into the thinking message.
-        """
-        if self._tool_registry is None:
-            return
-
-        # Unregister existing send_message if present
-        if self._tool_registry.has("send_message"):
-            self._tool_registry.unregister("send_message")
-
-        # Register the per-run progress tool
-        progress_tool = ProgressMessageTool(tracker)
-        self._tool_registry.register(progress_tool)  # type: ignore[arg-type]
-        logger.debug("Registered per-run progress message tool")
 
     def _log_response(self, text: str | None) -> None:
         bot_name = self._provider.bot_username or "bot"

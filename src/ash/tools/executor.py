@@ -58,11 +58,14 @@ class ToolExecutor:
     ) -> ToolResult:
         context = context or ToolContext()
 
-        try:
-            tool = self._registry.get(tool_name)
-        except KeyError:
-            logger.error(f"Tool not found: {tool_name}")
-            return ToolResult.error(f"Tool '{tool_name}' not found")
+        # Check per-session tool overrides before global registry
+        tool = context.tool_overrides.get(tool_name)
+        if tool is None:
+            try:
+                tool = self._registry.get(tool_name)
+            except KeyError:
+                logger.error(f"Tool not found: {tool_name}")
+                return ToolResult.error(f"Tool '{tool_name}' not found")
 
         logger.debug(f"Tool {tool_name} input: {input_data}")
 

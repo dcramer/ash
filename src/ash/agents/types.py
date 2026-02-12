@@ -89,6 +89,7 @@ class AgentConfig:
     supports_checkpointing: bool = False  # If True, agent can use interrupt tool
     is_passthrough: bool = False  # If True, bypasses LLM loop and runs external process
     enable_progress_updates: bool = True  # If True, adds send_message tool and steering
+    timeout: int = 300  # Maximum execution time in seconds (default: 5 minutes)
 
     def get_effective_tools(self) -> list[str]:
         """Get the effective tools list with auto-added tools.

@@ -1,5 +1,6 @@
 """Agent executor for running isolated subagent loops."""
 
+import asyncio
 import logging
 import uuid
 from typing import TYPE_CHECKING
@@ -133,19 +134,33 @@ class AgentExecutor:
         Returns:
             AgentResult with content, or interrupted result with checkpoint.
         """
+
         from ash.logging import log_context
 
+        timeout = agent.config.timeout
+
         with log_context(chat_id=context.chat_id, session_id=context.session_id):
-            return await self._execute_inner(
-                agent=agent,
-                input_message=input_message,
-                context=context,
-                environment=environment,
-                resume_from=resume_from,
-                user_response=user_response,
-                session_manager=session_manager,
-                parent_tool_use_id=parent_tool_use_id,
-            )
+            try:
+                return await asyncio.wait_for(
+                    self._execute_inner(
+                        agent=agent,
+                        input_message=input_message,
+                        context=context,
+                        environment=environment,
+                        resume_from=resume_from,
+                        user_response=user_response,
+                        session_manager=session_manager,
+                        parent_tool_use_id=parent_tool_use_id,
+                    ),
+                    timeout=timeout,
+                )
+            except TimeoutError:
+                logger.error(
+                    "Agent '%s' timed out after %ds",
+                    agent.config.name,
+                    timeout,
+                )
+                return AgentResult.error(f"Agent timed out after {timeout} seconds")
 
     async def _execute_inner(
         self,
@@ -303,6 +318,11 @@ class AgentExecutor:
                     f"Agent '{agent_config.name}' completed in {iteration} iterations"
                 )
                 result_metadata = self._build_result_metadata(tool_context)
+                if not text and iteration > 1:
+                    # Agent completed without producing text after tool execution
+                    return AgentResult.error(
+                        "Agent completed without producing a response"
+                    )
                 return AgentResult.success(
                     text, iterations=iteration, metadata=result_metadata
                 )
@@ -388,10 +408,15 @@ class AgentExecutor:
         last_text = session.get_last_text_response() or ""
         result_metadata = self._build_result_metadata(tool_context)
 
+        content = (
+            f"{last_text}\n\n[Agent hit the maximum number of steps and may not have finished.]"
+            if last_text
+            else "The agent couldn't complete within the allowed steps. It may have made partial progress."
+        )
+
         return AgentResult(
-            content=last_text
-            or "The agent couldn't complete within the allowed steps. It may have made partial progress.",
-            is_error=not last_text,
+            content=content,
+            is_error=True,
             iterations=max_iterations,
             metadata=result_metadata,
         )
