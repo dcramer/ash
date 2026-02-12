@@ -6,16 +6,37 @@ running asynchronously after each exchange.
 
 import json
 import logging
+import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ash.llm.types import Message, Role
-from ash.memory.types import ExtractedFact, MemoryType
+from ash.memory.types import ExtractedFact, MemoryType, Sensitivity
 
 if TYPE_CHECKING:
     from ash.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
+
+# Regex patterns for detecting secrets in extracted content (defense in depth)
+_SECRETS_PATTERNS = [
+    re.compile(r"\b(sk-[a-zA-Z0-9]{20,})\b"),  # OpenAI/Anthropic keys
+    re.compile(r"\b(ghp_[a-zA-Z0-9]{36,})\b"),  # GitHub tokens
+    re.compile(r"\b(AKIA[A-Z0-9]{16})\b"),  # AWS keys
+    re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"),  # Credit cards
+    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),  # SSN
+    re.compile(r"\b(?:password|passwd|pwd)\s*(?:is|:|=)\s*\S+", re.IGNORECASE),
+    re.compile(
+        r"-----BEGIN\s+(?:RSA\s+|DSA\s+|EC\s+|OPENSSH\s+|PGP\s+)?PRIVATE\s+KEY-----",
+        re.IGNORECASE,
+    ),
+]
+
+
+def _contains_secret(content: str) -> bool:
+    """Check if extracted content contains potential secrets."""
+    return any(pattern.search(content) for pattern in _SECRETS_PATTERNS)
 
 
 @dataclass
@@ -72,8 +93,21 @@ The conversation uses XML tags to clearly separate speakers:
 - Actions the assistant took
 - Temporary task context ("working on X project")
 - Generic conversation flow
-- Credentials or sensitive data
+- Credentials or sensitive data (see CRITICAL section below)
 - Things already in memory (avoid duplicates)
+
+## CRITICAL: Never store secrets or credentials
+NEVER extract the following - reject with confidence 0.0:
+- Passwords or passphrases (e.g., "my password is hunter2")
+- API keys or tokens (e.g., "sk-abc123...", "ghp_...", "AKIA...")
+- Social Security Numbers (e.g., "123-45-6789")
+- Credit card numbers (16-digit numbers)
+- Bank account or routing numbers
+- Private keys (SSH, PGP, crypto wallet)
+- Authentication secrets (MFA codes, recovery codes)
+- Connection strings with credentials
+
+If the user says "remember my password is X" - DO NOT store it. Return an empty array for such requests.
 
 ## CRITICAL: Resolve references
 Convert pronouns and references to concrete facts:
@@ -107,7 +141,7 @@ WRONG: "My wife got me a Grand Seiko" -> extracting that wife owns a Grand Seiko
 RIGHT: "My wife got me a Grand Seiko" -> speaker owns Grand Seiko, subjects: []
 
 {existing_memories_section}
-
+{datetime_section}
 ## Conversation to analyze:
 {conversation}
 
@@ -119,6 +153,7 @@ Return a JSON array of facts. Each fact has:
 - shared: true if this is group/team knowledge, false if personal
 - confidence: 0.0-1.0 how confident this should be stored
 - type: One of: "preference", "identity", "relationship", "knowledge", "context", "event", "task", "observation"
+- sensitivity: One of: "public", "personal", "sensitive" (see Sensitivity Classification)
 
 ## Memory Types:
 Long-lived (no automatic expiration):
@@ -133,12 +168,24 @@ Ephemeral (decay over time):
 - task: things to do (e.g., "needs to call dentist")
 - observation: fleeting observations (e.g., "seemed tired today")
 
+## Sensitivity Classification:
+Classify each fact's privacy level for sharing decisions:
+- "public": Can be shared anywhere. General facts, preferences, work info.
+  Examples: "Prefers dark mode", "Works at Acme Corp", "Has a dog named Max"
+- "personal": Share only with the subject or owner. Personal details not for group disclosure.
+  Examples: "Just went through a breakup", "Looking for a new job", "Having relationship troubles"
+- "sensitive": High privacy - medical, financial, mental health. Only share in private with the subject.
+  Examples: "Has anxiety", "Taking medication for depression", "Salary is $X", "Has diabetes", "Seeing a therapist"
+
+Default to "public" unless the content clearly involves private matters.
+
 Only include facts with confidence >= 0.7. If you cannot resolve a reference, do not extract it.
 
 Return ONLY valid JSON, no other text. Example:
 [
-  {{"content": "Prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference"}},
-  {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship"}}
+  {{"content": "Prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference", "sensitivity": "public"}},
+  {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship", "sensitivity": "public"}},
+  {{"content": "Has been dealing with anxiety", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "identity", "sensitivity": "sensitive"}}
 ]
 
 If there are no facts worth extracting, return an empty array: []"""
@@ -177,6 +224,7 @@ class MemoryExtractor:
         existing_memories: list[str] | None = None,
         owner_names: list[str] | None = None,
         speaker_info: SpeakerInfo | None = None,
+        current_datetime: datetime | None = None,
     ) -> list[ExtractedFact]:
         """Analyze conversation and extract facts worth remembering.
 
@@ -188,6 +236,8 @@ class MemoryExtractor:
                 in subjects - they're the owner, not a third party.
             speaker_info: Information about the speaker for attribution.
                 Used to label user messages with their identity.
+            current_datetime: Current datetime for resolving relative time
+                references (e.g., "this weekend" -> "Feb 15-16, 2026").
 
         Returns:
             List of extracted facts with confidence scores.
@@ -219,10 +269,30 @@ Do NOT put the user's own name in subjects - subjects is for OTHER people in the
 {memory_list}
 """
 
+        # Build datetime section for temporal context
+        datetime_section = ""
+        if current_datetime:
+            formatted_dt = current_datetime.strftime("%B %d, %Y at %H:%M")
+            weekday = current_datetime.strftime("%A")
+            datetime_section = f"""
+## Current date and time
+The current datetime is: {weekday}, {formatted_dt}
+
+CRITICAL: Convert ALL relative time references to absolute dates in extracted facts:
+- "this weekend" → "the weekend of [actual date]"
+- "next Tuesday" → "[actual weekday, Month Day, Year]"
+- "tomorrow" → "[actual Month Day, Year]"
+- "last week" → "the week of [actual date range]"
+- "in 2 days" → "[actual Month Day, Year]"
+
+This ensures memories remain meaningful when recalled later.
+"""
+
         # Build the extraction prompt
         prompt = EXTRACTION_PROMPT.format(
             owner_section=owner_section,
             existing_memories_section=existing_section,
+            datetime_section=datetime_section,
             conversation=conversation_text,
         )
 
@@ -334,6 +404,13 @@ Do NOT put the user's own name in subjects - subjects is for OTHER people in the
             if confidence < self._confidence_threshold:
                 continue
 
+            # Filter out potential secrets (defense in depth)
+            if _contains_secret(content):
+                logger.warning(
+                    "Filtered potential secret from extraction: %s...", content[:30]
+                )
+                continue
+
             subjects = item.get("subjects", [])
             if not isinstance(subjects, list):
                 subjects = []
@@ -358,6 +435,15 @@ Do NOT put the user's own name in subjects - subjects is for OTHER people in the
             else:
                 speaker = None
 
+            # Parse sensitivity - default to None (treated as PUBLIC)
+            sensitivity_str = item.get("sensitivity")
+            sensitivity = None
+            if sensitivity_str:
+                try:
+                    sensitivity = Sensitivity(sensitivity_str)
+                except ValueError:
+                    pass  # Leave as None (default PUBLIC)
+
             facts.append(
                 ExtractedFact(
                     content=content,
@@ -366,6 +452,7 @@ Do NOT put the user's own name in subjects - subjects is for OTHER people in the
                     confidence=confidence,
                     memory_type=memory_type,
                     speaker=speaker,
+                    sensitivity=sensitivity,
                 )
             )
 

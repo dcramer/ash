@@ -182,6 +182,79 @@ Best-effort authorization prevents accidental cross-user data access. When conte
 - Operations without context (e.g., internal GC) skip checks
 - Goal: prevent accidental mistakes, not malicious actors
 
+## Privacy & Sensitivity
+
+Memories can be classified by sensitivity level to control sharing:
+
+### Sensitivity Levels
+
+| Level | Description | Sharing Rules |
+|-------|-------------|---------------|
+| `public` | Can be shared anywhere (default) | No restrictions |
+| `personal` | Personal details not for group disclosure | Only with subject or memory owner |
+| `sensitive` | High privacy (medical, financial, mental health) | Only in private chat with subject |
+
+### Examples
+
+| Content | Sensitivity | Why |
+|---------|-------------|-----|
+| "Prefers dark mode" | public | General preference |
+| "Looking for a new job" | personal | Sensitive career info |
+| "Has anxiety" | sensitive | Mental health |
+| "Salary is $150k" | sensitive | Financial |
+| "Has a dog named Max" | public | General fact |
+
+### Privacy Filtering
+
+When retrieving memories:
+1. **PUBLIC**: Always shown
+2. **PERSONAL**: Only shown to the subject person or memory owner
+3. **SENSITIVE**: Only shown in private chat with the subject
+
+### Backward Compatibility
+
+- `sensitivity` field defaults to `null`, treated as `public`
+- Existing memories work unchanged
+
+## Cross-Context Retrieval
+
+Facts learned about a person in one context (e.g., group chat) can be recalled in another context (e.g., private chat with that person), subject to privacy rules.
+
+### How It Works
+
+1. When Alice mentions "@bob loves pizza" in a group chat:
+   - Memory stored with `subject_person_ids=[bob_person_id]`
+   - Person record links username "bob" to the person entity
+
+2. When Bob starts a private chat:
+   - System finds memories where Bob is a subject (across all owners)
+   - Privacy filter applies: sensitive facts only shown to Bob himself
+   - Facts from other users become available context
+
+### Cross-Context Query
+
+`find_memories_about_user()` searches across ALL owners:
+- Matches username to Person records via name/aliases
+- Returns memories where that person is a subject
+- Optional `exclude_owner_user_id` to avoid double-counting
+
+### Privacy in Groups
+
+When someone asks about a person in a group chat:
+- **PUBLIC** facts: shown
+- **PERSONAL** facts: shown only if the subject is asking
+- **SENSITIVE** facts: NOT shown (group context)
+
+### Self-Query Example
+
+When Bob asks "what do you know about me?" in different contexts:
+
+| Context | PUBLIC | PERSONAL | SENSITIVE |
+|---------|--------|----------|-----------|
+| Private chat with Bob | ✓ | ✓ | ✓ |
+| Group chat (Bob asking) | ✓ | ✓ | ✗ |
+| Group chat (others asking) | ✓ | ✗ | ✗ |
+
 ## Background Extraction
 
 Optionally, facts are extracted automatically from conversations:
@@ -189,6 +262,48 @@ Optionally, facts are extracted automatically from conversations:
 - Extracts preferences, facts about people, important dates
 - Skips assistant actions, temporary context, credentials
 - Confidence threshold filters low-quality extractions
+
+## Secrets Filtering
+
+Memory will NEVER store credentials or secrets. Three-layer defense:
+
+1. **Extraction prompt** - LLM instructed to reject secrets during extraction
+2. **Post-extraction filter** - Regex patterns catch secrets before storage
+3. **Centralized filter in MemoryManager** - Final check catches all entry points (CLI, RPC, direct)
+
+### Automatically Rejected
+
+| Type | Examples |
+|------|----------|
+| Passwords | "my password is X", "passwd: hunter2" |
+| API Keys | sk-..., ghp_..., gho_..., AKIA... |
+| SSN | 123-45-6789 |
+| Credit Cards | 16-digit numbers with optional separators |
+| Private Keys | -----BEGIN PRIVATE KEY----- |
+| Slack Tokens | xoxb-..., xoxp-..., xoxs-... |
+
+Even if the user explicitly asks to remember these, they will be rejected with an error.
+
+## Temporal Context
+
+Facts with relative time references are automatically converted to absolute dates during extraction.
+
+### How It Works
+
+1. Current datetime is passed to the extraction prompt
+2. LLM instructed to rewrite relative references → absolute dates
+3. `observed_at` field records when the fact was stated
+
+### Examples
+
+| User says | Stored as |
+|-----------|-----------|
+| "this weekend" | "the weekend of Feb 15-16, 2026" |
+| "next Tuesday" | "Tuesday, Feb 18, 2026" |
+| "tomorrow" | "Feb 12, 2026" |
+| "in 2 days" | "Feb 14, 2026" |
+
+This ensures memories remain meaningful when recalled weeks or months later.
 
 ## Multi-User Attribution
 
@@ -259,6 +374,7 @@ The LLM then attributes each extracted fact to the appropriate speaker.
   "source_session_id": null,
   "source_message_id": null,
   "extraction_confidence": null,
+  "sensitivity": null,
   "expires_at": null,
   "superseded_at": null,
   "superseded_by_id": null,
@@ -286,6 +402,7 @@ The LLM then attributes each extracted fact to the appropriate speaker.
 | `source_session_id` | No | Session ID for extraction tracing |
 | `source_message_id` | No | Message UUID for extraction tracing |
 | `extraction_confidence` | No | 0.0-1.0 confidence score |
+| `sensitivity` | No | "public" / "personal" / "sensitive" (null = public) |
 | `expires_at` | No | Explicit TTL |
 | `superseded_at` | No | When marked superseded |
 | `superseded_by_id` | No | What memory replaced this one |
@@ -319,7 +436,8 @@ Used during background extraction, before facts are converted to MemoryEntry:
   "shared": false,
   "confidence": 0.85,
   "memory_type": "preference",
-  "speaker": "@david (David Cramer)"
+  "speaker": "@david (David Cramer)",
+  "sensitivity": "public"
 }
 ```
 
@@ -331,6 +449,7 @@ Used during background extraction, before facts are converted to MemoryEntry:
 | `confidence` | Extraction confidence (0.0-1.0) |
 | `memory_type` | Assigned memory type |
 | `speaker` | Who stated this fact (format: `@username (Display Name)`) |
+| `sensitivity` | Privacy classification ("public" / "personal" / "sensitive") |
 
 ## Configuration
 
@@ -418,6 +537,49 @@ cat ~/.ash/memory/memories.jsonl | grep source_session
 # Rebuild index after corruption
 rm ~/.ash/data/memory.db
 uv run ash memory rebuild-index
+
+# Privacy tests:
+# 1. Bob says "I have anxiety" in private
+# 2. Verify sensitivity=sensitive in memories.jsonl
+cat ~/.ash/memory/memories.jsonl | grep -A1 "anxiety" | grep sensitivity
+# 3. In group chat, ask "tell me about Bob"
+# 4. Verify sensitive fact is NOT disclosed
+# 5. In private with Bob, ask same question
+# 6. Verify sensitive fact IS disclosed
+
+# Cross-context tests:
+# 1. In group chat, Alice says "@bob loves pizza"
+# 2. Verify memory stored with subject_person_ids containing bob
+cat ~/.ash/memory/memories.jsonl | grep "loves pizza" | grep subject_person_ids
+# 3. In private chat with Bob, ask "what do you know about me?"
+# 4. Verify "loves pizza" fact is retrieved
+
+# Secrets filtering tests:
+# 1. Via CLI - should reject
+uv run ash memory add -q "my password is hunter2"
+# Should error: "Memory content contains potential secrets"
+
+# 2. Via CLI with API key - should reject
+uv run ash memory add -q "API key: sk-abc123def456789"
+# Should error: "Memory content contains potential secrets"
+
+# 3. Via chat - should NOT extract secrets
+uv run ash chat "Remember my password is secret123"
+cat ~/.ash/memory/memories.jsonl | grep -c "password"  # 0
+
+# 4. Normal content should work
+uv run ash memory add -q "I prefer dark mode"
+cat ~/.ash/memory/memories.jsonl | grep "dark mode"  # found
+
+# Temporal context tests:
+# 1. Say something with relative time reference
+uv run ash chat "I have a meeting this weekend"
+# 2. Check extracted memory has absolute date
+cat ~/.ash/memory/memories.jsonl | grep "meeting" | grep -E "Feb|weekend of"
+# Should have converted "this weekend" to actual date
+
+# 3. Verify observed_at is populated
+cat ~/.ash/memory/memories.jsonl | grep "meeting" | grep "observed_at"
 ```
 
 ### Checklist
@@ -443,3 +605,13 @@ uv run ash memory rebuild-index
 - [ ] Extracted memories have `source_user_id` populated
 - [ ] `ash memory list` shows About, Source, and Trust columns
 - [ ] `ash memory show <id>` displays full attribution details
+- [ ] Extraction classifies sensitivity (public/personal/sensitive)
+- [ ] Sensitive memories not disclosed in group chats
+- [ ] Personal memories only shown to subject or owner
+- [ ] Cross-context retrieval finds facts from other owners
+- [ ] Privacy filter applied to cross-context memories
+- [ ] Secrets rejected via CLI: `ash memory add -q "password is hunter2"` → error
+- [ ] Secrets rejected via RPC: agent storing API key → error
+- [ ] Secrets filtered during extraction (LLM output post-filtered)
+- [ ] Relative times converted to absolute dates during extraction
+- [ ] `observed_at` field populated on extracted memories

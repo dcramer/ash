@@ -25,6 +25,7 @@ from ash.memory.types import (
     MemoryEntry,
     MemoryType,
     PersonEntry,
+    Sensitivity,
     matches_scope,
 )
 
@@ -111,6 +112,7 @@ class FileMemoryStore:
         source_session_id: str | None = None,
         source_message_id: str | None = None,
         extraction_confidence: float | None = None,
+        sensitivity: Sensitivity | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> MemoryEntry:
         """Add a new memory entry.
@@ -130,6 +132,7 @@ class FileMemoryStore:
             source_session_id: Session ID for extraction tracing.
             source_message_id: Message ID for extraction tracing.
             extraction_confidence: Confidence score for extraction.
+            sensitivity: Privacy classification (default PUBLIC).
             metadata: Additional metadata.
 
         Returns:
@@ -152,6 +155,7 @@ class FileMemoryStore:
             source_session_id=source_session_id,
             source_message_id=source_message_id,
             extraction_confidence=extraction_confidence,
+            sensitivity=sensitivity,
             expires_at=expires_at,
             metadata=metadata,
         )
@@ -355,6 +359,78 @@ class FileMemoryStore:
                 break
 
         return result
+
+    async def find_memories_about_user(
+        self,
+        username: str,
+        exclude_owner_user_id: str | None = None,
+        limit: int = 20,
+    ) -> list[MemoryEntry]:
+        """Find memories about a user from ANY owner (cross-context retrieval).
+
+        Searches all Person records (any owner) matching the username,
+        then returns memories where those person_ids are subjects.
+        This enables recalling facts about a person learned in other contexts.
+
+        Args:
+            username: Username to find memories about (e.g., "@bob" or "bob").
+            exclude_owner_user_id: Optionally exclude memories owned by this user
+                to avoid double-counting when combined with user's own memories.
+            limit: Maximum entries to return.
+
+        Returns:
+            List of memories about this user from all owners.
+        """
+        # Normalize username
+        username_clean = username.lstrip("@").lower()
+
+        # Load all people and memories
+        people = await self._ensure_people_loaded()
+        memories = await self._ensure_memories_loaded()
+        now = datetime.now(UTC)
+
+        # Find all person IDs that match this username (across ALL owners)
+        matching_person_ids: set[str] = set()
+        for person in people:
+            if self._person_matches_username(person, username_clean):
+                matching_person_ids.add(person.id)
+
+        if not matching_person_ids:
+            return []
+
+        # Find memories where this person is a subject
+        result: list[MemoryEntry] = []
+        for memory in memories:
+            # Skip expired
+            if memory.expires_at and memory.expires_at <= now:
+                continue
+
+            # Skip superseded
+            if memory.superseded_at:
+                continue
+
+            # Skip if excluding owner
+            if exclude_owner_user_id and memory.owner_user_id == exclude_owner_user_id:
+                continue
+
+            # Check if memory is about any matching person
+            if not memory.subject_person_ids:
+                continue
+
+            is_about_user = any(
+                pid in matching_person_ids for pid in memory.subject_person_ids
+            )
+            if not is_about_user:
+                continue
+
+            result.append(memory)
+
+        # Sort by created_at descending (newest first)
+        result.sort(
+            key=lambda x: x.created_at or datetime.min.replace(tzinfo=UTC), reverse=True
+        )
+
+        return result[:limit]
 
     async def mark_memory_superseded(
         self,

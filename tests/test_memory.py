@@ -307,3 +307,230 @@ class TestEphemeralDecay:
 
         assert result.removed_count == 0
         assert await file_memory_store.get_memory(preference.id) is not None
+
+
+class TestCrossContextRetrieval:
+    """Tests for cross-context memory retrieval."""
+
+    async def test_find_memories_about_user_by_username(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test finding memories about a user by username."""
+        # Create a person with a username alias
+        person = await file_memory_store.create_person(
+            owner_user_id="alice",
+            name="Bob",
+            aliases=["@bob", "bob"],
+        )
+
+        # Create a memory about this person
+        await file_memory_store.add_memory(
+            content="Bob likes pizza",
+            owner_user_id="alice",
+            subject_person_ids=[person.id],
+        )
+
+        # Find memories about bob
+        memories = await file_memory_store.find_memories_about_user(username="bob")
+
+        assert len(memories) == 1
+        assert memories[0].content == "Bob likes pizza"
+
+    async def test_find_memories_about_user_excludes_owner(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test that find_memories_about_user can exclude owner's memories."""
+        # Create a person record for both Alice and Carol
+        person_alice = await file_memory_store.create_person(
+            owner_user_id="alice",
+            name="Bob",
+            aliases=["bob"],
+        )
+        person_carol = await file_memory_store.create_person(
+            owner_user_id="carol",
+            name="Bob",
+            aliases=["bob"],
+        )
+
+        # Alice has a memory about Bob
+        await file_memory_store.add_memory(
+            content="Bob likes pizza",
+            owner_user_id="alice",
+            subject_person_ids=[person_alice.id],
+        )
+
+        # Carol also has a memory about Bob
+        await file_memory_store.add_memory(
+            content="Bob likes pasta",
+            owner_user_id="carol",
+            subject_person_ids=[person_carol.id],
+        )
+
+        # Find memories about bob excluding alice's
+        memories = await file_memory_store.find_memories_about_user(
+            username="bob", exclude_owner_user_id="alice"
+        )
+
+        assert len(memories) == 1
+        assert memories[0].content == "Bob likes pasta"
+        assert memories[0].owner_user_id == "carol"
+
+    async def test_find_memories_about_user_with_at_prefix(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test that @username prefix is handled."""
+        person = await file_memory_store.create_person(
+            owner_user_id="alice",
+            name="Bob",
+            aliases=["bob"],
+        )
+
+        await file_memory_store.add_memory(
+            content="Bob is cool",
+            owner_user_id="alice",
+            subject_person_ids=[person.id],
+        )
+
+        # Find with @ prefix
+        memories = await file_memory_store.find_memories_about_user(username="@bob")
+
+        assert len(memories) == 1
+
+
+class TestSecretsFiltering:
+    """Tests for secrets filtering in MemoryManager."""
+
+    async def test_rejects_openai_api_key(self, memory_manager):
+        """Test that OpenAI API keys are rejected."""
+        with pytest.raises(ValueError, match="potential secrets"):
+            await memory_manager.add_memory(
+                content="My API key is sk-abc123def456ghi789abcdef",
+                owner_user_id="user-1",
+            )
+
+    async def test_rejects_github_token(self, memory_manager):
+        """Test that GitHub tokens are rejected."""
+        with pytest.raises(ValueError, match="potential secrets"):
+            await memory_manager.add_memory(
+                content="Use token: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                owner_user_id="user-1",
+            )
+
+    async def test_rejects_aws_access_key(self, memory_manager):
+        """Test that AWS access keys are rejected."""
+        with pytest.raises(ValueError, match="potential secrets"):
+            await memory_manager.add_memory(
+                content="AWS key: AKIAIOSFODNN7EXAMPLE",
+                owner_user_id="user-1",
+            )
+
+    async def test_rejects_credit_card(self, memory_manager):
+        """Test that credit card numbers are rejected."""
+        with pytest.raises(ValueError, match="potential secrets"):
+            await memory_manager.add_memory(
+                content="Card: 4111-1111-1111-1111",
+                owner_user_id="user-1",
+            )
+
+    async def test_rejects_ssn(self, memory_manager):
+        """Test that Social Security Numbers are rejected."""
+        with pytest.raises(ValueError, match="potential secrets"):
+            await memory_manager.add_memory(
+                content="SSN: 123-45-6789",
+                owner_user_id="user-1",
+            )
+
+    async def test_rejects_password_is_pattern(self, memory_manager):
+        """Test that 'password is X' patterns are rejected."""
+        with pytest.raises(ValueError, match="potential secrets"):
+            await memory_manager.add_memory(
+                content="Remember my password is hunter2",
+                owner_user_id="user-1",
+            )
+
+    async def test_rejects_password_colon_pattern(self, memory_manager):
+        """Test that 'password: X' patterns are rejected."""
+        with pytest.raises(ValueError, match="potential secrets"):
+            await memory_manager.add_memory(
+                content="My password: secret123",
+                owner_user_id="user-1",
+            )
+
+    async def test_rejects_private_key(self, memory_manager):
+        """Test that private keys are rejected."""
+        with pytest.raises(ValueError, match="potential secrets"):
+            await memory_manager.add_memory(
+                content="-----BEGIN PRIVATE KEY-----\nMIIEvg...",
+                owner_user_id="user-1",
+            )
+
+    async def test_allows_safe_content(self, memory_manager):
+        """Test that normal content is allowed."""
+        memory = await memory_manager.add_memory(
+            content="User prefers dark mode",
+            owner_user_id="user-1",
+        )
+        assert memory.content == "User prefers dark mode"
+
+    async def test_allows_number_sequences(self, memory_manager):
+        """Test that normal number sequences are allowed."""
+        # 4 digits not credit card, no SSN pattern
+        memory = await memory_manager.add_memory(
+            content="Favorite number is 1234",
+            owner_user_id="user-1",
+        )
+        assert memory.content == "Favorite number is 1234"
+
+
+class TestSensitivity:
+    """Tests for memory sensitivity classification."""
+
+    async def test_add_memory_with_sensitivity(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test adding a memory with sensitivity classification."""
+        from ash.memory.types import Sensitivity
+
+        memory = await file_memory_store.add_memory(
+            content="Has anxiety",
+            owner_user_id="user-1",
+            sensitivity=Sensitivity.SENSITIVE,
+        )
+
+        assert memory.sensitivity == Sensitivity.SENSITIVE
+
+        # Verify it persists
+        loaded = await file_memory_store.get_memory(memory.id)
+        assert loaded is not None
+        assert loaded.sensitivity == Sensitivity.SENSITIVE
+
+    async def test_sensitivity_none_means_public(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test that None sensitivity is treated as public."""
+        memory = await file_memory_store.add_memory(
+            content="Likes pizza",
+            owner_user_id="user-1",
+        )
+
+        # No sensitivity set
+        assert memory.sensitivity is None
+
+    async def test_memory_serialization_with_sensitivity(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test that sensitivity is correctly serialized/deserialized."""
+        from ash.memory.types import Sensitivity
+
+        memory = await file_memory_store.add_memory(
+            content="Personal info",
+            owner_user_id="user-1",
+            sensitivity=Sensitivity.PERSONAL,
+        )
+
+        # Force cache invalidation to ensure we read from disk
+        file_memory_store._invalidate_memories_cache()
+
+        loaded = await file_memory_store.get_memory(memory.id)
+        assert loaded is not None
+        assert loaded.sensitivity == Sensitivity.PERSONAL

@@ -46,6 +46,20 @@ class MemoryType(Enum):
     OBSERVATION = "observation"
 
 
+class Sensitivity(Enum):
+    """Sensitivity classification for privacy-aware retrieval.
+
+    Controls when memories can be shared based on context:
+    - PUBLIC: Can be shared anywhere (default)
+    - PERSONAL: Only shown to the subject person or memory owner
+    - SENSITIVE: High privacy (medical, financial) - only in private chat with subject
+    """
+
+    PUBLIC = "public"
+    PERSONAL = "personal"
+    SENSITIVE = "sensitive"
+
+
 # Types that decay over time without explicit expiration
 EPHEMERAL_TYPES: set[MemoryType] = {
     MemoryType.CONTEXT,
@@ -116,6 +130,9 @@ class MemoryEntry:
     source_message_id: str | None = None
     extraction_confidence: float | None = None
 
+    # Privacy (optional)
+    sensitivity: Sensitivity | None = None  # None = PUBLIC for backward compat
+
     # Lifecycle (optional)
     expires_at: datetime | None = None
     superseded_at: datetime | None = None
@@ -162,6 +179,8 @@ class MemoryEntry:
             d["source_message_id"] = self.source_message_id
         if self.extraction_confidence is not None:
             d["extraction_confidence"] = self.extraction_confidence
+        if self.sensitivity is not None:
+            d["sensitivity"] = self.sensitivity.value
         if self.expires_at:
             d["expires_at"] = self.expires_at.isoformat()
         if self.superseded_at:
@@ -197,6 +216,7 @@ class MemoryEntry:
             source_session_id=d.get("source_session_id"),
             source_message_id=d.get("source_message_id"),
             extraction_confidence=d.get("extraction_confidence"),
+            sensitivity=Sensitivity(d["sensitivity"]) if d.get("sensitivity") else None,
             expires_at=_parse_datetime(d.get("expires_at")),
             superseded_at=_parse_datetime(d.get("superseded_at")),
             superseded_by_id=d.get("superseded_by_id"),
@@ -322,6 +342,7 @@ class ExtractedFact:
     confidence: float
     memory_type: MemoryType = MemoryType.KNOWLEDGE
     speaker: str | None = None  # Who said this (username or identifier)
+    sensitivity: Sensitivity | None = None  # Privacy classification
 
 
 @dataclass

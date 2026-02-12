@@ -324,10 +324,23 @@ class Agent:
         if self._memory:
             try:
                 start_time = time.monotonic()
+
+                # Build participant info for cross-context retrieval
+                chat_type = session.metadata.get("chat_type")
+                participant_usernames: list[str] | None = None
+
+                # In private chats, the other participant is the sender
+                if chat_type == "private":
+                    sender_username = session.metadata.get("username")
+                    if sender_username:
+                        participant_usernames = [sender_username]
+
                 memory_context = await self._memory.get_context_for_message(
                     user_id=effective_user_id,
                     user_message=user_message,
                     chat_id=session.chat_id,
+                    chat_type=chat_type,
+                    participant_usernames=participant_usernames,
                 )
                 duration_ms = int((time.monotonic() - start_time) * 1000)
                 if memory_context and memory_context.memories:
@@ -520,6 +533,7 @@ class Agent:
                 existing_memories=existing_memories,
                 owner_names=owner_names if owner_names else None,
                 speaker_info=speaker_info,
+                current_datetime=datetime.now(UTC),
             )
 
             # Build owner name matchers for filtering self-references
@@ -565,9 +579,11 @@ class Agent:
                         owner_user_id=user_id if not fact.shared else None,
                         chat_id=chat_id if fact.shared else None,
                         subject_person_ids=subject_person_ids or None,
+                        observed_at=datetime.now(UTC),
                         source_user_id=source_user_id,
                         source_user_name=source_user_name,
                         extraction_confidence=fact.confidence,
+                        sensitivity=fact.sensitivity,
                     )
 
                     logger.debug(
