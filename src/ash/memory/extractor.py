@@ -95,6 +95,7 @@ The conversation uses XML tags to clearly separate speakers:
 - Generic conversation flow
 - Credentials or sensitive data (see CRITICAL section below)
 - Things already in memory (avoid duplicates)
+- Vague or incoherent facts (see "Require coherence" section below)
 
 ## CRITICAL: Never store secrets or credentials
 NEVER extract the following - reject with confidence 0.0:
@@ -114,6 +115,20 @@ Convert pronouns and references to concrete facts:
 - "I liked that restaurant" -> Find which restaurant from context, store "User liked [restaurant name]"
 - "She's visiting next week" -> Find who "she" is, store "[Person name] is visiting [date]"
 - "Yes, that one" -> Don't extract - too ambiguous
+
+## CRITICAL: Require coherence
+Only extract facts that are COMPLETE and USEFUL on their own:
+- Reject if it contains unresolved words: "something", "somewhere", "someone", "that thing", "the thing", "it"
+- Reject if recalling this fact months later would be meaningless without conversation context
+- Facts must be actionable - "Spent $100 on something" is useless; "Spent $100 on a watch" is useful
+
+Examples of INCOHERENT facts to REJECT (confidence 0.0):
+- "Spent money on something" - what was bought?
+- "Is uncertain about the outcome" - outcome of what?
+- "Had a good experience with that" - with what?
+- "Wants to do the thing we discussed" - what thing?
+
+If you cannot identify WHAT, WHO, or WHERE specifically, do not extract the fact.
 
 ## CRITICAL: Ownership and perspective
 Facts should be attributed to who they're ABOUT, not who performed an action:

@@ -425,3 +425,68 @@ class TestTemporalContext:
         assert "February 15, 2026" in prompt
         assert "Sunday" in prompt
         assert "Convert ALL relative time references to absolute dates" in prompt
+
+
+class TestCoherenceFiltering:
+    """Tests for coherence filtering in extraction."""
+
+    @pytest.fixture
+    def extractor(self):
+        """Create a MemoryExtractor with mocked LLM."""
+        return MemoryExtractor(
+            llm=MagicMock(),
+            model="test-model",
+            confidence_threshold=0.7,
+        )
+
+    async def test_coherence_guidance_in_prompt(self, extractor):
+        """Test that coherence guidance is included in extraction prompt."""
+        mock_llm = AsyncMock(
+            return_value=CompletionResponse(
+                message=Message(role=Role.ASSISTANT, content="[]"),
+                usage=Usage(input_tokens=100, output_tokens=10),
+            )
+        )
+        extractor._llm.complete = mock_llm
+
+        await extractor.extract_from_conversation(
+            messages=[Message(role=Role.USER, content="I spent $100 on something")],
+        )
+
+        # Check that the prompt includes coherence guidance
+        call_args = mock_llm.call_args
+        messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
+        prompt = messages[0].content
+        assert "CRITICAL: Require coherence" in prompt
+        assert "something" in prompt
+        assert "Spent money on something" in prompt
+        assert "If you cannot identify WHAT, WHO, or WHERE specifically" in prompt
+
+    def test_vague_fact_filtered_via_low_confidence(self, extractor):
+        """Test that vague facts with low confidence are filtered out.
+
+        When the LLM follows our coherence guidance, it should return
+        confidence 0.0 for vague facts like "Spent money on something".
+        """
+        # Simulate LLM returning low confidence for a vague fact
+        response = """[
+            {"content": "Spent money on something", "subjects": [], "shared": false, "confidence": 0.0},
+            {"content": "Owns a Grand Seiko watch", "subjects": [], "shared": false, "confidence": 0.9}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        # Only the concrete fact should be extracted
+        assert len(facts) == 1
+        assert facts[0].content == "Owns a Grand Seiko watch"
+
+    def test_concrete_fact_extracted(self, extractor):
+        """Test that concrete, specific facts are properly extracted."""
+        response = """[
+            {"content": "Spent $100 on a Grand Seiko watch", "subjects": [], "shared": false, "confidence": 0.9}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].content == "Spent $100 on a Grand Seiko watch"
