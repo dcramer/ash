@@ -40,12 +40,6 @@ OpenWeatherMap provides a free-tier REST API for weather data.
 2. https://openweathermap.org/price
 ```
 
-## Progress Updates
-
-Use `send_message` to share progress on long research tasks:
-- "Searching for official documentation..."
-- "Found 3 authoritative sources, synthesizing..."
-
 ## Best Practices
 
 - Prefer official documentation over blog posts
@@ -65,25 +59,13 @@ class ResearchAgent(Agent):
             name="research",
             description="Research a topic using web search to find authoritative sources",
             system_prompt=RESEARCH_SYSTEM_PROMPT,
-            tools=["web_search", "web_fetch", "send_message"],
+            tools=["web_search", "web_fetch"],
             max_iterations=15,
         )
 
-    def build_system_prompt(self, context: AgentContext) -> str:
-        prompt = self.config.system_prompt
+    def _build_prompt_sections(self, context: AgentContext) -> list[str]:
+        sections = []
         focus = context.input_data.get("focus")
         if focus:
-            prompt += f"\n\n## Focus Area\n\nPay special attention to: {focus}"
-
-        # Add voice guidance for user-facing messages
-        if context.voice:
-            prompt += f"""
-
-## Communication Style (for user-facing messages only)
-
-{context.voice}
-
-IMPORTANT: Apply this style ONLY to send_message() updates that users will see.
-Do NOT apply it to research output, summaries, or technical findings."""
-
-        return prompt
+            sections.append(f"## Focus Area\n\nPay special attention to: {focus}")
+        return sections

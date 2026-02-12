@@ -253,8 +253,9 @@ class AgentExecutor:
         )
 
         system_prompt = agent.build_system_prompt(context)
+        effective_tools = agent_config.get_effective_tools()
         tool_definitions = self._get_tool_definitions(
-            agent_config.tools,
+            effective_tools,
             agent_config.is_skill_agent,
             agent_config.supports_checkpointing,
         )
@@ -339,7 +340,7 @@ class AgentExecutor:
                         )
                         continue
 
-                if agent_config.tools and tool_use.name not in agent_config.tools:
+                if effective_tools and tool_use.name not in effective_tools:
                     session.add_tool_result(
                         tool_use.id,
                         f"Tool '{tool_use.name}' is not available to this agent",

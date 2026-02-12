@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from ash.agents.base import Agent
 from ash.agents.types import AgentConfig, AgentContext
 from ash.skills.types import SkillDefinition
-from ash.tools.base import Tool, ToolContext, ToolResult
+from ash.tools.base import Tool, ToolContext, ToolResult, format_subagent_result
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor
@@ -68,7 +68,6 @@ Never use `send_message` for the final result - that must be in your response.
 
 def format_skill_result(content: str, skill_name: str) -> str:
     """Format skill result with structured tags for LLM clarity."""
-    from ash.tools.base import format_subagent_result
 
     return format_subagent_result(content, "skill", skill_name)
 

@@ -1,6 +1,6 @@
 """Skill writer agent for creating SKILL.md files."""
 
-from ash.agents.base import Agent, AgentConfig, AgentContext
+from ash.agents.base import Agent, AgentConfig
 
 SKILL_WRITER_PROMPT = """You are a skill builder. You create SKILL.md files that define specialized behaviors.
 
@@ -200,16 +200,7 @@ Use sequential by default. Only add branching when the skill needs to handle mul
 
 After 2 fix attempts, ABORT and delete broken files.
 
-## Progress Updates
-
-Use `send_message` for status updates:
-- "Starting research phase..."
-- "Found API documentation, reviewing..."
-- "Creating skill files..."
-
-Keep updates brief. One update per milestone.
-
-## Output
+## Completion Report
 
 When done, report:
 - **Skill name**: The name
@@ -233,7 +224,6 @@ class SkillWriterAgent(Agent):
                 # Coordination
                 "use_agent",  # Delegate to research/plan agents
                 "interrupt",  # Checkpoints between phases
-                "send_message",  # Progress updates
                 # Research phase (quick lookups)
                 "web_search",  # Quick web searches
                 "web_fetch",  # Fetch documentation
@@ -247,18 +237,4 @@ class SkillWriterAgent(Agent):
             supports_checkpointing=True,
         )
 
-    def build_system_prompt(self, context: AgentContext) -> str:
-        """Build system prompt with optional voice guidance."""
-        prompt = self.config.system_prompt
-
-        if context.voice:
-            prompt += f"""
-
-## Communication Style (for user-facing messages only)
-
-{context.voice}
-
-IMPORTANT: Apply this style ONLY to interrupt() prompts and send_message() updates.
-Do NOT apply it to skill files, code content, or technical documentation."""
-
-        return prompt
+    # No _build_prompt_sections override needed - uses base system prompt only

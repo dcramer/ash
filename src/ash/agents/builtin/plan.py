@@ -56,12 +56,6 @@ interrupt(
 
 This pauses execution and returns control to the caller. If the user requests changes, you'll be resumed to revise the plan.
 
-## Progress Updates
-
-Use `send_message` for status updates:
-- "Reviewing codebase structure..."
-- "Drafting implementation plan..."
-
 ## Guidelines
 
 - Each phase should have a clear verification step
@@ -80,59 +74,33 @@ class PlanAgent(Agent):
             name="plan",
             description="Create a step-by-step implementation plan from research or requirements",
             system_prompt=PLAN_SYSTEM_PROMPT,
-            tools=["read_file", "list_directory", "send_message", "interrupt"],
+            tools=["read_file", "list_directory", "interrupt"],
             max_iterations=10,
             supports_checkpointing=True,
         )
 
-    def build_system_prompt(self, context: AgentContext) -> str:
-        """Build system prompt with input data context.
-
-        Args:
-            context: Execution context with optional input data.
-
-        Returns:
-            System prompt string with input data appended if present.
-        """
-        prompt = self.config.system_prompt
+    def _build_prompt_sections(self, context: AgentContext) -> list[str]:
+        sections = []
 
         # Add research findings if provided
         research = context.input_data.get("research")
         if research:
-            prompt += f"""
-
-## Research Findings
-
-The following research has been provided:
-
-{research}
-
-Use these findings to inform your plan. Do not re-research what's already provided.
-"""
+            sections.append(
+                f"## Research Findings\n\n"
+                f"The following research has been provided:\n\n"
+                f"{research}\n\n"
+                f"Use these findings to inform your plan. Do not re-research what's already provided."
+            )
 
         # Add skill context if provided
         skill_name = context.input_data.get("skill_name")
         skill_type = context.input_data.get("skill_type")
         if skill_name or skill_type:
-            prompt += f"""
+            sections.append(
+                f"## Skill Context\n\n"
+                f"- Skill name: {skill_name or 'TBD'}\n"
+                f"- Skill type: {skill_type or 'TBD'}\n\n"
+                f"Design the plan around creating this skill."
+            )
 
-## Skill Context
-
-- Skill name: {skill_name or "TBD"}
-- Skill type: {skill_type or "TBD"}
-
-Design the plan around creating this skill.
-"""
-
-        # Add voice guidance for user-facing messages
-        if context.voice:
-            prompt += f"""
-
-## Communication Style (for user-facing messages only)
-
-{context.voice}
-
-IMPORTANT: Apply this style ONLY to interrupt() prompts and send_message() updates.
-Do NOT apply it to the plan content itself."""
-
-        return prompt
+        return sections

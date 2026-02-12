@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from ash.agents.executor import is_cancel_message
 from ash.agents.types import AgentContext, CheckpointState
-from ash.tools.base import Tool, ToolContext, ToolResult
+from ash.tools.base import Tool, ToolContext, ToolResult, format_subagent_result
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor, AgentRegistry
@@ -21,7 +21,6 @@ CHECKPOINT_METADATA_KEY = "checkpoint"
 
 def format_agent_result(content: str, agent_name: str) -> str:
     """Format agent result with structured tags for LLM clarity."""
-    from ash.tools.base import format_subagent_result
 
     return format_subagent_result(content, "agent", agent_name)
 

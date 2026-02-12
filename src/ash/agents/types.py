@@ -88,6 +88,18 @@ class AgentConfig:
     is_skill_agent: bool = False
     supports_checkpointing: bool = False  # If True, agent can use interrupt tool
     is_passthrough: bool = False  # If True, bypasses LLM loop and runs external process
+    enable_progress_updates: bool = True  # If True, adds send_message tool and steering
+
+    def get_effective_tools(self) -> list[str]:
+        """Get the effective tools list with auto-added tools.
+
+        Automatically adds:
+        - send_message if enable_progress_updates is True
+        """
+        tools = list(self.tools)
+        if self.enable_progress_updates and "send_message" not in tools:
+            tools.append("send_message")
+        return tools
 
 
 @dataclass

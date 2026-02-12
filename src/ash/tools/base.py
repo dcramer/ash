@@ -95,8 +95,8 @@ def format_subagent_result(content: str, source_type: str, source_name: str) -> 
 This is the result from the "{source_name}" {source_type}.
 The user has NOT seen this output.
 
-CRITICAL: You MUST include the actual {source_type} output in your response.
-The content below is what the user asked for - relay it directly, don't just summarize.
+CRITICAL: You MUST include this {source_type} output in your response to the user.
+Relay it directly - don't just summarize or say "the agent found X".
 </instruction>
 <output>
 {content}

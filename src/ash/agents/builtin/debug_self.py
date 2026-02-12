@@ -76,18 +76,7 @@ Before diving in, check if source code is available:
 ls -la /source/ 2>/dev/null || echo "Source not mounted - set sandbox.source_access = 'ro' in config"
 ```
 
-If source isn't available, you can still debug using logs and sessions.
-
-## Output Format
-
-Your final response MUST be wrapped in a <debug-report> tag:
-
-<debug-report>
-Your complete diagnostic analysis goes here. Include findings, root cause,
-and recommendations in natural prose.
-</debug-report>
-
-This format ensures your diagnosis can be consumed by other agents for automated remediation."""
+If source isn't available, you can still debug using logs and sessions."""
 
 
 class DebugAgent(Agent):
@@ -103,8 +92,8 @@ class DebugAgent(Agent):
             max_iterations=25,
         )
 
-    def build_system_prompt(self, context: AgentContext) -> str:
-        sections = [self.config.system_prompt]
+    def _build_prompt_sections(self, context: AgentContext) -> list[str]:
+        sections = []
 
         # Inject current session context so the agent can find itself
         if context.provider and context.chat_id:
@@ -120,4 +109,4 @@ class DebugAgent(Agent):
         if focus:
             sections.append(f"## Focus Area\n\nInvestigate: {focus}")
 
-        return "\n\n".join(sections)
+        return sections
