@@ -183,6 +183,47 @@ def get_uv_cache_path() -> Path:
     return get_ash_home() / "cache" / "uv"
 
 
+def get_source_path() -> Path | None:
+    """Get Ash source code path for debugging.
+
+    Resolution order:
+    1. ASH_SOURCE_PATH environment variable (if set)
+    2. Git repo root (walk parents looking for .git)
+    3. Installed package location (ash.__file__ parent)
+
+    Returns:
+        Path to Ash source code, or None if not found.
+    """
+    # Check environment variable first
+    if env_path := os.environ.get("ASH_SOURCE_PATH"):
+        path = Path(env_path).expanduser().resolve()
+        if path.exists():
+            return path
+
+    # Try to find git repo root by walking up from this file
+    try:
+        current = Path(__file__).resolve().parent
+        while current != current.parent:
+            if (current / ".git").exists():
+                return current
+            current = current.parent
+    except (OSError, ValueError):
+        pass
+
+    # Fall back to installed package location
+    try:
+        import ash
+
+        if ash.__file__ is not None:
+            pkg_path = Path(ash.__file__).resolve().parent
+            if pkg_path.exists():
+                return pkg_path
+    except (ImportError, AttributeError):
+        pass
+
+    return None
+
+
 def get_pid_path() -> Path:
     """Get the service PID file path."""
     return get_run_path() / "ash.pid"
@@ -209,7 +250,7 @@ def ensure_ash_home() -> Path:
     return home
 
 
-def get_all_paths() -> dict[str, Path]:
+def get_all_paths() -> dict[str, Path | None]:
     """Get all standard paths for debugging/display.
 
     Returns:
@@ -235,4 +276,5 @@ def get_all_paths() -> dict[str, Path]:
         "uv_cache": get_uv_cache_path(),
         "pid": get_pid_path(),
         "service_log": get_service_log_path(),
+        "source": get_source_path(),
     }

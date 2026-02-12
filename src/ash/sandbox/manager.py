@@ -93,6 +93,10 @@ class SandboxConfig:
     # UV cache mounting (for persistent package cache across sandbox runs)
     uv_cache_path: Path | None = None  # Host path to uv cache directory
 
+    # Source code mounting (for self-debugging skills)
+    source_path: Path | None = None  # Host path to Ash source code
+    source_access: Literal["none", "ro"] = "none"  # Never rw - always read-only
+
 
 class SandboxManager:
     """Manage Docker containers for sandboxed code execution."""
@@ -216,6 +220,16 @@ class SandboxManager:
             volumes[str(self._config.uv_cache_path)] = {
                 "bind": "/home/sandbox/.cache/uv",
                 "mode": "rw",
+            }
+
+        if (
+            self._config.source_path
+            and self._config.source_access != "none"
+            and self._config.source_path.exists()
+        ):
+            volumes[str(self._config.source_path)] = {
+                "bind": "/source",
+                "mode": "ro",  # Always read-only
             }
 
         container_config: dict[str, Any] = {

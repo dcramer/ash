@@ -144,6 +144,10 @@ class SandboxConfig(BaseModel):
     # Example: "uv pip install --user some-package"
     setup_command: str | None = None
 
+    # Source code mounting (for debug-myself skill)
+    # Mounted read-only at /source in container
+    source_access: Literal["none", "ro"] = "none"
+
 
 class ServerConfig(BaseModel):
     """Configuration for HTTP server."""

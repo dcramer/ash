@@ -168,6 +168,7 @@ def build_sandbox_manager_config(
         get_logs_path,
         get_rpc_socket_path,
         get_schedule_file,
+        get_source_path,
         get_uv_cache_path,
     )
     from ash.sandbox.manager import SandboxConfig as SandboxManagerConfig
@@ -192,6 +193,9 @@ def build_sandbox_manager_config(
             uv_cache_path=uv_cache_path,
         )
 
+    # Only resolve source path if access is enabled (avoids filesystem walks)
+    source_path = get_source_path() if config.source_access != "none" else None
+
     return SandboxManagerConfig(
         image=config.image,
         timeout=config.timeout,
@@ -210,4 +214,6 @@ def build_sandbox_manager_config(
         logs_path=logs_path,
         rpc_socket_path=rpc_socket_path,
         uv_cache_path=uv_cache_path,
+        source_path=source_path,
+        source_access=config.source_access,
     )
