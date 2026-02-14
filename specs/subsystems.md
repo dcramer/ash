@@ -125,6 +125,7 @@ Public types live in one place, not scattered across implementation files:
 | Subsystem | Status | Spec |
 |-----------|--------|------|
 | memory | Complete | [specs/memory.md](memory.md) |
+| people | Complete | [specs/people.md](people.md) |
 | sessions | Needs refactor | - |
 | scheduling | Needs refactor | - |
 

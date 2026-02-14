@@ -1,8 +1,9 @@
 """Scheduler behavior evaluation tests.
 
-These tests use real LLM calls to evaluate agent behavior.
-Run with: uv run pytest evals/test_scheduler.py -v
+Tests the scheduling system via suite-level accuracy threshold.
+Individual cases are defined in cases/scheduler.yaml.
 
+Run with: uv run pytest evals/test_scheduler.py -v
 Requires ANTHROPIC_API_KEY environment variable.
 """
 
@@ -13,126 +14,17 @@ import pytest
 from ash.core.agent import AgentComponents
 from ash.llm.base import LLMProvider
 from evals.report import print_report
-from evals.runner import get_case_by_id, load_eval_suite, run_eval_case, run_eval_suite
+from evals.runner import load_eval_suite, run_eval_suite
 
 CASES_DIR = Path(__file__).parent / "cases"
 SCHEDULER_CASES = CASES_DIR / "scheduler.yaml"
 
-# Default accuracy threshold (can be overridden per-suite)
 DEFAULT_ACCURACY_THRESHOLD = 0.80
-
-
-def _get_accuracy_threshold(suite_path: Path) -> float:
-    """Get accuracy threshold for a suite.
-
-    Uses suite-specific threshold if defined, otherwise default.
-    """
-    suite = load_eval_suite(suite_path)
-    if suite.accuracy_threshold is not None:
-        return suite.accuracy_threshold
-    return DEFAULT_ACCURACY_THRESHOLD
 
 
 @pytest.mark.eval
 class TestSchedulerEvals:
     """Scheduler behavior evaluation tests."""
-
-    @pytest.mark.asyncio
-    async def test_schedule_simple_reminder(
-        self,
-        eval_agent: AgentComponents,
-        judge_llm: LLMProvider,
-    ) -> None:
-        """Test simple reminder scheduling."""
-        suite = load_eval_suite(SCHEDULER_CASES)
-        case = get_case_by_id(suite, "schedule_simple_reminder")
-
-        result = await run_eval_case(
-            agent=eval_agent.agent,
-            case=case,
-            judge_llm=judge_llm,
-        )
-
-        # Print detailed result for debugging
-        print(f"\nResponse: {result.response_text[:200]}...")
-        print(f"Score: {result.score:.2f}")
-        print(f"Reasoning: {result.judge_result.reasoning}")
-
-        if result.is_judge_error:
-            pytest.fail(f"Judge error: {result.judge_result.reasoning}")
-        assert result.passed, f"Eval failed: {result.judge_result.reasoning}"
-
-    @pytest.mark.asyncio
-    async def test_schedule_with_timezone(
-        self,
-        eval_agent: AgentComponents,
-        judge_llm: LLMProvider,
-    ) -> None:
-        """Test timezone-aware scheduling."""
-        suite = load_eval_suite(SCHEDULER_CASES)
-        case = get_case_by_id(suite, "schedule_with_timezone")
-
-        result = await run_eval_case(
-            agent=eval_agent.agent,
-            case=case,
-            judge_llm=judge_llm,
-        )
-
-        print(f"\nResponse: {result.response_text[:200]}...")
-        print(f"Score: {result.score:.2f}")
-        print(f"Reasoning: {result.judge_result.reasoning}")
-
-        if result.is_judge_error:
-            pytest.fail(f"Judge error: {result.judge_result.reasoning}")
-        assert result.passed, f"Eval failed: {result.judge_result.reasoning}"
-
-    @pytest.mark.asyncio
-    async def test_schedule_recurring(
-        self,
-        eval_agent: AgentComponents,
-        judge_llm: LLMProvider,
-    ) -> None:
-        """Test recurring reminder handling."""
-        suite = load_eval_suite(SCHEDULER_CASES)
-        case = get_case_by_id(suite, "schedule_recurring")
-
-        result = await run_eval_case(
-            agent=eval_agent.agent,
-            case=case,
-            judge_llm=judge_llm,
-        )
-
-        print(f"\nResponse: {result.response_text[:200]}...")
-        print(f"Score: {result.score:.2f}")
-        print(f"Reasoning: {result.judge_result.reasoning}")
-
-        if result.is_judge_error:
-            pytest.fail(f"Judge error: {result.judge_result.reasoning}")
-        assert result.passed, f"Eval failed: {result.judge_result.reasoning}"
-
-    @pytest.mark.asyncio
-    async def test_schedule_vague_time(
-        self,
-        eval_agent: AgentComponents,
-        judge_llm: LLMProvider,
-    ) -> None:
-        """Test handling of vague time references."""
-        suite = load_eval_suite(SCHEDULER_CASES)
-        case = get_case_by_id(suite, "schedule_vague_time")
-
-        result = await run_eval_case(
-            agent=eval_agent.agent,
-            case=case,
-            judge_llm=judge_llm,
-        )
-
-        print(f"\nResponse: {result.response_text[:200]}...")
-        print(f"Score: {result.score:.2f}")
-        print(f"Reasoning: {result.judge_result.reasoning}")
-
-        if result.is_judge_error:
-            pytest.fail(f"Judge error: {result.judge_result.reasoning}")
-        assert result.passed, f"Eval failed: {result.judge_result.reasoning}"
 
     @pytest.mark.asyncio
     async def test_full_scheduler_suite(
@@ -142,7 +34,7 @@ class TestSchedulerEvals:
     ) -> None:
         """Run all scheduler eval cases and assert accuracy threshold."""
         suite = load_eval_suite(SCHEDULER_CASES)
-        threshold = _get_accuracy_threshold(SCHEDULER_CASES)
+        threshold = suite.accuracy_threshold or DEFAULT_ACCURACY_THRESHOLD
 
         report = await run_eval_suite(
             agent=eval_agent.agent,
@@ -150,16 +42,13 @@ class TestSchedulerEvals:
             judge_llm=judge_llm,
         )
 
-        # Print rich report
         print_report(report)
 
-        # Warn about judge errors
         if report.judge_errors > 0:
             print(
                 f"\nWarning: {report.judge_errors} cases had judge errors and were excluded from accuracy"
             )
 
-        # Assert accuracy threshold
         assert report.accuracy >= threshold, (
             f"Accuracy {report.accuracy:.2%} below threshold {threshold:.2%}. "
             f"Failed cases: {[r.case.id for r in report.failed_cases()]}"

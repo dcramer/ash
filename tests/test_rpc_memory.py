@@ -46,15 +46,12 @@ def mock_index():
 
 
 @pytest.fixture
-async def memory_manager(
-    file_memory_store, mock_index, mock_embedding_generator, db_session
-):
+async def memory_manager(file_memory_store, mock_index, mock_embedding_generator):
     """Create a memory manager with mocked components."""
     return MemoryManager(
         store=file_memory_store,
         index=mock_index,
         embedding_generator=mock_embedding_generator,
-        db_session=db_session,
     )
 
 
@@ -89,6 +86,41 @@ class TestRPCValidation:
 
         with pytest.raises(ValueError, match="memory_id is required"):
             await handler({})
+
+
+class TestRPCForgetPerson:
+    """Tests for memory.forget_person RPC method."""
+
+    async def test_forget_person_requires_person_id(self, rpc_server):
+        """Test that memory.forget_person requires person_id parameter."""
+        handler = rpc_server.methods["memory.forget_person"]
+
+        with pytest.raises(ValueError, match="person_id is required"):
+            await handler({})
+
+    async def test_forget_person_archives_memories(self, rpc_server, file_memory_store):
+        """Test that memory.forget_person archives subject memories."""
+        person_id = "person-bob"
+
+        await file_memory_store.add_memory(
+            content="Bob likes hiking",
+            owner_user_id="alice",
+            subject_person_ids=[person_id],
+        )
+        await file_memory_store.add_memory(
+            content="Alice likes cooking",
+            owner_user_id="alice",
+        )
+
+        handler = rpc_server.methods["memory.forget_person"]
+        result = await handler({"person_id": person_id})
+
+        assert result["archived_count"] == 1
+
+        # Verify only Bob's memory was removed
+        remaining = await file_memory_store.get_memories()
+        assert len(remaining) == 1
+        assert remaining[0].content == "Alice likes cooking"
 
 
 class TestRPCScoping:

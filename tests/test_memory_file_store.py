@@ -5,7 +5,9 @@ Tests focus on:
 - JSONL serialization/deserialization
 - GC with ephemeral decay
 - Supersession chain tracking
-- Migration from SQLite
+- Compaction
+- Embedding storage
+- Archive behavior
 """
 
 from datetime import UTC, datetime, timedelta
@@ -272,76 +274,6 @@ class TestSupersessionChain:
         assert chain[1].content == "Color is green"
 
 
-class TestPersonOperations:
-    """Tests for person entity operations."""
-
-    async def test_create_person(self, file_memory_store: FileMemoryStore):
-        """Test creating a person."""
-        person = await file_memory_store.create_person(
-            owner_user_id="user-1",
-            name="Sarah",
-            relationship="wife",
-            aliases=["my wife"],
-        )
-
-        assert person.id is not None
-        assert person.name == "Sarah"
-        assert person.relationship == "wife"
-        assert person.aliases == ["my wife"]
-
-    async def test_find_person_by_name(self, file_memory_store: FileMemoryStore):
-        """Test finding a person by name."""
-        await file_memory_store.create_person(
-            owner_user_id="user-1",
-            name="Sarah",
-        )
-
-        found = await file_memory_store.find_person_by_reference("user-1", "Sarah")
-
-        assert found is not None
-        assert found.name == "Sarah"
-
-    async def test_find_person_by_relationship(
-        self, file_memory_store: FileMemoryStore
-    ):
-        """Test finding a person by relationship."""
-        await file_memory_store.create_person(
-            owner_user_id="user-1",
-            name="Sarah",
-            relationship="wife",
-        )
-
-        found = await file_memory_store.find_person_by_reference("user-1", "wife")
-
-        assert found is not None
-        assert found.name == "Sarah"
-
-    async def test_find_person_by_alias(self, file_memory_store: FileMemoryStore):
-        """Test finding a person by alias."""
-        await file_memory_store.create_person(
-            owner_user_id="user-1",
-            name="Sarah",
-            aliases=["my wife"],
-        )
-
-        found = await file_memory_store.find_person_by_reference("user-1", "my wife")
-
-        assert found is not None
-        assert found.name == "Sarah"
-
-    async def test_add_person_alias(self, file_memory_store: FileMemoryStore):
-        """Test adding an alias to a person."""
-        person = await file_memory_store.create_person(
-            owner_user_id="user-1",
-            name="Sarah",
-        )
-
-        updated = await file_memory_store.add_person_alias(person.id, "honey", "user-1")
-
-        assert updated is not None
-        assert "honey" in updated.aliases
-
-
 class TestMemoryTypes:
     """Tests for memory type handling."""
 
@@ -415,3 +347,511 @@ class TestCacheInvalidation:
         await file_memory_store.add_memory(content="Second")
         memories2 = await file_memory_store.get_memories()
         assert len(memories2) == 2
+
+
+class TestPortableMemories:
+    """Tests for portable field on cross-context retrieval."""
+
+    async def test_non_portable_excluded_from_find_by_subject(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Non-portable memories are excluded from find_memories_by_subject."""
+        person_id = "person-bob"
+
+        # Portable memory
+        await file_memory_store.add_memory(
+            content="Bob loves pizza",
+            owner_user_id="alice",
+            subject_person_ids=[person_id],
+            portable=True,
+        )
+
+        # Non-portable memory
+        await file_memory_store.add_memory(
+            content="Bob is presenting next",
+            owner_user_id="alice",
+            subject_person_ids=[person_id],
+            portable=False,
+        )
+
+        memories = await file_memory_store.find_memories_by_subject(
+            person_ids={person_id}
+        )
+
+        assert len(memories) == 1
+        assert memories[0].content == "Bob loves pizza"
+
+    async def test_portable_default_is_true(self, file_memory_store: FileMemoryStore):
+        """Memories default to portable=True."""
+        memory = await file_memory_store.add_memory(
+            content="Some fact",
+            owner_user_id="user-1",
+        )
+        assert memory.portable is True
+
+    async def test_non_portable_serialization(self, file_memory_store: FileMemoryStore):
+        """Non-portable flag survives serialization round-trip."""
+        memory = await file_memory_store.add_memory(
+            content="Ephemeral fact",
+            owner_user_id="user-1",
+            subject_person_ids=["person-1"],
+            portable=False,
+        )
+
+        # Force cache reload
+        file_memory_store._invalidate_memories_cache()
+
+        loaded = await file_memory_store.get_memory(memory.id)
+        assert loaded is not None
+        assert loaded.portable is False
+
+
+class TestRemapSubjectPersonId:
+    """Tests for remap_subject_person_id after merge."""
+
+    async def test_remap_updates_matching_memories(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test that old person ID is replaced with new in subject_person_ids."""
+        m1 = await file_memory_store.add_memory(
+            content="Sarah likes hiking",
+            subject_person_ids=["old-id"],
+        )
+        m2 = await file_memory_store.add_memory(
+            content="Bob likes coding",
+            subject_person_ids=["other-id"],
+        )
+
+        count = await file_memory_store.remap_subject_person_id("old-id", "new-id")
+
+        assert count == 1
+        updated = await file_memory_store.get_memory(m1.id)
+        assert updated is not None
+        assert updated.subject_person_ids == ["new-id"]
+
+        # Unrelated memory should not be touched
+        untouched = await file_memory_store.get_memory(m2.id)
+        assert untouched is not None
+        assert untouched.subject_person_ids == ["other-id"]
+
+    async def test_remap_handles_multiple_subjects(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test remap when memory has multiple subject_person_ids."""
+        m = await file_memory_store.add_memory(
+            content="Sarah and Bob went hiking",
+            subject_person_ids=["old-id", "bob-id"],
+        )
+
+        count = await file_memory_store.remap_subject_person_id("old-id", "new-id")
+
+        assert count == 1
+        updated = await file_memory_store.get_memory(m.id)
+        assert updated is not None
+        assert updated.subject_person_ids == ["new-id", "bob-id"]
+
+    async def test_remap_returns_zero_when_no_matches(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test that remap returns 0 when no memories match."""
+        await file_memory_store.add_memory(
+            content="Unrelated",
+            subject_person_ids=["other-id"],
+        )
+
+        count = await file_memory_store.remap_subject_person_id("old-id", "new-id")
+
+        assert count == 0
+
+    async def test_remap_no_memories(self, file_memory_store: FileMemoryStore):
+        """Test remap on empty store."""
+        count = await file_memory_store.remap_subject_person_id("old-id", "new-id")
+        assert count == 0
+
+
+class TestDeleteMemoryArchives:
+    """Tests that delete_memory archives instead of physically removing."""
+
+    async def test_delete_memory_archives_in_place(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Deleted memory should be archived, not removed from file."""
+        memory = await file_memory_store.add_memory(
+            content="Delete me",
+            owner_user_id="user-1",
+        )
+
+        await file_memory_store.delete_memory(memory.id, owner_user_id="user-1")
+
+        # Should not appear in active queries
+        assert await file_memory_store.get_memory(memory.id) is None
+
+        # Should appear in archived
+        archived = await file_memory_store.get_archived_memories()
+        assert len(archived) == 1
+        assert archived[0].id == memory.id
+        assert archived[0].archive_reason == "user_deleted"
+        assert archived[0].archived_at is not None
+
+    async def test_delete_memory_still_in_get_all(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Deleted memory should appear in get_all_memories."""
+        memory = await file_memory_store.add_memory(
+            content="Delete me",
+            owner_user_id="user-1",
+        )
+
+        await file_memory_store.delete_memory(memory.id, owner_user_id="user-1")
+
+        all_memories = await file_memory_store.get_all_memories()
+        assert len(all_memories) == 1
+        assert all_memories[0].id == memory.id
+
+
+class TestGetMemoriesExcludesArchived:
+    """Tests that all retrieval methods exclude archived memories."""
+
+    async def test_get_memories_excludes_archived(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """get_memories should not return archived entries."""
+        m1 = await file_memory_store.add_memory(content="Active", owner_user_id="u1")
+        m2 = await file_memory_store.add_memory(content="Archived", owner_user_id="u1")
+
+        await file_memory_store.archive_memories({m2.id}, "test")
+
+        memories = await file_memory_store.get_memories(owner_user_id="u1")
+        assert len(memories) == 1
+        assert memories[0].id == m1.id
+
+    async def test_get_memory_excludes_archived(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """get_memory should return None for archived entries."""
+        memory = await file_memory_store.add_memory(content="Will archive")
+        await file_memory_store.archive_memories({memory.id}, "test")
+
+        assert await file_memory_store.get_memory(memory.id) is None
+
+    async def test_get_memory_by_prefix_excludes_archived(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """get_memory_by_prefix should not match archived entries."""
+        memory = await file_memory_store.add_memory(content="Will archive")
+        prefix = memory.id[:8]
+        await file_memory_store.archive_memories({memory.id}, "test")
+
+        assert await file_memory_store.get_memory_by_prefix(prefix) is None
+
+    async def test_find_memories_by_subject_excludes_archived(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """find_memories_by_subject should skip archived entries."""
+        pid = "person-1"
+        await file_memory_store.add_memory(
+            content="Active about person",
+            subject_person_ids=[pid],
+            owner_user_id="u1",
+        )
+        m2 = await file_memory_store.add_memory(
+            content="Archived about person",
+            subject_person_ids=[pid],
+            owner_user_id="u1",
+        )
+        await file_memory_store.archive_memories({m2.id}, "test")
+
+        results = await file_memory_store.find_memories_by_subject(person_ids={pid})
+        assert len(results) == 1
+        assert results[0].content == "Active about person"
+
+
+class TestCompact:
+    """Tests for compact() — permanent removal of old archived entries."""
+
+    async def test_compact_removes_old_archived(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Compact should permanently remove entries archived > N days ago."""
+        active = await file_memory_store.add_memory(content="Active")
+        to_archive = await file_memory_store.add_memory(content="Old archived")
+
+        # Archive it
+        await file_memory_store.archive_memories({to_archive.id}, "test")
+
+        # Backdate the archived_at to 100 days ago
+        memories = await file_memory_store.get_all_memories()
+        for m in memories:
+            if m.id == to_archive.id:
+                m.archived_at = datetime.now(UTC) - timedelta(days=100)
+        await file_memory_store._memories_jsonl.rewrite(memories)
+        file_memory_store._invalidate_memories_cache()
+
+        removed = await file_memory_store.compact(older_than_days=90)
+
+        assert removed == 1
+        all_remaining = await file_memory_store.get_all_memories()
+        assert len(all_remaining) == 1
+        assert all_remaining[0].id == active.id
+
+    async def test_compact_preserves_recent_archived(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Compact should keep entries archived less than N days ago."""
+        to_archive = await file_memory_store.add_memory(content="Recently archived")
+        await file_memory_store.archive_memories({to_archive.id}, "test")
+
+        removed = await file_memory_store.compact(older_than_days=90)
+
+        assert removed == 0
+        all_remaining = await file_memory_store.get_all_memories()
+        assert len(all_remaining) == 1
+
+    async def test_compact_preserves_active(self, file_memory_store: FileMemoryStore):
+        """Compact should never touch active (non-archived) entries."""
+        await file_memory_store.add_memory(content="Active 1")
+        await file_memory_store.add_memory(content="Active 2")
+
+        removed = await file_memory_store.compact(older_than_days=0)
+
+        assert removed == 0
+        all_remaining = await file_memory_store.get_all_memories()
+        assert len(all_remaining) == 2
+
+    async def test_compact_cleans_orphaned_embeddings(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Compact should remove embeddings for compacted memories."""
+        m1 = await file_memory_store.add_memory(content="Will be compacted")
+        m2 = await file_memory_store.add_memory(content="Will stay")
+
+        # Save embeddings for both
+        await file_memory_store.save_embedding(m1.id, "emb1")
+        await file_memory_store.save_embedding(m2.id, "emb2")
+
+        # Archive m1 and backdate
+        await file_memory_store.archive_memories({m1.id}, "test")
+        memories = await file_memory_store.get_all_memories()
+        for m in memories:
+            if m.id == m1.id:
+                m.archived_at = datetime.now(UTC) - timedelta(days=100)
+        await file_memory_store._memories_jsonl.rewrite(memories)
+        file_memory_store._invalidate_memories_cache()
+
+        await file_memory_store.compact(older_than_days=90)
+
+        # Only m2's embedding should remain
+        embeddings = await file_memory_store.load_embeddings()
+        assert m1.id not in embeddings
+        assert m2.id in embeddings
+        assert embeddings[m2.id] == "emb2"
+
+
+class TestEmbeddingStorage:
+    """Tests for save_embedding, load_embeddings, get_embedding_for_memory."""
+
+    async def test_save_and_load_embedding(self, file_memory_store: FileMemoryStore):
+        """Test basic save and load round-trip."""
+        await file_memory_store.save_embedding("mem-1", "base64data1")
+        await file_memory_store.save_embedding("mem-2", "base64data2")
+
+        embeddings = await file_memory_store.load_embeddings()
+
+        assert len(embeddings) == 2
+        assert embeddings["mem-1"] == "base64data1"
+        assert embeddings["mem-2"] == "base64data2"
+
+    async def test_load_embeddings_empty(self, file_memory_store: FileMemoryStore):
+        """Test loading when no embeddings exist."""
+        embeddings = await file_memory_store.load_embeddings()
+        assert embeddings == {}
+
+    async def test_get_embedding_for_memory(self, file_memory_store: FileMemoryStore):
+        """Test getting a single embedding."""
+        await file_memory_store.save_embedding("mem-1", "base64data")
+
+        result = await file_memory_store.get_embedding_for_memory("mem-1")
+        assert result == "base64data"
+
+    async def test_get_embedding_for_memory_missing(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Test getting a nonexistent embedding returns None."""
+        result = await file_memory_store.get_embedding_for_memory("no-such-id")
+        assert result is None
+
+    async def test_last_write_wins_for_duplicates(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """When same memory_id is appended twice, last write wins."""
+        await file_memory_store.save_embedding("mem-1", "old")
+        await file_memory_store.save_embedding("mem-1", "new")
+
+        embeddings = await file_memory_store.load_embeddings()
+        assert embeddings["mem-1"] == "new"
+
+
+class TestFindHearsayBySubject:
+    """Tests for find_hearsay_by_subject."""
+
+    async def test_finds_hearsay_about_person(self, file_memory_store: FileMemoryStore):
+        """Should find memories about a person spoken by someone else."""
+        pid = "person-bob"
+
+        # Hearsay: alice talking about bob
+        await file_memory_store.add_memory(
+            content="Bob likes hiking",
+            owner_user_id="alice",
+            subject_person_ids=[pid],
+            source_username="alice",
+        )
+
+        results = await file_memory_store.find_hearsay_by_subject(
+            person_ids={pid},
+            source_username="bob",
+            owner_user_id="alice",
+        )
+
+        assert len(results) == 1
+        assert results[0].content == "Bob likes hiking"
+
+    async def test_excludes_self_facts(self, file_memory_store: FileMemoryStore):
+        """Should exclude memories where the subject spoke about themselves."""
+        pid = "person-bob"
+
+        # Fact: bob talking about himself
+        await file_memory_store.add_memory(
+            content="I like hiking",
+            owner_user_id="alice",
+            subject_person_ids=[pid],
+            source_username="bob",
+        )
+
+        results = await file_memory_store.find_hearsay_by_subject(
+            person_ids={pid},
+            source_username="bob",
+            owner_user_id="alice",
+        )
+
+        assert len(results) == 0
+
+    async def test_case_insensitive_username(self, file_memory_store: FileMemoryStore):
+        """Username matching should be case-insensitive."""
+        pid = "person-bob"
+
+        await file_memory_store.add_memory(
+            content="I like coding",
+            owner_user_id="alice",
+            subject_person_ids=[pid],
+            source_username="Bob",  # Capital B
+        )
+
+        # Should still be excluded when source_username is "bob" (lowercase)
+        results = await file_memory_store.find_hearsay_by_subject(
+            person_ids={pid},
+            source_username="bob",
+            owner_user_id="alice",
+        )
+
+        assert len(results) == 0
+
+    async def test_respects_limit(self, file_memory_store: FileMemoryStore):
+        """Should stop after reaching the limit."""
+        pid = "person-bob"
+
+        for i in range(5):
+            await file_memory_store.add_memory(
+                content=f"Hearsay {i}",
+                owner_user_id="alice",
+                subject_person_ids=[pid],
+                source_username="charlie",
+            )
+
+        results = await file_memory_store.find_hearsay_by_subject(
+            person_ids={pid},
+            source_username="bob",
+            owner_user_id="alice",
+            limit=3,
+        )
+
+        assert len(results) == 3
+
+    async def test_empty_person_ids_returns_empty(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Should return empty list for empty person_ids."""
+        results = await file_memory_store.find_hearsay_by_subject(
+            person_ids=set(),
+            source_username="bob",
+        )
+
+        assert results == []
+
+
+class TestClear:
+    """Tests for clear() — physical wipe of all data."""
+
+    async def test_clear_removes_all_entries(self, file_memory_store: FileMemoryStore):
+        """Clear should physically remove all entries."""
+        await file_memory_store.add_memory(content="Active 1")
+        await file_memory_store.add_memory(content="Active 2")
+
+        count = await file_memory_store.clear()
+
+        assert count == 2
+        all_remaining = await file_memory_store.get_all_memories()
+        assert len(all_remaining) == 0
+
+    async def test_clear_removes_archived_entries(
+        self, file_memory_store: FileMemoryStore
+    ):
+        """Clear should also remove archived entries."""
+        m1 = await file_memory_store.add_memory(content="Will archive")
+        await file_memory_store.add_memory(content="Active")
+        await file_memory_store.archive_memories({m1.id}, "test")
+
+        count = await file_memory_store.clear()
+
+        assert count == 2  # Both active and archived
+        all_remaining = await file_memory_store.get_all_memories()
+        assert len(all_remaining) == 0
+
+    async def test_clear_removes_embeddings(self, file_memory_store: FileMemoryStore):
+        """Clear should also wipe embeddings.jsonl."""
+        await file_memory_store.add_memory(content="Test")
+        await file_memory_store.save_embedding("mem-1", "base64data")
+
+        await file_memory_store.clear()
+
+        embeddings = await file_memory_store.load_embeddings()
+        assert embeddings == {}
+
+    async def test_clear_empty_store(self, file_memory_store: FileMemoryStore):
+        """Clear on empty store should return 0."""
+        count = await file_memory_store.clear()
+        assert count == 0
+
+
+class TestGetAllMemories:
+    """Tests for get_all_memories (includes archived/superseded/expired)."""
+
+    async def test_includes_archived(self, file_memory_store: FileMemoryStore):
+        """get_all_memories should include archived entries."""
+        m1 = await file_memory_store.add_memory(content="Active")
+        m2 = await file_memory_store.add_memory(content="To archive")
+        await file_memory_store.archive_memories({m2.id}, "test")
+
+        all_memories = await file_memory_store.get_all_memories()
+        assert len(all_memories) == 2
+        ids = {m.id for m in all_memories}
+        assert m1.id in ids
+        assert m2.id in ids
+
+    async def test_includes_superseded(self, file_memory_store: FileMemoryStore):
+        """get_all_memories should include superseded entries."""
+        old = await file_memory_store.add_memory(content="Old")
+        new = await file_memory_store.add_memory(content="New")
+        await file_memory_store.mark_memory_superseded(old.id, new.id)
+
+        all_memories = await file_memory_store.get_all_memories()
+        assert len(all_memories) == 2

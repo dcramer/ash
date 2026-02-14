@@ -14,9 +14,6 @@ async def memory_show(memory_id: str) -> None:
     from rich.panel import Panel
     from rich.table import Table
 
-    from ash.config.paths import get_people_jsonl_path
-    from ash.memory.jsonl import PersonJSONL
-
     store = get_memory_store()
 
     # Find the memory by prefix
@@ -26,8 +23,10 @@ async def memory_show(memory_id: str) -> None:
         raise typer.Exit(1)
 
     # Load people for name lookup
-    people_jsonl = PersonJSONL(get_people_jsonl_path())
-    people = await people_jsonl.load_all()
+    from ash.cli.commands.memory._helpers import get_person_manager
+
+    pm = get_person_manager()
+    people = await pm.get_all()
     people_by_id = {p.id: p for p in people}
 
     # Build details table
@@ -39,12 +38,12 @@ async def memory_show(memory_id: str) -> None:
     table.add_row("Type", memory.memory_type.value)
 
     # Source user attribution
-    if memory.source_user_id and memory.source_user_name:
+    if memory.source_username and memory.source_display_name:
         table.add_row(
-            "Source User", f"@{memory.source_user_id} ({memory.source_user_name})"
+            "Source User", f"@{memory.source_username} ({memory.source_display_name})"
         )
-    elif memory.source_user_id:
-        table.add_row("Source User", f"@{memory.source_user_id}")
+    elif memory.source_username:
+        table.add_row("Source User", f"@{memory.source_username}")
     else:
         table.add_row("Source User", "-")
 
@@ -68,23 +67,21 @@ async def memory_show(memory_id: str) -> None:
             else:
                 subject_names.append(person_id)
         table.add_row("About", ", ".join(subject_names))
-    elif memory.source_user_name:
+    elif memory.source_display_name:
         # No subjects means speaking about self
-        table.add_row("About", f"{memory.source_user_name} (self)")
-    elif memory.source_user_id:
-        table.add_row("About", f"@{memory.source_user_id} (self)")
+        table.add_row("About", f"{memory.source_display_name} (self)")
+    elif memory.source_username:
+        table.add_row("About", f"@{memory.source_username} (self)")
     else:
         table.add_row("About", "-")
 
     # Trust level - check if source user matches any subject person (self-reference)
-    all_people = await store.get_people_for_user(memory.owner_user_id or "")
-    people_by_id_show = {p.id: p for p in all_people}
     is_self_ref = is_source_self_reference(
-        memory.source_user_id,
+        memory.source_username,
         memory.owner_user_id,
         memory.subject_person_ids,
-        all_people,
-        people_by_id_show,
+        people,
+        people_by_id,
     )
     if not subject_names or is_self_ref:
         table.add_row("Trust", "fact (source speaking about themselves)")
@@ -111,9 +108,7 @@ async def memory_show(memory_id: str) -> None:
     if memory.extraction_confidence is not None:
         table.add_row("Confidence", f"{memory.extraction_confidence:.2f}")
 
-    # Embedding info
-    if memory.embedding:
-        table.add_row("Embedding", f"{len(memory.embedding)} chars (base64)")
+    # Embedding info is now in embeddings.jsonl, not on the memory entry
 
     console.print(Panel(table, title=f"Memory {memory.id[:8]}"))
     console.print()

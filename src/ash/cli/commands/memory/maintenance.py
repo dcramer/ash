@@ -1,4 +1,4 @@
-"""Maintenance commands for memory system (gc, rebuild-index)."""
+"""Maintenance commands for memory system (gc, rebuild-index, compact)."""
 
 from ash.cli.commands.memory._helpers import get_memory_store
 from ash.cli.console import dim, success, warning
@@ -20,17 +20,44 @@ async def memory_gc() -> None:
 
 
 async def memory_rebuild_index(session) -> None:
-    """Rebuild vector index from JSONL source of truth."""
-    from ash.config.paths import get_memories_jsonl_path
+    """Rebuild vector index from embeddings.jsonl and memories.jsonl."""
+    from ash.config.paths import get_embeddings_jsonl_path, get_memories_jsonl_path
     from ash.memory.index import rebuild_vector_index_from_jsonl
 
     memories_path = get_memories_jsonl_path()
+    embeddings_path = get_embeddings_jsonl_path()
 
     if not memories_path.exists():
         warning("No memories.jsonl file found")
         return
 
-    dim(f"Rebuilding index from {memories_path}")
-    count = await rebuild_vector_index_from_jsonl(memories_path)
+    if not embeddings_path.exists():
+        warning("No embeddings.jsonl file found")
+        return
+
+    dim(f"Rebuilding index from {embeddings_path}")
+    count = await rebuild_vector_index_from_jsonl()
 
     success(f"Rebuilt index with {count} embeddings")
+
+
+async def memory_compact(force: bool, older_than_days: int = 90) -> None:
+    """Permanently remove old archived entries."""
+    import typer
+
+    store = get_memory_store()
+
+    if not force:
+        warning(
+            f"This will permanently remove archived entries older than {older_than_days} days."
+        )
+        if not typer.confirm("Are you sure?"):
+            dim("Cancelled")
+            return
+
+    removed = await store.compact(older_than_days)
+
+    if removed == 0:
+        dim("No archived entries old enough to compact")
+    else:
+        success(f"Permanently removed {removed} archived entries")

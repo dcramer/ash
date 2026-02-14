@@ -5,19 +5,23 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ash.memory import MemoryManager
+    from ash.people import PersonManager
     from ash.rpc.server import RPCServer
 
 logger = logging.getLogger(__name__)
 
 
 def register_memory_methods(
-    server: "RPCServer", memory_manager: "MemoryManager"
+    server: "RPCServer",
+    memory_manager: "MemoryManager",
+    person_manager: "PersonManager | None" = None,
 ) -> None:
     """Register memory-related RPC methods.
 
     Args:
         server: RPC server to register methods on.
         memory_manager: Memory manager instance.
+        person_manager: Person manager instance (for subject resolution).
     """
 
     async def memory_search(params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -69,8 +73,8 @@ def register_memory_methods(
             chat_id: Chat ID (for group memories when shared=True)
             shared: If True and chat_id set, creates group memory (default False)
             subjects: List of subject person references
-            source_user_id: Who provided this fact (username/handle)
-            source_user_name: Display name of the source user
+            source_username: Who provided this fact (username/handle)
+            source_display_name: Display name of the source user
         """
         content = params.get("content")
         if not content:
@@ -82,8 +86,11 @@ def register_memory_methods(
         chat_id = params.get("chat_id")
         shared = params.get("shared", False)
         subjects = params.get("subjects", [])
-        source_user_id = params.get("source_user_id")
-        source_user_name = params.get("source_user_name")
+        # Accept both old and new param names for API backward compat
+        source_username = params.get("source_username") or params.get("source_user_id")
+        source_display_name = params.get("source_display_name") or params.get(
+            "source_user_name"
+        )
 
         # Apply scoping rules:
         # - Group memory: shared=True with chat_id → owner_user_id=None, chat_id=chat_id
@@ -97,11 +104,11 @@ def register_memory_methods(
 
         # Resolve subject person IDs if provided
         subject_person_ids: list[str] = []
-        if subjects and user_id:
+        if subjects and user_id and person_manager:
             for subject in subjects:
                 try:
-                    result = await memory_manager.resolve_or_create_person(
-                        owner_user_id=user_id,
+                    result = await person_manager.resolve_or_create(
+                        created_by=user_id,
                         reference=subject,
                         content_hint=content,
                     )
@@ -116,8 +123,8 @@ def register_memory_methods(
             owner_user_id=owner_user_id,
             chat_id=effective_chat_id,
             subject_person_ids=subject_person_ids if subject_person_ids else None,
-            source_user_id=source_user_id,
-            source_user_name=source_user_name,
+            source_username=source_username,
+            source_display_name=source_display_name,
         )
 
         return {"id": memory.id}
@@ -176,10 +183,30 @@ def register_memory_methods(
         )
         return {"deleted": deleted}
 
+    async def memory_forget_person(params: dict[str, Any]) -> dict[str, Any]:
+        """Archive all memories about a person.
+
+        Params:
+            person_id: Person ID to forget (required)
+            delete_person_record: Also delete the person record (default False)
+        """
+        person_id = params.get("person_id")
+        if not person_id:
+            raise ValueError("person_id is required")
+
+        delete_person_record = params.get("delete_person_record", False)
+
+        archived_count = await memory_manager.forget_person(
+            person_id=person_id,
+            delete_person_record=delete_person_record,
+        )
+        return {"archived_count": archived_count}
+
     # Register handlers
     server.register("memory.search", memory_search)
     server.register("memory.add", memory_add)
     server.register("memory.list", memory_list)
     server.register("memory.delete", memory_delete)
+    server.register("memory.forget_person", memory_forget_person)
 
     logger.debug("Registered memory RPC methods")

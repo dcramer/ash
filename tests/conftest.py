@@ -116,13 +116,11 @@ async def file_memory_store(tmp_path: Path):
     from ash.memory.file_store import FileMemoryStore
 
     memories_path = tmp_path / "memories.jsonl"
-    archive_path = tmp_path / "archive.jsonl"
-    people_path = tmp_path / "people.jsonl"
+    embeddings_path = tmp_path / "embeddings.jsonl"
 
     return FileMemoryStore(
         memories_path=memories_path,
-        archive_path=archive_path,
-        people_path=people_path,
+        embeddings_path=embeddings_path,
     )
 
 
@@ -356,11 +354,32 @@ def make_tool_use(
 
 
 @pytest.fixture
-def cli_runner():
-    """Create a Typer CLI test runner with colors disabled."""
+def cli_runner(request):
+    """Create a Typer CLI test runner with colors disabled.
+
+    Temporarily disables pytest live logging (log_cli) because it
+    conflicts with Click's CliRunner stdout capture — the live log
+    handler writes to the real stdout and can close Click's BytesIO
+    wrapper, causing ``ValueError: I/O operation on closed file``.
+    """
+    import logging
+
     from typer.testing import CliRunner
 
-    return CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
+    # Disable live log handler if active (log_cli = true in pyproject.toml)
+    live_manager = request.config.pluginmanager.get_plugin("logging-plugin")
+    if live_manager and hasattr(live_manager, "log_cli_handler"):
+        handler = live_manager.log_cli_handler
+        old_level = handler.level
+        handler.setLevel(logging.CRITICAL + 1)  # Suppress all output
+    else:
+        handler = None
+        old_level = None
+
+    yield CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
+
+    if handler is not None and old_level is not None:
+        handler.setLevel(old_level)
 
 
 @pytest.fixture

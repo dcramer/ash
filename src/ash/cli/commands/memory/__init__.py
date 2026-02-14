@@ -19,7 +19,7 @@ def register(app: typer.Typer) -> None:
         action: Annotated[
             str | None,
             typer.Argument(
-                help="Action: list, show, add, remove, clear, gc, rebuild-index, history, doctor"
+                help="Action: list, search, show, add, remove, clear, gc, compact, rebuild-index, history, doctor, forget"
             ),
         ] = None,
         target: Annotated[
@@ -119,11 +119,18 @@ def register(app: typer.Typer) -> None:
                 help="Filter by scope: personal, shared, or global",
             ),
         ] = None,
+        delete_person: Annotated[
+            bool,
+            typer.Option(
+                "--delete-person",
+                help="Also delete the person record (for forget action)",
+            ),
+        ] = False,
         fix_attribution: Annotated[
             bool,
             typer.Option(
                 "--fix-attribution",
-                help="Fix memories missing source_user_id attribution (doctor action)",
+                help="Fix memories missing source_username attribution (doctor action)",
             ),
         ] = False,
     ) -> None:
@@ -131,10 +138,11 @@ def register(app: typer.Typer) -> None:
 
         Examples:
             ash memory list                    # List all memories
-            ash memory list -q "api keys"      # Filter memories by content
             ash memory list --scope personal   # List personal memories only
             ash memory list --scope shared     # List shared/group memories
             ash memory list --user bob         # List memories owned by bob
+            ash memory search "api keys"       # Semantic search across memories
+            ash memory search -q "api keys"    # Same, using --query flag
             ash memory show <id>               # Show full details of a memory
             ash memory add -q "User prefers dark mode"
             ash memory remove <id>             # Remove specific entry
@@ -143,6 +151,7 @@ def register(app: typer.Typer) -> None:
             ash memory gc                      # Garbage collect expired/superseded
             ash memory rebuild-index           # Rebuild vector index from JSONL
             ash memory history <id>            # Show supersession chain
+            ash memory forget <person-id>      # Archive all memories about a person
         """
         if action is None:
             ctx = click.get_current_context()
@@ -168,6 +177,7 @@ def register(app: typer.Typer) -> None:
                     user_id=user_id,
                     chat_id=chat_id,
                     scope=scope,
+                    delete_person=delete_person,
                     fix_attribution=fix_attribution,
                 )
             )
@@ -189,13 +199,21 @@ async def _run_memory_action(
     user_id: str | None,
     chat_id: str | None,
     scope: str | None,
+    delete_person: bool = False,
     fix_attribution: bool = False,
 ) -> None:
     """Run memory action asynchronously."""
+    from ash.cli.commands.memory._helpers import get_memory_manager
     from ash.cli.commands.memory.doctor import memory_doctor
+    from ash.cli.commands.memory.forget import memory_forget
     from ash.cli.commands.memory.list import memory_list
-    from ash.cli.commands.memory.maintenance import memory_gc, memory_rebuild_index
+    from ash.cli.commands.memory.maintenance import (
+        memory_compact,
+        memory_gc,
+        memory_rebuild_index,
+    )
     from ash.cli.commands.memory.mutate import memory_add, memory_clear, memory_remove
+    from ash.cli.commands.memory.search import memory_search
     from ash.cli.commands.memory.show import memory_history, memory_show
 
     if scope and scope not in ("personal", "shared", "global"):
@@ -209,13 +227,29 @@ async def _run_memory_action(
         async with database.session() as session:
             if action == "list":
                 await memory_list(
-                    session, query, limit, include_expired, user_id, chat_id, scope
+                    session, limit, include_expired, user_id, chat_id, scope
                 )
+            elif action == "search":
+                search_query = query or entry_id  # entry_id holds positional target
+                if not search_query:
+                    error(
+                        "Usage: ash memory search <query> or ash memory search -q <query>"
+                    )
+                    raise typer.Exit(1)
+                manager = await get_memory_manager(config, session)
+                if not manager:
+                    error("Semantic search requires [embeddings] configuration")
+                    raise typer.Exit(1)
+                await memory_search(manager, search_query, limit, user_id, chat_id)
             elif action == "add":
                 if not query:
-                    error("--query is required to specify content to add")
+                    error("--query/-q is required to specify content to add")
                     raise typer.Exit(1)
-                await memory_add(session, query, source, expires_days)
+                manager = await get_memory_manager(config, session)
+                if not manager:
+                    error("Memory add requires [embeddings] configuration for indexing")
+                    raise typer.Exit(1)
+                await memory_add(manager, query, source, expires_days)
             elif action == "remove":
                 await memory_remove(
                     session, entry_id, all_entries, force, user_id, chat_id, scope
@@ -236,12 +270,19 @@ async def _run_memory_action(
                     error("Usage: ash memory history <id>")
                     raise typer.Exit(1)
                 await memory_history(entry_id)
+            elif action == "forget":
+                if not entry_id:
+                    error("Usage: ash memory forget <person-id>")
+                    raise typer.Exit(1)
+                await memory_forget(config, session, entry_id, delete_person, force)
+            elif action == "compact":
+                await memory_compact(force)
             elif action == "doctor":
                 await memory_doctor(config, force, fix_attribution)
             else:
                 error(f"Unknown action: {action}")
                 console.print(
-                    "Valid actions: list, show, add, remove, clear, gc, rebuild-index, history, doctor"
+                    "Valid actions: list, search, show, add, remove, clear, gc, compact, rebuild-index, history, forget, doctor"
                 )
                 raise typer.Exit(1)
     finally:

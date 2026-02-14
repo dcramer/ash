@@ -6,37 +6,18 @@ running asynchronously after each exchange.
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ash.llm.types import Message, Role
+from ash.memory.secrets import contains_secret
 from ash.memory.types import ExtractedFact, MemoryType, Sensitivity
 
 if TYPE_CHECKING:
     from ash.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
-
-# Regex patterns for detecting secrets in extracted content (defense in depth)
-_SECRETS_PATTERNS = [
-    re.compile(r"\b(sk-[a-zA-Z0-9]{20,})\b"),  # OpenAI/Anthropic keys
-    re.compile(r"\b(ghp_[a-zA-Z0-9]{36,})\b"),  # GitHub tokens
-    re.compile(r"\b(AKIA[A-Z0-9]{16})\b"),  # AWS keys
-    re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"),  # Credit cards
-    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),  # SSN
-    re.compile(r"\b(?:password|passwd|pwd)\s*(?:is|:|=)\s*\S+", re.IGNORECASE),
-    re.compile(
-        r"-----BEGIN\s+(?:RSA\s+|DSA\s+|EC\s+|OPENSSH\s+|PGP\s+)?PRIVATE\s+KEY-----",
-        re.IGNORECASE,
-    ),
-]
-
-
-def _contains_secret(content: str) -> bool:
-    """Check if extracted content contains potential secrets."""
-    return any(pattern.search(content) for pattern in _SECRETS_PATTERNS)
 
 
 @dataclass
@@ -169,6 +150,13 @@ Return a JSON array of facts. Each fact has:
 - confidence: 0.0-1.0 how confident this should be stored
 - type: One of: "preference", "identity", "relationship", "knowledge", "context", "event", "task", "observation"
 - sensitivity: One of: "public", "personal", "sensitive" (see Sensitivity Classification)
+- portable: true if this is an enduring fact about a person (crosses chat boundaries), false if chat-operational/ephemeral (default true)
+
+## Portable vs Non-Portable:
+When a fact has subjects (is about a person), decide whether it's portable:
+- portable=true: Enduring traits and facts ("Bob loves pizza", "Sarah's birthday is March 15")
+- portable=false: Chat-operational, time-bound, or context-specific ("Bob is presenting next", "Sarah will send the report by EOD", "Alice is on mute")
+Default to true unless the fact is clearly ephemeral or only meaningful in this chat.
 
 ## Memory Types:
 Long-lived (no automatic expiration):
@@ -198,9 +186,9 @@ Only include facts with confidence >= 0.7. If you cannot resolve a reference, do
 
 Return ONLY valid JSON, no other text. Example:
 [
-  {{"content": "Prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference", "sensitivity": "public"}},
-  {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship", "sensitivity": "public"}},
-  {{"content": "Has been dealing with anxiety", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "identity", "sensitivity": "sensitive"}}
+  {{"content": "Prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference", "sensitivity": "public", "portable": true}},
+  {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship", "sensitivity": "public", "portable": true}},
+  {{"content": "Has been dealing with anxiety", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "identity", "sensitivity": "sensitive", "portable": true}}
 ]
 
 If there are no facts worth extracting, return an empty array: []"""
@@ -420,7 +408,7 @@ This ensures memories remain meaningful when recalled later.
                 continue
 
             # Filter out potential secrets (defense in depth)
-            if _contains_secret(content):
+            if contains_secret(content):
                 logger.warning(
                     "Filtered potential secret from extraction: %s...", content[:30]
                 )
@@ -459,6 +447,11 @@ This ensures memories remain meaningful when recalled later.
                 except ValueError:
                     pass  # Leave as None (default PUBLIC)
 
+            # Parse portable - default to True
+            portable = item.get("portable", True)
+            if not isinstance(portable, bool):
+                portable = True
+
             facts.append(
                 ExtractedFact(
                     content=content,
@@ -468,6 +461,7 @@ This ensures memories remain meaningful when recalled later.
                     memory_type=memory_type,
                     speaker=speaker,
                     sensitivity=sensitivity,
+                    portable=portable,
                 )
             )
 

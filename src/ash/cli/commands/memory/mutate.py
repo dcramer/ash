@@ -1,51 +1,50 @@
 """Mutation commands for memory entries (add, remove, clear)."""
 
 import logging
-from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import typer
 
 from ash.cli.commands.memory._helpers import get_memory_store
 from ash.cli.console import dim, error, success, warning
 
+if TYPE_CHECKING:
+    from ash.memory.manager import MemoryManager
+
 logger = logging.getLogger(__name__)
 
 
 async def memory_add(
-    session, content: str, source: str | None, expires_days: int | None
+    manager: "MemoryManager",
+    content: str,
+    source: str | None,
+    expires_days: int | None,
 ) -> None:
-    """Add a memory entry."""
+    """Add a memory entry via MemoryManager (with embedding + supersession)."""
     import os
 
-    from ash.memory.types import MemoryType
-
-    store = get_memory_store()
-
-    expires_at = None
-    if expires_days:
-        expires_at = datetime.now(UTC) + timedelta(days=expires_days)
-
     # Read user attribution from environment (set by sandbox)
-    # ASH_USERNAME is the user's handle (e.g., "notzeeg")
-    # ASH_DISPLAY_NAME is the user's display name (e.g., "David Cramer")
-    source_user_id = os.environ.get("ASH_USERNAME") or None
-    source_user_name = os.environ.get("ASH_DISPLAY_NAME") or None
+    source_username = os.environ.get("ASH_USERNAME") or None
+    source_display_name = os.environ.get("ASH_DISPLAY_NAME") or None
 
-    entry = await store.add_memory(
-        content=content,
-        source=source or "cli",
-        memory_type=MemoryType.KNOWLEDGE,
-        expires_at=expires_at,
-        source_user_id=source_user_id,
-        source_user_name=source_user_name,
-    )
+    try:
+        entry = await manager.add_memory(
+            content=content,
+            source=source or "cli",
+            expires_in_days=expires_days,
+            source_username=source_username,
+            source_display_name=source_display_name,
+        )
+    except ValueError as e:
+        error(str(e))
+        raise typer.Exit(1) from None
 
     success(f"Added memory entry: {entry.id[:8]}")
     dim(f"Type: {entry.memory_type.value}")
-    if source_user_id:
-        dim(f"Source: @{source_user_id}")
-    if expires_at:
-        dim(f"Expires: {expires_at.strftime('%Y-%m-%d')}")
+    if source_username:
+        dim(f"Source: @{source_username}")
+    if entry.expires_at:
+        dim(f"Expires: {entry.expires_at.strftime('%Y-%m-%d')}")
 
 
 async def memory_remove(
@@ -80,8 +79,10 @@ async def memory_remove(
                 dim("Cancelled")
                 return
 
-        # Get all entries and filter
-        entries = await store.get_all_memories()
+        # Get active entries only and filter
+        entries = await store.get_memories(
+            limit=10000, include_expired=True, include_superseded=True
+        )
         to_remove = []
 
         for entry in entries:
@@ -97,8 +98,11 @@ async def memory_remove(
                 continue
             to_remove.append(entry)
 
+        removed_count = 0
         for entry in to_remove:
-            await store.delete_memory(entry.id)
+            deleted = await store.delete_memory(entry.id)
+            if deleted:
+                removed_count += 1
             try:
                 await session.execute(
                     text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
@@ -110,7 +114,7 @@ async def memory_remove(
                 )
 
         await session.commit()
-        success(f"Removed {len(to_remove)} memory entries")
+        success(f"Removed {removed_count} memory entries")
     else:
         # Find entry by ID prefix
         assert entry_id is not None  # Guaranteed by check above
@@ -160,17 +164,15 @@ async def memory_clear(session, force: bool) -> None:
             return
 
     store = get_memory_store()
-    entries = await store.get_all_memories()
 
-    # Delete all entries
-    for entry in entries:
-        await store.delete_memory(entry.id)
+    # Physically wipe memories and embeddings JSONL files
+    count = await store.clear()
 
-    # Clear embeddings
+    # Clear vector index
     try:
         await session.execute(text("DELETE FROM memory_embeddings"))
         await session.commit()
     except Exception:
         logger.debug("Failed to clear embeddings table", exc_info=True)
 
-    success(f"Cleared {len(entries)} memory entries")
+    success(f"Cleared {count} memory entries")

@@ -9,7 +9,6 @@ from ash.cli.console import dim, warning
 
 async def memory_list(
     session,
-    query: str | None,
     limit: int,
     include_expired: bool,
     user_id: str | None,
@@ -60,31 +59,22 @@ async def memory_list(
         if scope == "global" and (entry.owner_user_id or entry.chat_id):
             continue
 
-        # Content filter
-        if query and query.lower() not in entry.content.lower():
-            continue
-
         filtered_entries.append(entry)
         if len(filtered_entries) >= limit:
             break
 
     # Load people for name lookup
-    from ash.config.paths import get_people_jsonl_path
-    from ash.memory.jsonl import PersonJSONL
+    from ash.cli.commands.memory._helpers import get_person_manager
 
-    people_jsonl = PersonJSONL(get_people_jsonl_path())
-    people = await people_jsonl.load_all()
+    pm = get_person_manager()
+    people = await pm.get_all()
     people_by_id = {p.id: p for p in people}
 
     if not filtered_entries:
-        if query:
-            warning(f"No memories found matching '{query}'")
-        else:
-            warning("No memory entries found")
+        warning("No memory entries found")
         return
 
-    title = f"Memory Search: '{query}'" if query else "Memory Entries"
-    table = Table(title=title)
+    table = Table(title="Memory Entries")
     table.add_column("ID", style="dim", max_width=8)
     table.add_column("Type", style="blue", max_width=10)
     table.add_column("About", style="green", max_width=12)
@@ -111,17 +101,17 @@ async def memory_list(
         # About: subjects if present, otherwise show username for self-referential facts
         if subject_names:
             about = ", ".join(subject_names)
-        elif entry.source_user_id:
+        elif entry.source_username:
             # Self-referential fact - show username to match source column
-            about = f"@{entry.source_user_id}"
-        elif entry.source_user_name:
-            about = entry.source_user_name
+            about = f"@{entry.source_username}"
+        elif entry.source_display_name:
+            about = entry.source_display_name
         else:
             about = "[dim]-[/dim]"
 
         # Source: who provided this information
-        if entry.source_user_id:
-            source_display = f"@{entry.source_user_id}"
+        if entry.source_username:
+            source_display = f"@{entry.source_username}"
         elif entry.source:
             source_display = entry.source
         else:
@@ -129,7 +119,7 @@ async def memory_list(
 
         # Trust: fact (speaking about self) vs hearsay (speaking about others)
         is_self_ref = is_source_self_reference(
-            entry.source_user_id,
+            entry.source_username,
             entry.owner_user_id,
             entry.subject_person_ids,
             people,

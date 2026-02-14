@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from ash.core.prompt import SystemPromptBuilder
     from ash.llm import LLMProvider
     from ash.memory import MemoryExtractor, MemoryManager
+    from ash.people import PersonManager
     from ash.providers.base import IncomingMessage
     from ash.sandbox import SandboxExecutor
     from ash.skills import SkillRegistry
@@ -109,6 +110,7 @@ class AgentComponents:
     prompt_builder: SystemPromptBuilder
     skill_registry: SkillRegistry
     memory_manager: MemoryManager | None
+    person_manager: PersonManager | None = None
     memory_extractor: MemoryExtractor | None = None
     sandbox_executor: SandboxExecutor | None = None
     agent_registry: AgentRegistry | None = None

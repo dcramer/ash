@@ -1,0 +1,18 @@
+name: Memory Recall
+description: Tests end-to-end memory flow - extraction from one session, recall in another
+
+cases:
+  - id: memory_recall_cross_session
+    description: Recall personal facts stated in a previous conversation
+    prompt: "What do you remember about me? What's my favorite programming language and where do I live?"
+    expected_behavior: |
+      The assistant should recall facts from a previous conversation where the
+      user stated their favorite programming language is Rust and they live in
+      Portland, Oregon. The response should mention both facts and be conversational.
+    criteria:
+      - Mentions Rust as the favorite programming language
+      - Mentions Portland or Oregon as the location
+      - Response is conversational, not just raw data listing
+    tags:
+      - memory
+      - recall

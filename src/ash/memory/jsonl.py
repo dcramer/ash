@@ -1,7 +1,7 @@
 """JSONL file operations for memory storage.
 
-Provides atomic read/write operations for memory and person entries,
-following the same patterns as sessions/writer.py.
+Provides a generic TypedJSONL[T] for atomic read/write operations on
+any entry type that implements to_dict/from_dict (MemoryEntry, PersonEntry).
 """
 
 from __future__ import annotations
@@ -10,18 +10,14 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import aiofiles
-
-if TYPE_CHECKING:
-    from ash.memory.types import MemoryEntry, PersonEntry
 
 logger = logging.getLogger(__name__)
 
 
-class MemoryJSONL:
-    """JSONL file operations for memory entries.
+class TypedJSONL[T]:
+    """Generic JSONL file operations for typed entries.
 
     Provides:
     - append: Add a single entry (append mode)
@@ -29,41 +25,27 @@ class MemoryJSONL:
     - rewrite: Atomically rewrite file with new entries
     """
 
-    def __init__(self, path: Path) -> None:
-        """Initialize JSONL handler.
-
-        Args:
-            path: Path to the JSONL file.
-        """
+    def __init__(self, path: Path, entry_type: type[T]) -> None:
         self.path = path
+        self._entry_type = entry_type
         self._ensure_parent()
 
     def _ensure_parent(self) -> None:
         """Ensure parent directory exists."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    async def append(self, entry: MemoryEntry) -> None:
-        """Append a memory entry to the file.
-
-        Args:
-            entry: Memory entry to append.
-        """
-        line = json.dumps(entry.to_dict(), ensure_ascii=False, separators=(",", ":"))
+    async def append(self, entry: T) -> None:
+        """Append an entry to the file."""
+        line = json.dumps(entry.to_dict(), ensure_ascii=False, separators=(",", ":"))  # type: ignore[union-attr]
         async with aiofiles.open(self.path, "a", encoding="utf-8") as f:
             await f.write(line + "\n")
 
-    async def load_all(self) -> list[MemoryEntry]:
-        """Load all memory entries from the file.
-
-        Returns:
-            List of memory entries.
-        """
-        from ash.memory.types import MemoryEntry
-
+    async def load_all(self) -> list[T]:
+        """Load all entries from the file."""
         if not self.path.exists():
             return []
 
-        entries: list[MemoryEntry] = []
+        entries: list[T] = []
         async with aiofiles.open(self.path, encoding="utf-8") as f:
             async for line in f:
                 line = line.strip()
@@ -71,31 +53,27 @@ class MemoryJSONL:
                     continue
                 try:
                     data = json.loads(line)
-                    entries.append(MemoryEntry.from_dict(data))
+                    entries.append(self._entry_type.from_dict(data))  # type: ignore[union-attr]
                 except json.JSONDecodeError as e:
                     logger.warning("Failed to parse JSONL line: %s", e)
                     continue
                 except Exception as e:
-                    logger.warning("Failed to parse memory entry: %s", e)
+                    logger.warning("Failed to parse entry: %s", e)
                     continue
 
         return entries
 
-    async def rewrite(self, entries: list[MemoryEntry]) -> None:
+    async def rewrite(self, entries: list[T]) -> None:
         """Atomically rewrite the file with new entries.
 
         Uses atomic write (write to temp, then rename) to prevent
         data loss on crash.
-
-        Args:
-            entries: Complete list of entries to write.
         """
         self._ensure_parent()
 
-        # Write to temporary file first
         temp_fd, temp_path = tempfile.mkstemp(
             dir=self.path.parent,
-            prefix=".memories_",
+            prefix=f".{self.path.stem}_",
             suffix=".tmp",
         )
 
@@ -103,7 +81,9 @@ class MemoryJSONL:
             async with aiofiles.open(temp_fd, "w", encoding="utf-8") as f:
                 for entry in entries:
                     line = json.dumps(
-                        entry.to_dict(), ensure_ascii=False, separators=(",", ":")
+                        entry.to_dict(),  # type: ignore[union-attr]
+                        ensure_ascii=False,
+                        separators=(",", ":"),
                     )
                     await f.write(line + "\n")
 
@@ -118,183 +98,33 @@ class MemoryJSONL:
             raise
 
     def exists(self) -> bool:
-        """Check if the file exists.
-
-        Returns:
-            True if file exists.
-        """
-        return self.path.exists()
-
-    def get_mtime(self) -> float | None:
-        """Get file modification time for cache invalidation.
-
-        Returns:
-            Modification time as float, or None if file doesn't exist.
-        """
-        if not self.path.exists():
-            return None
-        return self.path.stat().st_mtime
-
-
-class PersonJSONL:
-    """JSONL file operations for person entries."""
-
-    def __init__(self, path: Path) -> None:
-        """Initialize JSONL handler.
-
-        Args:
-            path: Path to the JSONL file.
-        """
-        self.path = path
-        self._ensure_parent()
-
-    def _ensure_parent(self) -> None:
-        """Ensure parent directory exists."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-
-    async def append(self, entry: PersonEntry) -> None:
-        """Append a person entry to the file.
-
-        Args:
-            entry: Person entry to append.
-        """
-        line = json.dumps(entry.to_dict(), ensure_ascii=False, separators=(",", ":"))
-        async with aiofiles.open(self.path, "a", encoding="utf-8") as f:
-            await f.write(line + "\n")
-
-    async def load_all(self) -> list[PersonEntry]:
-        """Load all person entries from the file.
-
-        Returns:
-            List of person entries.
-        """
-        from ash.memory.types import PersonEntry
-
-        if not self.path.exists():
-            return []
-
-        entries: list[PersonEntry] = []
-        async with aiofiles.open(self.path, encoding="utf-8") as f:
-            async for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                    entries.append(PersonEntry.from_dict(data))
-                except json.JSONDecodeError as e:
-                    logger.warning("Failed to parse JSONL line: %s", e)
-                    continue
-                except Exception as e:
-                    logger.warning("Failed to parse person entry: %s", e)
-                    continue
-
-        return entries
-
-    async def rewrite(self, entries: list[PersonEntry]) -> None:
-        """Atomically rewrite the file with new entries.
-
-        Args:
-            entries: Complete list of entries to write.
-        """
-        self._ensure_parent()
-
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=self.path.parent,
-            prefix=".people_",
-            suffix=".tmp",
-        )
-
-        try:
-            async with aiofiles.open(temp_fd, "w", encoding="utf-8") as f:
-                for entry in entries:
-                    line = json.dumps(
-                        entry.to_dict(), ensure_ascii=False, separators=(",", ":")
-                    )
-                    await f.write(line + "\n")
-
-            Path(temp_path).replace(self.path)
-        except Exception:
-            try:
-                Path(temp_path).unlink()
-            except OSError:
-                pass
-            raise
-
-    def exists(self) -> bool:
         """Check if the file exists."""
         return self.path.exists()
 
     def get_mtime(self) -> float | None:
-        """Get file modification time for cache invalidation.
-
-        Returns:
-            Modification time as float, or None if file doesn't exist.
-        """
+        """Get file modification time for cache invalidation."""
         if not self.path.exists():
             return None
         return self.path.stat().st_mtime
 
 
-class ArchiveJSONL:
-    """Append-only archive for removed memories.
+# Backward compatibility aliases
+def MemoryJSONL(path: Path) -> TypedJSONL:
+    """Create a TypedJSONL for MemoryEntry."""
+    from ash.memory.types import MemoryEntry
 
-    Never rewritten, only appended. Safety net for data recovery.
-    """
+    return TypedJSONL(path, MemoryEntry)
 
-    def __init__(self, path: Path) -> None:
-        """Initialize archive handler.
 
-        Args:
-            path: Path to the archive file.
-        """
-        self.path = path
-        self._ensure_parent()
+def PersonJSONL(path: Path) -> TypedJSONL:
+    """Create a TypedJSONL for PersonEntry."""
+    from ash.people.types import PersonEntry
 
-    def _ensure_parent(self) -> None:
-        """Ensure parent directory exists."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    return TypedJSONL(path, PersonEntry)
 
-    async def append(self, entry: MemoryEntry) -> None:
-        """Append a memory entry to the archive.
 
-        Args:
-            entry: Memory entry to archive (should have archived_at and
-                   archive_reason set).
-        """
-        line = json.dumps(entry.to_dict(), ensure_ascii=False, separators=(",", ":"))
-        async with aiofiles.open(self.path, "a", encoding="utf-8") as f:
-            await f.write(line + "\n")
+def EmbeddingJSONL(path: Path) -> TypedJSONL:
+    """Create a TypedJSONL for EmbeddingRecord."""
+    from ash.memory.types import EmbeddingRecord
 
-    async def load_all(self) -> list[MemoryEntry]:
-        """Load all archived entries.
-
-        Returns:
-            List of archived memory entries.
-        """
-        from ash.memory.types import MemoryEntry
-
-        if not self.path.exists():
-            return []
-
-        entries: list[MemoryEntry] = []
-        async with aiofiles.open(self.path, encoding="utf-8") as f:
-            async for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                    entries.append(MemoryEntry.from_dict(data))
-                except json.JSONDecodeError as e:
-                    logger.warning("Failed to parse archive line: %s", e)
-                    continue
-                except Exception as e:
-                    logger.warning("Failed to parse archived entry: %s", e)
-                    continue
-
-        return entries
-
-    def exists(self) -> bool:
-        """Check if the archive file exists."""
-        return self.path.exists()
+    return TypedJSONL(path, EmbeddingRecord)

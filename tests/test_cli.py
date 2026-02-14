@@ -92,10 +92,18 @@ class TestMemoryCommand:
         )
         assert result.exit_code == 1
 
+    def test_memory_search_requires_query(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app, ["memory", "search", "--config", str(config_file)]
+        )
+        assert result.exit_code == 1
+        assert "search" in result.stdout.lower() or "query" in result.stdout.lower()
+
     def test_memory_help(self, cli_runner):
         result = cli_runner.invoke(app, ["memory", "--help"])
         assert result.exit_code == 0
         assert "list" in result.stdout
+        assert "search" in result.stdout
         assert "add" in result.stdout
         assert "remove" in result.stdout
         assert "clear" in result.stdout

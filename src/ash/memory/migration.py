@@ -16,11 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ash.config.paths import (
     get_database_path,
+    get_embeddings_jsonl_path,
     get_memories_jsonl_path,
     get_people_jsonl_path,
 )
-from ash.memory.jsonl import MemoryJSONL, PersonJSONL
-from ash.memory.types import MemoryEntry, MemoryType, PersonEntry
+from ash.memory.jsonl import EmbeddingJSONL, MemoryJSONL, PersonJSONL
+from ash.memory.types import EmbeddingRecord, MemoryEntry, MemoryType
+from ash.people.types import PersonEntry
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ async def migrate_db_to_jsonl(
     session: AsyncSession,
     memories_path: Path | None = None,
     people_path: Path | None = None,
+    embeddings_path: Path | None = None,
 ) -> tuple[int, int]:
     """Migrate memories and people from SQLite to JSONL.
 
@@ -54,6 +57,7 @@ async def migrate_db_to_jsonl(
         session: Database session with existing data.
         memories_path: Path for memories.jsonl (default: standard location).
         people_path: Path for people.jsonl (default: standard location).
+        embeddings_path: Path for embeddings.jsonl (default: standard location).
 
     Returns:
         Tuple of (memories_migrated, people_migrated).
@@ -62,9 +66,11 @@ async def migrate_db_to_jsonl(
         memories_path = get_memories_jsonl_path()
     if people_path is None:
         people_path = get_people_jsonl_path()
+    if embeddings_path is None:
+        embeddings_path = get_embeddings_jsonl_path()
 
-    # Migrate memories
-    memories_count = await _migrate_memories(session, memories_path)
+    # Migrate memories (and extract embeddings)
+    memories_count = await _migrate_memories(session, memories_path, embeddings_path)
 
     # Migrate people
     people_count = await _migrate_people(session, people_path)
@@ -83,12 +89,17 @@ async def migrate_db_to_jsonl(
 async def _migrate_memories(
     session: AsyncSession,
     memories_path: Path,
+    embeddings_path: Path | None = None,
 ) -> int:
     """Migrate memories from SQLite to JSONL.
+
+    Embeddings are extracted to a separate embeddings.jsonl file
+    rather than being stored inline in the memory entries.
 
     Args:
         session: Database session.
         memories_path: Path for memories.jsonl.
+        embeddings_path: Path for embeddings.jsonl.
 
     Returns:
         Number of memories migrated.
@@ -179,12 +190,27 @@ async def _migrate_memories(
         )
         entries.append(entry)
 
+    # Extract embeddings to separate file and clear from entries
+    embedding_count = 0
+    if embeddings_path:
+        embeddings_jsonl = EmbeddingJSONL(embeddings_path)
+        for entry in entries:
+            if entry.embedding:
+                record = EmbeddingRecord(memory_id=entry.id, embedding=entry.embedding)
+                await embeddings_jsonl.append(record)
+                entry.embedding = ""
+                embedding_count += 1
+
     # Write all entries
     await jsonl.rewrite(entries)
 
     logger.info(
         "memories_migrated",
-        extra={"count": len(entries), "path": str(memories_path)},
+        extra={
+            "count": len(entries),
+            "embeddings": embedding_count,
+            "path": str(memories_path),
+        },
     )
 
     return len(entries)
@@ -255,13 +281,21 @@ async def _migrate_people(
             )
             continue
 
+        # Build new-format fields from old DB columns
+        from ash.people.types import AliasEntry, RelationshipClaim
+
+        alias_entries = [AliasEntry(value=a) for a in aliases]
+        relationships = []
+        if row[3]:
+            relationships = [RelationshipClaim(relationship=row[3])]
+
         entry = PersonEntry(
             id=row[0],
             version=1,
-            owner_user_id=row[1] or "",
+            created_by=row[1] or "",
             name=row[2] or "",
-            relationship=row[3],  # Maps DB 'relation' column to 'relationship' field
-            aliases=aliases,
+            relationships=relationships,
+            aliases=alias_entries,
             created_at=created_at,
             updated_at=_parse_datetime(row[7]),
             metadata=metadata,
@@ -383,6 +417,93 @@ def needs_migration() -> bool:
 
     # Migration needed if database exists
     return db_path.exists()
+
+
+async def migrate_to_graph_dir() -> bool:
+    """Migrate from old scattered paths to ~/.ash/graph/.
+
+    Old layout:
+    - ~/.ash/memory/memories.jsonl
+    - ~/.ash/memory/archive.jsonl
+    - ~/.ash/people.jsonl
+
+    New layout:
+    - ~/.ash/graph/memories.jsonl  (active + archived combined, no embeddings)
+    - ~/.ash/graph/people.jsonl
+    - ~/.ash/graph/embeddings.jsonl (memory_id -> embedding pairs)
+
+    Returns:
+        True if migration was performed, False if skipped.
+    """
+    from ash.config.paths import get_ash_home
+
+    graph_memories = get_memories_jsonl_path()  # Now points to graph/memories.jsonl
+
+    # Idempotent: skip if new path already exists
+    if graph_memories.exists():
+        return False
+
+    ash_home = get_ash_home()
+    old_memories_path = ash_home / "memory" / "memories.jsonl"
+    old_archive_path = ash_home / "memory" / "archive.jsonl"
+    old_people_path = ash_home / "people.jsonl"
+
+    # Nothing to migrate if old files don't exist
+    if not old_memories_path.exists() and not old_people_path.exists():
+        return False
+
+    logger.info("Migrating to graph directory layout")
+
+    # Ensure graph dir exists
+    graph_memories.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load old memories
+    active_entries: list[MemoryEntry] = []
+    if old_memories_path.exists():
+        old_mem_jsonl = MemoryJSONL(old_memories_path)
+        active_entries = await old_mem_jsonl.load_all()
+
+    # Load old archive
+    archive_entries: list[MemoryEntry] = []
+    if old_archive_path.exists():
+        old_archive_jsonl = MemoryJSONL(old_archive_path)
+        archive_entries = await old_archive_jsonl.load_all()
+
+    # Extract embeddings and strip from entries
+    embeddings_path = get_embeddings_jsonl_path()
+    embeddings_jsonl = EmbeddingJSONL(embeddings_path)
+
+    embedding_count = 0
+    all_entries = active_entries + archive_entries
+    for entry in all_entries:
+        if entry.embedding:
+            record = EmbeddingRecord(memory_id=entry.id, embedding=entry.embedding)
+            await embeddings_jsonl.append(record)
+            entry.embedding = ""
+            embedding_count += 1
+
+    # Write combined memories (active + archived)
+    new_mem_jsonl = MemoryJSONL(graph_memories)
+    await new_mem_jsonl.rewrite(all_entries)
+
+    # Copy people
+    if old_people_path.exists():
+        new_people_path = get_people_jsonl_path()
+        old_people_jsonl = PersonJSONL(old_people_path)
+        people = await old_people_jsonl.load_all()
+        new_people_jsonl = PersonJSONL(new_people_path)
+        await new_people_jsonl.rewrite(people)
+
+    logger.info(
+        "graph_migration_complete",
+        extra={
+            "active_memories": len(active_entries),
+            "archived_memories": len(archive_entries),
+            "embeddings": embedding_count,
+        },
+    )
+
+    return True
 
 
 async def check_db_has_memories(session: AsyncSession) -> bool:

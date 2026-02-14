@@ -1,0 +1,68 @@
+name: Identity Resolution
+description: Tests person recognition and identity resolution across sessions and users
+
+cases:
+  - id: identity_group_chat_recall
+    description: Recall facts about a person mentioned by multiple users in a group chat
+    prompt: "What do you know about Sukhpreet?"
+    expected_behavior: |
+      The assistant should recall facts about Sukhpreet from a previous group chat
+      where David (@dcramer) said his wife Sukhpreet loves hiking, and Sukhpreet
+      herself (@sksembhi) said she is training for a marathon. The response should
+      mention both hiking and marathon training, recognizing that @sksembhi is
+      Sukhpreet (David's wife).
+    criteria:
+      - Mentions hiking as something Sukhpreet likes or does
+      - Mentions marathon training
+      - Response is conversational
+    tags:
+      - identity
+      - people
+      - group_chat
+
+  - id: identity_relationship_term_recall
+    description: Resolve "my wife" to the correct person and recall facts about her
+    prompt: "Tell me about my wife"
+    expected_behavior: |
+      The assistant should resolve "my wife" to Sukhpreet via the wife relationship
+      that David stated. It should mention relevant facts about Sukhpreet such as
+      hiking or marathon training.
+    criteria:
+      - Identifies Sukhpreet as the wife
+      - Mentions at least one fact about her (hiking or marathon)
+      - Does not say it doesn't know who the user's wife is
+    tags:
+      - identity
+      - people
+      - relationship_resolution
+
+  - id: identity_the_prefix_resolution
+    description: Resolve "the boss" via relationship prefix stripping
+    prompt: "What does the boss think about our timeline?"
+    expected_behavior: |
+      The assistant should resolve "the boss" to the person with the "boss"
+      relationship. Even without specific facts about timeline opinions, it should
+      acknowledge the boss by name and not claim it doesn't know who the boss is.
+    criteria:
+      - References the boss by their name (not just "the boss")
+      - Does not claim ignorance about who the boss is
+    tags:
+      - identity
+      - people
+      - relationship_resolution
+
+  - id: identity_self_not_leaked
+    description: Agent should not describe the user as a third person they were "told about"
+    prompt: "What do you know about me?"
+    expected_behavior: |
+      The assistant should respond about the user (David) directly, drawing on
+      memories about him. It should NOT say things like "You told me about David Cramer"
+      as if David is a third party. It should speak about the user in second person.
+    criteria:
+      - Responds about the user directly (uses "you" not "David told me about David")
+      - Does not treat the user as a third-party person entry
+      - Response is natural and conversational
+    tags:
+      - identity
+      - people
+      - self_person

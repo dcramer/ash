@@ -4,16 +4,13 @@ Public API:
 - MemoryManager: Primary facade for all memory operations
 - create_memory_manager: Factory to create wired MemoryManager
 - MemoryExtractor: Background extraction from conversations
-- PersonManager: Person entity management
 
 Types:
 - MemoryEntry: Full memory entry schema
 - MemoryType: Memory type classification
-- PersonEntry: Person entity schema
 - GCResult: Result of garbage collection
 - RetrievedContext: Context for LLM augmentation
 - SearchResult: Individual search result with similarity
-- PersonResolutionResult: Result of person lookup/creation
 - ExtractedFact: Fact extracted from conversation
 - matches_scope: Utility for scope filtering
 
@@ -28,14 +25,11 @@ from ash.memory.extractor import MemoryExtractor
 from ash.memory.file_store import FileMemoryStore
 from ash.memory.index import VectorIndex
 from ash.memory.manager import MemoryManager, create_memory_manager
-from ash.memory.person import PersonManager
 from ash.memory.types import (
     ExtractedFact,
     GCResult,
     MemoryEntry,
     MemoryType,
-    PersonEntry,
-    PersonResolutionResult,
     RetrievedContext,
     SearchResult,
     matches_scope,
@@ -47,15 +41,11 @@ __all__ = [
     "create_memory_manager",
     # Extraction
     "MemoryExtractor",
-    # Person management
-    "PersonManager",
     # Types
     "MemoryEntry",
     "MemoryType",
-    "PersonEntry",
     "GCResult",
     "ExtractedFact",
-    "PersonResolutionResult",
     "RetrievedContext",
     "SearchResult",
     "matches_scope",

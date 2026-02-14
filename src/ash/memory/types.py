@@ -86,12 +86,14 @@ class MemoryEntry:
     - version: Schema version for migration
     - content: The memory text
     - memory_type: Type classification
-    - embedding: Base64-encoded float32 array
     - created_at: When written to storage
     - source: Origin tracking (user, extraction, cli, rpc)
     - owner_user_id OR chat_id: At least one required for authorization
 
     Optional fields populated based on context.
+
+    Note: Embeddings are stored separately in embeddings.jsonl, not in this entry.
+    The ``embedding`` field is vestigial and only used transiently during migration.
     """
 
     # Identity (required)
@@ -122,8 +124,8 @@ class MemoryEntry:
     source: str = "user"  # "user" | "extraction" | "cli" | "rpc"
 
     # Source Attribution (optional, for multi-user scenarios)
-    source_user_id: str | None = None  # Who said/provided this fact
-    source_user_name: str | None = None  # Display name for source user
+    source_username: str | None = None  # Who said/provided this fact (handle/username)
+    source_display_name: str | None = None  # Display name for source user
 
     # Source Attribution (optional, for extraction tracing)
     source_session_id: str | None = None
@@ -133,12 +135,15 @@ class MemoryEntry:
     # Privacy (optional)
     sensitivity: Sensitivity | None = None  # None = PUBLIC for backward compat
 
+    # Cross-context portability (optional)
+    portable: bool = True  # Whether this memory crosses chat boundaries via ABOUT edges
+
     # Lifecycle (optional)
     expires_at: datetime | None = None
     superseded_at: datetime | None = None
     superseded_by_id: str | None = None
 
-    # Archive fields (only present in archive.jsonl)
+    # Archive fields (set when memory is archived)
     archived_at: datetime | None = None
     archive_reason: str | None = None  # "superseded" | "expired" | "ephemeral_decay"
 
@@ -146,13 +151,15 @@ class MemoryEntry:
     metadata: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to JSON-compatible dict."""
+        """Serialize to JSON-compatible dict.
+
+        Note: embedding is NOT written to JSONL (stored separately in embeddings.jsonl).
+        """
         d: dict[str, Any] = {
             "id": self.id,
             "version": self.version,
             "content": self.content,
             "memory_type": self.memory_type.value,
-            "embedding": self.embedding,
             "source": self.source,
         }
 
@@ -169,10 +176,10 @@ class MemoryEntry:
             d["chat_id"] = self.chat_id
         if self.subject_person_ids:
             d["subject_person_ids"] = self.subject_person_ids
-        if self.source_user_id:
-            d["source_user_id"] = self.source_user_id
-        if self.source_user_name:
-            d["source_user_name"] = self.source_user_name
+        if self.source_username:
+            d["source_username"] = self.source_username
+        if self.source_display_name:
+            d["source_display_name"] = self.source_display_name
         if self.source_session_id:
             d["source_session_id"] = self.source_session_id
         if self.source_message_id:
@@ -181,6 +188,8 @@ class MemoryEntry:
             d["extraction_confidence"] = self.extraction_confidence
         if self.sensitivity is not None:
             d["sensitivity"] = self.sensitivity.value
+        if not self.portable:
+            d["portable"] = False
         if self.expires_at:
             d["expires_at"] = self.expires_at.isoformat()
         if self.superseded_at:
@@ -198,7 +207,12 @@ class MemoryEntry:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "MemoryEntry":
-        """Deserialize from JSON dict."""
+        """Deserialize from JSON dict.
+
+        Supports both old field names (source_user_id, source_user_name)
+        and new names (source_username, source_display_name) for backward compat.
+        Also accepts embedding if present (for migration reading old format).
+        """
         return cls(
             id=d["id"],
             version=d.get("version", 1),
@@ -211,12 +225,14 @@ class MemoryEntry:
             chat_id=d.get("chat_id"),
             subject_person_ids=d.get("subject_person_ids") or [],
             source=d.get("source", "user"),
-            source_user_id=d.get("source_user_id"),
-            source_user_name=d.get("source_user_name"),
+            source_username=d.get("source_username") or d.get("source_user_id"),
+            source_display_name=d.get("source_display_name")
+            or d.get("source_user_name"),
             source_session_id=d.get("source_session_id"),
             source_message_id=d.get("source_message_id"),
             extraction_confidence=d.get("extraction_confidence"),
             sensitivity=Sensitivity(d["sensitivity"]) if d.get("sensitivity") else None,
+            portable=d.get("portable", True),
             expires_at=_parse_datetime(d.get("expires_at")),
             superseded_at=_parse_datetime(d.get("superseded_at")),
             superseded_by_id=d.get("superseded_by_id"),
@@ -252,57 +268,22 @@ class MemoryEntry:
 
 
 @dataclass
-class PersonEntry:
-    """Person entity for filesystem storage."""
+class EmbeddingRecord:
+    """Embedding storage record for embeddings.jsonl.
 
-    id: str
-    version: int = 1
-    owner_user_id: str = ""
-    name: str = ""
-    relationship: str | None = None
-    aliases: list[str] = field(default_factory=list)
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-    metadata: dict[str, Any] | None = None
+    Stores memory_id → base64 embedding pairs separately from memories
+    to keep memories.jsonl human-readable.
+    """
+
+    memory_id: str
+    embedding: str  # Base64-encoded float32 array
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to JSON-compatible dict."""
-        d: dict[str, Any] = {
-            "id": self.id,
-            "version": self.version,
-            "owner_user_id": self.owner_user_id,
-            "name": self.name,
-        }
-
-        if self.relationship:
-            d["relationship"] = self.relationship
-        if self.aliases:
-            d["aliases"] = self.aliases
-        if self.created_at:
-            d["created_at"] = self.created_at.isoformat()
-        if self.updated_at:
-            d["updated_at"] = self.updated_at.isoformat()
-        if self.metadata:
-            d["metadata"] = self.metadata
-
-        return d
+        return {"memory_id": self.memory_id, "embedding": self.embedding}
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "PersonEntry":
-        """Deserialize from JSON dict."""
-        # Support both old "relation" and new "relationship" field names
-        relationship = d.get("relationship") or d.get("relation")
-        return cls(
-            id=d["id"],
-            version=d.get("version", 1),
-            owner_user_id=d.get("owner_user_id", ""),
-            name=d.get("name", ""),
-            relationship=relationship,
-            aliases=d.get("aliases") or [],
-            created_at=_parse_datetime(d.get("created_at")),
-            updated_at=_parse_datetime(d.get("updated_at")),
-            metadata=d.get("metadata"),
-        )
+    def from_dict(cls, d: dict[str, Any]) -> "EmbeddingRecord":
+        return cls(memory_id=d["memory_id"], embedding=d.get("embedding", ""))
 
 
 @dataclass
@@ -324,15 +305,6 @@ class RetrievedContext:
 
 
 @dataclass
-class PersonResolutionResult:
-    """Result of person resolution."""
-
-    person_id: str
-    created: bool
-    person_name: str
-
-
-@dataclass
 class ExtractedFact:
     """A fact extracted from conversation."""
 
@@ -343,6 +315,7 @@ class ExtractedFact:
     memory_type: MemoryType = MemoryType.KNOWLEDGE
     speaker: str | None = None  # Who said this (username or identifier)
     sensitivity: Sensitivity | None = None  # Privacy classification
+    portable: bool = True  # Whether this fact crosses chat boundaries
 
 
 @dataclass

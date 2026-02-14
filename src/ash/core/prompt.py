@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from ash.agents import AgentRegistry
     from ash.config import AshConfig, Workspace
     from ash.memory import RetrievedContext
-    from ash.memory.types import PersonEntry
+    from ash.people.types import PersonEntry
     from ash.skills import SkillRegistry
     from ash.tools import ToolRegistry
 
@@ -133,7 +133,7 @@ class SystemPromptBuilder:
             self._build_runtime_section(context.runtime),
             self._build_sender_section(context),
             self._build_passive_engagement_section(context),
-            self._build_people_section(context.known_people),
+            self._build_people_section(context.known_people, context.sender_username),
             self._build_memory_section(context.memory),
             self._build_conversation_context_section(context),
             self._build_session_section(context),
@@ -478,21 +478,36 @@ class SystemPromptBuilder:
 
         return "\n".join(lines)
 
-    def _build_people_section(self, people: list[PersonEntry] | None) -> str:
+    def _build_people_section(
+        self,
+        people: list[PersonEntry] | None,
+        sender_username: str | None = None,
+    ) -> str:
         if not people:
+            return ""
+
+        # Filter out self-persons for the current sender
+        display_people = []
+        for person in people:
+            if sender_username and self._is_self_person(person, sender_username):
+                continue
+            display_people.append(person)
+
+        if not display_people:
             return ""
 
         lines = [
             "## Known People",
             "",
-            "The user has told you about these people:",
+            "These are people you know about:",
             "",
         ]
 
-        for person in people:
+        for person in display_people:
             entry = f"**{person.name}**"
-            if person.relationship:
-                entry = f"{entry} ({person.relationship})"
+            rel_label = self._get_relationship_label(person, sender_username)
+            if rel_label:
+                entry = f"{entry} ({rel_label})"
             lines.append(f"- {entry}")
 
         lines.append("")
@@ -501,6 +516,49 @@ class SystemPromptBuilder:
         )
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _is_self_person(person: PersonEntry, username: str) -> bool:
+        """Check if a person is the self-record for the given username."""
+        is_self = any(r.relationship == "self" for r in person.relationships)
+        if not is_self:
+            return False
+        username_lower = username.lower()
+        if person.name.lower() == username_lower:
+            return True
+        return any(a.value.lower() == username_lower for a in person.aliases)
+
+    @staticmethod
+    def _get_relationship_label(
+        person: PersonEntry, sender_username: str | None
+    ) -> str | None:
+        """Get the best relationship label for a person.
+
+        Prefers the relationship stated by the current sender. Falls back to
+        showing all distinct relationships.
+        """
+        if not person.relationships:
+            return None
+
+        # Filter out "self" relationships from display
+        display_rels = [r for r in person.relationships if r.relationship != "self"]
+        if not display_rels:
+            return None
+
+        # Prefer relationship stated by the current sender
+        if sender_username:
+            for rc in display_rels:
+                if rc.stated_by and rc.stated_by.lower() == sender_username.lower():
+                    return rc.relationship
+
+        # Show all distinct relationships
+        seen: set[str] = set()
+        labels: list[str] = []
+        for rc in display_rels:
+            if rc.relationship.lower() not in seen:
+                seen.add(rc.relationship.lower())
+                labels.append(rc.relationship)
+        return ", ".join(labels) if labels else None
 
     def _build_memory_section(self, memory: RetrievedContext | None) -> str:
         if not memory:

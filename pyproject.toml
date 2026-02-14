@@ -172,6 +172,9 @@ markers = [
     "integration: marks tests as integration tests",
     "eval: marks tests as evaluation tests (require real LLM)",
 ]
+log_cli = true
+log_cli_level = "WARNING"
+log_cli_format = "%(levelname)s %(name)s: %(message)s"
 
 # ============== COVERAGE ==============
 

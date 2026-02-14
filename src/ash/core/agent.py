@@ -33,6 +33,7 @@ from ash.llm.types import (
     TextContent,
     ToolUse,
 )
+from ash.memory.types import MemoryType
 from ash.tools import ToolContext, ToolExecutor, ToolRegistry
 
 if TYPE_CHECKING:
@@ -41,7 +42,8 @@ if TYPE_CHECKING:
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
     from ash.memory import MemoryExtractor, MemoryManager, RetrievedContext
-    from ash.memory.types import PersonEntry
+    from ash.people import PersonManager
+    from ash.people.types import PersonEntry
     from ash.providers.base import IncomingMessage
 
 logger = logging.getLogger(__name__)
@@ -61,24 +63,71 @@ def _extract_checkpoint(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | No
 
 
 def _build_owner_matchers(owner_names: list[str] | None) -> _OwnerMatchers:
-    """Build matchers for filtering owner names from subjects."""
+    """Build matchers for filtering owner names from subjects.
+
+    Matches exact full names and usernames. For multi-word display names,
+    also matches individual name parts (e.g., "David" or "Cramer" from
+    "David Cramer") to catch LLM extractions that use partial names.
+    Single-word names and usernames are exact-only to avoid false positives.
+
+    Prefers false positives (dropping a valid subject) over false negatives
+    (creating a duplicate person entry for the speaker), since duplicate
+    identity entries cause persistent downstream issues.
+    """
     exact: set[str] = set()
     parts: set[str] = set()
     if owner_names:
         for name in owner_names:
-            normalized = name.lower().lstrip("@")
-            exact.add(normalized)
-            # Add name parts for partial matching (e.g., "David Cramer" -> "david", "cramer")
-            for part in normalized.split():
-                if len(part) >= 3:
-                    parts.add(part)
+            cleaned = name.lower().lstrip("@")
+            exact.add(cleaned)
+            # For multi-word names, add each word as a part match
+            words = cleaned.split()
+            if len(words) > 1:
+                for word in words:
+                    if len(word) >= 3:  # Skip very short parts (initials, etc.)
+                        parts.add(word)
     return _OwnerMatchers(exact=exact, parts=parts)
 
 
 def _is_owner_name(subject: str, matchers: _OwnerMatchers) -> bool:
-    """Check if a subject name refers to the owner."""
+    """Check if a subject name refers to the owner.
+
+    Uses exact matching, part matching, and prefix checks to catch common
+    LLM extraction variations (first name only, nicknames, abbreviations).
+    Prefers false positives over creating duplicate person entries.
+    """
     normalized = subject.lower().lstrip("@")
-    return normalized in matchers.exact or normalized in matchers.parts
+    if normalized in matchers.exact or normalized in matchers.parts:
+        return True
+
+    # Skip very short subjects to avoid false positives on initials
+    if len(normalized) < 3:
+        return False
+
+    # Prefix checks: catch nicknames and abbreviations.
+    # "Dave" matches part "david", "David C." starts with part "david".
+    for part in matchers.parts:
+        if part.startswith(normalized) or normalized.startswith(part):
+            return True
+
+    return False
+
+
+def _extract_relationship_term(content: str) -> str | None:
+    """Extract a relationship term from fact content.
+
+    Scans for known relationship terms (wife, boss, friend, etc.) to
+    attach to person records when a RELATIONSHIP-type fact is extracted.
+    Returns the first match found, or None.
+    """
+    from ash.people.manager import RELATIONSHIP_TERMS
+
+    content_lower = content.lower()
+    # Check multi-word terms first (e.g., "best friend" before "friend")
+    for term in sorted(RELATIONSHIP_TERMS, key=lambda t: len(t), reverse=True):
+        if term in content_lower:
+            return term
+    return None
 
 
 # Invalid speaker values that indicate assistant attribution
@@ -86,17 +135,17 @@ _INVALID_SPEAKERS = frozenset({"agent", "assistant", "bot", "system", "ash"})
 
 
 def _validate_speaker(speaker: str | None) -> str | None:
-    """Validate and normalize speaker, filtering out invalid values.
+    """Validate speaker, filtering out invalid values.
 
     Returns None for invalid speakers (agent, assistant, etc.) or empty values.
+    Preserves original casing — callers already lowercase for comparison.
     """
     if not speaker:
         return None
-    normalized = speaker.lower()
-    if normalized in _INVALID_SPEAKERS:
+    if speaker.lower() in _INVALID_SPEAKERS:
         logger.debug("Filtering invalid speaker: %s", speaker)
         return None
-    return normalized
+    return speaker
 
 
 def _build_routing_env(
@@ -149,6 +198,7 @@ class Agent:
         runtime: RuntimeInfo | None = None,
         memory_manager: MemoryManager | None = None,
         memory_extractor: MemoryExtractor | None = None,
+        person_manager: PersonManager | None = None,
         config: AgentConfig | None = None,
     ):
         """Initialize agent.
@@ -160,6 +210,7 @@ class Agent:
             runtime: Runtime information for prompt.
             memory_manager: Optional memory manager for context retrieval.
             memory_extractor: Optional memory extractor for background extraction.
+            person_manager: Optional person manager for person operations.
             config: Agent configuration.
         """
         self._llm = llm
@@ -168,6 +219,7 @@ class Agent:
         self._runtime = runtime
         self._memory = memory_manager
         self._extractor = memory_extractor
+        self._people = person_manager
         self._config = config or AgentConfig()
         self._last_extraction_time: float | None = None
 
@@ -327,34 +379,53 @@ class Agent:
 
                 # Build participant info for cross-context retrieval
                 chat_type = session.metadata.get("chat_type")
-                participant_usernames: list[str] | None = None
+                participant_person_ids: dict[str, set[str]] | None = None
 
-                # In private chats, the other participant is the sender
-                if chat_type == "private":
+                # Resolve sender's person IDs for cross-context (both private and group).
+                # Privacy filter already blocks SENSITIVE facts in group chats.
+                if self._people:
                     sender_username = session.metadata.get("username")
                     if sender_username:
-                        participant_usernames = [sender_username]
+                        try:
+                            person_ids = (
+                                await self._people.find_person_ids_for_username(
+                                    sender_username
+                                )
+                            )
+                            if person_ids:
+                                participant_person_ids = {sender_username: person_ids}
+                        except Exception:
+                            logger.debug("Failed to resolve participant person IDs")
 
                 memory_context = await self._memory.get_context_for_message(
                     user_id=effective_user_id,
                     user_message=user_message,
                     chat_id=session.chat_id,
                     chat_type=chat_type,
-                    participant_usernames=participant_usernames,
+                    participant_person_ids=participant_person_ids,
                 )
                 duration_ms = int((time.monotonic() - start_time) * 1000)
                 if memory_context and memory_context.memories:
-                    logger.debug(
-                        f"Memory retrieval: {len(memory_context.memories)} memories | {duration_ms}ms"
+                    logger.info(
+                        "Memory retrieval: %d memories | %dms",
+                        len(memory_context.memories),
+                        duration_ms,
                     )
+                    for mem in memory_context.memories:
+                        logger.debug(
+                            "  recalled: %s (sim=%.2f, meta=%s)",
+                            mem.content[:80],
+                            mem.similarity,
+                            mem.metadata,
+                        )
+                else:
+                    logger.info("Memory retrieval: 0 memories | %dms", duration_ms)
             except Exception:
                 logger.warning("Failed to retrieve memory context", exc_info=True)
 
-            if effective_user_id:
+            if effective_user_id and self._people:
                 try:
-                    known_people = await self._memory.get_known_people(
-                        effective_user_id
-                    )
+                    known_people = await self._people.list_all()
                 except Exception:
                     logger.warning("Failed to get known people", exc_info=True)
 
@@ -407,47 +478,99 @@ class Agent:
         """Ensure a self-Person exists for the user with username as alias.
 
         This enables proper trust determination by linking the username
-        (used as source_user_id) to the display name (used for display).
+        (used as source_username) to the display name (used for display).
+
+        Lookup order: display_name first, then username. If a matching person
+        exists but lacks a "self" relationship, we claim it (this handles
+        the case where another user mentions "David Cramer" before David
+        speaks). If no match, create a new self-person.
 
         Args:
-            user_id: The owner user ID for the person record.
+            user_id: The user ID (used as created_by for new records).
             username: The user's handle/username (e.g., "notzeeg").
             display_name: The user's display name (e.g., "David Cramer").
         """
-        if not self._memory:
+        if not self._people:
             return
 
         try:
-            # Check if self-person already exists by display name
-            existing = await self._memory.find_person(user_id, display_name)
-            if existing and existing.relationship == "self":
-                # Add username to aliases if not present
-                username_lower = username.lower()
-                aliases_lower = [a.lower() for a in (existing.aliases or [])]
-                if username_lower not in aliases_lower:
-                    await self._memory._store.add_person_alias(
-                        existing.id, username, user_id
+            # Try display name first, then username
+            existing = await self._people.find(display_name)
+            if not existing and username:
+                existing = await self._people.find(username)
+
+            if existing:
+                is_self = any(
+                    rc.relationship == "self" for rc in existing.relationships
+                )
+                if not is_self:
+                    await self._people.add_relationship(
+                        existing.id, "self", stated_by=username
                     )
+                await self._sync_person_details(
+                    existing, display_name, username, user_id
+                )
                 return
 
-            # Check by username
-            existing = await self._memory.find_person(user_id, username)
-            if existing and existing.relationship == "self":
-                return
-
-            # Create self-person with username as alias
-            await self._memory._store.create_person(
-                owner_user_id=user_id,
+            # No match found -- create new self-person
+            # When no username, use numeric user_id as alias to reconnect the graph
+            aliases = [username] if username else [user_id]
+            new_person = await self._people.create(
+                created_by=user_id,
                 name=display_name,
                 relationship="self",
-                aliases=[username],
+                aliases=aliases,
+                relationship_stated_by=username or None,
             )
             logger.debug(
                 "Created self-person for user",
-                extra={"user_id": user_id, "name": display_name, "username": username},
+                extra={
+                    "user_id": user_id,
+                    "person_name": display_name,
+                    "username": username,
+                },
             )
+
+            # Dedup: merge new self-person against any existing person with same name.
+            # Use exclude_self=False because the new person always has "self" relationship
+            # and would be skipped otherwise. _heuristic_match still skips pairs where
+            # *both* are self-persons (two different users' self-records).
+            try:
+                candidates = await self._people.find_dedup_candidates(
+                    [new_person.id], exclude_self=False
+                )
+                for primary_id, secondary_id in candidates:
+                    await self._people.merge(primary_id, secondary_id)
+            except Exception:
+                logger.debug("Self-person dedup failed", exc_info=True)
         except Exception:
             logger.debug("Failed to ensure self-person", exc_info=True)
+
+    async def _sync_person_details(
+        self,
+        person: PersonEntry,
+        display_name: str,
+        username: str,
+        user_id: str,
+    ) -> None:
+        """Update a person's name and ensure username alias exists.
+
+        Args:
+            person: Existing person record to sync.
+            display_name: Expected display name.
+            username: Username to ensure as alias.
+            user_id: Who is making the update (for provenance).
+        """
+        assert self._people is not None
+
+        if display_name and person.name != display_name:
+            await self._people.update(
+                person_id=person.id, name=display_name, updated_by=user_id
+            )
+        if username:
+            aliases_lower = [a.value.lower() for a in (person.aliases or [])]
+            if username.lower() not in aliases_lower:
+                await self._people.add_alias(person.id, username, user_id)
 
     def _should_extract_memories(self, user_message: str) -> bool:
         if not self._config.extraction_enabled:
@@ -484,11 +607,12 @@ class Agent:
 
             existing_memories: list[str] = []
             try:
-                existing_memories = await self._memory.get_recent_memories(
-                    user_id=user_id,
+                recent = await self._memory.list_memories(
+                    owner_user_id=user_id,
                     chat_id=chat_id,
                     limit=20,
                 )
+                existing_memories = [m.content for m in recent]
             except Exception:
                 logger.debug(
                     "Failed to get existing memories for extraction", exc_info=True
@@ -520,12 +644,15 @@ class Agent:
                 display_name=speaker_display_name,
             )
 
-            # Ensure self-person exists for proper trust determination
-            if speaker_username and speaker_display_name:
+            # Ensure self-person exists for proper trust determination.
+            # Create whenever we have at least one identifier.
+            if speaker_username or speaker_display_name:
+                effective_display = speaker_display_name or speaker_username
+                assert effective_display is not None  # guaranteed by outer if
                 await self._ensure_self_person(
                     user_id=user_id,
-                    username=speaker_username,
-                    display_name=speaker_display_name,
+                    username=speaker_username or "",
+                    display_name=effective_display,
                 )
 
             facts = await self._extractor.extract_from_conversation(
@@ -536,8 +663,38 @@ class Agent:
                 current_datetime=datetime.now(UTC),
             )
 
+            logger.info(
+                "Extracted %d facts from conversation (speaker=%s)",
+                len(facts),
+                speaker_info.username if speaker_info else None,
+            )
+            for fact in facts:
+                logger.debug(
+                    "  fact: %s (type=%s, confidence=%.2f, subjects=%s, speaker=%s)",
+                    fact.content[:80],
+                    fact.memory_type.value,
+                    fact.confidence,
+                    fact.subjects,
+                    fact.speaker,
+                )
+
+            # Resolve speaker's person ID for linking self-facts
+            speaker_person_id: str | None = None
+            if self._people and speaker_username:
+                try:
+                    pids = await self._people.find_person_ids_for_username(
+                        speaker_username
+                    )
+                    if pids:
+                        speaker_person_id = next(iter(pids))
+                except Exception:
+                    logger.debug("Failed to resolve speaker person ID", exc_info=True)
+
             # Build owner name matchers for filtering self-references
             owner_matchers = _build_owner_matchers(owner_names)
+
+            # Track newly created person IDs for post-extraction dedup
+            newly_created_person_ids: list[str] = []
 
             for fact in facts:
                 if fact.confidence < self._config.extraction_confidence_threshold:
@@ -545,30 +702,67 @@ class Agent:
 
                 try:
                     subject_person_ids: list[str] | None = None
-                    if fact.subjects:
+                    if fact.subjects and self._people:
                         subject_person_ids = []
                         for subject in fact.subjects:
                             if _is_owner_name(subject, owner_matchers):
                                 logger.debug("Skipping owner as subject: %s", subject)
                                 continue
                             try:
-                                result = await self._memory.resolve_or_create_person(
-                                    owner_user_id=user_id,
+                                result = await self._people.resolve_or_create(
+                                    created_by=user_id,
                                     reference=subject,
                                     content_hint=fact.content,
+                                    relationship_stated_by=speaker_username,
                                 )
                                 subject_person_ids.append(result.person_id)
+                                if result.created:
+                                    newly_created_person_ids.append(result.person_id)
                             except Exception:
                                 logger.debug("Failed to resolve subject: %s", subject)
+
+                    # For RELATIONSHIP facts, attach the term to the person record
+                    # so it shows in the Known People section of the system prompt.
+                    if (
+                        fact.memory_type == MemoryType.RELATIONSHIP
+                        and subject_person_ids
+                        and self._people
+                    ):
+                        rel_term = _extract_relationship_term(fact.content)
+                        if rel_term:
+                            for pid in subject_person_ids:
+                                try:
+                                    await self._people.add_relationship(
+                                        pid,
+                                        rel_term,
+                                        stated_by=speaker_username,
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "Failed to add relationship %s to %s",
+                                        rel_term,
+                                        pid,
+                                    )
+
+                    # Self-facts (no subjects) should reference the speaker's person
+                    # record so they're discoverable via find_memories_by_subject().
+                    # Skip RELATIONSHIP type to avoid attaching relationship terms to
+                    # the speaker instead of the related person.
+                    if (
+                        not subject_person_ids
+                        and speaker_person_id
+                        and fact.memory_type != MemoryType.RELATIONSHIP
+                    ):
+                        subject_person_ids = [speaker_person_id]
 
                     # Filter out invalid speaker values that indicate assistant attribution
                     speaker = _validate_speaker(fact.speaker)
 
                     # Determine source user from extracted speaker or session
-                    source_user_id = speaker or speaker_username or user_id
-                    source_user_name = (
+                    source_username = speaker or speaker_username or user_id
+                    source_display_name = (
                         speaker_display_name
-                        if source_user_id == speaker_username
+                        if source_username == speaker_username
                         else None
                     )
 
@@ -580,33 +774,44 @@ class Agent:
                         chat_id=chat_id if fact.shared else None,
                         subject_person_ids=subject_person_ids or None,
                         observed_at=datetime.now(UTC),
-                        source_user_id=source_user_id,
-                        source_user_name=source_user_name,
+                        source_username=source_username,
+                        source_display_name=source_display_name,
                         extraction_confidence=fact.confidence,
                         sensitivity=fact.sensitivity,
+                        portable=fact.portable,
                     )
 
                     logger.debug(
                         "Extracted memory: %s (confidence=%.2f, speaker=%s)",
                         fact.content[:50],
                         fact.confidence,
-                        source_user_id,
+                        source_username,
                     )
 
                     # Check for hearsay to supersede when this is a FACT
                     # (user speaking about themselves = no subject_person_ids)
-                    if not subject_person_ids and source_user_id:
+                    if not subject_person_ids and source_username and self._people:
                         try:
-                            superseded = await self._memory.supersede_confirmed_hearsay(
-                                new_memory=new_memory,
-                                source_user_id=source_user_id,
-                                owner_user_id=user_id,
-                            )
-                            if superseded > 0:
-                                logger.debug(
-                                    "Superseded %d hearsay memories with confirmed fact",
-                                    superseded,
+                            # Resolve the source user's person IDs for hearsay lookup
+                            source_person_ids = (
+                                await self._people.find_person_ids_for_username(
+                                    source_username
                                 )
+                            )
+                            if source_person_ids:
+                                superseded = (
+                                    await self._memory.supersede_confirmed_hearsay(
+                                        new_memory=new_memory,
+                                        person_ids=source_person_ids,
+                                        source_username=source_username,
+                                        owner_user_id=user_id,
+                                    )
+                                )
+                                if superseded > 0:
+                                    logger.debug(
+                                        "Superseded %d hearsay memories with confirmed fact",
+                                        superseded,
+                                    )
                         except Exception:
                             logger.debug(
                                 "Failed to check for hearsay supersession",
@@ -618,6 +823,17 @@ class Agent:
                         fact.content[:50],
                         exc_info=True,
                     )
+
+            # Post-extraction dedup: merge newly created people that match existing
+            if self._people and newly_created_person_ids:
+                try:
+                    candidates = await self._people.find_dedup_candidates(
+                        newly_created_person_ids, exclude_self=True
+                    )
+                    for primary_id, secondary_id in candidates:
+                        await self._people.merge(primary_id, secondary_id)
+                except Exception:
+                    logger.debug("Post-extraction dedup failed", exc_info=True)
 
         except Exception:
             logger.warning("Background memory extraction failed", exc_info=True)
@@ -1034,6 +1250,11 @@ async def create_agent(
             WebFetchTool(executor=shared_executor, cache=fetch_cache)
         )
 
+    # Create person manager (before memory manager, which needs it for subject authority)
+    from ash.people import create_person_manager
+
+    person_manager = create_person_manager()
+
     memory_manager: MemoryManager | None = None
     if not db_session:
         logger.info("Memory tools disabled: no database session")
@@ -1070,6 +1291,7 @@ async def create_agent(
                 embedding_model=config.embeddings.model,
                 embedding_provider=config.embeddings.provider,
                 max_entries=config.memory.max_entries,
+                person_manager=person_manager,
             )
             logger.debug("Memory manager initialized")
         except ValueError as e:
@@ -1098,6 +1320,9 @@ async def create_agent(
                 "Memory extractor initialized (model=%s)",
                 extraction_model_config.model,
             )
+            person_manager.set_llm(extraction_llm, extraction_model_config.model)
+            if memory_manager:
+                person_manager.set_memory_manager(memory_manager)
         except Exception:
             logger.warning("Failed to initialize memory extractor", exc_info=True)
 
@@ -1143,6 +1368,7 @@ async def create_agent(
         runtime=runtime,
         memory_manager=memory_manager,
         memory_extractor=memory_extractor,
+        person_manager=person_manager,
         config=AgentConfig(
             model=model_config.model,
             max_tokens=model_config.max_tokens,
@@ -1170,6 +1396,7 @@ async def create_agent(
         prompt_builder=prompt_builder,
         skill_registry=skill_registry,
         memory_manager=memory_manager,
+        person_manager=person_manager,
         memory_extractor=memory_extractor,
         sandbox_executor=shared_executor,
         agent_registry=agent_registry,

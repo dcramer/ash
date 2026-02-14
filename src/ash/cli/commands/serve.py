@@ -153,7 +153,9 @@ async def _run_server(
     if components.memory_manager:
         rpc_socket_path = get_rpc_socket_path()
         rpc_server = RPCServer(rpc_socket_path)
-        register_memory_methods(rpc_server, components.memory_manager)
+        register_memory_methods(
+            rpc_server, components.memory_manager, components.person_manager
+        )
         register_config_methods(rpc_server, ash_config, components.skill_registry)
         register_log_methods(rpc_server, get_logs_path())
         await rpc_server.start()

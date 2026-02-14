@@ -31,25 +31,28 @@ If all memories are correctly classified, return: {{}}"""
 
 
 async def memory_doctor_attribution(force: bool) -> None:
-    """Fix memories missing source_user_id attribution.
+    """Fix memories missing source_username attribution.
 
-    For personal memories created by agent/cli without source_user_id,
+    For personal memories created by agent/cli without source_username,
     infers the speaker from owner_user_id (personal memories = owner spoke).
     """
     from rich.table import Table
 
     store = get_memory_store()
-    memories = await store.get_all_memories()
+    # Only process active memories (exclude archived)
+    memories = await store.get_memories(
+        limit=10000, include_expired=True, include_superseded=True
+    )
 
     # Find memories that need attribution fix:
     # - source is "agent" or "cli" (created through sandbox or CLI)
-    # - no source_user_id set
+    # - no source_username set
     # - has owner_user_id (personal memory scope)
     to_fix = [
         m
         for m in memories
         if m.source in ("agent", "cli", "rpc")
-        and not m.source_user_id
+        and not m.source_username
         and m.owner_user_id
     ]
 
@@ -57,7 +60,7 @@ async def memory_doctor_attribution(force: bool) -> None:
         success("No memories need attribution fix")
         return
 
-    console.print(f"Found {len(to_fix)} memories missing source_user_id attribution")
+    console.print(f"Found {len(to_fix)} memories missing source_username attribution")
 
     if not force:
         # Show preview
@@ -94,7 +97,7 @@ async def memory_doctor_attribution(force: bool) -> None:
     fixed_count = 0
     for memory in to_fix:
         # For personal memories, owner is the speaker
-        memory.source_user_id = memory.owner_user_id
+        memory.source_username = memory.owner_user_id
         await store.update_memory(memory)
         fixed_count += 1
 
@@ -120,7 +123,10 @@ async def memory_doctor(config, force: bool, fix_attribution: bool = False) -> N
         return
 
     store = get_memory_store()
-    memories = await store.get_all_memories()
+    # Only process active memories (exclude archived)
+    memories = await store.get_memories(
+        limit=10000, include_expired=True, include_superseded=True
+    )
 
     if not memories:
         warning("No memories to process")

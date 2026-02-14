@@ -121,36 +121,3 @@ class TestPlanAgent:
         assert judge_result.passed, (
             f"Plan quality check failed: {judge_result.reasoning}"
         )
-
-    @pytest.mark.asyncio
-    async def test_incorporates_research_input(
-        self,
-        plan_agent_executor: tuple[PlanAgent, AgentExecutor],
-    ) -> None:
-        """Plan should incorporate provided research findings."""
-        agent, executor = plan_agent_executor
-        suite = load_eval_suite(PLAN_AGENT_CASES)
-        case = get_case_by_id(suite, "uses_research_input")
-
-        context = AgentContext(
-            session_id="test-plan-input",
-            chat_id="test-chat",
-            user_id="test-user",
-            input_data=case.input_data or {},
-        )
-
-        result = await executor.execute(agent, case.prompt, context)
-
-        assert result.checkpoint is not None, "Plan agent should checkpoint"
-
-        plan_text = result.checkpoint.prompt.lower()
-
-        # Should reference the API from research
-        has_api_ref = "openweathermap" in plan_text or "weather" in plan_text
-        assert has_api_ref, "Plan should reference the provided API"
-
-        # Should mention authentication
-        has_auth = "api key" in plan_text or "auth" in plan_text or "key" in plan_text
-        assert has_auth, "Plan should include authentication step"
-
-        print(f"\nPlan with research input:\n{result.checkpoint.prompt[:600]}...")

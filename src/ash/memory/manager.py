@@ -7,19 +7,17 @@ using filesystem-primary storage with a SQLite vector index.
 from __future__ import annotations
 
 import logging
-import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.file_store import FileMemoryStore
 from ash.memory.index import VectorIndex
+from ash.memory.secrets import contains_secret
 from ash.memory.types import (
     GCResult,
     MemoryEntry,
     MemoryType,
-    PersonEntry,
-    PersonResolutionResult,
     RetrievedContext,
     SearchResult,
     Sensitivity,
@@ -30,48 +28,11 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ash.llm import LLMProvider, LLMRegistry
+    from ash.people import PersonManager
 
 logger = logging.getLogger(__name__)
 
 CONFLICT_SIMILARITY_THRESHOLD = 0.75
-
-# Regex patterns for detecting secrets/credentials in memory content
-_SECRETS_PATTERNS = [
-    # API keys and tokens
-    re.compile(r"\b(sk-[a-zA-Z0-9]{20,})\b"),  # OpenAI/Anthropic keys
-    re.compile(r"\b(gh[pors]_[a-zA-Z0-9]{36,})\b"),  # GitHub tokens (PAT, OAuth, etc.)
-    re.compile(r"\b(AKIA[A-Z0-9]{16})\b"),  # AWS access key IDs
-    re.compile(r"\b(xox[baprs]-[a-zA-Z0-9-]{10,})\b"),  # Slack tokens
-    # Credit card numbers (16 digits with optional separators)
-    re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"),
-    # Social Security Numbers
-    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
-    # Passwords in common formats
-    re.compile(r"\b(?:password|passwd|pwd)\s*(?:is|:|=)\s*\S+", re.IGNORECASE),
-    # Private keys
-    re.compile(
-        r"-----BEGIN\s+(?:RSA\s+|DSA\s+|EC\s+|OPENSSH\s+|PGP\s+)?PRIVATE\s+KEY-----",
-        re.IGNORECASE,
-    ),
-    # API key assignments
-    re.compile(
-        r"\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)\s*(?:is|:|=)\s*\S+",
-        re.IGNORECASE,
-    ),
-]
-
-
-def contains_secret(content: str) -> bool:
-    """Check if content contains patterns that look like secrets.
-
-    Args:
-        content: The text content to check.
-
-    Returns:
-        True if any secret pattern is detected.
-    """
-    return any(pattern.search(content) for pattern in _SECRETS_PATTERNS)
-
 
 # LLM verification prompt for supersession
 SUPERSESSION_PROMPT = """Given these two memories, determine if the NEW memory supersedes/replaces the OLD memory.
@@ -98,9 +59,9 @@ class MemoryManager:
         store: FileMemoryStore,
         index: VectorIndex,
         embedding_generator: EmbeddingGenerator,
-        db_session: AsyncSession,
         llm: LLMProvider | None = None,
         max_entries: int | None = None,
+        person_manager: PersonManager | None = None,
     ) -> None:
         """Initialize memory manager.
 
@@ -108,19 +69,38 @@ class MemoryManager:
             store: Filesystem-based memory store.
             index: Vector index for semantic search.
             embedding_generator: Generator for embeddings.
-            db_session: Database session for vector operations.
             llm: LLM for supersession verification (optional).
             max_entries: Optional cap on active memories.
+            person_manager: Optional person manager for subject authority checks.
         """
-        from ash.memory.person import PersonManager
-
         self._store = store
         self._index = index
         self._embeddings = embedding_generator
-        self._session = db_session
-        self._person_manager = PersonManager(store)
         self._llm = llm
         self._max_entries = max_entries
+        self._people = person_manager
+        # Cache resolved person names within a single request
+        self._person_name_cache: dict[str, str] = {}
+
+    async def _resolve_subject_name(self, person_ids: list[str]) -> str | None:
+        """Resolve subject person IDs to a display name for memory annotation.
+
+        Returns the first resolvable name, or None if no person manager or
+        no match. Results are cached for the lifetime of the manager instance.
+        """
+        if not self._people or not person_ids:
+            return None
+        for pid in person_ids:
+            if pid in self._person_name_cache:
+                return self._person_name_cache[pid]
+            try:
+                person = await self._people.get(pid)
+                if person:
+                    self._person_name_cache[pid] = person.name
+                    return person.name
+            except Exception:
+                logger.debug("Failed to resolve person name for %s", pid)
+        return None
 
     async def get_context_for_message(
         self,
@@ -129,7 +109,7 @@ class MemoryManager:
         chat_id: str | None = None,
         max_memories: int = 10,
         chat_type: str | None = None,
-        participant_usernames: list[str] | None = None,
+        participant_person_ids: dict[str, set[str]] | None = None,
     ) -> RetrievedContext:
         """Retrieve relevant memory context before LLM call.
 
@@ -143,7 +123,7 @@ class MemoryManager:
             chat_id: Optional chat ID for group memories.
             max_memories: Maximum memories to return.
             chat_type: Type of chat ("private", "group", "supergroup").
-            participant_usernames: Usernames of other participants (for cross-context).
+            participant_person_ids: Map of username -> person_ids (pre-resolved).
 
         Returns:
             Retrieved context with matching memories.
@@ -163,11 +143,13 @@ class MemoryManager:
             memories = []
 
         # Cross-context retrieval: get memories about participants from other owners
-        if participant_usernames:
-            for username in participant_usernames:
+        if participant_person_ids:
+            for username, person_ids in participant_person_ids.items():
+                if not person_ids:
+                    continue
                 try:
-                    cross_memories = await self._store.find_memories_about_user(
-                        username=username,
+                    cross_memories = await self._store.find_memories_by_subject(
+                        person_ids=person_ids,
                         exclude_owner_user_id=user_id,  # Don't double-count
                         limit=max_memories,
                     )
@@ -175,18 +157,27 @@ class MemoryManager:
                     # Apply privacy filtering and convert to SearchResult
                     for memory in cross_memories:
                         if self._passes_privacy_filter(
-                            memory, chat_type, username, participant_usernames
+                            sensitivity=memory.sensitivity,
+                            subject_person_ids=memory.subject_person_ids,
+                            chat_type=chat_type,
+                            querying_person_ids=person_ids,
                         ):
+                            subject_name = await self._resolve_subject_name(
+                                memory.subject_person_ids
+                            )
+                            cross_meta: dict[str, Any] = {
+                                "memory_type": memory.memory_type.value,
+                                "subject_person_ids": memory.subject_person_ids,
+                                "cross_context": True,
+                            }
+                            if subject_name:
+                                cross_meta["subject_name"] = subject_name
                             memories.append(
                                 SearchResult(
                                     id=memory.id,
                                     content=memory.content,
                                     similarity=0.7,  # Default for cross-context
-                                    metadata={
-                                        "memory_type": memory.memory_type.value,
-                                        "subject_person_ids": memory.subject_person_ids,
-                                        "cross_context": True,
-                                    },
+                                    metadata=cross_meta,
                                     source_type="memory",
                                 )
                             )
@@ -195,21 +186,78 @@ class MemoryManager:
                         "Failed to get cross-context memories for %s", username
                     )
 
-        # Apply privacy filtering to own memories
-        memories = [
-            m
-            for m in memories
-            if self._passes_privacy_filter_search_result(
-                m, chat_type, participant_usernames
-            )
-        ]
+        # Note: privacy filtering is NOT applied to the owner's own memories
+        # (from primary search). Those are already scope-checked by search().
+        # Cross-context memories have their own filter applied above (lines 142-148).
+        # Filtering own memories would incorrectly block SENSITIVE self-memories
+        # (no subjects → is_subject always False) and PERSONAL memories about
+        # others (subject != owner → filtered out in group chats).
+
+        # --- Second pass: graph traversal ---
+        # Collect person IDs mentioned in primary and cross-context results.
+        # These represent people "in scope" for the conversation that we should
+        # also retrieve facts about (e.g., David's wife Sukhpreet → get Sukhpreet's facts).
+        seen_ids: set[str] = {m.id for m in memories}
+        mentioned_person_ids: set[str] = set()
+        for m in memories:
+            spids = (m.metadata or {}).get("subject_person_ids") or []
+            mentioned_person_ids.update(spids)
+
+        # Remove the querying user's own person IDs to avoid self-retrieval loops
+        if participant_person_ids:
+            for pids in participant_person_ids.values():
+                mentioned_person_ids -= pids
+
+        if mentioned_person_ids:
+            try:
+                subject_cross = await self._store.find_memories_by_subject(
+                    person_ids=mentioned_person_ids,
+                    exclude_owner_user_id=user_id,
+                    limit=max_memories,
+                )
+                for memory in subject_cross:
+                    if memory.id in seen_ids:
+                        continue
+                    querying_person_ids: set[str] = set()
+                    if participant_person_ids:
+                        for pids in participant_person_ids.values():
+                            querying_person_ids |= pids
+                    if self._passes_privacy_filter(
+                        sensitivity=memory.sensitivity,
+                        subject_person_ids=memory.subject_person_ids,
+                        chat_type=chat_type,
+                        querying_person_ids=querying_person_ids,
+                    ):
+                        subject_name = await self._resolve_subject_name(
+                            memory.subject_person_ids
+                        )
+                        cross_meta: dict[str, Any] = {
+                            "memory_type": memory.memory_type.value,
+                            "subject_person_ids": memory.subject_person_ids,
+                            "cross_context": True,
+                            "graph_traversal": True,
+                        }
+                        if subject_name:
+                            cross_meta["subject_name"] = subject_name
+                        memories.append(
+                            SearchResult(
+                                id=memory.id,
+                                content=memory.content,
+                                similarity=0.6,
+                                metadata=cross_meta,
+                                source_type="memory",
+                            )
+                        )
+                        seen_ids.add(memory.id)
+            except Exception:
+                logger.debug("Graph traversal cross-context failed", exc_info=True)
 
         # Deduplicate and limit
-        seen_ids: set[str] = set()
         unique_memories: list[SearchResult] = []
+        final_seen: set[str] = set()
         for m in memories:
-            if m.id not in seen_ids:
-                seen_ids.add(m.id)
+            if m.id not in final_seen:
+                final_seen.add(m.id)
                 unique_memories.append(m)
                 if len(unique_memories) >= max_memories:
                     break
@@ -218,131 +266,34 @@ class MemoryManager:
 
     def _passes_privacy_filter(
         self,
-        memory: MemoryEntry,
+        sensitivity: Sensitivity | None,
+        subject_person_ids: list[str],
         chat_type: str | None,
-        querying_username: str | None,
-        participant_usernames: list[str] | None,
+        querying_person_ids: set[str],
     ) -> bool:
         """Filter memories based on sensitivity and context.
 
         Args:
-            memory: Memory to filter.
+            sensitivity: Privacy classification of the memory.
+            subject_person_ids: Person IDs the memory is about.
             chat_type: Type of chat ("private", "group", etc.).
-            querying_username: Username being queried about.
-            participant_usernames: All participants in the chat.
+            querying_person_ids: Pre-resolved person IDs for the querying user.
 
         Returns:
             True if memory passes the privacy filter.
         """
-        # No sensitivity or PUBLIC = always pass
-        if memory.sensitivity is None or memory.sensitivity == Sensitivity.PUBLIC:
+        if sensitivity is None or sensitivity == Sensitivity.PUBLIC:
             return True
 
-        # Check if querying user is a subject of this memory
-        is_subject = self._is_user_subject_of_memory(querying_username, memory)
-
-        if memory.sensitivity == Sensitivity.PERSONAL:
-            # PERSONAL: only show to the subject
-            return is_subject
-
-        if memory.sensitivity == Sensitivity.SENSITIVE:
-            # SENSITIVE: only in private chat with the subject
-            is_private = chat_type == "private"
-            return is_private and is_subject
-
-        return False
-
-    def _passes_privacy_filter_search_result(
-        self,
-        result: SearchResult,
-        chat_type: str | None,
-        participant_usernames: list[str] | None,
-    ) -> bool:
-        """Filter search results based on sensitivity metadata.
-
-        For search results where we don't have the full MemoryEntry,
-        we check if metadata contains sensitivity.
-        """
-        if not result.metadata:
-            return True
-
-        sensitivity_str = result.metadata.get("sensitivity")
-        if not sensitivity_str:
-            return True
-
-        try:
-            sensitivity = Sensitivity(sensitivity_str)
-        except ValueError:
-            return True
-
-        if sensitivity == Sensitivity.PUBLIC:
-            return True
-
-        # For non-public, we need to be more conservative in group chats
-        is_private = chat_type == "private"
-
-        if sensitivity == Sensitivity.SENSITIVE:
-            # Only allow in private chats
-            return is_private
+        is_subject = bool(set(subject_person_ids) & querying_person_ids)
 
         if sensitivity == Sensitivity.PERSONAL:
-            # In group chats, be conservative and hide PERSONAL memories
-            # about third parties (we can't easily determine subject here)
-            return is_private
+            return is_subject
 
-        return True
+        if sensitivity == Sensitivity.SENSITIVE:
+            return chat_type == "private" and is_subject
 
-    def _is_user_subject_of_memory(
-        self, username: str | None, memory: MemoryEntry
-    ) -> bool:
-        """Check if a username is the subject of a memory.
-
-        Uses the existing _person_matches_username logic to check if
-        the user matches any of the subject_person_ids.
-        """
-        if not username or not memory.subject_person_ids:
-            return False
-
-        # We need to load person records to check aliases
-        # For efficiency, we just check if the memory was stored about
-        # this username by checking subject_person_ids against people cache
-        # This is a simplified check - full check would need to await _ensure_people_loaded
-        return False  # Conservative default - proper check done in async methods
-
-    async def get_recent_memories(
-        self,
-        user_id: str | None = None,
-        chat_id: str | None = None,
-        limit: int = 20,
-    ) -> list[str]:
-        """Get recent memories without semantic search.
-
-        Args:
-            user_id: User ID for scoping.
-            chat_id: Chat ID for group memories.
-            limit: Maximum memories to return.
-
-        Returns:
-            List of memory content strings.
-        """
-        try:
-            memories = await self._store.get_memories(
-                limit=limit,
-                include_expired=False,
-                include_superseded=False,
-                owner_user_id=user_id,
-                chat_id=chat_id,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to get recent memories (user_id=%s, chat_id=%s)",
-                user_id,
-                chat_id,
-                exc_info=True,
-            )
-            return []
-
-        return [m.content for m in memories]
+        return False
 
     async def add_memory(
         self,
@@ -355,12 +306,13 @@ class MemoryManager:
         chat_id: str | None = None,
         subject_person_ids: list[str] | None = None,
         observed_at: datetime | None = None,
-        source_user_id: str | None = None,
-        source_user_name: str | None = None,
+        source_username: str | None = None,
+        source_display_name: str | None = None,
         source_session_id: str | None = None,
         source_message_id: str | None = None,
         extraction_confidence: float | None = None,
         sensitivity: Sensitivity | None = None,
+        portable: bool = True,
         metadata: dict[str, Any] | None = None,
     ) -> MemoryEntry:
         """Add a memory entry.
@@ -375,8 +327,8 @@ class MemoryManager:
             chat_id: Group scope.
             subject_person_ids: People this memory is about.
             observed_at: When fact was observed (for extraction).
-            source_user_id: Who said/provided this fact (for multi-user attribution).
-            source_user_name: Display name of source user.
+            source_username: Who said/provided this fact (handle/username).
+            source_display_name: Display name of source user.
             source_session_id: Session ID for extraction tracing.
             source_message_id: Message ID for extraction tracing.
             extraction_confidence: Confidence score for extraction.
@@ -402,37 +354,43 @@ class MemoryManager:
             memory_type = MemoryType.KNOWLEDGE
 
         # Generate embedding
+        embedding_floats: list[float] | None = None
         try:
             embedding_floats = await self._embeddings.embed(content)
-            embedding = MemoryEntry.encode_embedding(embedding_floats)
         except Exception:
             logger.warning(
                 "Failed to generate embedding, continuing without", exc_info=True
             )
-            embedding = ""
 
         # Create memory entry
         memory = await self._store.add_memory(
             content=content,
             memory_type=memory_type,
-            embedding=embedding,
             source=source,
             expires_at=expires_at,
             owner_user_id=owner_user_id,
             chat_id=chat_id,
             subject_person_ids=subject_person_ids,
             observed_at=observed_at,
-            source_user_id=source_user_id,
-            source_user_name=source_user_name,
+            source_username=source_username,
+            source_display_name=source_display_name,
             source_session_id=source_session_id,
             source_message_id=source_message_id,
             extraction_confidence=extraction_confidence,
             sensitivity=sensitivity,
+            portable=portable,
             metadata=metadata,
         )
 
-        # Index embedding
-        if embedding:
+        # Persist embedding to JSONL and index
+        if embedding_floats:
+            embedding_base64 = MemoryEntry.encode_embedding(embedding_floats)
+            try:
+                await self._store.save_embedding(memory.id, embedding_base64)
+            except Exception:
+                logger.warning(
+                    "Failed to save embedding to JSONL, continuing", exc_info=True
+                )
             try:
                 await self._index.add_embedding(memory.id, embedding_floats)
             except Exception:
@@ -467,6 +425,17 @@ class MemoryManager:
                 logger.warning("Failed to enforce max_entries limit", exc_info=True)
 
         return memory
+
+    async def get_memory(self, memory_id: str) -> MemoryEntry | None:
+        """Get a memory by ID.
+
+        Args:
+            memory_id: Memory UUID.
+
+        Returns:
+            Memory entry or None.
+        """
+        return await self._store.get_memory(memory_id)
 
     async def find_conflicting_memories(
         self,
@@ -591,6 +560,10 @@ class MemoryManager:
             if memory.id == new_memory.id:
                 continue
 
+            # Subject authority: protect self-confirmed facts from third-party supersession
+            if await self._is_protected_by_subject_authority(memory, new_memory):
+                continue
+
             # LLM verification for borderline cases
             if similarity < 0.85 and self._llm:
                 if not await self._verify_conflict_with_llm(
@@ -603,6 +576,48 @@ class MemoryManager:
                 count += 1
 
         return count
+
+    async def _is_protected_by_subject_authority(
+        self,
+        candidate: MemoryEntry,
+        new_memory: MemoryEntry,
+    ) -> bool:
+        """Check if a candidate memory is protected by subject authority.
+
+        A self-confirmed fact (where source_username resolves to one of the
+        subject_person_ids) cannot be superseded by a third party unless the
+        third party is also a subject of the memory.
+
+        Only applies when both memories have overlapping subject_person_ids.
+        """
+        if not self._people:
+            return False
+        if not candidate.source_username or not candidate.subject_person_ids:
+            return False
+        if not new_memory.source_username:
+            return False
+        if new_memory.source_username == candidate.source_username:
+            return False
+
+        try:
+            # Is the candidate a self-confirmed fact?
+            source_ids = await self._people.find_person_ids_for_username(
+                candidate.source_username
+            )
+            if not (source_ids & set(candidate.subject_person_ids)):
+                return False
+
+            # Self-confirmed — only allow supersession if new source is also a subject
+            new_source_ids = await self._people.find_person_ids_for_username(
+                new_memory.source_username
+            )
+            if new_source_ids & set(candidate.subject_person_ids):
+                return False
+
+            return True
+        except Exception:
+            logger.debug("Subject authority check failed", exc_info=True)
+            return False
 
     async def _mark_superseded(
         self,
@@ -656,9 +671,6 @@ class MemoryManager:
         vector_results = await self._index.search(query, limit=limit * 2)
         now = datetime.now(UTC)
 
-        # Resolve person names for subject attribution
-        all_person_ids: set[str] = set()
-
         results: list[SearchResult] = []
         for vr in vector_results:
             memory = await self._store.get_memory(vr.memory_id)
@@ -680,22 +692,24 @@ class MemoryManager:
                 if subject_person_id not in (memory.subject_person_ids or []):
                     continue
 
-            if memory.subject_person_ids:
-                all_person_ids.update(memory.subject_person_ids)
+            # Resolve subject name for prompt annotation
+            subject_name = await self._resolve_subject_name(memory.subject_person_ids)
+
+            metadata: dict[str, Any] = {
+                "memory_type": memory.memory_type.value,
+                "subject_person_ids": memory.subject_person_ids,
+                "sensitivity": memory.sensitivity.value if memory.sensitivity else None,
+                **(memory.metadata or {}),
+            }
+            if subject_name:
+                metadata["subject_name"] = subject_name
 
             results.append(
                 SearchResult(
                     id=memory.id,
                     content=memory.content,
                     similarity=vr.similarity,
-                    metadata={
-                        "memory_type": memory.memory_type.value,
-                        "subject_person_ids": memory.subject_person_ids,
-                        "sensitivity": memory.sensitivity.value
-                        if memory.sensitivity
-                        else None,
-                        **(memory.metadata or {}),
-                    },
+                    metadata=metadata,
                     source_type="memory",
                 )
             )
@@ -703,33 +717,7 @@ class MemoryManager:
             if len(results) >= limit:
                 break
 
-        # Resolve person names
-        if all_person_ids:
-            person_names = await self._resolve_person_names(list(all_person_ids))
-            for result in results:
-                if result.metadata:
-                    subject_ids = result.metadata.get("subject_person_ids") or []
-                    if subject_ids:
-                        names = [
-                            person_names[pid]
-                            for pid in subject_ids
-                            if pid in person_names
-                        ]
-                        if names:
-                            result.metadata["subject_name"] = ", ".join(names)
-
         return results
-
-    async def _resolve_person_names(self, person_ids: list[str]) -> dict[str, str]:
-        """Resolve person IDs to names.
-
-        Args:
-            person_ids: List of person UUIDs.
-
-        Returns:
-            Dict mapping person_id to name.
-        """
-        return await self._person_manager.resolve_person_names(person_ids)
 
     async def list_memories(
         self,
@@ -799,53 +787,6 @@ class MemoryManager:
             )
 
         return True
-
-    async def find_person(
-        self,
-        owner_user_id: str,
-        reference: str,
-    ) -> PersonEntry | None:
-        """Find a person by reference.
-
-        Args:
-            owner_user_id: User who owns the person record.
-            reference: Name, relationship, or alias.
-
-        Returns:
-            Person entry or None.
-        """
-        return await self._person_manager.find_person(owner_user_id, reference)
-
-    async def get_known_people(self, owner_user_id: str) -> list[PersonEntry]:
-        """Get all known people for a user.
-
-        Args:
-            owner_user_id: User to get people for.
-
-        Returns:
-            List of person entries.
-        """
-        return await self._person_manager.get_known_people(owner_user_id)
-
-    async def resolve_or_create_person(
-        self,
-        owner_user_id: str,
-        reference: str,
-        content_hint: str | None = None,
-    ) -> PersonResolutionResult:
-        """Resolve a reference to a person, creating if needed.
-
-        Args:
-            owner_user_id: User who will own the person record.
-            reference: Name or relationship reference.
-            content_hint: Content that may contain the person's name.
-
-        Returns:
-            Resolution result with person ID.
-        """
-        return await self._person_manager.resolve_or_create_person(
-            owner_user_id, reference, content_hint
-        )
 
     async def gc(self) -> GCResult:
         """Garbage collect expired and superseded memories.
@@ -918,15 +859,85 @@ class MemoryManager:
         return evicted
 
     async def rebuild_index(self) -> int:
-        """Rebuild vector index from filesystem storage.
+        """Rebuild vector index from embeddings.jsonl.
 
         Returns:
             Number of embeddings indexed.
         """
         memories = await self._store.get_all_memories()
-        count = await self._index.rebuild_from_memories(memories)
+        embeddings = await self._store.load_embeddings()
+        count = await self._index.rebuild_from_embeddings(memories, embeddings)
         logger.info("index_rebuilt", extra={"count": count})
         return count
+
+    async def remap_subject_person_id(self, old_id: str, new_id: str) -> int:
+        """Replace old_id with new_id in all subject_person_ids.
+
+        Called by the orchestrator after merging person records to keep
+        memories reachable via the primary person ID.
+
+        Args:
+            old_id: The person ID being merged away.
+            new_id: The primary person ID to replace it with.
+
+        Returns:
+            Number of memories updated.
+        """
+        return await self._store.remap_subject_person_id(old_id, new_id)
+
+    async def forget_person(
+        self,
+        person_id: str,
+        delete_person_record: bool = False,
+    ) -> int:
+        """Archive all memories about a person (the "forget me" operation).
+
+        Finds all memories with ABOUT edges to this person, archives them,
+        and removes them from active store and vector index.
+
+        Args:
+            person_id: The person ID to forget.
+            delete_person_record: If True, also delete the person record.
+
+        Returns:
+            Number of memories archived.
+        """
+        memories = await self._store.get_all_memories()
+
+        to_archive = {
+            m.id
+            for m in memories
+            if person_id in (m.subject_person_ids or []) and m.archived_at is None
+        }
+
+        if not to_archive:
+            if delete_person_record and self._people:
+                await self._people.delete(person_id)
+            return 0
+
+        archived_ids = await self._store.archive_memories(to_archive, "forgotten")
+
+        # Remove from vector index
+        for memory_id in archived_ids:
+            try:
+                await self._index.delete_embedding(memory_id)
+            except Exception:
+                logger.debug("Failed to delete embedding for %s", memory_id)
+
+        # Optionally delete the person record
+        if delete_person_record and self._people:
+            await self._people.delete(person_id)
+
+        logger.info(
+            "forget_person_complete",
+            extra={
+                "person_id": person_id,
+                "archived_count": len(archived_ids),
+                "deleted_person": delete_person_record,
+            },
+        )
+
+        return len(archived_ids)
 
     async def get_supersession_chain(self, memory_id: str) -> list[MemoryEntry]:
         """Get the chain of superseded memories leading to this ID.
@@ -942,7 +953,8 @@ class MemoryManager:
     async def supersede_confirmed_hearsay(
         self,
         new_memory: MemoryEntry,
-        source_user_id: str,
+        person_ids: set[str],
+        source_username: str,
         owner_user_id: str,
         similarity_threshold: float = 0.80,
     ) -> int:
@@ -954,16 +966,17 @@ class MemoryManager:
 
         Args:
             new_memory: The new FACT memory (user speaking about themselves).
-            source_user_id: The user who stated the fact (their username).
+            person_ids: Pre-resolved person IDs for the source user.
+            source_username: Username of the source user.
             owner_user_id: Owner user ID for scoping.
             similarity_threshold: Minimum similarity score to supersede (default 0.80).
 
         Returns:
             Number of hearsay memories superseded.
         """
-        # Find hearsay about this user
-        hearsay_candidates = await self._store.find_hearsay_about_user(
-            user_id=source_user_id,
+        hearsay_candidates = await self._store.find_hearsay_by_subject(
+            person_ids=person_ids,
+            source_username=source_username,
             owner_user_id=owner_user_id,
         )
 
@@ -1023,6 +1036,7 @@ async def create_memory_manager(
     max_entries: int | None = None,
     llm_provider: str = "anthropic",
     auto_migrate: bool = True,
+    person_manager: PersonManager | None = None,
 ) -> MemoryManager:
     """Create a fully-wired MemoryManager.
 
@@ -1036,6 +1050,7 @@ async def create_memory_manager(
         max_entries: Optional cap on active memories.
         llm_provider: Provider for supersession verification.
         auto_migrate: Whether to auto-migrate from SQLite.
+        person_manager: Optional person manager for subject authority checks.
 
     Returns:
         Configured MemoryManager instance.
@@ -1043,10 +1058,19 @@ async def create_memory_manager(
     from ash.memory.migration import (
         check_db_has_memories,
         migrate_db_to_jsonl,
+        migrate_to_graph_dir,
         needs_migration,
     )
 
-    # Check if migration is needed
+    # Migrate from old scattered paths to graph/ layout
+    if auto_migrate:
+        try:
+            if await migrate_to_graph_dir():
+                logger.info("Migrated to graph directory layout")
+        except Exception:
+            logger.warning("Graph directory migration failed", exc_info=True)
+
+    # Check if SQLite→JSONL migration is needed
     if auto_migrate and needs_migration():
         try:
             has_memories = await check_db_has_memories(db_session)
@@ -1078,22 +1102,20 @@ async def create_memory_manager(
     except Exception:
         logger.debug("LLM not available for supersession verification")
 
-    # Check if index needs rebuild from JSONL
-    memories = await store.get_all_memories()
+    # Check if index needs rebuild from embeddings.jsonl
+    embeddings = await store.load_embeddings()
     indexed_count = await index.get_embedding_count()
 
-    # Count active memories that should be indexed
-    active_count = sum(1 for m in memories if not m.superseded_at and m.embedding)
-
-    if active_count > 0 and indexed_count == 0:
-        logger.info("Index empty, rebuilding from JSONL")
-        await index.rebuild_from_memories(memories)
+    if embeddings and indexed_count == 0:
+        logger.info("Index empty, rebuilding from embeddings.jsonl")
+        memories = await store.get_all_memories()
+        await index.rebuild_from_embeddings(memories, embeddings)
 
     return MemoryManager(
         store=store,
         index=index,
         embedding_generator=embedding_generator,
-        db_session=db_session,
         llm=llm,
         max_entries=max_entries,
+        person_manager=person_manager,
     )

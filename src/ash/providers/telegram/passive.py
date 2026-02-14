@@ -436,8 +436,8 @@ class PassiveMemoryExtractor:
                     memory_type=fact.memory_type,
                     owner_user_id=message.user_id,
                     chat_id=message.chat_id,
-                    source_user_id=message.user_id,
-                    source_user_name=message.username,
+                    source_username=message.username,
+                    source_display_name=message.display_name,
                     extraction_confidence=fact.confidence,
                     metadata={
                         "subjects": fact.subjects,

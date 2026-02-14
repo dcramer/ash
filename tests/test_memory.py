@@ -19,7 +19,7 @@ from ash.memory import MemoryManager
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.file_store import FileMemoryStore
 from ash.memory.index import VectorIndex, VectorSearchResult
-from ash.memory.types import MemoryType
+from ash.memory.types import MemoryType, Sensitivity
 
 
 def _make_search_results(
@@ -49,15 +49,12 @@ def mock_index():
 
 
 @pytest.fixture
-async def memory_manager(
-    file_memory_store, mock_index, mock_embedding_generator, db_session
-):
+async def memory_manager(file_memory_store, mock_index, mock_embedding_generator):
     """Create a memory manager with mocked components."""
     return MemoryManager(
         store=file_memory_store,
         index=mock_index,
         embedding_generator=mock_embedding_generator,
-        db_session=db_session,
     )
 
 
@@ -310,91 +307,88 @@ class TestEphemeralDecay:
 
 
 class TestCrossContextRetrieval:
-    """Tests for cross-context memory retrieval."""
+    """Tests for cross-context memory retrieval using person IDs."""
 
-    async def test_find_memories_about_user_by_username(
-        self, file_memory_store: FileMemoryStore
-    ):
-        """Test finding memories about a user by username."""
-        # Create a person with a username alias
-        person = await file_memory_store.create_person(
-            owner_user_id="alice",
-            name="Bob",
-            aliases=["@bob", "bob"],
-        )
+    async def test_find_memories_by_subject(self, file_memory_store: FileMemoryStore):
+        """Test finding memories by subject person IDs."""
+        person_id = "person-bob-1"
 
         # Create a memory about this person
         await file_memory_store.add_memory(
             content="Bob likes pizza",
             owner_user_id="alice",
-            subject_person_ids=[person.id],
+            subject_person_ids=[person_id],
         )
 
-        # Find memories about bob
-        memories = await file_memory_store.find_memories_about_user(username="bob")
+        # Also a memory not about Bob
+        await file_memory_store.add_memory(
+            content="General fact",
+            owner_user_id="alice",
+        )
+
+        # Find memories about bob by person_id
+        memories = await file_memory_store.find_memories_by_subject(
+            person_ids={person_id}
+        )
 
         assert len(memories) == 1
         assert memories[0].content == "Bob likes pizza"
 
-    async def test_find_memories_about_user_excludes_owner(
+    async def test_find_memories_by_subject_excludes_owner(
         self, file_memory_store: FileMemoryStore
     ):
-        """Test that find_memories_about_user can exclude owner's memories."""
-        # Create a person record for both Alice and Carol
-        person_alice = await file_memory_store.create_person(
-            owner_user_id="alice",
-            name="Bob",
-            aliases=["bob"],
-        )
-        person_carol = await file_memory_store.create_person(
-            owner_user_id="carol",
-            name="Bob",
-            aliases=["bob"],
-        )
+        """Test that find_memories_by_subject can exclude owner's memories."""
+        person_id_alice = "person-bob-alice"
+        person_id_carol = "person-bob-carol"
 
         # Alice has a memory about Bob
         await file_memory_store.add_memory(
             content="Bob likes pizza",
             owner_user_id="alice",
-            subject_person_ids=[person_alice.id],
+            subject_person_ids=[person_id_alice],
         )
 
         # Carol also has a memory about Bob
         await file_memory_store.add_memory(
             content="Bob likes pasta",
             owner_user_id="carol",
-            subject_person_ids=[person_carol.id],
+            subject_person_ids=[person_id_carol],
         )
 
         # Find memories about bob excluding alice's
-        memories = await file_memory_store.find_memories_about_user(
-            username="bob", exclude_owner_user_id="alice"
+        memories = await file_memory_store.find_memories_by_subject(
+            person_ids={person_id_alice, person_id_carol},
+            exclude_owner_user_id="alice",
         )
 
         assert len(memories) == 1
         assert memories[0].content == "Bob likes pasta"
         assert memories[0].owner_user_id == "carol"
 
-    async def test_find_memories_about_user_with_at_prefix(
+    async def test_find_memories_by_subject_multiple_ids(
         self, file_memory_store: FileMemoryStore
     ):
-        """Test that @username prefix is handled."""
-        person = await file_memory_store.create_person(
-            owner_user_id="alice",
-            name="Bob",
-            aliases=["bob"],
+        """Test that multiple person IDs find all relevant memories."""
+        person_id_1 = "person-bob-1"
+        person_id_2 = "person-bob-2"
+
+        await file_memory_store.add_memory(
+            content="Bob fact from user1",
+            owner_user_id="user1",
+            subject_person_ids=[person_id_1],
         )
 
         await file_memory_store.add_memory(
-            content="Bob is cool",
-            owner_user_id="alice",
-            subject_person_ids=[person.id],
+            content="Bob fact from user2",
+            owner_user_id="user2",
+            subject_person_ids=[person_id_2],
         )
 
-        # Find with @ prefix
-        memories = await file_memory_store.find_memories_about_user(username="@bob")
+        memories = await file_memory_store.find_memories_by_subject(
+            person_ids={person_id_1, person_id_2}
+        )
 
-        assert len(memories) == 1
+        assert len(memories) == 2
 
 
 class TestSecretsFiltering:
@@ -489,7 +483,6 @@ class TestSensitivity:
         self, file_memory_store: FileMemoryStore
     ):
         """Test adding a memory with sensitivity classification."""
-        from ash.memory.types import Sensitivity
 
         memory = await file_memory_store.add_memory(
             content="Has anxiety",
@@ -520,7 +513,6 @@ class TestSensitivity:
         self, file_memory_store: FileMemoryStore
     ):
         """Test that sensitivity is correctly serialized/deserialized."""
-        from ash.memory.types import Sensitivity
 
         memory = await file_memory_store.add_memory(
             content="Personal info",
@@ -534,3 +526,360 @@ class TestSensitivity:
         loaded = await file_memory_store.get_memory(memory.id)
         assert loaded is not None
         assert loaded.sensitivity == Sensitivity.PERSONAL
+
+
+class TestPrivacyFilter:
+    """Regression tests for privacy filter bugs.
+
+    Bug 1: _is_user_subject_of_memory always returned False (now fixed by
+    accepting pre-resolved person IDs instead of doing sync lookups).
+
+    Bug 2: Inconsistent filter logic between MemoryEntry and SearchResult
+    paths (now unified into single _passes_privacy_filter method).
+    """
+
+    def test_public_always_passes(self, memory_manager):
+        """PUBLIC memories pass regardless of context."""
+        assert memory_manager._passes_privacy_filter(
+            sensitivity=Sensitivity.PUBLIC,
+            subject_person_ids=["person-1"],
+            chat_type="group",
+            querying_person_ids=set(),
+        )
+
+    def test_none_sensitivity_treated_as_public(self, memory_manager):
+        """None sensitivity (legacy) treated as PUBLIC."""
+        assert memory_manager._passes_privacy_filter(
+            sensitivity=None,
+            subject_person_ids=["person-1"],
+            chat_type="group",
+            querying_person_ids=set(),
+        )
+
+    def test_personal_shown_to_subject(self, memory_manager):
+        """PERSONAL memories shown when querying user is the subject."""
+        assert memory_manager._passes_privacy_filter(
+            sensitivity=Sensitivity.PERSONAL,
+            subject_person_ids=["person-1"],
+            chat_type="group",
+            querying_person_ids={"person-1"},
+        )
+
+    def test_personal_hidden_from_non_subject(self, memory_manager):
+        """PERSONAL memories hidden when querying user is NOT the subject."""
+        assert not memory_manager._passes_privacy_filter(
+            sensitivity=Sensitivity.PERSONAL,
+            subject_person_ids=["person-1"],
+            chat_type="group",
+            querying_person_ids={"person-2"},
+        )
+
+    def test_personal_hidden_when_no_person_ids(self, memory_manager):
+        """PERSONAL memories hidden when no person IDs resolved."""
+        assert not memory_manager._passes_privacy_filter(
+            sensitivity=Sensitivity.PERSONAL,
+            subject_person_ids=["person-1"],
+            chat_type="private",
+            querying_person_ids=set(),
+        )
+
+    def test_sensitive_shown_in_private_to_subject(self, memory_manager):
+        """SENSITIVE memories shown only in private chat to subject."""
+        assert memory_manager._passes_privacy_filter(
+            sensitivity=Sensitivity.SENSITIVE,
+            subject_person_ids=["person-1"],
+            chat_type="private",
+            querying_person_ids={"person-1"},
+        )
+
+    def test_sensitive_hidden_in_group_even_for_subject(self, memory_manager):
+        """SENSITIVE memories hidden in group chat even for subject."""
+        assert not memory_manager._passes_privacy_filter(
+            sensitivity=Sensitivity.SENSITIVE,
+            subject_person_ids=["person-1"],
+            chat_type="group",
+            querying_person_ids={"person-1"},
+        )
+
+    def test_sensitive_hidden_in_private_from_non_subject(self, memory_manager):
+        """SENSITIVE memories hidden in private chat from non-subject."""
+        assert not memory_manager._passes_privacy_filter(
+            sensitivity=Sensitivity.SENSITIVE,
+            subject_person_ids=["person-1"],
+            chat_type="private",
+            querying_person_ids={"person-2"},
+        )
+
+
+class TestOwnMemoryPrivacy:
+    """Verify owner's own memories are never filtered by privacy rules.
+
+    Regression: the privacy filter was applied to ALL memories including the
+    owner's primary search results, incorrectly blocking SENSITIVE self-memories
+    (empty subjects) and PERSONAL memories about others in group chats.
+    """
+
+    async def test_sensitive_self_memory_returned_in_group(
+        self, file_memory_store, mock_index, mock_embedding_generator
+    ):
+        """SENSITIVE self-memory (no subjects) visible in group chat."""
+        memory = await file_memory_store.add_memory(
+            content="I have been dealing with anxiety",
+            owner_user_id="user-1",
+            sensitivity=Sensitivity.SENSITIVE,
+        )
+
+        # Wire mock index to return this memory
+        mock_index.search = AsyncMock(
+            return_value=_make_search_results([(memory.id, 0.9)])
+        )
+
+        mm = MemoryManager(
+            store=file_memory_store,
+            index=mock_index,
+            embedding_generator=mock_embedding_generator,
+        )
+
+        ctx = await mm.get_context_for_message(
+            user_id="user-1",
+            user_message="how am I doing",
+            chat_type="group",
+            participant_person_ids={"dcramer": {"self-person-id"}},
+        )
+
+        assert len(ctx.memories) == 1
+        assert ctx.memories[0].content == "I have been dealing with anxiety"
+
+    async def test_personal_memory_about_other_returned_in_group(
+        self, file_memory_store, mock_index, mock_embedding_generator
+    ):
+        """PERSONAL memory about someone else visible to owner in group chat."""
+        memory = await file_memory_store.add_memory(
+            content="Sarah is going through a hard time",
+            owner_user_id="user-1",
+            sensitivity=Sensitivity.PERSONAL,
+            subject_person_ids=["sarah-person-id"],
+        )
+
+        mock_index.search = AsyncMock(
+            return_value=_make_search_results([(memory.id, 0.9)])
+        )
+
+        mm = MemoryManager(
+            store=file_memory_store,
+            index=mock_index,
+            embedding_generator=mock_embedding_generator,
+        )
+
+        ctx = await mm.get_context_for_message(
+            user_id="user-1",
+            user_message="how is Sarah",
+            chat_type="group",
+            participant_person_ids={"dcramer": {"self-person-id"}},
+        )
+
+        assert len(ctx.memories) == 1
+        assert ctx.memories[0].content == "Sarah is going through a hard time"
+
+
+class TestPortableExtraction:
+    """Tests for portable field in extraction."""
+
+    def test_extractor_parses_portable_false(self):
+        """Extractor correctly parses portable=false from LLM output."""
+        from ash.memory.extractor import MemoryExtractor
+
+        extractor = MemoryExtractor.__new__(MemoryExtractor)
+        extractor._confidence_threshold = 0.7
+
+        response = '[{"content": "Bob is presenting next", "speaker": "david", "subjects": ["Bob"], "shared": true, "confidence": 0.9, "type": "context", "sensitivity": "public", "portable": false}]'
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].portable is False
+
+    def test_extractor_defaults_portable_true(self):
+        """Extractor defaults portable to true when not specified."""
+        from ash.memory.extractor import MemoryExtractor
+
+        extractor = MemoryExtractor.__new__(MemoryExtractor)
+        extractor._confidence_threshold = 0.7
+
+        response = '[{"content": "Bob loves pizza", "speaker": "david", "subjects": ["Bob"], "shared": false, "confidence": 0.9, "type": "knowledge", "sensitivity": "public"}]'
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].portable is True
+
+
+class TestForgetPerson:
+    """Tests for forget-person operation."""
+
+    async def test_forget_archives_subject_memories(
+        self, memory_manager, file_memory_store, mock_index
+    ):
+        """Forget archives memories with ABOUT edges to the person."""
+        person_id = "person-bob"
+
+        # Memory about Bob
+        about_bob = await file_memory_store.add_memory(
+            content="Bob likes hiking",
+            owner_user_id="alice",
+            subject_person_ids=[person_id],
+        )
+
+        # Memory not about Bob
+        unrelated = await file_memory_store.add_memory(
+            content="Alice likes cooking",
+            owner_user_id="alice",
+        )
+
+        archived_count = await memory_manager.forget_person(person_id=person_id)
+
+        assert archived_count == 1
+        assert await file_memory_store.get_memory(about_bob.id) is None
+        assert await file_memory_store.get_memory(unrelated.id) is not None
+
+        # Verify it was archived
+        archived = await file_memory_store.get_archived_memories()
+        assert len(archived) == 1
+        assert archived[0].id == about_bob.id
+        assert archived[0].archive_reason == "forgotten"
+
+    async def test_forget_removes_from_vector_index(
+        self, memory_manager, file_memory_store, mock_index
+    ):
+        """Forget removes embeddings from the vector index."""
+        person_id = "person-bob"
+
+        about_bob = await file_memory_store.add_memory(
+            content="Bob likes hiking",
+            owner_user_id="alice",
+            subject_person_ids=[person_id],
+        )
+
+        await memory_manager.forget_person(person_id=person_id)
+
+        mock_index.delete_embedding.assert_called_once_with(about_bob.id)
+
+    async def test_forget_returns_zero_when_no_memories(
+        self, memory_manager, file_memory_store
+    ):
+        """Forget returns 0 when person has no memories."""
+        archived_count = await memory_manager.forget_person(person_id="nonexistent")
+
+        assert archived_count == 0
+
+    async def test_forget_with_delete_person_record(
+        self, memory_manager, file_memory_store, mock_index
+    ):
+        """Forget can optionally delete the person record."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_people = MagicMock()
+        mock_people.delete = AsyncMock()
+        memory_manager._people = mock_people
+
+        person_id = "person-bob"
+        await file_memory_store.add_memory(
+            content="Bob likes hiking",
+            owner_user_id="alice",
+            subject_person_ids=[person_id],
+        )
+
+        await memory_manager.forget_person(
+            person_id=person_id,
+            delete_person_record=True,
+        )
+
+        mock_people.delete.assert_called_once_with(person_id)
+
+
+class TestSubjectNameResolution:
+    """Verify subject_name is resolved in search result metadata."""
+
+    async def test_search_resolves_subject_name(
+        self, file_memory_store, mock_index, mock_embedding_generator
+    ):
+        """Search results include subject_name when person_manager is available."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.people.types import PersonEntry
+
+        memory = await file_memory_store.add_memory(
+            content="Sarah's birthday is March 15",
+            owner_user_id="user-1",
+            subject_person_ids=["sarah-id"],
+        )
+
+        mock_index.search = AsyncMock(
+            return_value=_make_search_results([(memory.id, 0.9)])
+        )
+
+        # Mock person manager
+        mock_people = MagicMock()
+        mock_person = MagicMock(spec=PersonEntry)
+        mock_person.name = "Sarah"
+        mock_people.get = AsyncMock(return_value=mock_person)
+
+        mm = MemoryManager(
+            store=file_memory_store,
+            index=mock_index,
+            embedding_generator=mock_embedding_generator,
+            person_manager=mock_people,
+        )
+
+        results = await mm.search(query="birthday", owner_user_id="user-1")
+        assert len(results) == 1
+        assert results[0].metadata is not None
+        assert results[0].metadata["subject_name"] == "Sarah"
+
+    async def test_search_no_subject_name_without_people(
+        self, file_memory_store, mock_index, mock_embedding_generator
+    ):
+        """No subject_name when person_manager is not available."""
+        memory = await file_memory_store.add_memory(
+            content="Sarah's birthday is March 15",
+            owner_user_id="user-1",
+            subject_person_ids=["sarah-id"],
+        )
+
+        mock_index.search = AsyncMock(
+            return_value=_make_search_results([(memory.id, 0.9)])
+        )
+
+        mm = MemoryManager(
+            store=file_memory_store,
+            index=mock_index,
+            embedding_generator=mock_embedding_generator,
+        )
+
+        results = await mm.search(query="birthday", owner_user_id="user-1")
+        assert len(results) == 1
+        assert results[0].metadata is not None
+        assert "subject_name" not in results[0].metadata
+
+    async def test_search_no_subject_name_for_self_facts(
+        self, file_memory_store, mock_index, mock_embedding_generator
+    ):
+        """No subject_name for facts about the speaker (empty subjects)."""
+        memory = await file_memory_store.add_memory(
+            content="Prefers dark mode",
+            owner_user_id="user-1",
+            subject_person_ids=[],
+        )
+
+        mock_index.search = AsyncMock(
+            return_value=_make_search_results([(memory.id, 0.9)])
+        )
+
+        mm = MemoryManager(
+            store=file_memory_store,
+            index=mock_index,
+            embedding_generator=mock_embedding_generator,
+        )
+
+        results = await mm.search(query="dark mode", owner_user_id="user-1")
+        assert len(results) == 1
+        assert results[0].metadata is not None
+        assert "subject_name" not in results[0].metadata

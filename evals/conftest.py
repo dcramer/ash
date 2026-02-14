@@ -21,7 +21,11 @@ if _env_local.exists() and not os.environ.get("ANTHROPIC_API_KEY"):
         os.environ["ANTHROPIC_API_KEY"] = content
 
 from ash.config import AshConfig
-from ash.config.models import MemoryConfig, ModelConfig, SandboxConfig
+from ash.config.models import (
+    MemoryConfig,
+    ModelConfig,
+    SandboxConfig,
+)
 from ash.config.workspace import Workspace, WorkspaceLoader
 from ash.core.agent import AgentComponents, create_agent
 from ash.db.engine import Database
@@ -30,8 +34,29 @@ from ash.llm import AnthropicProvider, LLMProvider
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register eval marker."""
+    """Register eval marker and configure logging for eval visibility."""
+    import logging
+
     config.addinivalue_line("markers", "eval: marks tests as evaluation tests")
+
+    # Add a console handler for key modules so eval runs show what was
+    # extracted, recalled, and resolved. This makes flaky eval failures
+    # debuggable without re-running.
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+
+    for module in [
+        "ash.core.agent",
+        "ash.memory.extractor",
+        "ash.memory.manager",
+        "ash.memory.index",
+        "ash.people.manager",
+        "evals",
+    ]:
+        mod_logger = logging.getLogger(module)
+        mod_logger.setLevel(logging.DEBUG)
+        mod_logger.addHandler(handler)
 
 
 @pytest.fixture
@@ -165,5 +190,85 @@ async def eval_agent(
         yield components
 
         # Cleanup: stop sandbox if running
+        if components.sandbox_executor:
+            await components.sandbox_executor.cleanup()
+
+
+@pytest.fixture
+def eval_memory_config(eval_workspace_path: Path, tmp_path: Path) -> AshConfig:
+    """Create AshConfig with embeddings and extraction enabled for memory evals."""
+    from ash.config.models import EmbeddingsConfig
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set")
+
+    return AshConfig(
+        workspace=eval_workspace_path,
+        models={
+            "default": ModelConfig(
+                provider="anthropic",
+                model="claude-sonnet-4-5",
+                temperature=0.7,
+            ),
+            "haiku": ModelConfig(
+                provider="anthropic",
+                model="claude-haiku-4-5",
+                temperature=0,
+            ),
+        },
+        sandbox=SandboxConfig(
+            workspace_access="rw",
+        ),
+        embeddings=EmbeddingsConfig(),
+        memory=MemoryConfig(
+            database_path=tmp_path / "eval-memory.db",
+            extraction_enabled=True,
+            extraction_min_message_length=10,
+            extraction_debounce_seconds=0,
+            compaction_enabled=False,
+        ),
+    )
+
+
+@pytest.fixture
+async def eval_memory_agent(
+    eval_memory_config: AshConfig,
+    eval_workspace: Workspace,
+    eval_database: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> AsyncGenerator[AgentComponents, None]:
+    """Create agent with memory (embeddings + extraction) for memory evals.
+
+    Uses an isolated people.jsonl in tmp_path so evals don't touch ~/.ash/.
+    Requires both ANTHROPIC_API_KEY and OPENAI_API_KEY.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        pytest.skip("ANTHROPIC_API_KEY not set")
+
+    # Isolate file stores to tmp_path so evals don't touch ~/.ash/
+    monkeypatch.setattr(
+        "ash.people.manager.get_people_jsonl_path",
+        lambda: tmp_path / "people.jsonl",
+    )
+    monkeypatch.setattr(
+        "ash.memory.file_store.get_memories_jsonl_path",
+        lambda: tmp_path / "memories.jsonl",
+    )
+    monkeypatch.setattr(
+        "ash.memory.file_store.get_embeddings_jsonl_path",
+        lambda: tmp_path / "embeddings.jsonl",
+    )
+
+    async with eval_database.session() as db_session:
+        components = await create_agent(
+            config=eval_memory_config,
+            workspace=eval_workspace,
+            db_session=db_session,
+        )
+
+        yield components
+
         if components.sandbox_executor:
             await components.sandbox_executor.cleanup()

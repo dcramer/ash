@@ -17,16 +17,46 @@ Memory is NOT for:
 - Temporary task state (that's session context)
 - Credentials or secrets (security risk)
 
+## Graph Model
+
+The memory subsystem is best understood as a graph. Memory entries are nodes; attributions, subjects, and lifecycle links are edges.
+
+### Nodes
+
+| Node Type | Backed By | Key Fields |
+|-----------|-----------|------------|
+| **Memory** | `MemoryEntry` in `memories.jsonl` | id, content, memory_type |
+
+### Edges (owned by memory subsystem)
+
+| Edge | From → To | Stored As | Metadata |
+|------|-----------|-----------|----------|
+| **ABOUT** | Memory → Person | `subject_person_ids` list | — |
+| **STATED_BY** | Memory → username | `source_username` field | source_display_name |
+| **OWNED_BY** | Memory → user_id | `owner_user_id` field | — |
+| **IN_CHAT** | Memory → chat_id | `chat_id` field | — |
+| **SUPERSEDES** | Memory → Memory | `superseded_by_id` field | superseded_at |
+
+### Key Traversals
+
+| Query | Traversal |
+|-------|-----------|
+| "what about Bob?" | Bob(person) ←ABOUT← memories →filter(privacy, portable)→ **results** |
+| hearsay check | memory →STATED_BY→ user; memory →ABOUT→ persons; overlap? → fact, else hearsay |
+| cross-context | person ←ABOUT← memories →filter(portable=true, privacy)→ **results** |
+
+See [specs/people.md](people.md) for Person-owned edges (SELF, KNOWS, ALIAS, MERGED_INTO).
+
 ## Storage Architecture
 
 Memory uses a **filesystem-primary** architecture where JSONL files are the source of truth:
 
 ```
 ~/.ash/
-├── people.jsonl                # Person entities (global)
-├── memory/
-│   ├── memories.jsonl          # Active memories (source of truth)
-│   └── archive.jsonl           # Archived memories (append-only safety net)
+├── graph/
+│   ├── memories.jsonl          # All memories: active + archived (source of truth)
+│   ├── people.jsonl            # Person entities (global)
+│   └── embeddings.jsonl        # {memory_id, embedding} pairs (derived, for rebuild)
 └── data/
     └── memory.db               # Vector index only (rebuildable)
 ```
@@ -37,16 +67,24 @@ Memory uses a **filesystem-primary** architecture where JSONL files are the sour
 |-----------|-----------|
 | JSONL is source of truth | Human-readable, version-controllable, survives DB corruption |
 | SQLite for vectors only | sqlite-vec provides fast similarity search, fully rebuildable |
-| Embeddings in JSONL | Avoids API costs on rebuild; OpenAI embeddings aren't deterministic |
-| Append-only archive | Never lose data; safety net for recovery |
+| Embeddings separated | ~8KB per entry in base64; separate file keeps memories.jsonl jq-friendly |
+| Single-file archive | Active + archived in one file; `archived_at` field distinguishes them |
 | Atomic file writes | Write to temp file, then rename; prevents corruption on crash |
 
 ### Auto-Migration
 
-On first run, if SQLite database exists but JSONL files don't, the system automatically migrates:
+**SQLite → JSONL** (legacy): On first run, if SQLite database exists but JSONL files don't, the system automatically migrates:
 1. Exports all memories and people from SQLite to JSONL
 2. Rebuilds the vector index
 3. Original SQLite preserved as backup
+
+**Scattered → Graph** (v2): On first run, if old paths exist (`~/.ash/memory/memories.jsonl`, `~/.ash/people.jsonl`) but `~/.ash/graph/` doesn't:
+1. Loads old `memories.jsonl` and `archive.jsonl` (if exists)
+2. Extracts embeddings to `graph/embeddings.jsonl`
+3. Strips embeddings from entries
+4. Combines active + archive into `graph/memories.jsonl`
+5. Copies `people.jsonl` to `graph/people.jsonl`
+6. Old files left in place (user can clean up)
 
 ## Memory Types
 
@@ -92,9 +130,8 @@ When a user asks about something they've told the agent before, the agent should
 
 ### Users can explicitly store facts
 
-The `remember` tool stores facts when users explicitly request it:
-- "Remember that..." / "Don't forget..." / "Save this..."
-- Supports batch storage (multiple facts at once)
+When users say "remember that..." / "don't forget..." / "save this...", the agent stores facts by calling `ash-sb memory add` in the sandbox. This routes through `MemoryManager`, which generates embeddings, indexes the memory, and detects supersession automatically. Features:
+- Supports batch storage (agent makes multiple `ash-sb memory add` calls)
 - Supports expiration ("remember for 2 weeks")
 - Supports person attribution ("remember Sarah likes...")
 
@@ -121,14 +158,14 @@ When facts relate to people in the user's life:
 
 When new information conflicts with old:
 - "Favorite color is red" then "favorite color is blue" → only blue is retrieved
-- Superseded facts preserved in archive but excluded from active search
+- Superseded facts archived in-place (`archived_at` set) but excluded from active search
 - Subject-specific facts don't conflict with general facts
 
 **Supersession process:**
 1. Vector search finds candidates with similarity ≥ 0.75
 2. LLM verifies that memories actually conflict (reduces false positives)
 3. Old memory marked as superseded with reference to replacement
-4. GC later archives superseded memory to `archive.jsonl`
+4. GC later archives superseded memory in-place (`archived_at` + `archive_reason` set)
 
 ### Memory doesn't grow unbounded
 
@@ -138,13 +175,15 @@ When new information conflicts with old:
 - Ephemeral types decay based on their TTL
 
 **GC algorithm:**
-1. Identify memories to archive:
+1. Scan active memories (where `archived_at` is null):
    - Explicit expiration (`expires_at` passed)
    - Superseded memories (`superseded_at` set)
    - Ephemeral types past their default TTL
-2. Append each to `archive.jsonl` with reason
-3. Rewrite `memories.jsonl` without archived entries (atomic)
+2. Set `archived_at` + `archive_reason` on each (archive-in-place)
+3. Rewrite `memories.jsonl` (atomic)
 4. Remove embeddings from vector index
+
+**Compaction:** Over time, archived entries accumulate. `ash memory compact --force` permanently removes archived entries older than 90 days (configurable via `--older-than`).
 
 ## Scoping
 
@@ -172,10 +211,10 @@ Best-effort authorization prevents accidental cross-user data access. When conte
 | Operation | Rule |
 |-----------|------|
 | Delete memory | Must be owner (personal) or member of chat (group) |
-| Update person | Must be owner of the person entity |
-| Add person alias | Must be owner of the person entity |
-| Reference person in memory | Person must belong to memory owner |
-| Get memories about person | Filtered to accessible memories |
+| Update person | Must be the person's creator (`created_by`) or the person themselves |
+| Add person alias | Must be the person's creator (`created_by`) or the person themselves |
+| Reference person in memory | Any user (people are globally visible) |
+| Get memories about person | Filtered to accessible memories (privacy rules apply) |
 
 **Design notes:**
 - Authorization is best-effort, not security boundary (sandbox can't be fully trusted)
@@ -233,9 +272,10 @@ Facts learned about a person in one context (e.g., group chat) can be recalled i
 
 ### Cross-Context Query
 
-`find_memories_about_user()` searches across ALL owners:
-- Matches username to Person records via name/aliases
+`find_memories_by_subject(person_ids)` searches across ALL owners:
+- Caller resolves person IDs first via `PersonManager`
 - Returns memories where that person is a subject
+- Only includes **portable** memories (enduring facts about a person, not chat-operational)
 - Optional `exclude_owner_user_id` to avoid double-counting
 
 ### Privacy in Groups
@@ -313,8 +353,8 @@ Memory supports tracking WHO provided each fact, enabling trust-based reasoning:
 
 | Field | Description |
 |-------|-------------|
-| `source_user_id` | Username/ID of who stated this fact |
-| `source_user_name` | Display name of the source user |
+| `source_username` | Username/handle of who stated this fact |
+| `source_display_name` | Display name of the source user |
 | `subject_person_ids` | Who the memory is ABOUT (third parties) |
 
 ### Trust Model
@@ -362,15 +402,14 @@ The LLM then attributes each extracted fact to the appropriate speaker.
   "version": 1,
   "content": "User prefers dark mode",
   "memory_type": "preference",
-  "embedding": "BASE64_ENCODED_FLOAT32_ARRAY",
   "created_at": "2026-02-09T10:00:00+00:00",
   "observed_at": null,
   "owner_user_id": "user-1",
   "chat_id": null,
   "subject_person_ids": [],
   "source": "user",
-  "source_user_id": "david",
-  "source_user_name": "David Cramer",
+  "source_username": "david",
+  "source_display_name": "David Cramer",
   "source_session_id": null,
   "source_message_id": null,
   "extraction_confidence": null,
@@ -390,15 +429,14 @@ The LLM then attributes each extracted fact to the appropriate speaker.
 | `version` | Yes | Schema version (currently 1) |
 | `content` | Yes | The memory text |
 | `memory_type` | Yes | Type classification |
-| `embedding` | Yes | Base64-encoded float32 array for vector search |
 | `created_at` | Yes | When written to storage |
 | `observed_at` | No | When fact was observed (for delayed extraction) |
 | `owner_user_id` | One of these | Personal scope |
 | `chat_id` | required | Group scope |
 | `subject_person_ids` | Yes | Who this is about (empty list if nobody) |
 | `source` | Yes | "user" / "extraction" / "background_extraction" / "cli" / "rpc" |
-| `source_user_id` | No | Who said/provided this fact (for multi-user attribution) |
-| `source_user_name` | No | Display name of source user |
+| `source_username` | No | Username/handle of who stated this fact |
+| `source_display_name` | No | Display name of source user |
 | `source_session_id` | No | Session ID for extraction tracing |
 | `source_message_id` | No | Message UUID for extraction tracing |
 | `extraction_confidence` | No | 0.0-1.0 confidence score |
@@ -406,21 +444,45 @@ The LLM then attributes each extracted fact to the appropriate speaker.
 | `expires_at` | No | Explicit TTL |
 | `superseded_at` | No | When marked superseded |
 | `superseded_by_id` | No | What memory replaced this one |
-| `archived_at` | No | When moved to archive (archive only) |
-| `archive_reason` | No | "superseded" / "expired" / "ephemeral_decay" |
+| `archived_at` | No | When archived (null = active) |
+| `portable` | No | Whether cross-context traversal is allowed (default true) |
+| `archive_reason` | No | "superseded" / "expired" / "ephemeral_decay" / "forgotten" / "user_deleted" |
+
+### Embedding Record
+
+Embeddings are stored separately in `embeddings.jsonl` to keep `memories.jsonl` human-readable (~8KB per embedding in base64):
+
+```json
+{
+  "memory_id": "abc-123",
+  "embedding": "BASE64_ENCODED_FLOAT32_ARRAY"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `memory_id` | References a MemoryEntry id |
+| `embedding` | Base64-encoded float32 array for vector search |
 
 ### Person Entry
+
+See [specs/people.md](people.md) for the canonical person schema. Summary:
 
 ```json
 {
   "id": "person-456",
   "version": 1,
-  "owner_user_id": "user-1",
+  "created_by": "123456789",
   "name": "Sarah",
-  "relationship": "wife",
-  "aliases": ["my wife"],
+  "relationships": [
+    {"relationship": "wife", "stated_by": "123456789", "created_at": "2026-01-15T10:00:00+00:00"}
+  ],
+  "aliases": [
+    {"value": "my wife", "added_by": "123456789", "created_at": "2026-01-15T10:00:00+00:00"}
+  ],
+  "merged_into": null,
   "created_at": "2026-01-15T10:00:00+00:00",
-  "updated_at": null,
+  "updated_at": "2026-01-15T10:00:00+00:00",
   "metadata": null
 }
 ```
@@ -450,6 +512,38 @@ Used during background extraction, before facts are converted to MemoryEntry:
 | `memory_type` | Assigned memory type |
 | `speaker` | Who stated this fact (format: `@username (Display Name)`) |
 | `sensitivity` | Privacy classification ("public" / "personal" / "sensitive") |
+| `portable` | Whether this fact should be retrievable cross-context (default true) |
+
+## Forget Person
+
+When a user requests to be forgotten, or a person record needs to be purged:
+
+1. Find all active memories with ABOUT edges to this person (`subject_person_ids` contains person_id)
+2. Archive in-place: set `archived_at` + `archive_reason="forgotten"`
+3. Remove from vector index
+4. If `delete_person_record=True`, delete the person node
+
+Available via:
+- `memory.forget_person` RPC method
+- `ash memory forget --person <id>` CLI command
+
+## Portable Memories
+
+Not all group-scoped memories about a person should cross contexts. The `portable` field controls whether a memory's ABOUT edge is traversable from outside the originating chat.
+
+| Content | Portable | Why |
+|---------|----------|-----|
+| "Bob loves pizza" | true | Enduring trait about the person |
+| "Bob is presenting next" | false | Chat-operational, only relevant here |
+| "Sarah's birthday is March 15" | true | Enduring fact |
+| "Sarah will send the report by EOD" | false | Ephemeral task context |
+
+**Default:** `true` for backward compatibility. Extraction prompt guides the LLM to set `portable=false` for chat-operational facts.
+
+## Known Limitations
+
+- **Contradictory group facts**: no authority model — last-write-wins. Two users stating conflicting facts about the same subject both persist.
+- **Hearsay directionality**: self-facts are safe because ABOUT edges are empty (no subjects), so supersession search can't find them via subject overlap.
 
 ## Configuration
 
@@ -471,6 +565,7 @@ Tools running in the sandbox can access memory via RPC:
 | `memory.add` | Add a memory | `content` (required), `source`, `expires_days`, `user_id`, `chat_id`, `subjects` |
 | `memory.list` | List recent memories | `limit`, `include_expired`, `user_id`, `chat_id` |
 | `memory.delete` | Delete a memory | `memory_id` (required), `user_id`, `chat_id` |
+| `memory.forget_person` | Archive all memories about a person | `person_id` (required), `delete_person_record` (default false) |
 
 The sandbox CLI (`ash-sb memory`) wraps these RPC calls with environment-provided `ASH_USER_ID` and `ASH_CHAT_ID`. Authorization checks use these values to verify ownership before mutations.
 
@@ -486,10 +581,10 @@ uv run ash memory rebuild-index
 **How rebuild works:**
 1. Delete existing SQLite database (if corrupted)
 2. Create fresh database with sqlite-vec virtual table
-3. Load all active memories from `memories.jsonl`
-4. Insert embeddings (from stored base64, no API calls needed)
+3. Load active memories from `memories.jsonl` and embeddings from `embeddings.jsonl`
+4. Insert embeddings for active memories (from stored base64, no API calls needed)
 
-**Auto-recovery:** On startup, if SQLite is missing but JSONL exists, the index is automatically rebuilt.
+**Auto-recovery:** On startup, if SQLite is missing but JSONL + embeddings exist, the index is automatically rebuilt.
 
 ### Supersession History
 
@@ -504,7 +599,7 @@ uv run ash memory history <memory-id>
 
 ```bash
 # Unit tests
-uv run pytest tests/test_memory.py tests/test_memory_extractor.py tests/test_memory_file_store.py -v
+uv run pytest tests/test_memory.py tests/test_memory_extractor.py tests/test_memory_file_store.py tests/test_people.py -v
 
 # Integration test
 uv run ash chat "Remember my favorite color is blue"
@@ -520,19 +615,22 @@ uv run ash memory list
 uv run ash memory search "favorite"
 uv run ash memory gc
 
-# Verify JSONL storage
-cat ~/.ash/memory/memories.jsonl | head -3
+# Verify JSONL storage (human-readable, no embeddings bloat)
+jq . ~/.ash/graph/memories.jsonl | head -5
+jq 'select(.archived_at == null)' ~/.ash/graph/memories.jsonl | wc -l  # active count
+jq . ~/.ash/graph/people.jsonl | head -5
+wc -l ~/.ash/graph/embeddings.jsonl  # should match active memory count
 
 # Check supersession removes old memory
 uv run ash chat "Remember my favorite color is red"
-cat ~/.ash/memory/memories.jsonl | grep -c "favorite color"  # 1
+jq -r 'select(.content | test("favorite color"))' ~/.ash/graph/memories.jsonl  # 1
 uv run ash chat "Remember my favorite color is blue"
 uv run ash memory gc
-cat ~/.ash/memory/memories.jsonl | grep -c "favorite color"  # 1 (red archived)
+jq 'select(.archived_at == null) | select(.content | test("favorite color"))' ~/.ash/graph/memories.jsonl  # 1 active (red archived in-place)
 
 # Verify extraction attribution
 uv run ash chat "I really love hiking in the mountains"
-cat ~/.ash/memory/memories.jsonl | grep source_session
+jq 'select(.source_session_id != null)' ~/.ash/graph/memories.jsonl | head -3
 
 # Rebuild index after corruption
 rm ~/.ash/data/memory.db
@@ -541,7 +639,7 @@ uv run ash memory rebuild-index
 # Privacy tests:
 # 1. Bob says "I have anxiety" in private
 # 2. Verify sensitivity=sensitive in memories.jsonl
-cat ~/.ash/memory/memories.jsonl | grep -A1 "anxiety" | grep sensitivity
+jq 'select(.content | test("anxiety"))' ~/.ash/graph/memories.jsonl
 # 3. In group chat, ask "tell me about Bob"
 # 4. Verify sensitive fact is NOT disclosed
 # 5. In private with Bob, ask same question
@@ -550,7 +648,7 @@ cat ~/.ash/memory/memories.jsonl | grep -A1 "anxiety" | grep sensitivity
 # Cross-context tests:
 # 1. In group chat, Alice says "@bob loves pizza"
 # 2. Verify memory stored with subject_person_ids containing bob
-cat ~/.ash/memory/memories.jsonl | grep "loves pizza" | grep subject_person_ids
+jq 'select(.content | test("loves pizza"))' ~/.ash/graph/memories.jsonl
 # 3. In private chat with Bob, ask "what do you know about me?"
 # 4. Verify "loves pizza" fact is retrieved
 
@@ -565,21 +663,21 @@ uv run ash memory add -q "API key: sk-abc123def456789"
 
 # 3. Via chat - should NOT extract secrets
 uv run ash chat "Remember my password is secret123"
-cat ~/.ash/memory/memories.jsonl | grep -c "password"  # 0
+jq 'select(.content | test("password"))' ~/.ash/graph/memories.jsonl  # empty
 
 # 4. Normal content should work
 uv run ash memory add -q "I prefer dark mode"
-cat ~/.ash/memory/memories.jsonl | grep "dark mode"  # found
+jq 'select(.content | test("dark mode"))' ~/.ash/graph/memories.jsonl  # found
 
 # Temporal context tests:
 # 1. Say something with relative time reference
 uv run ash chat "I have a meeting this weekend"
 # 2. Check extracted memory has absolute date
-cat ~/.ash/memory/memories.jsonl | grep "meeting" | grep -E "Feb|weekend of"
+jq 'select(.content | test("meeting"))' ~/.ash/graph/memories.jsonl
 # Should have converted "this weekend" to actual date
 
 # 3. Verify observed_at is populated
-cat ~/.ash/memory/memories.jsonl | grep "meeting" | grep "observed_at"
+jq 'select(.content | test("meeting")) | .observed_at' ~/.ash/graph/memories.jsonl
 ```
 
 ### Checklist
@@ -602,7 +700,7 @@ cat ~/.ash/memory/memories.jsonl | grep "meeting" | grep "observed_at"
 - [ ] `ash memory rebuild-index` rebuilds SQLite from JSONL
 - [ ] `ash memory history <id>` shows supersession chain
 - [ ] Auto-migration from SQLite to JSONL on first run
-- [ ] Extracted memories have `source_user_id` populated
+- [ ] Extracted memories have `source_username` populated
 - [ ] `ash memory list` shows About, Source, and Trust columns
 - [ ] `ash memory show <id>` displays full attribution details
 - [ ] Extraction classifies sensitivity (public/personal/sensitive)
@@ -615,3 +713,5 @@ cat ~/.ash/memory/memories.jsonl | grep "meeting" | grep "observed_at"
 - [ ] Secrets filtered during extraction (LLM output post-filtered)
 - [ ] Relative times converted to absolute dates during extraction
 - [ ] `observed_at` field populated on extracted memories
+- [ ] `ash memory search <query>` performs semantic search via MemoryManager
+- [ ] `ash memory add` generates embeddings and indexes via MemoryManager

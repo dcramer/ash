@@ -154,7 +154,9 @@ async def _run_chat(
             # Start RPC server for sandbox memory access
             if components.memory_manager:
                 rpc_server = RPCServer(get_rpc_socket_path())
-                register_memory_methods(rpc_server, components.memory_manager)
+                register_memory_methods(
+                    rpc_server, components.memory_manager, components.person_manager
+                )
                 await rpc_server.start()
 
             # Dump prompt mode: print system prompt and exit

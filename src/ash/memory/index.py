@@ -6,6 +6,7 @@ This is a rebuildable index - the source of truth is the JSONL file.
 
 from __future__ import annotations
 
+import base64
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -189,17 +190,19 @@ class VectorIndex:
         await self._session.commit()
         return count
 
-    async def rebuild_from_memories(
+    async def rebuild_from_embeddings(
         self,
         memories: list[MemoryEntry],
+        embeddings: dict[str, str],
     ) -> int:
-        """Rebuild index from memory entries.
+        """Rebuild index from separate embeddings mapping.
 
-        Clears existing index and rebuilds from memory entries.
-        Only indexes active (non-superseded) memories that have embeddings.
+        Clears existing index and rebuilds.  Only indexes active
+        (non-superseded, non-archived) memories that have embeddings.
 
         Args:
-            memories: Memory entries to index.
+            memories: Memory entries (for filtering active ones).
+            embeddings: Mapping of memory_id → base64-encoded embedding.
 
         Returns:
             Number of embeddings indexed.
@@ -207,21 +210,25 @@ class VectorIndex:
         # Clear existing
         await self.clear()
 
+        # Build set of active memory IDs
+        active_ids = {
+            m.id for m in memories if not m.superseded_at and m.archived_at is None
+        }
+
         # Index active memories with embeddings
         count = 0
-        for memory in memories:
-            if memory.superseded_at:
-                continue  # Skip superseded
+        for memory_id, embedding_b64 in embeddings.items():
+            if memory_id not in active_ids:
+                continue
+            if not embedding_b64:
+                continue
 
-            embedding_bytes = memory.get_embedding_bytes()
-            if not embedding_bytes:
-                continue  # Skip without embedding
-
+            embedding_bytes = base64.b64decode(embedding_b64)
             await self._session.execute(
                 text(
                     "INSERT INTO memory_embeddings (memory_id, embedding) VALUES (:id, :embedding)"
                 ),
-                {"id": memory.id, "embedding": embedding_bytes},
+                {"id": memory_id, "embedding": embedding_bytes},
             )
             count += 1
 
@@ -283,21 +290,19 @@ async def create_vector_index(
 
 
 async def rebuild_vector_index_from_jsonl(
-    memories_path: Path,
     db_path: Path | None = None,
 ) -> int:
-    """Rebuild vector index from JSONL source of truth.
+    """Rebuild vector index from embeddings.jsonl and memories.jsonl.
 
     This is a recovery operation - use when SQLite is missing or corrupted.
 
     Args:
-        memories_path: Path to memories.jsonl.
         db_path: Path to database (default: standard location).
 
     Returns:
         Number of embeddings indexed.
     """
-    from ash.memory.jsonl import MemoryJSONL
+    from ash.memory.file_store import FileMemoryStore
 
     if db_path is None:
         db_path = get_database_path()
@@ -307,20 +312,21 @@ async def rebuild_vector_index_from_jsonl(
         db_path.unlink()
         logger.info("deleted_corrupted_db", extra={"path": str(db_path)})
 
-    # Load memories from JSONL
-    jsonl = MemoryJSONL(memories_path)
-    memories = await jsonl.load_all()
+    # Load memories and embeddings
+    store = FileMemoryStore()
+    memories = await store.get_all_memories()
+    embeddings = await store.load_embeddings()
 
     logger.info(
-        "loaded_memories_for_rebuild",
-        extra={"count": len(memories), "path": str(memories_path)},
+        "loaded_data_for_rebuild",
+        extra={"memories": len(memories), "embeddings": len(embeddings)},
     )
 
     # Create new index
     index, session = await create_vector_index(db_path)
 
     try:
-        count = await index.rebuild_from_memories(memories)
+        count = await index.rebuild_from_embeddings(memories, embeddings)
         return count
     finally:
         await session.close()
