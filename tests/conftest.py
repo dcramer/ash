@@ -1,6 +1,6 @@
 """Shared test fixtures and factories."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +108,28 @@ async def db_session(database: Database) -> AsyncGenerator[AsyncSession, None]:
     """Get a database session for testing."""
     async with database.session() as session:
         yield session
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ash_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[Path, None, None]:
+    """Safety net: ensure ALL tests use a temporary ASH_HOME, never ~/.ash."""
+    home = tmp_path / ".ash"
+    home.mkdir()
+    monkeypatch.setenv("ASH_HOME", str(home))
+
+    from ash.config.paths import get_ash_home
+
+    get_ash_home.cache_clear()
+    yield home
+    get_ash_home.cache_clear()
+
+
+@pytest.fixture
+def ash_home(_isolate_ash_home: Path) -> Path:
+    """Explicit reference to the temporary ASH_HOME directory."""
+    return _isolate_ash_home
 
 
 @pytest.fixture

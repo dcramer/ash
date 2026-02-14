@@ -1,8 +1,7 @@
 """Person/identity management.
 
 Public API:
-- PersonManager: Primary facade for person operations
-- create_person_manager: Factory function
+- GraphStore (from ash.graph): Primary facade for person operations
 
 Types:
 - PersonEntry: Person entity schema
@@ -11,7 +10,6 @@ Types:
 - PersonResolutionResult: Result of person lookup/creation
 """
 
-from ash.people.manager import PersonManager, create_person_manager
 from ash.people.types import (
     AliasEntry,
     PersonEntry,
@@ -21,9 +19,7 @@ from ash.people.types import (
 
 __all__ = [
     "AliasEntry",
-    "PersonManager",
     "PersonEntry",
     "PersonResolutionResult",
     "RelationshipClaim",
-    "create_person_manager",
 ]

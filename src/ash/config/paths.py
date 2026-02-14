@@ -77,8 +77,8 @@ def get_config_path() -> Path:
 
 
 def get_database_path() -> Path:
-    """Get the default database file path."""
-    return get_ash_home() / "data" / "memory.db"
+    """Get the vector index database file path."""
+    return get_index_dir() / "vectors.db"
 
 
 def get_graph_dir() -> Path:
@@ -98,7 +98,22 @@ def get_people_jsonl_path() -> Path:
 
 def get_embeddings_jsonl_path() -> Path:
     """Get the embeddings JSONL file path (derived, for rebuild)."""
-    return get_graph_dir() / "embeddings.jsonl"
+    return get_index_dir() / "embeddings.jsonl"
+
+
+def get_index_dir() -> Path:
+    """Get the index directory path (derived data, rebuildable)."""
+    return get_ash_home() / "index"
+
+
+def get_users_jsonl_path() -> Path:
+    """Get the users JSONL file path."""
+    return get_graph_dir() / "users.jsonl"
+
+
+def get_chats_jsonl_path() -> Path:
+    """Get the chats JSONL file path."""
+    return get_graph_dir() / "chats.jsonl"
 
 
 def get_workspace_path() -> Path:
@@ -153,7 +168,7 @@ def get_chat_dir(
 
 def get_skill_state_path() -> Path:
     """Get the skill state directory path (per-skill JSON files)."""
-    return get_ash_home() / "data" / "skills"
+    return get_ash_home() / "skills" / "state"
 
 
 def get_user_skills_path() -> Path:
@@ -261,8 +276,11 @@ def get_all_paths() -> dict[str, Path | None]:
         "config": get_config_path(),
         "database": get_database_path(),
         "graph": get_graph_dir(),
+        "index": get_index_dir(),
         "memories_jsonl": get_memories_jsonl_path(),
         "people_jsonl": get_people_jsonl_path(),
+        "users_jsonl": get_users_jsonl_path(),
+        "chats_jsonl": get_chats_jsonl_path(),
         "embeddings_jsonl": get_embeddings_jsonl_path(),
         "workspace": get_workspace_path(),
         "schedule": get_schedule_file(),

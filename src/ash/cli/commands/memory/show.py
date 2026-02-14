@@ -2,10 +2,7 @@
 
 import typer
 
-from ash.cli.commands.memory._helpers import (
-    get_memory_store,
-    is_source_self_reference,
-)
+from ash.cli.commands.memory._helpers import get_memory_store, is_source_self_reference
 from ash.cli.console import console, dim, error
 
 
@@ -23,10 +20,9 @@ async def memory_show(memory_id: str) -> None:
         raise typer.Exit(1)
 
     # Load people for name lookup
-    from ash.cli.commands.memory._helpers import get_person_manager
+    from ash.cli.commands.memory._helpers import get_all_people
 
-    pm = get_person_manager()
-    people = await pm.get_all()
+    people = await get_all_people()
     people_by_id = {p.id: p for p in people}
 
     # Build details table

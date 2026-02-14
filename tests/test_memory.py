@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.memory import MemoryManager
+from ash.graph.store import GraphStore
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.file_store import FileMemoryStore
 from ash.memory.index import VectorIndex, VectorSearchResult
@@ -34,7 +34,7 @@ def mock_embedding_generator():
     """Create a mock embedding generator."""
     generator = MagicMock(spec=EmbeddingGenerator)
     # Return mock embedding (1536 dimensions)
-    generator.generate = AsyncMock(return_value=[0.1] * 1536)
+    generator.embed = AsyncMock(return_value=[0.1] * 1536)
     return generator
 
 
@@ -49,12 +49,19 @@ def mock_index():
 
 
 @pytest.fixture
-async def memory_manager(file_memory_store, mock_index, mock_embedding_generator):
-    """Create a memory manager with mocked components."""
-    return MemoryManager(
-        store=file_memory_store,
-        index=mock_index,
+async def memory_manager(
+    ash_home, file_memory_store, mock_index, mock_embedding_generator
+):
+    """Create a GraphStore (replaces MemoryManager) with mocked components."""
+    graph_dir = ash_home / "graph"
+    graph_dir.mkdir(exist_ok=True)
+    return GraphStore(
+        memory_store=file_memory_store,
+        vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
+        people_path=graph_dir / "people.jsonl",
+        users_path=graph_dir / "users.jsonl",
+        chats_path=graph_dir / "chats.jsonl",
     )
 
 
@@ -109,8 +116,8 @@ class TestMemorySupersession:
         assert len(memories) == 2
 
 
-class TestMemoryManagerSupersession:
-    """Tests for automatic supersession via MemoryManager."""
+class TestGraphStoreSupersession:
+    """Tests for automatic supersession via GraphStore."""
 
     async def test_add_memory_supersedes_conflicting(
         self, memory_manager, file_memory_store, mock_index
@@ -309,7 +316,7 @@ class TestEphemeralDecay:
 class TestCrossContextRetrieval:
     """Tests for cross-context memory retrieval using person IDs."""
 
-    async def test_find_memories_by_subject(self, file_memory_store: FileMemoryStore):
+    async def test_find_memories_by_subject(self, memory_manager, file_memory_store):
         """Test finding memories by subject person IDs."""
         person_id = "person-bob-1"
 
@@ -326,8 +333,8 @@ class TestCrossContextRetrieval:
             owner_user_id="alice",
         )
 
-        # Find memories about bob by person_id
-        memories = await file_memory_store.find_memories_by_subject(
+        # Find memories about bob by person_id via GraphStore
+        memories = await memory_manager._find_memories_about_persons(
             person_ids={person_id}
         )
 
@@ -335,9 +342,9 @@ class TestCrossContextRetrieval:
         assert memories[0].content == "Bob likes pizza"
 
     async def test_find_memories_by_subject_excludes_owner(
-        self, file_memory_store: FileMemoryStore
+        self, memory_manager, file_memory_store
     ):
-        """Test that find_memories_by_subject can exclude owner's memories."""
+        """Test that _find_memories_about_persons can exclude owner's memories."""
         person_id_alice = "person-bob-alice"
         person_id_carol = "person-bob-carol"
 
@@ -356,7 +363,7 @@ class TestCrossContextRetrieval:
         )
 
         # Find memories about bob excluding alice's
-        memories = await file_memory_store.find_memories_by_subject(
+        memories = await memory_manager._find_memories_about_persons(
             person_ids={person_id_alice, person_id_carol},
             exclude_owner_user_id="alice",
         )
@@ -366,7 +373,7 @@ class TestCrossContextRetrieval:
         assert memories[0].owner_user_id == "carol"
 
     async def test_find_memories_by_subject_multiple_ids(
-        self, file_memory_store: FileMemoryStore
+        self, memory_manager, file_memory_store
     ):
         """Test that multiple person IDs find all relevant memories."""
         person_id_1 = "person-bob-1"
@@ -384,7 +391,7 @@ class TestCrossContextRetrieval:
             subject_person_ids=[person_id_2],
         )
 
-        memories = await file_memory_store.find_memories_by_subject(
+        memories = await memory_manager._find_memories_about_persons(
             person_ids={person_id_1, person_id_2}
         )
 
@@ -392,7 +399,7 @@ class TestCrossContextRetrieval:
 
 
 class TestSecretsFiltering:
-    """Tests for secrets filtering in MemoryManager."""
+    """Tests for secrets filtering in GraphStore."""
 
     async def test_rejects_openai_api_key(self, memory_manager):
         """Test that OpenAI API keys are rejected."""
@@ -620,7 +627,7 @@ class TestOwnMemoryPrivacy:
     """
 
     async def test_sensitive_self_memory_returned_in_group(
-        self, file_memory_store, mock_index, mock_embedding_generator
+        self, ash_home, file_memory_store, mock_index, mock_embedding_generator
     ):
         """SENSITIVE self-memory (no subjects) visible in group chat."""
         memory = await file_memory_store.add_memory(
@@ -634,10 +641,15 @@ class TestOwnMemoryPrivacy:
             return_value=_make_search_results([(memory.id, 0.9)])
         )
 
-        mm = MemoryManager(
-            store=file_memory_store,
-            index=mock_index,
+        graph_dir = ash_home / "graph"
+        graph_dir.mkdir(exist_ok=True)
+        mm = GraphStore(
+            memory_store=file_memory_store,
+            vector_index=mock_index,
             embedding_generator=mock_embedding_generator,
+            people_path=graph_dir / "people.jsonl",
+            users_path=graph_dir / "users.jsonl",
+            chats_path=graph_dir / "chats.jsonl",
         )
 
         ctx = await mm.get_context_for_message(
@@ -651,7 +663,7 @@ class TestOwnMemoryPrivacy:
         assert ctx.memories[0].content == "I have been dealing with anxiety"
 
     async def test_personal_memory_about_other_returned_in_group(
-        self, file_memory_store, mock_index, mock_embedding_generator
+        self, ash_home, file_memory_store, mock_index, mock_embedding_generator
     ):
         """PERSONAL memory about someone else visible to owner in group chat."""
         memory = await file_memory_store.add_memory(
@@ -665,10 +677,15 @@ class TestOwnMemoryPrivacy:
             return_value=_make_search_results([(memory.id, 0.9)])
         )
 
-        mm = MemoryManager(
-            store=file_memory_store,
-            index=mock_index,
+        graph_dir = ash_home / "graph"
+        graph_dir.mkdir(exist_ok=True)
+        mm = GraphStore(
+            memory_store=file_memory_store,
+            vector_index=mock_index,
             embedding_generator=mock_embedding_generator,
+            people_path=graph_dir / "people.jsonl",
+            users_path=graph_dir / "users.jsonl",
+            chats_path=graph_dir / "chats.jsonl",
         )
 
         ctx = await mm.get_context_for_message(
@@ -774,11 +791,8 @@ class TestForgetPerson:
         self, memory_manager, file_memory_store, mock_index
     ):
         """Forget can optionally delete the person record."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        mock_people = MagicMock()
-        mock_people.delete = AsyncMock()
-        memory_manager._people = mock_people
+        # Mock delete_person on the GraphStore instance
+        memory_manager.delete_person = AsyncMock(return_value=True)
 
         person_id = "person-bob"
         await file_memory_store.add_memory(
@@ -792,18 +806,16 @@ class TestForgetPerson:
             delete_person_record=True,
         )
 
-        mock_people.delete.assert_called_once_with(person_id)
+        memory_manager.delete_person.assert_called_once_with(person_id)
 
 
 class TestSubjectNameResolution:
     """Verify subject_name is resolved in search result metadata."""
 
     async def test_search_resolves_subject_name(
-        self, file_memory_store, mock_index, mock_embedding_generator
+        self, ash_home, file_memory_store, mock_index, mock_embedding_generator
     ):
-        """Search results include subject_name when person_manager is available."""
-        from unittest.mock import AsyncMock, MagicMock
-
+        """Search results include subject_name when person records exist."""
         from ash.people.types import PersonEntry
 
         memory = await file_memory_store.add_memory(
@@ -816,18 +828,21 @@ class TestSubjectNameResolution:
             return_value=_make_search_results([(memory.id, 0.9)])
         )
 
-        # Mock person manager
-        mock_people = MagicMock()
+        graph_dir = ash_home / "graph"
+        graph_dir.mkdir(exist_ok=True)
+        mm = GraphStore(
+            memory_store=file_memory_store,
+            vector_index=mock_index,
+            embedding_generator=mock_embedding_generator,
+            people_path=graph_dir / "people.jsonl",
+            users_path=graph_dir / "users.jsonl",
+            chats_path=graph_dir / "chats.jsonl",
+        )
+
+        # Mock get_person to return a person entry with a name
         mock_person = MagicMock(spec=PersonEntry)
         mock_person.name = "Sarah"
-        mock_people.get = AsyncMock(return_value=mock_person)
-
-        mm = MemoryManager(
-            store=file_memory_store,
-            index=mock_index,
-            embedding_generator=mock_embedding_generator,
-            person_manager=mock_people,
-        )
+        mm.get_person = AsyncMock(return_value=mock_person)  # type: ignore[assignment]
 
         results = await mm.search(query="birthday", owner_user_id="user-1")
         assert len(results) == 1
@@ -835,9 +850,9 @@ class TestSubjectNameResolution:
         assert results[0].metadata["subject_name"] == "Sarah"
 
     async def test_search_no_subject_name_without_people(
-        self, file_memory_store, mock_index, mock_embedding_generator
+        self, ash_home, file_memory_store, mock_index, mock_embedding_generator
     ):
-        """No subject_name when person_manager is not available."""
+        """No subject_name when person records are not available."""
         memory = await file_memory_store.add_memory(
             content="Sarah's birthday is March 15",
             owner_user_id="user-1",
@@ -848,10 +863,15 @@ class TestSubjectNameResolution:
             return_value=_make_search_results([(memory.id, 0.9)])
         )
 
-        mm = MemoryManager(
-            store=file_memory_store,
-            index=mock_index,
+        graph_dir = ash_home / "graph"
+        graph_dir.mkdir(exist_ok=True)
+        mm = GraphStore(
+            memory_store=file_memory_store,
+            vector_index=mock_index,
             embedding_generator=mock_embedding_generator,
+            people_path=graph_dir / "people.jsonl",
+            users_path=graph_dir / "users.jsonl",
+            chats_path=graph_dir / "chats.jsonl",
         )
 
         results = await mm.search(query="birthday", owner_user_id="user-1")
@@ -860,7 +880,7 @@ class TestSubjectNameResolution:
         assert "subject_name" not in results[0].metadata
 
     async def test_search_no_subject_name_for_self_facts(
-        self, file_memory_store, mock_index, mock_embedding_generator
+        self, ash_home, file_memory_store, mock_index, mock_embedding_generator
     ):
         """No subject_name for facts about the speaker (empty subjects)."""
         memory = await file_memory_store.add_memory(
@@ -873,10 +893,15 @@ class TestSubjectNameResolution:
             return_value=_make_search_results([(memory.id, 0.9)])
         )
 
-        mm = MemoryManager(
-            store=file_memory_store,
-            index=mock_index,
+        graph_dir = ash_home / "graph"
+        graph_dir.mkdir(exist_ok=True)
+        mm = GraphStore(
+            memory_store=file_memory_store,
+            vector_index=mock_index,
             embedding_generator=mock_embedding_generator,
+            people_path=graph_dir / "people.jsonl",
+            users_path=graph_dir / "users.jsonl",
+            chats_path=graph_dir / "chats.jsonl",
         )
 
         results = await mm.search(query="dark mode", owner_user_id="user-1")

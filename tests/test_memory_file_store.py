@@ -352,35 +352,6 @@ class TestCacheInvalidation:
 class TestPortableMemories:
     """Tests for portable field on cross-context retrieval."""
 
-    async def test_non_portable_excluded_from_find_by_subject(
-        self, file_memory_store: FileMemoryStore
-    ):
-        """Non-portable memories are excluded from find_memories_by_subject."""
-        person_id = "person-bob"
-
-        # Portable memory
-        await file_memory_store.add_memory(
-            content="Bob loves pizza",
-            owner_user_id="alice",
-            subject_person_ids=[person_id],
-            portable=True,
-        )
-
-        # Non-portable memory
-        await file_memory_store.add_memory(
-            content="Bob is presenting next",
-            owner_user_id="alice",
-            subject_person_ids=[person_id],
-            portable=False,
-        )
-
-        memories = await file_memory_store.find_memories_by_subject(
-            person_ids={person_id}
-        )
-
-        assert len(memories) == 1
-        assert memories[0].content == "Bob loves pizza"
-
     async def test_portable_default_is_true(self, file_memory_store: FileMemoryStore):
         """Memories default to portable=True."""
         memory = await file_memory_store.add_memory(
@@ -544,27 +515,6 @@ class TestGetMemoriesExcludesArchived:
 
         assert await file_memory_store.get_memory_by_prefix(prefix) is None
 
-    async def test_find_memories_by_subject_excludes_archived(
-        self, file_memory_store: FileMemoryStore
-    ):
-        """find_memories_by_subject should skip archived entries."""
-        pid = "person-1"
-        await file_memory_store.add_memory(
-            content="Active about person",
-            subject_person_ids=[pid],
-            owner_user_id="u1",
-        )
-        m2 = await file_memory_store.add_memory(
-            content="Archived about person",
-            subject_person_ids=[pid],
-            owner_user_id="u1",
-        )
-        await file_memory_store.archive_memories({m2.id}, "test")
-
-        results = await file_memory_store.find_memories_by_subject(person_ids={pid})
-        assert len(results) == 1
-        assert results[0].content == "Active about person"
-
 
 class TestCompact:
     """Tests for compact() — permanent removal of old archived entries."""
@@ -689,103 +639,6 @@ class TestEmbeddingStorage:
 
         embeddings = await file_memory_store.load_embeddings()
         assert embeddings["mem-1"] == "new"
-
-
-class TestFindHearsayBySubject:
-    """Tests for find_hearsay_by_subject."""
-
-    async def test_finds_hearsay_about_person(self, file_memory_store: FileMemoryStore):
-        """Should find memories about a person spoken by someone else."""
-        pid = "person-bob"
-
-        # Hearsay: alice talking about bob
-        await file_memory_store.add_memory(
-            content="Bob likes hiking",
-            owner_user_id="alice",
-            subject_person_ids=[pid],
-            source_username="alice",
-        )
-
-        results = await file_memory_store.find_hearsay_by_subject(
-            person_ids={pid},
-            source_username="bob",
-            owner_user_id="alice",
-        )
-
-        assert len(results) == 1
-        assert results[0].content == "Bob likes hiking"
-
-    async def test_excludes_self_facts(self, file_memory_store: FileMemoryStore):
-        """Should exclude memories where the subject spoke about themselves."""
-        pid = "person-bob"
-
-        # Fact: bob talking about himself
-        await file_memory_store.add_memory(
-            content="I like hiking",
-            owner_user_id="alice",
-            subject_person_ids=[pid],
-            source_username="bob",
-        )
-
-        results = await file_memory_store.find_hearsay_by_subject(
-            person_ids={pid},
-            source_username="bob",
-            owner_user_id="alice",
-        )
-
-        assert len(results) == 0
-
-    async def test_case_insensitive_username(self, file_memory_store: FileMemoryStore):
-        """Username matching should be case-insensitive."""
-        pid = "person-bob"
-
-        await file_memory_store.add_memory(
-            content="I like coding",
-            owner_user_id="alice",
-            subject_person_ids=[pid],
-            source_username="Bob",  # Capital B
-        )
-
-        # Should still be excluded when source_username is "bob" (lowercase)
-        results = await file_memory_store.find_hearsay_by_subject(
-            person_ids={pid},
-            source_username="bob",
-            owner_user_id="alice",
-        )
-
-        assert len(results) == 0
-
-    async def test_respects_limit(self, file_memory_store: FileMemoryStore):
-        """Should stop after reaching the limit."""
-        pid = "person-bob"
-
-        for i in range(5):
-            await file_memory_store.add_memory(
-                content=f"Hearsay {i}",
-                owner_user_id="alice",
-                subject_person_ids=[pid],
-                source_username="charlie",
-            )
-
-        results = await file_memory_store.find_hearsay_by_subject(
-            person_ids={pid},
-            source_username="bob",
-            owner_user_id="alice",
-            limit=3,
-        )
-
-        assert len(results) == 3
-
-    async def test_empty_person_ids_returns_empty(
-        self, file_memory_store: FileMemoryStore
-    ):
-        """Should return empty list for empty person_ids."""
-        results = await file_memory_store.find_hearsay_by_subject(
-            person_ids=set(),
-            source_username="bob",
-        )
-
-        assert results == []
 
 
 class TestClear:

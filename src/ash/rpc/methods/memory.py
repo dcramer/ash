@@ -4,8 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ash.memory import MemoryManager
-    from ash.people import PersonManager
+    from ash.graph.store import GraphStore
     from ash.rpc.server import RPCServer
 
 logger = logging.getLogger(__name__)
@@ -13,15 +12,15 @@ logger = logging.getLogger(__name__)
 
 def register_memory_methods(
     server: "RPCServer",
-    memory_manager: "MemoryManager",
-    person_manager: "PersonManager | None" = None,
+    memory_manager: "GraphStore",
+    person_manager: "GraphStore | None" = None,
 ) -> None:
     """Register memory-related RPC methods.
 
     Args:
         server: RPC server to register methods on.
-        memory_manager: Memory manager instance.
-        person_manager: Person manager instance (for subject resolution).
+        memory_manager: GraphStore instance.
+        person_manager: GraphStore instance (for subject resolution).
     """
 
     async def memory_search(params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -107,7 +106,7 @@ def register_memory_methods(
         if subjects and user_id and person_manager:
             for subject in subjects:
                 try:
-                    result = await person_manager.resolve_or_create(
+                    result = await person_manager.resolve_or_create_person(
                         created_by=user_id,
                         reference=subject,
                         content_hint=content,

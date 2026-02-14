@@ -45,8 +45,8 @@ from ash.llm.types import Message, Role
 
 if TYPE_CHECKING:
     from ash.config.models import PassiveListeningConfig
+    from ash.graph.store import GraphStore
     from ash.llm import LLMProvider
-    from ash.memory import MemoryManager
     from ash.memory.extractor import MemoryExtractor, SpeakerInfo
     from ash.providers.base import IncomingMessage
 
@@ -390,7 +390,7 @@ class PassiveMemoryExtractor:
     def __init__(
         self,
         extractor: MemoryExtractor,
-        memory_manager: MemoryManager,
+        memory_manager: GraphStore,
     ):
         """Initialize the passive extractor.
 

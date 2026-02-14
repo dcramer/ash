@@ -2,7 +2,7 @@
 
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
 import pytest
@@ -49,14 +49,29 @@ def pytest_configure(config: pytest.Config) -> None:
     for module in [
         "ash.core.agent",
         "ash.memory.extractor",
-        "ash.memory.manager",
+        "ash.graph.store",
         "ash.memory.index",
-        "ash.people.manager",
         "evals",
     ]:
         mod_logger = logging.getLogger(module)
         mod_logger.setLevel(logging.DEBUG)
         mod_logger.addHandler(handler)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ash_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[Path, None, None]:
+    """Safety net: ensure ALL evals use a temporary ASH_HOME."""
+    home = tmp_path / ".ash"
+    home.mkdir()
+    monkeypatch.setenv("ASH_HOME", str(home))
+
+    from ash.config.paths import get_ash_home
+
+    get_ash_home.cache_clear()
+    yield home
+    get_ash_home.cache_clear()
 
 
 @pytest.fixture
@@ -235,31 +250,15 @@ async def eval_memory_agent(
     eval_memory_config: AshConfig,
     eval_workspace: Workspace,
     eval_database: Database,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> AsyncGenerator[AgentComponents, None]:
     """Create agent with memory (embeddings + extraction) for memory evals.
 
-    Uses an isolated people.jsonl in tmp_path so evals don't touch ~/.ash/.
+    File stores are isolated via the _isolate_ash_home autouse fixture.
     Requires both ANTHROPIC_API_KEY and OPENAI_API_KEY.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         pytest.skip("ANTHROPIC_API_KEY not set")
-
-    # Isolate file stores to tmp_path so evals don't touch ~/.ash/
-    monkeypatch.setattr(
-        "ash.people.manager.get_people_jsonl_path",
-        lambda: tmp_path / "people.jsonl",
-    )
-    monkeypatch.setattr(
-        "ash.memory.file_store.get_memories_jsonl_path",
-        lambda: tmp_path / "memories.jsonl",
-    )
-    monkeypatch.setattr(
-        "ash.memory.file_store.get_embeddings_jsonl_path",
-        lambda: tmp_path / "embeddings.jsonl",
-    )
 
     async with eval_database.session() as db_session:
         components = await create_agent(

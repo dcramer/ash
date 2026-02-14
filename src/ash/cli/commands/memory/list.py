@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ash.cli.commands.memory._helpers import get_memory_store, get_person_manager
+from ash.cli.commands.memory._helpers import get_memory_store
 from ash.cli.console import console, dim, warning
 
 
@@ -59,8 +59,9 @@ async def memory_list(
             break
 
     # Load people for name lookup
-    pm = get_person_manager()
-    people = await pm.get_all()
+    from ash.cli.commands.memory._helpers import get_all_people
+
+    people = await get_all_people()
     people_by_id = {p.id: p for p in people}
 
     # Build username -> person name lookup

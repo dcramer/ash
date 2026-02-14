@@ -22,7 +22,6 @@ async def main():
     from ash.config.paths import get_database_path
     from ash.db.engine import Database
     from ash.llm import create_registry
-    from ash.memory.manager import create_memory_manager
 
     print("=" * 60)
     print("Memory System QA Test")
@@ -74,8 +73,10 @@ async def main():
             else None,
         )
 
-        # Create memory manager (handles JSONL storage + vector index)
-        memory = await create_memory_manager(
+        # Create graph store (handles JSONL storage + vector index)
+        from ash.graph import create_graph_store
+
+        memory = await create_graph_store(
             db_session=session,
             llm_registry=llm_registry,
             embedding_model=config.embeddings.model,

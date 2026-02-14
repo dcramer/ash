@@ -92,7 +92,7 @@ async def _dump_state(agent: "AgentComponents") -> None:
             )
 
     if agent.person_manager:
-        people = await agent.person_manager.list_all()
+        people = await agent.person_manager.list_people()
         logger.info("=== People records (%d) ===", len(people))
         for p in people:
             alias_strs = [a.value if hasattr(a, "value") else str(a) for a in p.aliases]

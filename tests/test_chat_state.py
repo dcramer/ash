@@ -80,13 +80,6 @@ def telegram_message_no_username() -> IncomingMessage:
 
 
 @pytest.fixture
-def ash_home(tmp_path: Path) -> Path:
-    ash_home = tmp_path / ".ash"
-    ash_home.mkdir()
-    return ash_home
-
-
-@pytest.fixture
 def mock_get_chat_dir(ash_home: Path):
     def _get_chat_dir(
         provider: str, chat_id: str, thread_id: str | None = None

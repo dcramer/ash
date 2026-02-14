@@ -133,6 +133,34 @@ def register(app: typer.Typer) -> None:
                 help="Fix memories missing source_username attribution (doctor action)",
             ),
         ] = False,
+        review: Annotated[
+            bool,
+            typer.Option(
+                "--review",
+                help="Content quality review (doctor action)",
+            ),
+        ] = False,
+        dedup: Annotated[
+            bool,
+            typer.Option(
+                "--dedup",
+                help="Semantic deduplication (doctor action)",
+            ),
+        ] = False,
+        fix_names: Annotated[
+            bool,
+            typer.Option(
+                "--fix-names",
+                help="Resolve numeric source usernames (doctor action)",
+            ),
+        ] = False,
+        run_all: Annotated[
+            bool,
+            typer.Option(
+                "--all-checks",
+                help="Run all doctor checks in sequence (doctor action)",
+            ),
+        ] = False,
     ) -> None:
         """Manage memory entries.
 
@@ -179,6 +207,10 @@ def register(app: typer.Typer) -> None:
                     scope=scope,
                     delete_person=delete_person,
                     fix_attribution=fix_attribution,
+                    review=review,
+                    dedup=dedup,
+                    fix_names=fix_names,
+                    run_all=run_all,
                 )
             )
         except KeyboardInterrupt:
@@ -201,10 +233,13 @@ async def _run_memory_action(
     scope: str | None,
     delete_person: bool = False,
     fix_attribution: bool = False,
+    review: bool = False,
+    dedup: bool = False,
+    fix_names: bool = False,
+    run_all: bool = False,
 ) -> None:
     """Run memory action asynchronously."""
-    from ash.cli.commands.memory._helpers import get_memory_manager
-    from ash.cli.commands.memory.doctor import memory_doctor
+    from ash.cli.commands.memory._helpers import get_graph_store
     from ash.cli.commands.memory.forget import memory_forget
     from ash.cli.commands.memory.list import memory_list
     from ash.cli.commands.memory.maintenance import (
@@ -236,20 +271,20 @@ async def _run_memory_action(
                         "Usage: ash memory search <query> or ash memory search -q <query>"
                     )
                     raise typer.Exit(1)
-                manager = await get_memory_manager(config, session)
-                if not manager:
+                store = await get_graph_store(config, session)
+                if not store:
                     error("Semantic search requires [embeddings] configuration")
                     raise typer.Exit(1)
-                await memory_search(manager, search_query, limit, user_id, chat_id)
+                await memory_search(store, search_query, limit, user_id, chat_id)
             elif action == "add":
                 if not query:
                     error("--query/-q is required to specify content to add")
                     raise typer.Exit(1)
-                manager = await get_memory_manager(config, session)
-                if not manager:
+                store = await get_graph_store(config, session)
+                if not store:
                     error("Memory add requires [embeddings] configuration for indexing")
                     raise typer.Exit(1)
-                await memory_add(manager, query, source, expires_days)
+                await memory_add(store, query, source, expires_days)
             elif action == "remove":
                 await memory_remove(
                     session, entry_id, all_entries, force, user_id, chat_id, scope
@@ -278,7 +313,29 @@ async def _run_memory_action(
             elif action == "compact":
                 await memory_compact(force)
             elif action == "doctor":
-                await memory_doctor(config, force, fix_attribution)
+                from ash.cli.commands.memory.doctor import (
+                    memory_doctor_attribution,
+                    memory_doctor_dedup,
+                    memory_doctor_fix_names,
+                    memory_doctor_quality,
+                    memory_doctor_reclassify,
+                )
+
+                if run_all:
+                    await memory_doctor_quality(config, force)
+                    await memory_doctor_dedup(config, session, force)
+                    await memory_doctor_fix_names(force)
+                    await memory_doctor_attribution(force)
+                elif review:
+                    await memory_doctor_quality(config, force)
+                elif dedup:
+                    await memory_doctor_dedup(config, session, force)
+                elif fix_names:
+                    await memory_doctor_fix_names(force)
+                elif fix_attribution:
+                    await memory_doctor_attribution(force)
+                else:
+                    await memory_doctor_reclassify(config, force)
             else:
                 error(f"Unknown action: {action}")
                 console.print(

@@ -1,6 +1,6 @@
 """Canonical secret detection patterns for the memory subsystem.
 
-Used by both MemoryManager (add_memory rejection) and MemoryExtractor
+Used by both GraphStore (add_memory rejection) and MemoryExtractor
 (extraction filtering) to prevent storing credentials and secrets.
 """
 

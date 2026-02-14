@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ash.cli.commands.memory._helpers import get_person_manager
+from ash.cli.commands.memory._helpers import get_all_people
 from ash.cli.console import console, dim, warning
 
 if TYPE_CHECKING:
-    from ash.memory.manager import MemoryManager
+    from ash.graph.store import GraphStore
 
 
 async def memory_search(
-    manager: MemoryManager,
+    manager: GraphStore,
     query: str,
     limit: int,
     user_id: str | None,
@@ -33,8 +33,7 @@ async def memory_search(
         return
 
     # Load people for subject name resolution
-    pm = get_person_manager()
-    people = await pm.get_all()
+    people = await get_all_people()
     people_by_id = {p.id: p for p in people}
 
     table = Table(title=f"Memory Search: '{query}'")

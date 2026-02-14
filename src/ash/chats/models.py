@@ -17,6 +17,7 @@ class Participant(BaseModel):
     last_active: datetime = Field(default_factory=lambda: datetime.now(UTC))
     joined_at: datetime | None = None  # When they joined (if we saw the event)
     left: bool = False  # True if they left the chat
+    graph_user_id: str | None = None  # Reference to graph UserEntry.id
 
 
 class ChatInfo(BaseModel):
@@ -34,6 +35,7 @@ class ChatState(BaseModel):
     participants: list[Participant] = Field(default_factory=list)
     thread_index: dict[str, str] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    graph_chat_id: str | None = None  # Reference to graph ChatEntry.id
 
     def get_participant(self, user_id: str) -> Participant | None:
         """Get a participant by ID."""

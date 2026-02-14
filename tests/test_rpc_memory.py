@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.memory import MemoryManager
+from ash.graph.store import GraphStore
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.index import VectorIndex
 from ash.rpc.methods.memory import register_memory_methods
@@ -46,12 +46,19 @@ def mock_index():
 
 
 @pytest.fixture
-async def memory_manager(file_memory_store, mock_index, mock_embedding_generator):
-    """Create a memory manager with mocked components."""
-    return MemoryManager(
-        store=file_memory_store,
-        index=mock_index,
+async def memory_manager(
+    ash_home, file_memory_store, mock_index, mock_embedding_generator
+):
+    """Create a GraphStore (replaces MemoryManager) with mocked components."""
+    graph_dir = ash_home / "graph"
+    graph_dir.mkdir(exist_ok=True)
+    return GraphStore(
+        memory_store=file_memory_store,
+        vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
+        people_path=graph_dir / "people.jsonl",
+        users_path=graph_dir / "users.jsonl",
+        chats_path=graph_dir / "chats.jsonl",
     )
 
 

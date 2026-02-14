@@ -15,8 +15,8 @@ if TYPE_CHECKING:
     from ash.config import AshConfig
     from ash.core import Agent
     from ash.db import Database
+    from ash.graph.store import GraphStore
     from ash.llm import LLMProvider
-    from ash.memory import MemoryManager
     from ash.memory.extractor import MemoryExtractor
     from ash.providers.telegram import TelegramMessageHandler, TelegramProvider
     from ash.skills import SkillRegistry
@@ -41,7 +41,7 @@ class AshServer:
         skill_registry: "SkillRegistry | None" = None,
         tool_registry: "ToolRegistry | None" = None,
         llm_provider: "LLMProvider | None" = None,
-        memory_manager: "MemoryManager | None" = None,
+        memory_manager: "GraphStore | None" = None,
         memory_extractor: "MemoryExtractor | None" = None,
     ):
         self._database = database
@@ -146,7 +146,7 @@ def create_app(
     skill_registry: "SkillRegistry | None" = None,
     tool_registry: "ToolRegistry | None" = None,
     llm_provider: "LLMProvider | None" = None,
-    memory_manager: "MemoryManager | None" = None,
+    memory_manager: "GraphStore | None" = None,
     memory_extractor: "MemoryExtractor | None" = None,
 ) -> FastAPI:
     """Create the FastAPI application."""

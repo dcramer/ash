@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from ash.cli.commands.memory._helpers import get_memory_manager, get_person_manager
 from ash.cli.console import dim, error, success, warning
 
 if TYPE_CHECKING:
@@ -26,13 +25,15 @@ async def memory_forget(
     force: bool,
 ) -> None:
     """Archive all memories about a person."""
-    pm = get_person_manager()
-    person = await pm.get(person_id)
+    from ash.cli.commands.memory._helpers import get_all_people, get_graph_store
 
+    people = await get_all_people()
+    people_by_id = {p.id: p for p in people}
+
+    # Find person by exact or prefix match
+    person = people_by_id.get(person_id)
     if not person:
-        # Try prefix match
-        all_people = await pm.get_all()
-        matches = [p for p in all_people if p.id.startswith(person_id)]
+        matches = [p for p in people if p.id.startswith(person_id)]
         if len(matches) == 1:
             person = matches[0]
         elif len(matches) > 1:
@@ -44,8 +45,8 @@ async def memory_forget(
             error(f"No person found with ID: {person_id}")
             raise typer.Exit(1)
 
-    manager = await get_memory_manager(config, session)
-    if not manager:
+    store = await get_graph_store(config, session)
+    if not store:
         error("Memory forget requires [embeddings] configuration")
         raise typer.Exit(1)
 
@@ -59,7 +60,7 @@ async def memory_forget(
             dim("Cancelled")
             return
 
-    archived_count = await manager.forget_person(
+    archived_count = await store.forget_person(
         person_id=person.id,
         delete_person_record=delete_person,
     )

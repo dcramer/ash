@@ -9,18 +9,18 @@ from ash.cli.commands.memory._helpers import get_memory_store
 from ash.cli.console import dim, error, success, warning
 
 if TYPE_CHECKING:
-    from ash.memory.manager import MemoryManager
+    from ash.graph.store import GraphStore
 
 logger = logging.getLogger(__name__)
 
 
 async def memory_add(
-    manager: "MemoryManager",
+    manager: "GraphStore",
     content: str,
     source: str | None,
     expires_days: int | None,
 ) -> None:
-    """Add a memory entry via MemoryManager (with embedding + supersession)."""
+    """Add a memory entry with embedding + supersession."""
     import os
 
     # Read user attribution from environment (set by sandbox)

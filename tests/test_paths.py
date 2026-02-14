@@ -53,7 +53,7 @@ class TestDerivedPaths:
         monkeypatch.setenv(ENV_VAR, str(tmp_path))
         get_ash_home.cache_clear()
 
-        assert get_database_path() == tmp_path / "data" / "memory.db"
+        assert get_database_path() == tmp_path / "index" / "vectors.db"
 
     def test_workspace_path(self, monkeypatch, tmp_path):
         monkeypatch.setenv(ENV_VAR, str(tmp_path))

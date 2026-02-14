@@ -41,8 +41,8 @@ if TYPE_CHECKING:
 
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
-    from ash.memory import MemoryExtractor, MemoryManager, RetrievedContext
-    from ash.people import PersonManager
+    from ash.graph.store import GraphStore
+    from ash.memory import MemoryExtractor, RetrievedContext
     from ash.people.types import PersonEntry
     from ash.providers.base import IncomingMessage
 
@@ -120,7 +120,7 @@ def _extract_relationship_term(content: str) -> str | None:
     attach to person records when a RELATIONSHIP-type fact is extracted.
     Returns the first match found, or None.
     """
-    from ash.people.manager import RELATIONSHIP_TERMS
+    from ash.graph.store import RELATIONSHIP_TERMS
 
     content_lower = content.lower()
     # Check multi-word terms first (e.g., "best friend" before "friend")
@@ -196,10 +196,9 @@ class Agent:
         tool_executor: ToolExecutor,
         prompt_builder: SystemPromptBuilder,
         runtime: RuntimeInfo | None = None,
-        memory_manager: MemoryManager | None = None,
         memory_extractor: MemoryExtractor | None = None,
-        person_manager: PersonManager | None = None,
         config: AgentConfig | None = None,
+        graph_store: GraphStore | None = None,
     ):
         """Initialize agent.
 
@@ -208,18 +207,18 @@ class Agent:
             tool_executor: Tool executor for running tools.
             prompt_builder: System prompt builder with full context.
             runtime: Runtime information for prompt.
-            memory_manager: Optional memory manager for context retrieval.
             memory_extractor: Optional memory extractor for background extraction.
-            person_manager: Optional person manager for person operations.
             config: Agent configuration.
+            graph_store: Unified graph store (memory + people).
         """
         self._llm = llm
         self._tools = tool_executor
         self._prompt_builder = prompt_builder
         self._runtime = runtime
-        self._memory = memory_manager
+        self._graph_store = graph_store
+        self._memory: GraphStore | None = graph_store
         self._extractor = memory_extractor
-        self._people = person_manager
+        self._people: GraphStore | None = graph_store
         self._config = config or AgentConfig()
         self._last_extraction_time: float | None = None
 
@@ -425,7 +424,7 @@ class Agent:
 
             if effective_user_id and self._people:
                 try:
-                    known_people = await self._people.list_all()
+                    known_people = await self._people.list_people()
                 except Exception:
                     logger.warning("Failed to get known people", exc_info=True)
 
@@ -495,9 +494,9 @@ class Agent:
 
         try:
             # Try display name first, then username
-            existing = await self._people.find(display_name)
+            existing = await self._people.find_person(display_name)
             if not existing and username:
-                existing = await self._people.find(username)
+                existing = await self._people.find_person(username)
 
             if existing:
                 is_self = any(
@@ -515,7 +514,7 @@ class Agent:
             # No match found -- create new self-person
             # When no username, use numeric user_id as alias to reconnect the graph
             aliases = [username] if username else [user_id]
-            new_person = await self._people.create(
+            new_person = await self._people.create_person(
                 created_by=user_id,
                 name=display_name,
                 relationship="self",
@@ -540,7 +539,7 @@ class Agent:
                     [new_person.id], exclude_self=False
                 )
                 for primary_id, secondary_id in candidates:
-                    await self._people.merge(primary_id, secondary_id)
+                    await self._people.merge_people(primary_id, secondary_id)
             except Exception:
                 logger.debug("Self-person dedup failed", exc_info=True)
         except Exception:
@@ -564,7 +563,7 @@ class Agent:
         assert self._people is not None
 
         if display_name and person.name != display_name:
-            await self._people.update(
+            await self._people.update_person(
                 person_id=person.id, name=display_name, updated_by=user_id
             )
         if username:
@@ -709,7 +708,7 @@ class Agent:
                                 logger.debug("Skipping owner as subject: %s", subject)
                                 continue
                             try:
-                                result = await self._people.resolve_or_create(
+                                result = await self._people.resolve_or_create_person(
                                     created_by=user_id,
                                     reference=subject,
                                     content_hint=fact.content,
@@ -745,7 +744,7 @@ class Agent:
                                     )
 
                     # Self-facts (no subjects) should reference the speaker's person
-                    # record so they're discoverable via find_memories_by_subject().
+                    # record so they're discoverable via graph traversal.
                     # Skip RELATIONSHIP type to avoid attaching relationship terms to
                     # the speaker instead of the related person.
                     if (
@@ -831,7 +830,7 @@ class Agent:
                         newly_created_person_ids, exclude_self=True
                     )
                     for primary_id, secondary_id in candidates:
-                        await self._people.merge(primary_id, secondary_id)
+                        await self._people.merge_people(primary_id, secondary_id)
                 except Exception:
                     logger.debug("Post-extraction dedup failed", exc_info=True)
 
@@ -1187,8 +1186,9 @@ async def create_agent(
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.agents.builtin import register_builtin_agents
     from ash.core.prompt import RuntimeInfo
+    from ash.graph import create_graph_store
     from ash.llm import create_llm_provider, create_registry
-    from ash.memory import MemoryExtractor, create_memory_manager
+    from ash.memory import MemoryExtractor
     from ash.sandbox import SandboxExecutor
     from ash.sandbox.packages import build_setup_command, collect_skill_packages
     from ash.skills import SkillRegistry
@@ -1250,12 +1250,8 @@ async def create_agent(
             WebFetchTool(executor=shared_executor, cache=fetch_cache)
         )
 
-    # Create person manager (before memory manager, which needs it for subject authority)
-    from ash.people import create_person_manager
-
-    person_manager = create_person_manager()
-
-    memory_manager: MemoryManager | None = None
+    # Create unified graph store (replaces separate memory_manager + person_manager)
+    graph_store: GraphStore | None = None
     if not db_session:
         logger.info("Memory tools disabled: no database session")
     elif not config.embeddings:
@@ -1285,22 +1281,21 @@ async def create_agent(
                 if config.embeddings.provider == "openai"
                 else None,
             )
-            memory_manager = await create_memory_manager(
+            graph_store = await create_graph_store(
                 db_session=db_session,
                 llm_registry=llm_registry,
                 embedding_model=config.embeddings.model,
                 embedding_provider=config.embeddings.provider,
                 max_entries=config.memory.max_entries,
-                person_manager=person_manager,
             )
-            logger.debug("Memory manager initialized")
+            logger.debug("Graph store initialized")
         except ValueError as e:
             logger.debug(f"Memory disabled: {e}")
         except Exception:
-            logger.warning("Failed to initialize memory", exc_info=True)
+            logger.warning("Failed to initialize graph store", exc_info=True)
 
     memory_extractor: MemoryExtractor | None = None
-    if memory_manager and config.memory.extraction_enabled:
+    if graph_store and config.memory.extraction_enabled:
         extraction_model_alias = config.memory.extraction_model or model_alias
         try:
             extraction_model_config = config.get_model(extraction_model_alias)
@@ -1320,9 +1315,7 @@ async def create_agent(
                 "Memory extractor initialized (model=%s)",
                 extraction_model_config.model,
             )
-            person_manager.set_llm(extraction_llm, extraction_model_config.model)
-            if memory_manager:
-                person_manager.set_memory_manager(memory_manager)
+            graph_store.set_llm(extraction_llm, extraction_model_config.model)
         except Exception:
             logger.warning("Failed to initialize memory extractor", exc_info=True)
 
@@ -1366,9 +1359,8 @@ async def create_agent(
         tool_executor=tool_executor,
         prompt_builder=prompt_builder,
         runtime=runtime,
-        memory_manager=memory_manager,
         memory_extractor=memory_extractor,
-        person_manager=person_manager,
+        graph_store=graph_store,
         config=AgentConfig(
             model=model_config.model,
             max_tokens=model_config.max_tokens,
@@ -1395,8 +1387,8 @@ async def create_agent(
         tool_executor=tool_executor,
         prompt_builder=prompt_builder,
         skill_registry=skill_registry,
-        memory_manager=memory_manager,
-        person_manager=person_manager,
+        memory_manager=graph_store,
+        person_manager=graph_store,
         memory_extractor=memory_extractor,
         sandbox_executor=shared_executor,
         agent_registry=agent_registry,

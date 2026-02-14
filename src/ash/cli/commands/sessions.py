@@ -286,6 +286,8 @@ def _find_session_dir(query: str) -> Path | None:
 
     sessions_path = get_sessions_path()
     if not sessions_path.exists():
+        error(f"No session found matching '{query}'")
+        dim("Use 'ash sessions' to see available sessions")
         return None
 
     matching_dirs = [
