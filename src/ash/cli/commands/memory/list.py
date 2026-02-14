@@ -1,10 +1,9 @@
 """List memory entries command."""
 
-from ash.cli.commands.memory._helpers import (
-    get_memory_store,
-    is_source_self_reference,
-)
-from ash.cli.console import dim, warning
+from __future__ import annotations
+
+from ash.cli.commands.memory._helpers import get_memory_store, get_person_manager
+from ash.cli.console import console, dim, warning
 
 
 async def memory_list(
@@ -18,8 +17,6 @@ async def memory_list(
     """List memory entries."""
     from rich.table import Table
 
-    from ash.cli.console import console
-
     store = get_memory_store()
 
     # Apply scope-based filters
@@ -29,9 +26,7 @@ async def memory_list(
     if scope == "personal":
         if user_id:
             owner_user_id = user_id
-        else:
-            # Need to show all personal memories - get all and filter
-            pass
+        # else: no DB filter -- post-filter catches all personal memories below
     elif scope == "shared":
         if chat_id:
             filter_chat_id = chat_id
@@ -64,11 +59,17 @@ async def memory_list(
             break
 
     # Load people for name lookup
-    from ash.cli.commands.memory._helpers import get_person_manager
-
     pm = get_person_manager()
     people = await pm.get_all()
     people_by_id = {p.id: p for p in people}
+
+    # Build username -> person name lookup
+    username_to_name: dict[str, str] = {}
+    for p in people:
+        if p.name:
+            username_to_name[p.name.lower()] = p.name
+            for alias in p.aliases:
+                username_to_name[alias.value.lower()] = p.name
 
     if not filtered_entries:
         warning("No memory entries found")
@@ -76,59 +77,28 @@ async def memory_list(
 
     table = Table(title="Memory Entries")
     table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Type", style="blue", max_width=10)
-    table.add_column("About", style="green", max_width=12)
-    table.add_column("Source", style="cyan", max_width=12)
-    table.add_column("Trust", style="yellow", max_width=8)
-    table.add_column("Created", style="dim")
-    table.add_column("Content", style="white", max_width=40)
+    table.add_column("Type", style="blue", max_width=12)
+    table.add_column("About", style="green", max_width=16)
+    table.add_column("Said by", style="cyan", max_width=14)
+    table.add_column("Created", style="dim", max_width=10)
+    table.add_column("Content", style="white", max_width=80)
 
     for entry in filtered_entries:
-        content = (
-            entry.content[:60] + "..." if len(entry.content) > 60 else entry.content
-        )
-        content = content.replace("\n", " ")
+        content = entry.content.replace("\n", " ")
 
         # Resolve subject person names
-        subject_names = []
+        subject_names: list[str] = []
         for person_id in entry.subject_person_ids or []:
             person = people_by_id.get(person_id)
-            if person:
-                subject_names.append(person.name)
-            else:
-                subject_names.append(person_id[:8])
+            subject_names.append(person.name if person else person_id[:8])
 
-        # About: subjects if present, otherwise show username for self-referential facts
-        if subject_names:
-            about = ", ".join(subject_names)
-        elif entry.source_username:
-            # Self-referential fact - show username to match source column
-            about = f"@{entry.source_username}"
-        elif entry.source_display_name:
-            about = entry.source_display_name
-        else:
-            about = "[dim]-[/dim]"
+        about = ", ".join(subject_names) if subject_names else "[dim]-[/dim]"
 
-        # Source: who provided this information
         if entry.source_username:
-            source_display = f"@{entry.source_username}"
-        elif entry.source:
-            source_display = entry.source
+            resolved = username_to_name.get(entry.source_username.lower())
+            said_by = resolved or f"@{entry.source_username}"
         else:
-            source_display = "[dim]-[/dim]"
-
-        # Trust: fact (speaking about self) vs hearsay (speaking about others)
-        is_self_ref = is_source_self_reference(
-            entry.source_username,
-            entry.owner_user_id,
-            entry.subject_person_ids,
-            people,
-            people_by_id,
-        )
-        if not subject_names or is_self_ref:
-            trust = "[green]fact[/green]"
-        else:
-            trust = "[yellow]hearsay[/yellow]"
+            said_by = "[dim]-[/dim]"
 
         created = entry.created_at.strftime("%Y-%m-%d") if entry.created_at else "-"
 
@@ -136,8 +106,7 @@ async def memory_list(
             entry.id[:8],
             entry.memory_type.value,
             about,
-            source_display,
-            trust,
+            said_by,
             created,
             content,
         )

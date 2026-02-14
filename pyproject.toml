@@ -166,6 +166,7 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+    "--basetemp=.pytest_tmp",
 ]
 markers = [
     "slow: marks tests as slow",
