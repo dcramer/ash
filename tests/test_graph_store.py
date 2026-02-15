@@ -331,6 +331,145 @@ class TestGetContextViaGraph:
         assert len(ctx.memories) == 0
 
 
+class TestGraphTraversalPass:
+    """Tests for the graph traversal second pass in get_context_for_message.
+
+    The graph traversal pass discovers additional memories about persons
+    mentioned in the initial search results, even if those memories wouldn't
+    match the query directly.
+    """
+
+    async def test_graph_traversal_finds_related_memories(
+        self, graph_store: GraphStore
+    ):
+        """Memories about a mentioned person are surfaced via graph traversal."""
+        alice = await graph_store.create_person(created_by="user-1", name="Alice")
+        bob = await graph_store.create_person(created_by="user-1", name="Bob")
+
+        # Memory about Alice that mentions Bob via subject_person_ids
+        m_alice = await graph_store._store.add_memory(
+            content="Alice and Bob went hiking together",
+            owner_user_id="user-1",
+            subject_person_ids=[alice.id, bob.id],
+        )
+
+        # Additional memory about Bob from user-2 (cross-context, not in search)
+        m_bob_extra = await graph_store._store.add_memory(
+            content="Bob is training for a marathon",
+            owner_user_id="user-2",
+            subject_person_ids=[bob.id],
+        )
+
+        # Mock index: direct search returns the Alice+Bob memory
+        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+            return_value=_make_search_results([(m_alice.id, 0.85)])
+        )
+
+        ctx = await graph_store.get_context_for_message(
+            user_id="user-1",
+            user_message="what's Alice been up to?",
+        )
+
+        memory_ids = {m.id for m in ctx.memories}
+        # Should include both the direct hit AND the graph-traversal discovery
+        assert m_alice.id in memory_ids
+        assert m_bob_extra.id in memory_ids
+
+    async def test_graph_traversal_excludes_already_seen(self, graph_store: GraphStore):
+        """Memories already in results are not duplicated by graph traversal."""
+        person = await graph_store.create_person(created_by="user-1", name="Bob")
+
+        m1 = await graph_store._store.add_memory(
+            content="Bob likes hiking",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+
+        # Same memory would show up in both search and graph traversal
+        # but should only appear once
+        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+            return_value=_make_search_results([(m1.id, 0.90)])
+        )
+
+        ctx = await graph_store.get_context_for_message(
+            user_id="user-1",
+            user_message="tell me about Bob",
+        )
+
+        # Should not have duplicates
+        ids = [m.id for m in ctx.memories]
+        assert len(ids) == len(set(ids))
+
+    async def test_graph_traversal_excludes_participant_persons(
+        self, graph_store: GraphStore
+    ):
+        """Graph traversal skips person IDs that are already handled as participants."""
+        bob = await graph_store.create_person(created_by="user-1", name="Bob")
+        carol = await graph_store.create_person(created_by="user-1", name="Carol")
+
+        # Memory mentioning both Bob and Carol
+        m1 = await graph_store._store.add_memory(
+            content="Bob and Carol met at the park",
+            owner_user_id="user-1",
+            subject_person_ids=[bob.id, carol.id],
+        )
+
+        # Memory about Bob from user-2
+        m_bob = await graph_store._store.add_memory(
+            content="Bob enjoys running",
+            owner_user_id="user-2",
+            subject_person_ids=[bob.id],
+        )
+
+        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+            return_value=_make_search_results([(m1.id, 0.85)])
+        )
+
+        # Bob is a participant — his memories are already handled in cross-context
+        # Carol is NOT a participant — her graph traversal should work
+        ctx = await graph_store.get_context_for_message(
+            user_id="user-1",
+            user_message="what happened at the park?",
+            participant_person_ids={"bob": {bob.id}},
+        )
+
+        memory_ids = {m.id for m in ctx.memories}
+        # Bob's extra memory should come from cross-context (pass 1), not graph traversal
+        assert m_bob.id in memory_ids
+
+    async def test_graph_traversal_marks_metadata(self, graph_store: GraphStore):
+        """Graph-traversal memories have graph_traversal=True in metadata."""
+        person = await graph_store.create_person(created_by="user-1", name="Bob")
+
+        m1 = await graph_store._store.add_memory(
+            content="Bob was mentioned in a conversation",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+
+        m_extra = await graph_store._store.add_memory(
+            content="Bob's birthday is June 15",
+            owner_user_id="user-2",
+            subject_person_ids=[person.id],
+        )
+
+        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+            return_value=_make_search_results([(m1.id, 0.85)])
+        )
+
+        ctx = await graph_store.get_context_for_message(
+            user_id="user-1",
+            user_message="any news about Bob?",
+        )
+
+        # Find the graph-traversal memory
+        traversal_mems = [
+            m for m in ctx.memories if (m.metadata or {}).get("graph_traversal")
+        ]
+        assert len(traversal_mems) >= 1
+        assert traversal_mems[0].id == m_extra.id
+
+
 class TestBatchMarkSuperseded:
     """Tests for GraphStore.batch_mark_superseded."""
 

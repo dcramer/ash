@@ -10,13 +10,23 @@ import json
 import logging
 import tempfile
 from pathlib import Path
+from typing import Any, Protocol, Self
 
 import aiofiles
 
 logger = logging.getLogger(__name__)
 
 
-class TypedJSONL[T]:
+class Serializable(Protocol):
+    """Protocol for types that can be serialized to/from JSON dicts."""
+
+    def to_dict(self) -> dict[str, Any]: ...
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Self: ...
+
+
+class TypedJSONL[T: Serializable]:
     """Generic JSONL file operations for typed entries.
 
     Provides:
@@ -36,7 +46,7 @@ class TypedJSONL[T]:
 
     async def append(self, entry: T) -> None:
         """Append an entry to the file."""
-        line = json.dumps(entry.to_dict(), ensure_ascii=False, separators=(",", ":"))  # type: ignore[union-attr]
+        line = json.dumps(entry.to_dict(), ensure_ascii=False, separators=(",", ":"))
         async with aiofiles.open(self.path, "a", encoding="utf-8") as f:
             await f.write(line + "\n")
 
@@ -53,12 +63,9 @@ class TypedJSONL[T]:
                     continue
                 try:
                     data = json.loads(line)
-                    entries.append(self._entry_type.from_dict(data))  # type: ignore[union-attr]
-                except json.JSONDecodeError as e:
-                    logger.warning("Failed to parse JSONL line: %s", e)
-                    continue
+                    entries.append(self._entry_type.from_dict(data))
                 except Exception as e:
-                    logger.warning("Failed to parse entry: %s", e)
+                    logger.warning("Skipping malformed JSONL line: %s", e)
                     continue
 
         return entries
@@ -81,7 +88,7 @@ class TypedJSONL[T]:
             async with aiofiles.open(temp_fd, "w", encoding="utf-8") as f:
                 for entry in entries:
                     line = json.dumps(
-                        entry.to_dict(),  # type: ignore[union-attr]
+                        entry.to_dict(),
                         ensure_ascii=False,
                         separators=(",", ":"),
                     )

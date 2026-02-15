@@ -388,9 +388,9 @@ class TestUsernameMatching:
             name="Bob",
         )
 
-        assert GraphStore._matches_username(person, "bob")
-        assert GraphStore._matches_username(person, "Bob")
-        assert not GraphStore._matches_username(person, "alice")
+        assert person.matches_username("bob")
+        assert person.matches_username("Bob")
+        assert not person.matches_username("alice")
 
     async def test_matches_username_by_alias(self, graph_store: GraphStore):
         """Test matching by alias."""
@@ -400,8 +400,8 @@ class TestUsernameMatching:
             aliases=["@bobby", "robert"],
         )
 
-        assert GraphStore._matches_username(person, "@bobby")
-        assert GraphStore._matches_username(person, "robert")
+        assert person.matches_username("@bobby")
+        assert person.matches_username("robert")
 
 
 class TestResolution:
