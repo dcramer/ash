@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ash.core.compaction import CompactionSettings, compact_messages, should_compact
+from ash.core.context import ContextGatherer
 from ash.core.prompt import PromptContext, SystemPromptBuilder
 from ash.core.session import SessionState
 from ash.core.tokens import estimate_tokens
@@ -22,7 +23,6 @@ from ash.core.types import (
     GetSteeringMessagesCallback,
     OnToolStartCallback,
     _MessageSetup,
-    _OwnerMatchers,
     _StreamToolAccumulator,
 )
 from ash.llm import LLMProvider, ToolDefinition
@@ -59,57 +59,6 @@ def _extract_checkpoint(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | No
             if CHECKPOINT_METADATA_KEY in metadata:
                 return metadata[CHECKPOINT_METADATA_KEY]
     return None
-
-
-def _build_owner_matchers(owner_names: list[str] | None) -> _OwnerMatchers:
-    """Build matchers for filtering owner names from subjects.
-
-    Matches exact full names and usernames. For multi-word display names,
-    also matches individual name parts (e.g., "David" or "Cramer" from
-    "David Cramer") to catch LLM extractions that use partial names.
-    Single-word names and usernames are exact-only to avoid false positives.
-
-    Prefers false positives (dropping a valid subject) over false negatives
-    (creating a duplicate person entry for the speaker), since duplicate
-    identity entries cause persistent downstream issues.
-    """
-    exact: set[str] = set()
-    parts: set[str] = set()
-    if owner_names:
-        for name in owner_names:
-            cleaned = name.lower().lstrip("@")
-            exact.add(cleaned)
-            # For multi-word names, add each word as a part match
-            words = cleaned.split()
-            if len(words) > 1:
-                for word in words:
-                    if len(word) >= 3:  # Skip very short parts (initials, etc.)
-                        parts.add(word)
-    return _OwnerMatchers(exact=exact, parts=parts)
-
-
-def _is_owner_name(subject: str, matchers: _OwnerMatchers) -> bool:
-    """Check if a subject name refers to the owner.
-
-    Uses exact matching, part matching, and prefix checks to catch common
-    LLM extraction variations (first name only, nicknames, abbreviations).
-    Prefers false positives over creating duplicate person entries.
-    """
-    normalized = subject.lower().lstrip("@")
-    if normalized in matchers.exact or normalized in matchers.parts:
-        return True
-
-    # Skip very short subjects to avoid false positives on initials
-    if len(normalized) < 3:
-        return False
-
-    # Prefix checks: catch nicknames and abbreviations.
-    # "Dave" matches part "david", "David C." starts with part "david".
-    for part in matchers.parts:
-        if part.startswith(normalized) or normalized.startswith(part):
-            return True
-
-    return False
 
 
 def _extract_relationship_term(content: str) -> str | None:
@@ -368,68 +317,19 @@ class Agent:
     ) -> _MessageSetup:
         effective_user_id = user_id or session.user_id
 
-        memory_context: RetrievedContext | None = None
-        known_people: list[PersonEntry] | None = None
-
-        if self._memory:
-            try:
-                start_time = time.monotonic()
-
-                # Build participant info for cross-context retrieval
-                chat_type = session.metadata.get("chat_type")
-                participant_person_ids: dict[str, set[str]] | None = None
-
-                # Resolve sender's person IDs for cross-context (both private and group).
-                # Privacy filter already blocks SENSITIVE facts in group chats.
-                if self._people:
-                    sender_username = session.metadata.get("username")
-                    if sender_username:
-                        try:
-                            person_ids = (
-                                await self._people.find_person_ids_for_username(
-                                    sender_username
-                                )
-                            )
-                            if person_ids:
-                                participant_person_ids = {sender_username: person_ids}
-                        except Exception:
-                            logger.debug("Failed to resolve participant person IDs")
-
-                memory_context = await self._memory.get_context_for_message(
-                    user_id=effective_user_id,
-                    user_message=user_message,
-                    chat_id=session.chat_id,
-                    chat_type=chat_type,
-                    participant_person_ids=participant_person_ids,
-                )
-                duration_ms = int((time.monotonic() - start_time) * 1000)
-                if memory_context and memory_context.memories:
-                    logger.info(
-                        "Memory retrieval: %d memories | %dms",
-                        len(memory_context.memories),
-                        duration_ms,
-                    )
-                    for mem in memory_context.memories:
-                        logger.debug(
-                            "  recalled: %s (sim=%.2f, meta=%s)",
-                            mem.content[:80],
-                            mem.similarity,
-                            mem.metadata,
-                        )
-                else:
-                    logger.info("Memory retrieval: 0 memories | %dms", duration_ms)
-            except Exception:
-                logger.warning("Failed to retrieve memory context", exc_info=True)
-
-            if effective_user_id and self._people:
-                try:
-                    known_people = await self._people.list_people()
-                except Exception:
-                    logger.warning("Failed to get known people", exc_info=True)
+        # Use ContextGatherer to retrieve memory and people context
+        context_gatherer = ContextGatherer(self._memory)
+        gathered = await context_gatherer.gather(
+            user_id=effective_user_id,
+            user_message=user_message,
+            chat_id=session.chat_id,
+            chat_type=session.metadata.get("chat_type"),
+            sender_username=session.metadata.get("username"),
+        )
 
         system_prompt = self._build_system_prompt(
-            context=memory_context,
-            known_people=known_people,
+            context=gathered.memory,
+            known_people=gathered.known_people,
             conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
             has_reply_context=session.metadata.get("has_reply_context", False),
             session_path=session_path,
@@ -691,7 +591,9 @@ class Agent:
                     logger.debug("Failed to resolve speaker person ID", exc_info=True)
 
             # Build owner name matchers for filtering self-references
-            owner_matchers = _build_owner_matchers(owner_names)
+            from ash.core.filters import build_owner_matchers, is_owner_name
+
+            owner_matchers = build_owner_matchers(owner_names)
 
             # Track newly created person IDs for post-extraction dedup
             newly_created_person_ids: list[str] = []
@@ -705,7 +607,7 @@ class Agent:
                     if fact.subjects and self._people:
                         subject_person_ids = []
                         for subject in fact.subjects:
-                            if _is_owner_name(subject, owner_matchers):
+                            if is_owner_name(subject, owner_matchers):
                                 logger.debug("Skipping owner as subject: %s", subject)
                                 continue
                             try:
@@ -790,33 +692,15 @@ class Agent:
 
                     # Check for hearsay to supersede when this is a FACT
                     # (user speaking about themselves = no subject_person_ids)
-                    if not subject_person_ids and source_username and self._people:
-                        try:
-                            # Resolve the source user's person IDs for hearsay lookup
-                            source_person_ids = (
-                                await self._people.find_person_ids_for_username(
-                                    source_username
-                                )
-                            )
-                            if source_person_ids:
-                                superseded = (
-                                    await self._memory.supersede_confirmed_hearsay(
-                                        new_memory=new_memory,
-                                        person_ids=source_person_ids,
-                                        source_username=source_username,
-                                        owner_user_id=user_id,
-                                    )
-                                )
-                                if superseded > 0:
-                                    logger.debug(
-                                        "Superseded %d hearsay memories with confirmed fact",
-                                        superseded,
-                                    )
-                        except Exception:
-                            logger.warning(
-                                "Failed to check for hearsay supersession",
-                                exc_info=True,
-                            )
+                    if not subject_person_ids and source_username and self._memory:
+                        from ash.store.hearsay import supersede_hearsay_for_fact
+
+                        await supersede_hearsay_for_fact(
+                            store=self._memory,
+                            new_memory=new_memory,
+                            source_username=source_username,
+                            owner_user_id=user_id,
+                        )
                 except Exception:
                     logger.debug(
                         "Failed to store extracted fact: %s",

@@ -120,14 +120,6 @@ class AgentComponents:
 
 
 @dataclass
-class _OwnerMatchers:
-    """Compiled matchers for owner name filtering."""
-
-    exact: set[str]  # Exact matches (username, full name)
-    parts: set[str]  # Name parts (first name, last name)
-
-
-@dataclass
 class _MessageSetup:
     """Internal setup data prepared before processing a message."""
 

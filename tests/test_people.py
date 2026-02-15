@@ -15,11 +15,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.core.agent import (
-    _build_owner_matchers,
-    _extract_relationship_term,
-    _is_owner_name,
-)
+from ash.core.agent import _extract_relationship_term
+from ash.core.filters import build_owner_matchers, is_owner_name
 from ash.db.engine import Database
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.index import VectorIndex
@@ -921,7 +918,7 @@ class TestRelationshipStatedBy:
 
 
 class TestOwnerNameMatchers:
-    """Tests for _build_owner_matchers name matching (Bug 3 fix).
+    """Tests for build_owner_matchers name matching (Bug 3 fix).
 
     Prefers false positives (dropping a valid subject) over false negatives
     (creating a duplicate person entry for the speaker).
@@ -929,64 +926,64 @@ class TestOwnerNameMatchers:
 
     def test_first_name_of_multi_word_matches(self):
         """First name of multi-word name matches as owner."""
-        matchers = _build_owner_matchers(["David Cramer", "dcramer"])
-        assert _is_owner_name("David", matchers) is True
+        matchers = build_owner_matchers(["David Cramer", "dcramer"])
+        assert is_owner_name("David", matchers) is True
 
     def test_last_name_of_multi_word_matches(self):
         """Last name of multi-word name matches as owner."""
-        matchers = _build_owner_matchers(["David Cramer"])
-        assert _is_owner_name("Cramer", matchers) is True
+        matchers = build_owner_matchers(["David Cramer"])
+        assert is_owner_name("Cramer", matchers) is True
 
     def test_single_word_name_no_parts(self):
         """Single-word name does NOT add parts — exact-only matching."""
-        matchers = _build_owner_matchers(["dcramer"])
+        matchers = build_owner_matchers(["dcramer"])
         # "dcramer" is exact match
-        assert _is_owner_name("dcramer", matchers) is True
+        assert is_owner_name("dcramer", matchers) is True
         # No parts were added for single-word names
         assert len(matchers.parts) == 0
 
     def test_prefix_of_name_part_matches(self):
         """Prefix of a name part matches (e.g., Davi → David)."""
-        matchers = _build_owner_matchers(["David Cramer"])
+        matchers = build_owner_matchers(["David Cramer"])
         # "davi" is a prefix of part "david"
-        assert _is_owner_name("Davi", matchers) is True
+        assert is_owner_name("Davi", matchers) is True
         # "dave" is NOT a prefix of "david" — true nicknames aren't caught
-        assert _is_owner_name("Dave", matchers) is False
+        assert is_owner_name("Dave", matchers) is False
 
     def test_subject_starting_with_name_part_matches(self):
         """Subject starting with a name part matches (e.g., 'David C.' → 'david')."""
-        matchers = _build_owner_matchers(["David Cramer"])
-        assert _is_owner_name("David C.", matchers) is True
+        matchers = build_owner_matchers(["David Cramer"])
+        assert is_owner_name("David C.", matchers) is True
 
     def test_short_subjects_skip_prefix_check(self):
         """Very short subjects (< 3 chars) don't trigger prefix matching."""
-        matchers = _build_owner_matchers(["David Cramer"])
-        assert _is_owner_name("Da", matchers) is False
+        matchers = build_owner_matchers(["David Cramer"])
+        assert is_owner_name("Da", matchers) is False
 
     def test_username_not_split(self):
         """Username is not split into parts."""
-        matchers = _build_owner_matchers(["dcramer"])
-        assert _is_owner_name("dcr", matchers) is False
+        matchers = build_owner_matchers(["dcramer"])
+        assert is_owner_name("dcr", matchers) is False
 
     def test_full_name_exact_match(self):
         """Full name still matches exactly."""
-        matchers = _build_owner_matchers(["David Cramer"])
-        assert _is_owner_name("David Cramer", matchers) is True
+        matchers = build_owner_matchers(["David Cramer"])
+        assert is_owner_name("David Cramer", matchers) is True
 
     def test_at_prefix_stripped(self):
         """@ prefix is stripped before matching."""
-        matchers = _build_owner_matchers(["dcramer"])
-        assert _is_owner_name("@dcramer", matchers) is True
+        matchers = build_owner_matchers(["dcramer"])
+        assert is_owner_name("@dcramer", matchers) is True
 
     def test_unrelated_name_does_not_match(self):
         """Completely unrelated names don't match."""
-        matchers = _build_owner_matchers(["David Cramer", "dcramer"])
-        assert _is_owner_name("Sarah", matchers) is False
-        assert _is_owner_name("Bob Smith", matchers) is False
+        matchers = build_owner_matchers(["David Cramer", "dcramer"])
+        assert is_owner_name("Sarah", matchers) is False
+        assert is_owner_name("Bob Smith", matchers) is False
 
     def test_short_name_parts_excluded(self):
         """Name parts shorter than 3 chars are excluded from part matching."""
-        matchers = _build_owner_matchers(["Li Wei"])
+        matchers = build_owner_matchers(["Li Wei"])
         # "li" is too short (< 3) to be a part
         assert "li" not in matchers.parts
         assert "wei" in matchers.parts
