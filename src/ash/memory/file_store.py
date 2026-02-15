@@ -20,7 +20,7 @@ from ash.config.paths import (
     get_memories_jsonl_path,
 )
 from ash.memory.jsonl import EmbeddingJSONL, MemoryJSONL
-from ash.memory.types import (
+from ash.store.types import (
     EPHEMERAL_TYPES,
     TYPE_TTL,
     EmbeddingRecord,

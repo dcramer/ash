@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING, Any
 
 from ash.core.compaction import CompactionSettings, compact_messages, should_compact
 from ash.core.context import ContextGatherer
-from ash.core.prompt import PromptContext, SystemPromptBuilder
+from ash.core.prompt import (
+    PromptContext,
+    SystemPromptBuilder,
+)
 from ash.core.session import SessionState
 from ash.core.tokens import estimate_tokens
 from ash.core.types import (
@@ -233,22 +236,30 @@ class Agent:
         Returns:
             Complete system prompt.
         """
+        from ash.core.prompt import ChatInfo, SenderInfo, SessionInfo
+
         prompt_context = PromptContext(
             runtime=self._refresh_runtime_time(),
             memory=context,
             known_people=known_people,
+            sender=SenderInfo(
+                username=sender_username,
+                display_name=sender_display_name,
+            ),
+            chat=ChatInfo(
+                title=chat_title,
+                chat_type=chat_type,
+                state_path=chat_state_path,
+                thread_state_path=thread_state_path,
+                is_scheduled_task=is_scheduled_task,
+                is_passive_engagement=is_passive_engagement,
+            ),
+            session=SessionInfo(
+                path=session_path,
+                mode=session_mode,
+            ),
             conversation_gap_minutes=conversation_gap_minutes,
             has_reply_context=has_reply_context,
-            session_path=session_path,
-            session_mode=session_mode,
-            chat_state_path=chat_state_path,
-            thread_state_path=thread_state_path,
-            sender_username=sender_username,
-            sender_display_name=sender_display_name,
-            chat_title=chat_title,
-            chat_type=chat_type,
-            is_scheduled_task=is_scheduled_task,
-            is_passive_engagement=is_passive_engagement,
         )
         return self._prompt_builder.build(prompt_context)
 

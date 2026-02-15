@@ -126,78 +126,45 @@ class PromptContext:
     # Extra context for extensibility
     extra_context: dict[str, Any] = field(default_factory=dict)
 
-    # Backward compatibility: individual fields still supported
-    # These are used if the composed objects are not provided
-    session_path: str | None = None
-    session_mode: str | None = None
-    chat_state_path: str | None = None
-    thread_state_path: str | None = None
-    sender_username: str | None = None
-    sender_display_name: str | None = None
-    chat_title: str | None = None
-    chat_type: str | None = None
-    is_scheduled_task: bool = False
-    is_passive_engagement: bool = False
-
     def get_sender_username(self) -> str | None:
-        """Get sender username from composed object or fallback field."""
-        if self.sender:
-            return self.sender.username
-        return self.sender_username
+        """Get sender username from composed object."""
+        return self.sender.username if self.sender else None
 
     def get_sender_display_name(self) -> str | None:
-        """Get sender display name from composed object or fallback field."""
-        if self.sender:
-            return self.sender.display_name
-        return self.sender_display_name
+        """Get sender display name from composed object."""
+        return self.sender.display_name if self.sender else None
 
     def get_chat_type(self) -> str | None:
-        """Get chat type from composed object or fallback field."""
-        if self.chat:
-            return self.chat.chat_type
-        return self.chat_type
+        """Get chat type from composed object."""
+        return self.chat.chat_type if self.chat else None
 
     def get_chat_title(self) -> str | None:
-        """Get chat title from composed object or fallback field."""
-        if self.chat:
-            return self.chat.title
-        return self.chat_title
+        """Get chat title from composed object."""
+        return self.chat.title if self.chat else None
 
     def get_chat_state_path(self) -> str | None:
-        """Get chat state path from composed object or fallback field."""
-        if self.chat:
-            return self.chat.state_path
-        return self.chat_state_path
+        """Get chat state path from composed object."""
+        return self.chat.state_path if self.chat else None
 
     def get_thread_state_path(self) -> str | None:
-        """Get thread state path from composed object or fallback field."""
-        if self.chat:
-            return self.chat.thread_state_path
-        return self.thread_state_path
+        """Get thread state path from composed object."""
+        return self.chat.thread_state_path if self.chat else None
 
     def get_is_scheduled_task(self) -> bool:
-        """Get scheduled task flag from composed object or fallback field."""
-        if self.chat:
-            return self.chat.is_scheduled_task
-        return self.is_scheduled_task
+        """Get scheduled task flag from composed object."""
+        return self.chat.is_scheduled_task if self.chat else False
 
     def get_is_passive_engagement(self) -> bool:
-        """Get passive engagement flag from composed object or fallback field."""
-        if self.chat:
-            return self.chat.is_passive_engagement
-        return self.is_passive_engagement
+        """Get passive engagement flag from composed object."""
+        return self.chat.is_passive_engagement if self.chat else False
 
     def get_session_path(self) -> str | None:
-        """Get session path from composed object or fallback field."""
-        if self.session:
-            return self.session.path
-        return self.session_path
+        """Get session path from composed object."""
+        return self.session.path if self.session else None
 
     def get_session_mode(self) -> str | None:
-        """Get session mode from composed object or fallback field."""
-        if self.session:
-            return self.session.mode
-        return self.session_mode
+        """Get session mode from composed object."""
+        return self.session.mode if self.session else None
 
 
 class SystemPromptBuilder:

@@ -132,20 +132,20 @@ class TypedJSONL[T: Serializable]:
 # Backward compatibility aliases
 def MemoryJSONL(path: Path) -> TypedJSONL:
     """Create a TypedJSONL for MemoryEntry."""
-    from ash.memory.types import MemoryEntry
+    from ash.store.types import MemoryEntry
 
     return TypedJSONL(path, MemoryEntry)
 
 
 def PersonJSONL(path: Path) -> TypedJSONL:
     """Create a TypedJSONL for PersonEntry."""
-    from ash.people.types import PersonEntry
+    from ash.store.types import PersonEntry
 
     return TypedJSONL(path, PersonEntry)  # type: ignore[arg-type]
 
 
 def EmbeddingJSONL(path: Path) -> TypedJSONL:
     """Create a TypedJSONL for EmbeddingRecord."""
-    from ash.memory.types import EmbeddingRecord
+    from ash.store.types import EmbeddingRecord
 
     return TypedJSONL(path, EmbeddingRecord)

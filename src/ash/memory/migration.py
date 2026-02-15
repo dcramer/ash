@@ -21,8 +21,7 @@ from ash.config.paths import (
     get_people_jsonl_path,
 )
 from ash.memory.jsonl import EmbeddingJSONL, MemoryJSONL, PersonJSONL
-from ash.memory.types import EmbeddingRecord, MemoryEntry, MemoryType
-from ash.people.types import PersonEntry
+from ash.store.types import EmbeddingRecord, MemoryEntry, MemoryType, PersonEntry
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +281,7 @@ async def _migrate_people(
             continue
 
         # Build new-format fields from old DB columns
-        from ash.people.types import AliasEntry, RelationshipClaim
+        from ash.store.types import AliasEntry, RelationshipClaim
 
         alias_entries = [AliasEntry(value=a) for a in aliases]
         relationships = []
