@@ -597,6 +597,52 @@ View the chain of memories that led to a current memory:
 uv run ash memory history <memory-id>
 ```
 
+## Export, Import & Backup
+
+The database can be exported, imported, and backed up using CLI commands:
+
+### Export
+
+Export all data (memories, people, users, chats) to a single JSONL file:
+
+```bash
+# Export to stdout
+uv run ash db export > backup.jsonl
+
+# Export to file
+uv run ash db export --output backup.jsonl
+```
+
+Each line contains a record with a `_type` field indicating the entity type.
+
+### Import
+
+Import data from a previously exported JSONL file:
+
+```bash
+# Replace existing data
+uv run ash db import backup.jsonl
+
+# Merge with existing data
+uv run ash db import backup.jsonl --merge
+```
+
+After import, run `ash memory rebuild-index` to rebuild the vector index.
+
+### Backup
+
+Create an atomic backup of the SQLite vector index using `VACUUM INTO`:
+
+```bash
+# Backup to timestamped file in ~/.ash/backups/
+uv run ash db backup
+
+# Backup to specific path
+uv run ash db backup --output /tmp/ash-backup.db
+```
+
+The backup is a standalone database file that can be copied or restored directly.
+
 ## Verification
 
 ```bash
@@ -680,6 +726,18 @@ jq 'select(.content | test("meeting"))' ~/.ash/graph/memories.jsonl
 
 # 3. Verify observed_at is populated
 jq 'select(.content | test("meeting")) | .observed_at' ~/.ash/graph/memories.jsonl
+
+# Export/Import/Backup tests:
+# 1. Export data
+uv run ash db export --output /tmp/ash-export.jsonl
+head -5 /tmp/ash-export.jsonl
+
+# 2. Import data (with merge)
+uv run ash db import /tmp/ash-export.jsonl --merge
+
+# 3. Create backup
+uv run ash db backup --output /tmp/ash-backup.db
+ls -la /tmp/ash-backup.db
 ```
 
 ### Checklist
@@ -717,3 +775,6 @@ jq 'select(.content | test("meeting")) | .observed_at' ~/.ash/graph/memories.jso
 - [ ] `observed_at` field populated on extracted memories
 - [ ] `ash memory search <query>` performs semantic search via MemoryManager
 - [ ] `ash memory add` generates embeddings and indexes via MemoryManager
+- [ ] `ash db export` exports all data to JSONL format
+- [ ] `ash db import` imports data from exported JSONL
+- [ ] `ash db backup` creates atomic SQLite backup with VACUUM INTO

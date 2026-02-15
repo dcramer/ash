@@ -71,32 +71,133 @@ class RuntimeInfo:
 
 
 @dataclass
-class PromptContext:
-    """Context for building system prompts."""
+class SenderInfo:
+    """Information about the message sender (for group chats)."""
 
+    username: str | None = None
+    display_name: str | None = None
+
+
+@dataclass
+class ChatInfo:
+    """Information about the chat context."""
+
+    title: str | None = None
+    chat_type: str | None = None  # "group", "supergroup", "private"
+    state_path: str | None = None  # Path to chat-level state.json
+    thread_state_path: str | None = None  # Path to thread-specific state.json
+    is_scheduled_task: bool = False  # True when executing a scheduled task
+    is_passive_engagement: bool = False  # True when engaging via passive listening
+
+
+@dataclass
+class SessionInfo:
+    """Information about the current session."""
+
+    path: str | None = None
+    mode: str | None = None  # "persistent" or "fresh"
+
+
+@dataclass
+class PromptContext:
+    """Context for building system prompts.
+
+    Uses composed objects for cleaner API:
+    - runtime: Model and timezone info
+    - memory: Retrieved memories
+    - known_people: People the user knows
+    - sender: Message sender info (for group chats)
+    - chat: Chat context info
+    - session: Session state info
+    """
+
+    # Core context (composed objects)
     runtime: RuntimeInfo | None = None
     memory: RetrievedContext | None = None
     known_people: list[PersonEntry] | None = None
-    extra_context: dict[str, Any] = field(default_factory=dict)
-    # Conversation context
+    sender: SenderInfo | None = None
+    chat: ChatInfo | None = None
+    session: SessionInfo | None = None
+
+    # Conversation state
     conversation_gap_minutes: float | None = None
     has_reply_context: bool = False
-    # Session info
+
+    # Extra context for extensibility
+    extra_context: dict[str, Any] = field(default_factory=dict)
+
+    # Backward compatibility: individual fields still supported
+    # These are used if the composed objects are not provided
     session_path: str | None = None
-    session_mode: str | None = None  # "persistent" or "fresh"
-    # Chat state info
-    chat_state_path: str | None = None  # Path to chat-level state.json
-    thread_state_path: str | None = (
-        None  # Path to thread-specific state.json (when in thread)
-    )
-    # Sender context (for group chats)
+    session_mode: str | None = None
+    chat_state_path: str | None = None
+    thread_state_path: str | None = None
     sender_username: str | None = None
     sender_display_name: str | None = None
     chat_title: str | None = None
-    chat_type: str | None = None  # "group", "supergroup", "private"
-    is_scheduled_task: bool = False  # True when executing a scheduled task
-    # Passive engagement context
-    is_passive_engagement: bool = False  # True when engaging via passive listening
+    chat_type: str | None = None
+    is_scheduled_task: bool = False
+    is_passive_engagement: bool = False
+
+    def get_sender_username(self) -> str | None:
+        """Get sender username from composed object or fallback field."""
+        if self.sender:
+            return self.sender.username
+        return self.sender_username
+
+    def get_sender_display_name(self) -> str | None:
+        """Get sender display name from composed object or fallback field."""
+        if self.sender:
+            return self.sender.display_name
+        return self.sender_display_name
+
+    def get_chat_type(self) -> str | None:
+        """Get chat type from composed object or fallback field."""
+        if self.chat:
+            return self.chat.chat_type
+        return self.chat_type
+
+    def get_chat_title(self) -> str | None:
+        """Get chat title from composed object or fallback field."""
+        if self.chat:
+            return self.chat.title
+        return self.chat_title
+
+    def get_chat_state_path(self) -> str | None:
+        """Get chat state path from composed object or fallback field."""
+        if self.chat:
+            return self.chat.state_path
+        return self.chat_state_path
+
+    def get_thread_state_path(self) -> str | None:
+        """Get thread state path from composed object or fallback field."""
+        if self.chat:
+            return self.chat.thread_state_path
+        return self.thread_state_path
+
+    def get_is_scheduled_task(self) -> bool:
+        """Get scheduled task flag from composed object or fallback field."""
+        if self.chat:
+            return self.chat.is_scheduled_task
+        return self.is_scheduled_task
+
+    def get_is_passive_engagement(self) -> bool:
+        """Get passive engagement flag from composed object or fallback field."""
+        if self.chat:
+            return self.chat.is_passive_engagement
+        return self.is_passive_engagement
+
+    def get_session_path(self) -> str | None:
+        """Get session path from composed object or fallback field."""
+        if self.session:
+            return self.session.path
+        return self.session_path
+
+    def get_session_mode(self) -> str | None:
+        """Get session mode from composed object or fallback field."""
+        if self.session:
+            return self.session.mode
+        return self.session_mode
 
 
 class SystemPromptBuilder:
@@ -133,7 +234,9 @@ class SystemPromptBuilder:
             self._build_runtime_section(context.runtime),
             self._build_sender_section(context),
             self._build_passive_engagement_section(context),
-            self._build_people_section(context.known_people, context.sender_username),
+            self._build_people_section(
+                context.known_people, context.get_sender_username()
+            ),
             self._build_memory_section(context.memory),
             self._build_conversation_context_section(context),
             self._build_session_section(context),
@@ -370,7 +473,7 @@ class SystemPromptBuilder:
         ]
 
         # Only include scheduling commands for regular (non-scheduled) sessions
-        if not context.is_scheduled_task:
+        if not context.get_is_scheduled_task():
             lines.extend(
                 [
                     "- `ash-sb schedule create 'msg' --at <time>` - Set reminder/task",
@@ -399,7 +502,7 @@ class SystemPromptBuilder:
         )
 
         # Only include reminder guidance for regular sessions
-        if not context.is_scheduled_task:
+        if not context.get_is_scheduled_task():
             lines.extend(
                 [
                     "",
@@ -618,23 +721,28 @@ class SystemPromptBuilder:
         )
 
     def _build_sender_section(self, context: PromptContext) -> str:
-        if context.chat_type not in ("group", "supergroup"):
+        chat_type = context.get_chat_type()
+        if chat_type not in ("group", "supergroup"):
             return ""
 
-        if not context.sender_username and not context.sender_display_name:
+        sender_username = context.get_sender_username()
+        sender_display_name = context.get_sender_display_name()
+
+        if not sender_username and not sender_display_name:
             return ""
 
         # Build sender identifier with username taking precedence
-        if context.sender_username:
-            sender = f"**@{context.sender_username}**"
-            if context.sender_display_name:
-                sender = f"{sender} ({context.sender_display_name})"
+        if sender_username:
+            sender = f"**@{sender_username}**"
+            if sender_display_name:
+                sender = f"{sender} ({sender_display_name})"
         else:
-            sender = f"**{context.sender_display_name}**"
+            sender = f"**{sender_display_name}**"
 
         from_line = f"From: {sender}"
-        if context.chat_title:
-            from_line = f'{from_line} in the group "{context.chat_title}"'
+        chat_title = context.get_chat_title()
+        if chat_title:
+            from_line = f'{from_line} in the group "{chat_title}"'
 
         lines = [
             "## Current Message",
@@ -645,21 +753,21 @@ class SystemPromptBuilder:
             "they are referring to someone else - not themselves.",
         ]
 
-        if context.chat_state_path:
+        chat_state_path = context.get_chat_state_path()
+        if chat_state_path:
             lines.append("")
-            lines.append(
-                f"Chat participants: `cat {context.chat_state_path}/state.json`"
-            )
-            if context.thread_state_path:
+            lines.append(f"Chat participants: `cat {chat_state_path}/state.json`")
+            thread_state_path = context.get_thread_state_path()
+            if thread_state_path:
                 lines.append(
-                    f"Thread participants: `cat {context.thread_state_path}/state.json`"
+                    f"Thread participants: `cat {thread_state_path}/state.json`"
                 )
 
         return "\n".join(lines)
 
     def _build_passive_engagement_section(self, context: PromptContext) -> str:
         """Build section for passive engagement context."""
-        if not context.is_passive_engagement:
+        if not context.get_is_passive_engagement():
             return ""
 
         return "\n".join(
@@ -680,19 +788,21 @@ class SystemPromptBuilder:
         )
 
     def _build_session_section(self, context: PromptContext) -> str:
-        if not context.session_path:
+        session_path = context.get_session_path()
+        if not session_path:
             return ""
 
         lines = ["## Session", ""]
 
-        if context.session_mode == "fresh":
+        session_mode = context.get_session_mode()
+        if session_mode == "fresh":
             lines.extend(
                 [
                     "This is a **fresh conversation** without prior context loaded.",
                     "Each message is independent - you don't have access to previous",
                     "messages in your conversation context.",
                     "",
-                    f"Chat history file: {context.session_path}",
+                    f"Chat history file: {session_path}",
                     "",
                     "For questions about what was said in THIS conversation,",
                     "read the file using bash (e.g., `grep` or `tail`).",
@@ -703,7 +813,7 @@ class SystemPromptBuilder:
         else:
             lines.extend(
                 [
-                    f"Conversation history file: {context.session_path}",
+                    f"Conversation history file: {session_path}",
                     "",
                     "This file contains only THIS conversation session, not long-term knowledge.",
                     "Only search it for 'what did X say earlier in this chat' type questions.",
@@ -717,7 +827,7 @@ class SystemPromptBuilder:
                 "- Questions about people's opinions, preferences, facts about them:",
                 "  Use `ash-sb memory search 'topic'` (NOT session file grep)",
                 "- Questions about what was said earlier in THIS conversation:",
-                f"  Search session file: `grep -i 'term' {context.session_path}`",
+                f"  Search session file: `grep -i 'term' {session_path}`",
                 "",
                 "Session file format: JSONL with id, role, content, created_at, user_id, username",
             ]

@@ -5,8 +5,11 @@ from ash.core.agent import (
     create_agent,
 )
 from ash.core.prompt import (
+    ChatInfo,
     PromptContext,
     RuntimeInfo,
+    SenderInfo,
+    SessionInfo,
     SystemPromptBuilder,
 )
 from ash.core.session import SessionState
@@ -22,9 +25,12 @@ __all__ = [
     "AgentComponents",
     "AgentConfig",
     "AgentResponse",
+    "ChatInfo",
     "CompactionInfo",
     "PromptContext",
     "RuntimeInfo",
+    "SenderInfo",
+    "SessionInfo",
     "SessionState",
     "SystemPromptBuilder",
     "create_agent",
