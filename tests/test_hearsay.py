@@ -43,8 +43,12 @@ class TestSupersedHearsayForFact:
         return store
 
     @pytest.mark.asyncio
-    async def test_skips_facts_about_others(self, mock_store):
-        """Facts with subject_person_ids (about others) should be skipped."""
+    async def test_proceeds_with_injected_subject_person_ids(self, mock_store):
+        """Self-facts may have speaker person_id injected; function still proceeds."""
+        mock_store.find_person_ids_for_username = AsyncMock(return_value={"person-1"})
+        mock_store.supersede_confirmed_hearsay = AsyncMock(return_value=1)
+
+        # Memory with subject_person_ids (injected speaker person_id for graph traversal)
         memory = make_memory(subject_person_ids=["person-1"])
 
         result = await supersede_hearsay_for_fact(
@@ -54,8 +58,8 @@ class TestSupersedHearsayForFact:
             owner_user_id="user-1",
         )
 
-        assert result == 0
-        mock_store.find_person_ids_for_username.assert_not_called()
+        assert result == 1
+        mock_store.find_person_ids_for_username.assert_called_once_with("testuser")
 
     @pytest.mark.asyncio
     async def test_skips_without_source_username(self, mock_store):

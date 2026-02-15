@@ -38,11 +38,9 @@ async def supersede_hearsay_for_fact(
     Returns:
         Number of hearsay memories superseded.
     """
-    # Only check for hearsay when this is a FACT (user speaking about themselves)
-    # A fact has no subject_person_ids (implicitly about the speaker)
-    if new_memory.subject_person_ids:
-        return 0
-
+    # Caller already verified this is a self-fact. The memory may have
+    # the speaker's person_id injected into subject_person_ids for graph
+    # traversal, so we don't re-check that field here.
     if not source_username:
         return 0
 

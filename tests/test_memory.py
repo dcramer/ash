@@ -284,6 +284,27 @@ class TestScoping:
         assert len(chat1_memories) == 1
         assert chat1_memories[0].content == "Chat 1 fact"
 
+    async def test_list_memories_limit_respects_scope(self, graph_store: Store):
+        """LIMIT should apply after scope filtering, returning correct count."""
+        # Create 10 memories for user-1 and 10 for user-2
+        for i in range(10):
+            await graph_store.add_memory(
+                content=f"User1 fact {i}", owner_user_id="user-1"
+            )
+            await graph_store.add_memory(
+                content=f"User2 fact {i}", owner_user_id="user-2"
+            )
+
+        # Ask for 5 memories scoped to user-1
+        user1_memories = await graph_store.list_memories(
+            owner_user_id="user-1", limit=5
+        )
+
+        assert len(user1_memories) == 5
+        # All should belong to user-1
+        for m in user1_memories:
+            assert m.owner_user_id == "user-1"
+
 
 class TestEphemeralDecay:
     """Tests for ephemeral memory type decay."""
@@ -332,7 +353,10 @@ class TestCrossContextRetrieval:
 
     async def test_find_memories_by_subject(self, graph_store: Store):
         """Test finding memories by subject person IDs."""
+        from ash.store.retrieval import RetrievalPipeline
+
         person_id = "person-bob-1"
+        pipeline = RetrievalPipeline(graph_store)
 
         # Create a memory about this person
         await graph_store.add_memory(
@@ -347,18 +371,18 @@ class TestCrossContextRetrieval:
             owner_user_id="alice",
         )
 
-        # Find memories about bob by person_id via Store
-        memories = await graph_store._find_memories_about_persons(
-            person_ids={person_id}
-        )
+        memories = await pipeline._find_memories_about_persons(person_ids={person_id})
 
         assert len(memories) == 1
         assert memories[0].content == "Bob likes pizza"
 
     async def test_find_memories_by_subject_excludes_owner(self, graph_store: Store):
         """Test that _find_memories_about_persons can exclude owner's memories."""
+        from ash.store.retrieval import RetrievalPipeline
+
         person_id_alice = "person-bob-alice"
         person_id_carol = "person-bob-carol"
+        pipeline = RetrievalPipeline(graph_store)
 
         # Alice has a memory about Bob
         await graph_store.add_memory(
@@ -375,7 +399,7 @@ class TestCrossContextRetrieval:
         )
 
         # Find memories about bob excluding alice's
-        memories = await graph_store._find_memories_about_persons(
+        memories = await pipeline._find_memories_about_persons(
             person_ids={person_id_alice, person_id_carol},
             exclude_owner_user_id="alice",
         )
@@ -386,8 +410,11 @@ class TestCrossContextRetrieval:
 
     async def test_find_memories_by_subject_multiple_ids(self, graph_store: Store):
         """Test that multiple person IDs find all relevant memories."""
+        from ash.store.retrieval import RetrievalPipeline
+
         person_id_1 = "person-bob-1"
         person_id_2 = "person-bob-2"
+        pipeline = RetrievalPipeline(graph_store)
 
         await graph_store.add_memory(
             content="Bob fact from user1",
@@ -401,7 +428,7 @@ class TestCrossContextRetrieval:
             subject_person_ids=[person_id_2],
         )
 
-        memories = await graph_store._find_memories_about_persons(
+        memories = await pipeline._find_memories_about_persons(
             person_ids={person_id_1, person_id_2}
         )
 
@@ -541,75 +568,82 @@ class TestPrivacyFilter:
     accepting pre-resolved person IDs instead of doing sync lookups).
 
     Bug 2: Inconsistent filter logic between MemoryEntry and SearchResult
-    paths (now unified into single _passes_privacy_filter method).
+    paths (now unified into single _passes_privacy_filter method on
+    RetrievalPipeline).
     """
 
-    def test_public_always_passes(self, graph_store: Store):
+    @pytest.fixture
+    def pipeline(self, graph_store: Store):
+        from ash.store.retrieval import RetrievalPipeline
+
+        return RetrievalPipeline(graph_store)
+
+    def test_public_always_passes(self, pipeline):
         """PUBLIC memories pass regardless of context."""
-        assert graph_store._passes_privacy_filter(
+        assert pipeline._passes_privacy_filter(
             sensitivity=Sensitivity.PUBLIC,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids=set(),
         )
 
-    def test_none_sensitivity_treated_as_public(self, graph_store: Store):
+    def test_none_sensitivity_treated_as_public(self, pipeline):
         """None sensitivity (legacy) treated as PUBLIC."""
-        assert graph_store._passes_privacy_filter(
+        assert pipeline._passes_privacy_filter(
             sensitivity=None,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids=set(),
         )
 
-    def test_personal_shown_to_subject(self, graph_store: Store):
+    def test_personal_shown_to_subject(self, pipeline):
         """PERSONAL memories shown when querying user is the subject."""
-        assert graph_store._passes_privacy_filter(
+        assert pipeline._passes_privacy_filter(
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids={"person-1"},
         )
 
-    def test_personal_hidden_from_non_subject(self, graph_store: Store):
+    def test_personal_hidden_from_non_subject(self, pipeline):
         """PERSONAL memories hidden when querying user is NOT the subject."""
-        assert not graph_store._passes_privacy_filter(
+        assert not pipeline._passes_privacy_filter(
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids={"person-2"},
         )
 
-    def test_personal_hidden_when_no_person_ids(self, graph_store: Store):
+    def test_personal_hidden_when_no_person_ids(self, pipeline):
         """PERSONAL memories hidden when no person IDs resolved."""
-        assert not graph_store._passes_privacy_filter(
+        assert not pipeline._passes_privacy_filter(
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["person-1"],
             chat_type="private",
             querying_person_ids=set(),
         )
 
-    def test_sensitive_shown_in_private_to_subject(self, graph_store: Store):
+    def test_sensitive_shown_in_private_to_subject(self, pipeline):
         """SENSITIVE memories shown only in private chat to subject."""
-        assert graph_store._passes_privacy_filter(
+        assert pipeline._passes_privacy_filter(
             sensitivity=Sensitivity.SENSITIVE,
             subject_person_ids=["person-1"],
             chat_type="private",
             querying_person_ids={"person-1"},
         )
 
-    def test_sensitive_hidden_in_group_even_for_subject(self, graph_store: Store):
+    def test_sensitive_hidden_in_group_even_for_subject(self, pipeline):
         """SENSITIVE memories hidden in group chat even for subject."""
-        assert not graph_store._passes_privacy_filter(
+        assert not pipeline._passes_privacy_filter(
             sensitivity=Sensitivity.SENSITIVE,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids={"person-1"},
         )
 
-    def test_sensitive_hidden_in_private_from_non_subject(self, graph_store: Store):
+    def test_sensitive_hidden_in_private_from_non_subject(self, pipeline):
         """SENSITIVE memories hidden in private chat from non-subject."""
-        assert not graph_store._passes_privacy_filter(
+        assert not pipeline._passes_privacy_filter(
             sensitivity=Sensitivity.SENSITIVE,
             subject_person_ids=["person-1"],
             chat_type="private",
@@ -849,3 +883,68 @@ class TestSubjectNameResolution:
         assert len(results) == 1
         assert results[0].metadata is not None
         assert "subject_name" not in results[0].metadata
+
+
+class TestHearsaySupersession:
+    """Tests for hearsay supersession when self-facts confirm hearsay."""
+
+    async def test_self_fact_supersedes_hearsay(self, graph_store: Store, mock_index):
+        """Store hearsay about Bob from Alice, then Bob's self-fact supersedes it."""
+        # Create a person record for Bob and link username
+        person = await graph_store.create_person(
+            created_by="alice", name="Bob", aliases=["bob"]
+        )
+        # Link bob username -> person via users table
+        async with graph_store._db.session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO users (id, version, provider, provider_id, username, person_id, created_at, updated_at) "
+                    "VALUES (:id, 1, 'test', 'test', :username, :pid, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+                ),
+                {"id": "bob-user-id", "username": "bob", "pid": person.id},
+            )
+
+        # Alice says something about Bob (hearsay)
+        hearsay = await graph_store.add_memory(
+            content="Bob likes pasta",
+            owner_user_id="alice",
+            source_username="alice",
+            subject_person_ids=[person.id],
+        )
+
+        # Mock index to return the hearsay as similar to Bob's self-fact
+        mock_index.search = AsyncMock(
+            return_value=_make_search_results([(hearsay.id, 0.90)])
+        )
+
+        # Bob confirms directly (self-fact)
+        from ash.store.hearsay import supersede_hearsay_for_fact
+
+        self_fact = await graph_store.add_memory(
+            content="I like pasta",
+            owner_user_id="alice",
+            source_username="bob",
+            subject_person_ids=[],
+        )
+
+        count = await supersede_hearsay_for_fact(
+            store=graph_store,
+            new_memory=self_fact,
+            source_username="bob",
+            owner_user_id="alice",
+        )
+
+        assert count == 1
+
+        # Verify hearsay is now superseded
+        async with graph_store._db.session() as session:
+            r = await session.execute(
+                text(
+                    "SELECT superseded_at, superseded_by_id FROM memories WHERE id = :id"
+                ),
+                {"id": hearsay.id},
+            )
+            row = r.fetchone()
+            assert row is not None
+            assert row[0] is not None  # superseded_at set
+            assert row[1] == self_fact.id

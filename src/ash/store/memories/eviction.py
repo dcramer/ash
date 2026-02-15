@@ -132,11 +132,13 @@ class MemoryEvictionMixin:
             )
             active_memories = result.fetchall()
 
-        # Check which have embeddings
-        indexed_count = await self._index.get_embedding_count()
+        # Only generate embeddings for memories not already indexed
+        existing_ids = await self._index.get_indexed_memory_ids()
 
         generated = 0
         for row in active_memories:
+            if row.id in existing_ids:
+                continue
             try:
                 floats = await self._embeddings.embed(row.content)
                 if floats:
@@ -150,7 +152,7 @@ class MemoryEvictionMixin:
         if generated:
             logger.info(
                 "Generated embeddings during rebuild",
-                extra={"generated": generated, "indexed_before": indexed_count},
+                extra={"generated": generated, "already_indexed": len(existing_ids)},
             )
 
         return generated

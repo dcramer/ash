@@ -163,7 +163,7 @@ class ContextGatherer:
             return None
 
         try:
-            return await self._store.list_people()
+            return await self._store.list_people(limit=50)
         except Exception:
             logger.warning("Failed to get known people", exc_info=True)
             return None

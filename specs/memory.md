@@ -27,7 +27,7 @@ The memory subsystem is best understood as a graph. Memory entries are nodes; at
 
 | Node Type | Backed By | Key Fields |
 |-----------|-----------|------------|
-| **Memory** | `MemoryEntry` in `memories.jsonl` | id, content, memory_type |
+| **Memory** | `memories` table (SQLite) | id, content, memory_type |
 
 ### Edges (owned by memory subsystem)
 
@@ -51,42 +51,33 @@ See [specs/people.md](people.md) for Person-owned edges (SELF, KNOWS, ALIAS, MER
 
 ## Storage Architecture
 
-Memory uses a **filesystem-primary** architecture where JSONL files are the source of truth:
+Memory uses a **SQLite-primary** architecture. A single SQLite database is the source of truth for all data:
 
 ```
-~/.ash/
-├── graph/
-│   ├── memories.jsonl          # All memories: active + archived (source of truth)
-│   ├── people.jsonl            # Person entities (global)
-│   └── embeddings.jsonl        # {memory_id, embedding} pairs (derived, for rebuild)
-└── data/
-    └── memory.db               # Vector index only (rebuildable)
+~/.ash/data/
+└── ash.db                    # All data: memories, people, users, embeddings
 ```
+
+### Tables
+
+| Table | Purpose |
+|-------|---------|
+| `memories` | All memory entries (active + archived, distinguished by `archived_at`) |
+| `memory_subjects` | ABOUT edges: memory → person_id |
+| `memory_embeddings` | sqlite-vec virtual table for vector search |
+| `people` | Person entities |
+| `person_aliases` | Alias entries for people |
+| `person_relationships` | Relationship claims for people |
+| `users` | User records with username → person_id links |
 
 ### Design Principles
 
 | Principle | Rationale |
 |-----------|-----------|
-| JSONL is source of truth | Human-readable, version-controllable, survives DB corruption |
-| SQLite for vectors only | sqlite-vec provides fast similarity search, fully rebuildable |
-| Embeddings separated | ~8KB per entry in base64; separate file keeps memories.jsonl jq-friendly |
-| Single-file archive | Active + archived in one file; `archived_at` field distinguishes them |
-| Atomic file writes | Write to temp file, then rename; prevents corruption on crash |
-
-### Auto-Migration
-
-**SQLite → JSONL** (legacy): On first run, if SQLite database exists but JSONL files don't, the system automatically migrates:
-1. Exports all memories and people from SQLite to JSONL
-2. Rebuilds the vector index
-3. Original SQLite preserved as backup
-
-**Scattered → Graph** (v2): On first run, if old paths exist (`~/.ash/memory/memories.jsonl`, `~/.ash/people.jsonl`) but `~/.ash/graph/` doesn't:
-1. Loads old `memories.jsonl` and `archive.jsonl` (if exists)
-2. Extracts embeddings to `graph/embeddings.jsonl`
-3. Strips embeddings from entries
-4. Combines active + archive into `graph/memories.jsonl`
-5. Copies `people.jsonl` to `graph/people.jsonl`
-6. Old files left in place (user can clean up)
+| SQLite is source of truth | Single file, ACID transactions, no sync issues |
+| sqlite-vec for vectors | Efficient similarity search via virtual table |
+| Archive in-place | Active + archived in same table; `archived_at` field distinguishes them |
+| Export for portability | `ash db export` produces JSONL for backup/migration |
 
 ## Memory Types
 
@@ -153,7 +144,7 @@ Search features:
 When facts relate to people in the user's life:
 - Person entities are created/resolved automatically
 - References like "my wife", "Sarah", "my boss" resolve to the same person
-- System prompt includes known people for context
+- System prompt includes up to 50 most recently active people for context
 - Memory results show who facts are about
 
 ### Old information gets superseded
@@ -180,10 +171,9 @@ When new information conflicts with old:
 1. Scan active memories (where `archived_at` is null):
    - Explicit expiration (`expires_at` passed)
    - Superseded memories (`superseded_at` set)
-   - Ephemeral types past their default TTL
+   - Ephemeral types past their default TTL (measured from `observed_at`, falling back to `created_at`)
 2. Set `archived_at` + `archive_reason` on each (archive-in-place)
-3. Rewrite `memories.jsonl` (atomic)
-4. Remove embeddings from vector index
+3. Remove embeddings from vector index
 
 **Compaction:** Over time, archived entries accumulate. `ash memory compact --force` permanently removes archived entries older than 90 days (configurable via `--older-than`).
 
@@ -394,9 +384,11 @@ Assistant: Great choices!
 
 The LLM then attributes each extracted fact to the appropriate speaker.
 
-## JSONL Schema
+## Schema
 
 ### Memory Entry
+
+The `memories` table stores all memory entries. Subject links are in the `memory_subjects` join table.
 
 ```json
 {
@@ -452,19 +444,7 @@ The LLM then attributes each extracted fact to the appropriate speaker.
 
 ### Embedding Record
 
-Embeddings are stored separately in `embeddings.jsonl` to keep `memories.jsonl` human-readable (~8KB per embedding in base64):
-
-```json
-{
-  "memory_id": "abc-123",
-  "embedding": "BASE64_ENCODED_FLOAT32_ARRAY"
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `memory_id` | References a MemoryEntry id |
-| `embedding` | Base64-encoded float32 array for vector search |
+Embeddings are stored in the `memory_embeddings` sqlite-vec virtual table. Each row maps a `memory_id` to a float32 vector blob used for similarity search.
 
 ### Person Entry
 
@@ -545,7 +525,7 @@ Not all group-scoped memories about a person should cross contexts. The `portabl
 ## Known Limitations
 
 - **Contradictory group facts**: no authority model — last-write-wins. Two users stating conflicting facts about the same subject both persist.
-- **Hearsay directionality**: self-facts are safe because ABOUT edges are empty (no subjects), so supersession search can't find them via subject overlap.
+- **Hearsay directionality**: Self-facts have the speaker's person_id injected into `subject_person_ids` for graph traversal (so they're discoverable when asking "what do you know about Bob?"). Hearsay supersession uses the original extraction state (no subjects = self-fact) to trigger cross-scope lookup, not the post-injection `subject_person_ids`.
 
 ## Configuration
 
@@ -573,20 +553,17 @@ The sandbox CLI (`ash-sb memory`) wraps these RPC calls with environment-provide
 
 ## Rebuild & Repair
 
-If the SQLite vector index is corrupted or missing, it can be rebuilt entirely from the JSONL source of truth:
+If the vector index is missing embeddings (e.g., after a crash or manual DB edit), it can be rebuilt:
 
 ```bash
-# Rebuild vector index from JSONL
 uv run ash memory rebuild-index
 ```
 
 **How rebuild works:**
-1. Delete existing SQLite database (if corrupted)
-2. Create fresh database with sqlite-vec virtual table
-3. Load active memories from `memories.jsonl` and embeddings from `embeddings.jsonl`
-4. Insert embeddings for active memories (from stored base64, no API calls needed)
-
-**Auto-recovery:** On startup, if SQLite is missing but JSONL + embeddings exist, the index is automatically rebuilt.
+1. Query active memories from the `memories` table
+2. Check which memory IDs already have embeddings in `memory_embeddings`
+3. Generate embeddings via API only for missing entries
+4. Insert new embeddings into the vector index
 
 ### Supersession History
 
@@ -647,7 +624,7 @@ The backup is a standalone database file that can be copied or restored directly
 
 ```bash
 # Unit tests
-uv run pytest tests/test_memory.py tests/test_memory_extractor.py tests/test_memory_file_store.py tests/test_people.py -v
+uv run pytest tests/test_memory.py tests/test_memory_extractor.py tests/test_people.py -v
 
 # Integration test
 uv run ash chat "Remember my favorite color is blue"
@@ -663,42 +640,19 @@ uv run ash memory list
 uv run ash memory search "favorite"
 uv run ash memory gc
 
-# Verify JSONL storage (human-readable, no embeddings bloat)
-jq . ~/.ash/graph/memories.jsonl | head -5
-jq 'select(.archived_at == null)' ~/.ash/graph/memories.jsonl | wc -l  # active count
-jq . ~/.ash/graph/people.jsonl | head -5
-wc -l ~/.ash/graph/embeddings.jsonl  # should match active memory count
+# Verify storage via CLI
+uv run ash memory list
+uv run ash db export | head -5
 
 # Check supersession removes old memory
 uv run ash chat "Remember my favorite color is red"
-jq -r 'select(.content | test("favorite color"))' ~/.ash/graph/memories.jsonl  # 1
+uv run ash memory search "favorite color"  # should show red
 uv run ash chat "Remember my favorite color is blue"
 uv run ash memory gc
-jq 'select(.archived_at == null) | select(.content | test("favorite color"))' ~/.ash/graph/memories.jsonl  # 1 active (red archived in-place)
+uv run ash memory search "favorite color"  # should show only blue
 
-# Verify extraction attribution
-uv run ash chat "I really love hiking in the mountains"
-jq 'select(.source_session_id != null)' ~/.ash/graph/memories.jsonl | head -3
-
-# Rebuild index after corruption
-rm ~/.ash/data/memory.db
+# Rebuild index for missing embeddings
 uv run ash memory rebuild-index
-
-# Privacy tests:
-# 1. Bob says "I have anxiety" in private
-# 2. Verify sensitivity=sensitive in memories.jsonl
-jq 'select(.content | test("anxiety"))' ~/.ash/graph/memories.jsonl
-# 3. In group chat, ask "tell me about Bob"
-# 4. Verify sensitive fact is NOT disclosed
-# 5. In private with Bob, ask same question
-# 6. Verify sensitive fact IS disclosed
-
-# Cross-context tests:
-# 1. In group chat, Alice says "@bob loves pizza"
-# 2. Verify memory stored with subject_person_ids containing bob
-jq 'select(.content | test("loves pizza"))' ~/.ash/graph/memories.jsonl
-# 3. In private chat with Bob, ask "what do you know about me?"
-# 4. Verify "loves pizza" fact is retrieved
 
 # Secrets filtering tests:
 # 1. Via CLI - should reject
@@ -709,23 +663,9 @@ uv run ash memory add -q "my password is hunter2"
 uv run ash memory add -q "API key: sk-abc123def456789"
 # Should error: "Memory content contains potential secrets"
 
-# 3. Via chat - should NOT extract secrets
-uv run ash chat "Remember my password is secret123"
-jq 'select(.content | test("password"))' ~/.ash/graph/memories.jsonl  # empty
-
-# 4. Normal content should work
+# 3. Normal content should work
 uv run ash memory add -q "I prefer dark mode"
-jq 'select(.content | test("dark mode"))' ~/.ash/graph/memories.jsonl  # found
-
-# Temporal context tests:
-# 1. Say something with relative time reference
-uv run ash chat "I have a meeting this weekend"
-# 2. Check extracted memory has absolute date
-jq 'select(.content | test("meeting"))' ~/.ash/graph/memories.jsonl
-# Should have converted "this weekend" to actual date
-
-# 3. Verify observed_at is populated
-jq 'select(.content | test("meeting")) | .observed_at' ~/.ash/graph/memories.jsonl
+uv run ash memory search "dark mode"  # should find it
 
 # Export/Import/Backup tests:
 # 1. Export data
@@ -755,11 +695,10 @@ ls -la /tmp/ash-backup.db
 - [ ] Background extraction captures facts from conversations
 - [ ] Extraction assigns memory types (preference, identity, etc.)
 - [ ] Extraction skips low-confidence and duplicate facts
-- [ ] Ephemeral memory types decay based on their TTL
-- [ ] `memories.jsonl` is the source of truth
-- [ ] `ash memory rebuild-index` rebuilds SQLite from JSONL
+- [ ] Ephemeral memory types decay based on their TTL (from `observed_at`)
+- [ ] SQLite database is the source of truth
+- [ ] `ash memory rebuild-index` generates embeddings for missing entries
 - [ ] `ash memory history <id>` shows supersession chain
-- [ ] Auto-migration from SQLite to JSONL on first run
 - [ ] Extracted memories have `source_username` populated
 - [ ] `ash memory list` shows About, Source, and Trust columns
 - [ ] `ash memory show <id>` displays full attribution details

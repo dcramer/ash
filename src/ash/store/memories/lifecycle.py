@@ -71,8 +71,9 @@ class MemoryLifecycleMixin:
         if memory.expires_at and memory.expires_at <= now:
             return "expired"
         if not memory.expires_at and memory.memory_type in EPHEMERAL_TYPES:
-            if memory.created_at:
-                age_days = (now - memory.created_at).days
+            anchor = memory.observed_at or memory.created_at
+            if anchor:
+                age_days = (now - anchor).days
                 default_ttl = TYPE_TTL.get(memory.memory_type, 30)
                 if age_days > default_ttl:
                     return "ephemeral_decay"

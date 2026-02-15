@@ -214,3 +214,74 @@ class TestPrivacyFilter:
             querying_person_ids={"person-2"},
         )
         assert result is False
+
+
+class TestFinalizeRanking:
+    """Tests for _finalize ranking behavior."""
+
+    def test_dedup_keeps_highest_similarity(self, mock_store):
+        """Dedup should keep the highest-similarity entry, not first-seen."""
+        pipeline = RetrievalPipeline(mock_store)
+
+        memories = [
+            SearchResult(
+                id="mem-1",
+                content="Memory A",
+                similarity=0.5,
+                metadata={},
+                source_type="memory",
+            ),
+            SearchResult(
+                id="mem-1",  # Duplicate
+                content="Memory A",
+                similarity=0.9,
+                metadata={},
+                source_type="memory",
+            ),
+            SearchResult(
+                id="mem-2",
+                content="Memory B",
+                similarity=0.7,
+                metadata={},
+                source_type="memory",
+            ),
+        ]
+
+        result = pipeline._finalize(memories, max_memories=10)
+
+        assert len(result.memories) == 2
+        # mem-1 should have the higher similarity (0.9)
+        mem1 = next(m for m in result.memories if m.id == "mem-1")
+        assert mem1.similarity == 0.9
+
+    def test_results_sorted_by_similarity(self, mock_store):
+        """Results should be sorted by similarity descending."""
+        pipeline = RetrievalPipeline(mock_store)
+
+        memories = [
+            SearchResult(
+                id="low",
+                content="Low sim",
+                similarity=0.3,
+                metadata={},
+                source_type="memory",
+            ),
+            SearchResult(
+                id="high",
+                content="High sim",
+                similarity=0.95,
+                metadata={},
+                source_type="memory",
+            ),
+            SearchResult(
+                id="mid",
+                content="Mid sim",
+                similarity=0.6,
+                metadata={},
+                source_type="memory",
+            ),
+        ]
+
+        result = pipeline._finalize(memories, max_memories=10)
+
+        assert [m.id for m in result.memories] == ["high", "mid", "low"]

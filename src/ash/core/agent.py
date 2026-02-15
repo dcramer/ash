@@ -655,12 +655,17 @@ class Agent:
                                         pid,
                                     )
 
+                    # Capture whether this is a self-fact (no subjects) before
+                    # we inject speaker_person_id for graph traversal, since hearsay
+                    # supersession needs to know the original extraction state.
+                    is_self_fact = not subject_person_ids
+
                     # Self-facts (no subjects) should reference the speaker's person
                     # record so they're discoverable via graph traversal.
                     # Skip RELATIONSHIP type to avoid attaching relationship terms to
                     # the speaker instead of the related person.
                     if (
-                        not subject_person_ids
+                        is_self_fact
                         and speaker_person_id
                         and fact.memory_type != MemoryType.RELATIONSHIP
                     ):
@@ -699,9 +704,10 @@ class Agent:
                         source_username,
                     )
 
-                    # Check for hearsay to supersede when this is a FACT
-                    # (user speaking about themselves = no subject_person_ids)
-                    if not subject_person_ids and source_username and self._memory:
+                    # Check for hearsay to supersede when this is a self-fact
+                    # (user speaking about themselves). Use is_self_fact since
+                    # subject_person_ids now has the speaker's person_id injected.
+                    if is_self_fact and source_username and self._memory:
                         from ash.store.hearsay import supersede_hearsay_for_fact
 
                         await supersede_hearsay_for_fact(

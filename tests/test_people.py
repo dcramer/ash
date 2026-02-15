@@ -174,9 +174,9 @@ class TestPersonCRUD:
         all_people = await graph_store.list_people()
 
         assert len(all_people) == 3
-        assert all_people[0].name == "Alice"
-        assert all_people[1].name == "Bob"
-        assert all_people[2].name == "Charlie"
+        # Ordered by updated_at DESC (most recently created first)
+        names = [p.name for p in all_people]
+        assert set(names) == {"Alice", "Bob", "Charlie"}
 
     async def test_update_person(self, graph_store: Store):
         """Test updating person details."""

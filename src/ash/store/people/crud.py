@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
+from ash.store.mappers import row_to_person as _row_to_person
 from ash.store.people.helpers import load_person_full
 from ash.store.types import (
     AliasEntry,
     PersonEntry,
     RelationshipClaim,
+    _parse_datetime,
 )
 
 if TYPE_CHECKING:
@@ -118,16 +120,63 @@ class PeopleCrudMixin:
         async with self._db.session() as session:
             return await load_person_full(session, person_id)
 
-    async def list_people(self: Store) -> list[PersonEntry]:
+    async def list_people(self: Store, limit: int | None = None) -> list[PersonEntry]:
         async with self._db.session() as session:
-            result = await session.execute(
-                text("SELECT id FROM people WHERE merged_into IS NULL ORDER BY name"),
+            query = "SELECT * FROM people WHERE merged_into IS NULL ORDER BY updated_at DESC"
+            params: dict[str, Any] = {}
+            if limit is not None:
+                query += " LIMIT :limit"
+                params["limit"] = limit
+
+            result = await session.execute(text(query), params)
+            rows = result.fetchall()
+            if not rows:
+                return []
+
+            person_ids = [row.id for row in rows]
+
+            # Batch-load aliases
+            aliases_map: dict[str, list[AliasEntry]] = {pid: [] for pid in person_ids}
+            placeholders = ", ".join(f":id{i}" for i in range(len(person_ids)))
+            id_params = {f"id{i}": pid for i, pid in enumerate(person_ids)}
+            alias_result = await session.execute(
+                text(
+                    f"SELECT person_id, value, added_by, created_at FROM person_aliases WHERE person_id IN ({placeholders})"
+                ),
+                id_params,
             )
+            for arow in alias_result.fetchall():
+                aliases_map[arow[0]].append(
+                    AliasEntry(
+                        value=arow[1],
+                        added_by=arow[2],
+                        created_at=_parse_datetime(arow[3]),
+                    )
+                )
+
+            # Batch-load relationships
+            rels_map: dict[str, list[RelationshipClaim]] = {
+                pid: [] for pid in person_ids
+            }
+            rel_result = await session.execute(
+                text(
+                    f"SELECT person_id, relationship, stated_by, created_at FROM person_relationships WHERE person_id IN ({placeholders})"
+                ),
+                id_params,
+            )
+            for rrow in rel_result.fetchall():
+                rels_map[rrow[0]].append(
+                    RelationshipClaim(
+                        relationship=rrow[1],
+                        stated_by=rrow[2],
+                        created_at=_parse_datetime(rrow[3]),
+                    )
+                )
+
             people = []
-            for row in result.fetchall():
-                person = await load_person_full(session, row[0])
-                if person:
-                    people.append(person)
+            for row in rows:
+                person = _row_to_person(row, aliases_map[row.id], rels_map[row.id])
+                people.append(person)
             return people
 
     async def get_all_people(self: Store) -> list[PersonEntry]:

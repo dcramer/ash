@@ -17,7 +17,6 @@ from ash.store.types import (
     MemoryEntry,
     MemoryType,
     Sensitivity,
-    matches_scope,
 )
 
 if TYPE_CHECKING:
@@ -276,6 +275,20 @@ class MemoryCrudMixin:
             if not include_superseded:
                 conditions.append("superseded_at IS NULL")
 
+            # Scope filtering in SQL so LIMIT returns the correct count
+            if owner_user_id and chat_id:
+                conditions.append(
+                    "(owner_user_id = :owner_user_id OR (owner_user_id IS NULL AND chat_id = :chat_id))"
+                )
+                params["owner_user_id"] = owner_user_id
+                params["chat_id"] = chat_id
+            elif owner_user_id:
+                conditions.append("owner_user_id = :owner_user_id")
+                params["owner_user_id"] = owner_user_id
+            elif chat_id:
+                conditions.append("(owner_user_id IS NULL AND chat_id = :chat_id)")
+                params["chat_id"] = chat_id
+
             where = " AND ".join(conditions)
             query = f"SELECT * FROM memories WHERE {where} ORDER BY created_at DESC"
             if limit is not None:
@@ -293,9 +306,6 @@ class MemoryCrudMixin:
             for row in rows:
                 memory = _row_to_memory(row)
                 memory.subject_person_ids = subjects_map.get(memory.id, [])
-                # Apply scope filter in Python (complex logic)
-                if not matches_scope(memory, owner_user_id, chat_id):
-                    continue
                 memories.append(memory)
 
             return memories

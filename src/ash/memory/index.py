@@ -149,6 +149,14 @@ class VectorIndex:
             )
             return result.scalar() or 0
 
+    async def get_indexed_memory_ids(self) -> set[str]:
+        """Get the set of memory IDs that have embeddings in the index."""
+        async with self._db.session() as session:
+            result = await session.execute(
+                text("SELECT memory_id FROM memory_embeddings")
+            )
+            return {row[0] for row in result.fetchall()}
+
     async def clear(self) -> int:
         """Clear all embeddings from index."""
         count = await self.get_embedding_count()

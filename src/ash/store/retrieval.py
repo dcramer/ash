@@ -176,10 +176,13 @@ class RetrievalPipeline:
         self, memories: list[SearchResult], max_memories: int
     ) -> RetrievedContext:
         """Stage 4: Deduplicate, rank, and limit results."""
+        # Sort by similarity descending so dedup keeps highest-relevance entries
+        sorted_memories = sorted(memories, key=lambda m: m.similarity, reverse=True)
+
         unique: list[SearchResult] = []
         deduped: set[str] = set()
 
-        for m in memories:
+        for m in sorted_memories:
             if m.id not in deduped:
                 deduped.add(m.id)
                 unique.append(m)
