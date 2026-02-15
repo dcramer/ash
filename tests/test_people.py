@@ -1203,6 +1203,48 @@ class TestHeuristicMatch:
         b = PersonEntry(id="b", name="David Cramer")
         assert Store._heuristic_match(a, b) is True
 
+    def test_shared_alias_overrides_self_check(self):
+        """Shared alias on two self-persons from different users should match."""
+        a = PersonEntry(
+            id="a",
+            created_by="user-1",
+            name="David Cramer",
+            relationships=[RelationshipClaim(relationship="self")],
+            aliases=[AliasEntry(value="notzeeg")],
+        )
+        b = PersonEntry(
+            id="b",
+            created_by="user-2",
+            name="David Cramer",
+            relationships=[RelationshipClaim(relationship="self")],
+            aliases=[AliasEntry(value="notzeeg")],
+        )
+        assert Store._heuristic_match(a, b) is True
+
+    def test_name_matches_alias(self):
+        """Person name matching another's alias should match."""
+        a = PersonEntry(id="a", name="Sksembhi")
+        b = PersonEntry(
+            id="b",
+            name="Sukhpreet Sembhi",
+            aliases=[AliasEntry(value="sksembhi")],
+        )
+        assert Store._heuristic_match(a, b) is True
+
+    def test_alias_at_prefix_normalized(self):
+        """@-prefixed alias should match non-prefixed alias after normalization."""
+        a = PersonEntry(
+            id="a",
+            name="David Cramer",
+            aliases=[AliasEntry(value="@notzeeg")],
+        )
+        b = PersonEntry(
+            id="b",
+            name="Notzeeg",
+            aliases=[AliasEntry(value="notzeeg")],
+        )
+        assert Store._heuristic_match(a, b) is True
+
 
 class TestPickPrimary:
     """Tests for _pick_primary merge direction."""
@@ -1313,8 +1355,8 @@ class TestFindDedupCandidates:
         # LLM should be called exactly once, not twice
         assert mock_llm.complete.call_count == 1
 
-    async def test_exclude_self_skips_self_person(self, graph_store: Store):
-        """exclude_self=True skips candidates where either person has 'self' relationship."""
+    async def test_exclude_self_allows_non_self_vs_self(self, graph_store: Store):
+        """exclude_self=True allows matching non-self person against self person."""
         await graph_store.create_person(
             created_by="user-1",
             name="David Cramer",
@@ -1322,10 +1364,28 @@ class TestFindDedupCandidates:
         )
         p2 = await graph_store.create_person(created_by="user-2", name="David")
 
+        graph_store.set_llm(_make_mock_llm("YES"), "test-model")
+
+        # With exclude_self=True, non-self "David" CAN match self "David Cramer"
+        result = await graph_store.find_dedup_candidates([p2.id], exclude_self=True)
+        assert len(result) == 1
+
+    async def test_exclude_self_blocks_both_self(self, graph_store: Store):
+        """exclude_self=True blocks when BOTH persons have 'self' relationship."""
+        await graph_store.create_person(
+            created_by="user-1",
+            name="David Cramer",
+            relationship="self",
+        )
+        p2 = await graph_store.create_person(
+            created_by="user-2",
+            name="David",
+            relationship="self",
+        )
+
         mock_llm = AsyncMock()
         graph_store.set_llm(mock_llm, "test-model")
 
-        # With exclude_self=True, should skip the candidate
         result = await graph_store.find_dedup_candidates([p2.id], exclude_self=True)
         assert result == []
         mock_llm.complete.assert_not_called()

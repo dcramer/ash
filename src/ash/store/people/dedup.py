@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
-from ash.store.people.helpers import load_person_full, primary_sort_key
+from ash.store.people.helpers import (
+    load_person_full,
+    normalize_reference,
+    primary_sort_key,
+)
 from ash.store.types import PersonEntry
 
 if TYPE_CHECKING:
@@ -153,11 +157,14 @@ class PeopleDedupMixin:
                 if pair_key in seen:
                     continue
                 if exclude_self:
-                    has_self = any(
+                    new_is_self = any(
                         r.relationship.lower() == "self"
-                        for r in (*new_person.relationships, *existing.relationships)
+                        for r in new_person.relationships
                     )
-                    if has_self:
+                    existing_is_self = any(
+                        r.relationship.lower() == "self" for r in existing.relationships
+                    )
+                    if new_is_self and existing_is_self:
                         continue
                 if self._heuristic_match(new_person, existing):
                     seen.add(pair_key)
@@ -223,14 +230,28 @@ class PeopleDedupMixin:
 
     @staticmethod
     def _heuristic_match(a: PersonEntry, b: PersonEntry) -> bool:
+        # Normalized alias overlap (strong identity signal, checked first)
+        a_aliases = {normalize_reference(alias.value) for alias in a.aliases}
+        b_aliases = {normalize_reference(alias.value) for alias in b.aliases}
+        a_aliases.discard("")
+        b_aliases.discard("")
+        if a_aliases & b_aliases:
+            return True
+
+        # Name-to-alias cross-matching
+        a_name_norm = normalize_reference(a.name)
+        b_name_norm = normalize_reference(b.name)
+        if a_name_norm and a_name_norm in b_aliases:
+            return True
+        if b_name_norm and b_name_norm in a_aliases:
+            return True
+
+        # Self-check (after alias checks so shared aliases override)
         a_rels = {r.relationship.lower() for r in a.relationships}
         b_rels = {r.relationship.lower() for r in b.relationships}
         if "self" in a_rels and "self" in b_rels and a.created_by != b.created_by:
             return False
-        a_aliases = {alias.value.lower() for alias in a.aliases}
-        b_aliases = {alias.value.lower() for alias in b.aliases}
-        if a_aliases & b_aliases:
-            return True
+
         a_name = a.name.lower()
         b_name = b.name.lower()
         if a_name in b_rels or b_name in a_rels:
