@@ -11,7 +11,7 @@ is not directly mentioned or replied to. It orchestrates:
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
@@ -230,7 +230,7 @@ class PassiveHandler:
                 logger.exception("Passive engagement decision failed: %s", e)
                 return
 
-        # Note: The engagement decision could be recorded to incoming.jsonl here
+        # Note: The engagement decision could be recorded to history.jsonl here
         # to update the original record. For now, the decision is implicit in
         # whether we promote to active processing.
 
@@ -289,42 +289,17 @@ class PassiveHandler:
         except Exception as e:
             logger.warning("Passive memory extraction failed: %s", e)
 
-    def _read_recent_incoming_records(
-        self, chat_id: str, limit: int
-    ) -> list[dict[str, Any]]:
-        """Read recent records from incoming.jsonl as raw dicts."""
-        import json
-
-        from ash.config.paths import get_chat_dir
-
-        chat_dir = get_chat_dir(self._provider.name, chat_id)
-        incoming_file = chat_dir / "incoming.jsonl"
-
-        if not incoming_file.exists():
-            return []
-
-        try:
-            lines = incoming_file.read_text().strip().split("\n")
-            records = []
-            for line in lines[-limit:]:
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-            return records
-        except Exception as e:
-            logger.debug("Failed to load incoming records: %s", e)
-            return []
-
     async def _get_recent_message_texts(
         self, chat_id: str, limit: int = 5
     ) -> list[str]:
-        """Get recent message texts from incoming.jsonl for context."""
-        records = self._read_recent_incoming_records(chat_id, limit)
+        """Get recent message texts from chat history for context."""
+        from ash.chats.history import read_recent_chat_history
+
+        entries = read_recent_chat_history(self._provider.name, chat_id, limit=limit)
         return [
-            f"@{data.get('username') or data.get('display_name', 'User')}: {text}"
-            for data in records
-            if (text := data.get("text"))
+            f"@{entry.username or entry.display_name or 'User'}: {entry.content}"
+            for entry in entries
+            if entry.content and entry.role == "user"
         ]
 
     async def _query_relevant_memories(

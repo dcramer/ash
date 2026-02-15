@@ -201,6 +201,7 @@ class ConversationConfig(BaseModel):
     recency_window: int = 10  # Always include last N messages
     gap_threshold_minutes: int = 15  # Signal gap if longer than this
     reply_context_window: int = 3  # Messages before/after reply target
+    chat_history_limit: int = 15  # Recent chat messages to include in LLM context
 
 
 class SessionsConfig(BaseModel):

@@ -123,6 +123,9 @@ class PromptContext:
     conversation_gap_minutes: float | None = None
     has_reply_context: bool = False
 
+    # Chat-level history (recent messages across all threads)
+    chat_history: list[dict[str, Any]] | None = None
+
     # Extra context for extensibility
     extra_context: dict[str, Any] = field(default_factory=dict)
 
@@ -206,6 +209,7 @@ class SystemPromptBuilder:
             ),
             self._build_memory_section(context.memory),
             self._build_conversation_context_section(context),
+            self._build_chat_history_section(context),
             self._build_session_section(context),
         ]
 
@@ -755,6 +759,38 @@ class SystemPromptBuilder:
             ]
         )
 
+    def _build_chat_history_section(self, context: PromptContext) -> str:
+        """Build section showing recent chat messages for cross-thread context."""
+        if not context.chat_history:
+            return ""
+
+        lines = [
+            "## Recent Chat Messages",
+            "",
+            "Recent messages in this chat (for context — these may be from separate threads):",
+            "",
+        ]
+
+        for entry in context.chat_history:
+            role = entry.get("role", "user")
+            content = entry.get("content", "")
+            # Truncate long messages
+            if len(content) > 200:
+                content = content[:200] + "..."
+            if role == "user":
+                username = entry.get("username") or entry.get("display_name") or "User"
+                lines.append(f"- @{username}: {content}")
+            else:
+                lines.append(f"- bot: {content}")
+
+        lines.append("")
+        lines.append(
+            "Use this context to understand what's been discussed. "
+            "Don't repeat or summarize unless asked."
+        )
+
+        return "\n".join(lines)
+
     def _build_session_section(self, context: PromptContext) -> str:
         session_path = context.get_session_path()
         if not session_path:
@@ -785,6 +821,17 @@ class SystemPromptBuilder:
                     "",
                     "This file contains only THIS conversation session, not long-term knowledge.",
                     "Only search it for 'what did X say earlier in this chat' type questions.",
+                ]
+            )
+
+        # Add chat-level history path for full cross-thread search
+        chat_state_path = context.get_chat_state_path()
+        if chat_state_path:
+            chat_history_path = f"{chat_state_path}/history.jsonl"
+            lines.extend(
+                [
+                    "",
+                    f"Full chat history (all threads): `{chat_history_path}`",
                 ]
             )
 

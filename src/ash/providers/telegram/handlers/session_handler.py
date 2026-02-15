@@ -152,6 +152,20 @@ class SessionHandler:
         else:
             await self._load_persistent_session(session, session_manager, message)
 
+        # Load recent chat-level history for cross-thread context (group chats only)
+        chat_type = message.metadata.get("chat_type")
+        if chat_type in ("group", "supergroup"):
+            from ash.chats.history import read_recent_chat_history
+
+            history_limit = self._conversation_config.chat_history_limit
+            entries = read_recent_chat_history(
+                self._provider_name, message.chat_id, limit=history_limit
+            )
+            if entries:
+                session.metadata["chat_history"] = [
+                    e.model_dump(mode="json") for e in entries
+                ]
+
         async with self._database.session() as db_session:
             from sqlalchemy import text as _text
 
@@ -452,6 +466,20 @@ class SessionHandler:
                 content=assistant_message,
                 token_count=estimate_tokens(assistant_message),
                 metadata=assistant_metadata,
+            )
+
+            # Write bot response to chat-level history.jsonl
+            from ash.chats.history import ChatHistoryWriter
+
+            chat_writer = ChatHistoryWriter(self._provider_name, chat_id)
+            bot_metadata: dict[str, Any] = {}
+            if bot_response_id:
+                bot_metadata["external_id"] = bot_response_id
+            if thread_id:
+                bot_metadata["thread_id"] = thread_id
+            chat_writer.record_bot_message(
+                content=assistant_message,
+                metadata=bot_metadata or None,
             )
 
         # Register bot response in thread index so replies to bot get routed correctly

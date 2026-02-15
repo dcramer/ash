@@ -407,7 +407,7 @@ class MemoryCrudMixin:
                         else None,
                     },
                 )
-                if r.rowcount > 0:
+                if r.rowcount > 0:  # type: ignore[possibly-missing-attribute]
                     count += 1
 
                     # Update subjects

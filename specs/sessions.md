@@ -2,7 +2,30 @@
 
 > JSONL-based session persistence for conversation history and context
 
-Files: src/ash/sessions/manager.py, src/ash/sessions/types.py, src/ash/sessions/reader.py, src/ash/sessions/writer.py
+Files: src/ash/sessions/manager.py, src/ash/sessions/types.py, src/ash/sessions/reader.py, src/ash/sessions/writer.py, src/ash/chats/history.py
+
+## One-Session-Per-Thread Model
+
+Ash uses a **one session per thread** model for group chats:
+
+- Standalone `@mention` messages create a new thread (thread_id = message external_id)
+- Replies follow the parent thread via `ThreadIndex`
+- Session key for groups: `telegram_{chat_id}_{thread_id}` (all users in the thread share it)
+- DMs use a single session: `telegram_{chat_id}_{user_id}` (no thread_id)
+
+## File Structure
+
+```
+~/.ash/
+├── chats/telegram/{chat_id}/
+│   ├── state.json        # Chat metadata & participants (ChatState)
+│   └── history.jsonl     # All user + bot messages across all threads (HistoryEntry)
+│
+├── sessions/{session_key}/
+│   ├── state.json        # Session metadata (SessionState)
+│   ├── context.jsonl     # Full LLM context — discriminated union on `type`
+│   └── history.jsonl     # Thread conversation log (HistoryEntry-compatible)
+```
 
 ## Requirements
 
@@ -12,7 +35,8 @@ Files: src/ash/sessions/manager.py, src/ash/sessions/types.py, src/ash/sessions/
 - Generate session keys from provider, chat_id, user_id, thread_id
 - Maintain state.json with session metadata (provider, chat_id, user_id, thread_id)
 - Maintain two files per session: context.jsonl (full LLM context) and history.jsonl (human-readable)
-- Support entry types: session header, message, tool_use, tool_result, compaction
+- Maintain chat-level history.jsonl with all user + bot messages across all threads
+- Support entry types: session header, message, tool_use, tool_result, compaction, agent_session
 - Track message metadata including external_id for deduplication
 - Support loading recent messages for LLM context window
 - Preserve tool use/result pairs for context reconstruction
@@ -26,12 +50,161 @@ Files: src/ash/sessions/manager.py, src/ash/sessions/types.py, src/ash/sessions/
 - Support compaction entries for context window management
 - Provide session listing and search functionality
 - Include user metadata (username, display_name) in history
+- Inject recent chat history into LLM system prompt for cross-thread awareness
 
 ### MAY
 
 - Support session export to other formats
 - Track session statistics (message count, token usage)
 - Support session archival
+
+## Schemas
+
+### history.jsonl — `HistoryEntry`
+
+**Pydantic model:** `src/ash/chats/history.py::HistoryEntry`
+
+Used at both levels:
+- **Chat-level:** `~/.ash/chats/{provider}/{chat_id}/history.jsonl` — all messages across all threads
+- **Thread-level:** `~/.ash/sessions/{session_key}/history.jsonl` — messages in one thread
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | `str` | yes | UUID |
+| `role` | `"user" \| "assistant"` | yes | Message role |
+| `content` | `str` | yes | Message text |
+| `created_at` | `datetime` | yes | ISO 8601 timestamp |
+| `user_id` | `str \| null` | no | Provider user ID |
+| `username` | `str \| null` | no | Username handle |
+| `display_name` | `str \| null` | no | Display name |
+| `metadata` | `dict \| null` | no | Context-specific data |
+
+**Metadata fields (varies by use):**
+- `external_id` — Telegram message ID
+- `was_processed` — did bot respond? (chat-level user messages)
+- `skip_reason` — why skipped (chat-level, unprocessed messages)
+- `processing_mode` — `"active"` or `"passive"` (chat-level user messages)
+- `thread_id` — which thread this belongs to (chat-level bot messages)
+- `bot_response_id` — Telegram ID of bot reply
+
+**Validation rules:**
+- **On write:** Construct `HistoryEntry(...)` (Pydantic validates), then `entry.model_dump_json()` to append
+- **On read:** `HistoryEntry.model_validate_json(line)` — skip lines that fail validation
+- **`MessageEntry.to_history_dict()`** produces a dict conforming to `HistoryEntry` (includes `metadata`)
+
+**Examples:**
+```json
+{"id":"uuid","role":"user","content":"i need a tool...","created_at":"2026-02-15T10:00:00Z","username":"notzeeg","user_id":"958786881","metadata":{"external_id":"211","was_processed":true,"processing_mode":"active"}}
+{"id":"uuid","role":"assistant","content":"ok so you got a few options...","created_at":"2026-02-15T10:00:05Z","metadata":{"external_id":"212","thread_id":"211"}}
+{"id":"uuid","role":"user","content":"random msg bot ignored","created_at":"2026-02-15T10:01:00Z","username":"someone","metadata":{"external_id":"214","was_processed":false,"skip_reason":"not_mentioned_or_reply"}}
+```
+
+### context.jsonl — discriminated union on `type`
+
+Lives at `~/.ash/sessions/{session_key}/context.jsonl`. Tagged union — each line has a `type` field.
+
+#### `type: "session"` — SessionHeader (first line only)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"session"` | yes | Discriminator |
+| `version` | `str` | yes | Schema version |
+| `id` | `str` | yes | UUID |
+| `created_at` | `datetime` | yes | ISO 8601 |
+| `provider` | `str` | yes | Provider name |
+| `user_id` | `str \| null` | no | User ID |
+| `chat_id` | `str \| null` | no | Chat ID |
+
+#### `type: "message"` — MessageEntry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"message"` | yes | Discriminator |
+| `id` | `str` | yes | UUID |
+| `role` | `"user" \| "assistant" \| "system"` | yes | Message role |
+| `content` | `str \| list[dict]` | yes | Message content |
+| `created_at` | `datetime` | yes | ISO 8601 |
+| `token_count` | `int \| null` | no | Estimated tokens |
+| `metadata` | `dict \| null` | no | External IDs, etc. |
+| `agent_session_id` | `str \| null` | no | Links to AgentSessionEntry |
+
+#### `type: "tool_use"` — ToolUseEntry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"tool_use"` | yes | Discriminator |
+| `id` | `str` | yes | Tool use ID |
+| `message_id` | `str` | yes | Parent message UUID |
+| `name` | `str` | yes | Tool name |
+| `input` | `dict` | yes | Tool input |
+| `agent_session_id` | `str \| null` | no | Links to AgentSessionEntry |
+
+#### `type: "tool_result"` — ToolResultEntry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"tool_result"` | yes | Discriminator |
+| `tool_use_id` | `str` | yes | Matching tool_use ID |
+| `output` | `str` | yes | Tool output |
+| `success` | `bool` | yes | Whether tool succeeded |
+| `duration_ms` | `int \| null` | no | Execution time |
+| `metadata` | `dict \| null` | no | Extra data |
+| `agent_session_id` | `str \| null` | no | Links to AgentSessionEntry |
+
+#### `type: "compaction"` — CompactionEntry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"compaction"` | yes | Discriminator |
+| `id` | `str` | yes | UUID |
+| `summary` | `str` | yes | Summary of compacted messages |
+| `tokens_before` | `int` | yes | Token count before |
+| `tokens_after` | `int` | yes | Token count after |
+| `first_kept_entry_id` | `str` | yes | First non-compacted entry |
+| `created_at` | `datetime` | yes | ISO 8601 |
+
+#### `type: "agent_session"` — AgentSessionEntry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"agent_session"` | yes | Discriminator |
+| `id` | `str` | yes | UUID |
+| `parent_tool_use_id` | `str` | yes | Links to invoking tool_use |
+| `agent_type` | `"skill" \| "agent"` | yes | Type of subagent |
+| `agent_name` | `str` | yes | Name of skill or agent |
+| `created_at` | `datetime` | yes | ISO 8601 |
+
+### Chat-level state.json — `ChatState`
+
+Lives at `~/.ash/chats/{provider}/{chat_id}/state.json`. Managed by `ChatStateManager`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `chat` | `ChatInfo` | yes | Chat metadata (id, type, title) |
+| `participants` | `list[Participant]` | yes | Chat members |
+| `thread_index` | `dict[str, str]` | yes | message_id -> thread_id mapping |
+| `updated_at` | `datetime` | yes | Last update time |
+| `graph_chat_id` | `str \| null` | no | Graph store chat ID |
+
+### Session-level state.json — `SessionState`
+
+Lives at `~/.ash/sessions/{session_key}/state.json`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | `str` | yes | Provider name |
+| `chat_id` | `str \| null` | no | Chat ID |
+| `user_id` | `str \| null` | no | User ID |
+| `thread_id` | `str \| null` | no | Thread ID |
+| `created_at` | `datetime` | yes | ISO 8601 |
+
+## Write Flow
+
+Two write points for chat-level history — no duplicate user messages:
+
+1. **Provider level** (`TelegramProvider._should_process_message`): Writes ALL incoming user messages to chat `history.jsonl` — processed or not. Carries audit metadata (`was_processed`, `skip_reason`, `processing_mode`).
+
+2. **Session handler level** (`SessionHandler.persist_messages`): Writes bot responses to chat `history.jsonl` after the agent responds. Only the assistant message — user message was already written at step 1.
 
 ## Interface
 
@@ -73,97 +246,6 @@ class SessionManager:
     async def load_messages_for_llm(recency_window) -> list[Message]
     async def get_message_by_external_id(external_id) -> MessageEntry | None
     async def get_messages_around(message_id, window) -> list[Entry]
-```
-
-### Session Metadata
-
-```python
-class SessionState(BaseModel):
-    """Session metadata stored in state.json."""
-    provider: str
-    chat_id: str | None = None
-    user_id: str | None = None
-    thread_id: str | None = None
-    created_at: datetime
-```
-
-### Entry Types
-
-```python
-@dataclass
-class SessionHeader:
-    id: str
-    created_at: datetime
-    provider: str
-    user_id: str | None
-    chat_id: str | None
-    version: str
-    type: Literal["session"]
-
-@dataclass
-class MessageEntry:
-    id: str
-    role: Literal["user", "assistant", "system"]
-    content: str | list[dict]
-    created_at: datetime
-    token_count: int | None
-    user_id: str | None
-    username: str | None
-    display_name: str | None
-    metadata: dict | None
-    type: Literal["message"]
-
-@dataclass
-class ToolUseEntry:
-    id: str
-    message_id: str
-    name: str
-    input: dict
-    type: Literal["tool_use"]
-
-@dataclass
-class ToolResultEntry:
-    tool_use_id: str
-    output: str
-    success: bool
-    duration_ms: int | None
-    type: Literal["tool_result"]
-
-@dataclass
-class CompactionEntry:
-    id: str
-    summary: str
-    tokens_before: int
-    tokens_after: int
-    first_kept_entry_id: str
-    created_at: datetime
-    type: Literal["compaction"]
-```
-
-## File Format
-
-### state.json
-Session metadata for quick lookup without parsing JSONL:
-```json
-{"provider": "telegram", "chat_id": "-123456", "user_id": "11111", "created_at": "2026-01-12T..."}
-```
-
-### context.jsonl
-Full LLM context with all entry types:
-```json
-{"type": "session", "id": "uuid", "created_at": "2026-01-12T...", "provider": "telegram", ...}
-{"type": "message", "id": "uuid", "role": "user", "content": "Hello", ...}
-{"type": "message", "id": "uuid", "role": "assistant", "content": [...], ...}
-{"type": "tool_use", "id": "tool-id", "message_id": "uuid", "name": "web_search", "input": {...}}
-{"type": "tool_result", "tool_use_id": "tool-id", "output": "...", "success": true}
-{"type": "compaction", "id": "uuid", "summary": "...", "tokens_before": 50000, "tokens_after": 10000, ...}
-```
-
-### history.jsonl
-Human-readable conversation log (messages only):
-```json
-{"id": "uuid", "role": "user", "content": "Hello", "created_at": "...", "username": "alice"}
-{"id": "uuid", "role": "assistant", "content": "Hi there!", "created_at": "..."}
 ```
 
 ## Session Key Generation

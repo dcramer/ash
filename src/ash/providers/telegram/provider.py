@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from aiogram import Bot, Dispatcher, F
 
@@ -249,7 +249,6 @@ class TelegramProvider(Provider):
             ("passive", user_id, username) for group messages eligible for passive listening
             None if message should not be processed
         """
-        from ash.chats import IncomingMessageRecord, IncomingMessageWriter
 
         skip_reason: str | None = None
         processing_mode: Literal["active", "passive"] | None = None
@@ -314,22 +313,30 @@ class TelegramProvider(Provider):
             },
         )
 
-        # Record ALL incoming messages to per-chat JSONL file
-        writer = IncomingMessageWriter(provider=self.name, chat_id=str(message.chat.id))
-        record = IncomingMessageRecord(
-            external_id=str(message.message_id),
-            chat_id=str(message.chat.id),
-            user_id=str(user_id) if user_id else None,
-            username=username,
-            display_name=display_name,
-            text=message.text or message.caption,
-            timestamp=message.date.isoformat() if message.date else "",
-            was_processed=processing_mode is not None,
-            skip_reason=skip_reason,
-            processing_mode=processing_mode,
-            metadata={"chat_type": message.chat.type},
-        )
-        writer.record(record)
+        # Record ALL incoming user messages to chat-level history.jsonl
+        # Format: specs/sessions.md#historyjsonl
+        text = message.text or message.caption or ""
+        if text:
+            history_metadata: dict[str, Any] = {
+                "external_id": str(message.message_id),
+                "was_processed": processing_mode is not None,
+            }
+            if skip_reason:
+                history_metadata["skip_reason"] = skip_reason
+            if processing_mode:
+                history_metadata["processing_mode"] = processing_mode
+
+            from ash.chats import ChatHistoryWriter
+
+            writer = ChatHistoryWriter(provider=self.name, chat_id=str(message.chat.id))
+            writer.record_user_message(
+                content=text,
+                created_at=message.date,
+                user_id=str(user_id) if user_id else None,
+                username=username,
+                display_name=display_name,
+                metadata=history_metadata,
+            )
 
         if skip_reason or processing_mode is None:
             return None

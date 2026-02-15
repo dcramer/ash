@@ -172,7 +172,7 @@ class MemoryLifecycleMixin:
                     ),
                     {"now": now_iso, "reason": reason, "id": mid},
                 )
-                if r.rowcount > 0:
+                if r.rowcount > 0:  # type: ignore[possibly-missing-attribute]
                     archived.append(mid)
 
         for memory_id in archived:

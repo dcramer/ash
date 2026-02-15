@@ -193,6 +193,8 @@ class MessageEntry:
             result["username"] = self.username
         if self.display_name:
             result["display_name"] = self.display_name
+        if self.metadata:
+            result["metadata"] = self.metadata
         return result
 
     def _extract_text_content(self) -> str:

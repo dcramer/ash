@@ -180,7 +180,7 @@ class SupersessionMixin:
                 """),
                 {"now": now_iso, "new_id": new_memory_id, "old_id": old_memory_id},
             )
-            if r.rowcount == 0:
+            if r.rowcount == 0:  # type: ignore[possibly-missing-attribute]
                 return False
 
         try:
@@ -225,7 +225,7 @@ class SupersessionMixin:
                     """),
                     {"now": now_iso, "new_id": new_id, "old_id": old_id},
                 )
-                if r.rowcount > 0:
+                if r.rowcount > 0:  # type: ignore[possibly-missing-attribute]
                     marked.append(old_id)
 
         if marked:
