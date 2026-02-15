@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
-from ash.store.memories import _load_subjects, _row_to_memory
+from ash.store.mappers import row_to_memory as _row_to_memory
+from ash.store.memories.helpers import load_subjects as _load_subjects
 from ash.store.types import MemoryEntry, matches_scope
 
 if TYPE_CHECKING:

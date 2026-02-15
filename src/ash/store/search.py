@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
-from ash.store.memories import _load_subjects, _row_to_memory
+from ash.store.mappers import row_to_memory as _row_to_memory
+from ash.store.memories.helpers import load_subjects as _load_subjects
+from ash.store.retrieval import RetrievalContext, RetrievalPipeline
 from ash.store.types import (
     MemoryEntry,
     RetrievedContext,
@@ -274,51 +276,14 @@ class SearchMixin:
         chat_type: str | None = None,
         participant_person_ids: dict[str, set[str]] | None = None,
     ) -> RetrievedContext:
-        # Primary: vector search scoped to user/chat
-        try:
-            memories = await self.search(
-                query=user_message,
-                limit=max_memories,
-                owner_user_id=user_id,
-                chat_id=chat_id,
-            )
-        except Exception:
-            logger.error(
-                "Primary memory search failed, returning without context",
-                exc_info=True,
-            )
-            memories = []
-
-        # Cross-context: memories about participants from other chats
-        if participant_person_ids:
-            memories.extend(
-                await self._collect_cross_context_memories(
-                    participant_person_ids, user_id, chat_type, max_memories
-                )
-            )
-
-        # Graph traversal: memories about people mentioned in results so far
-        seen_ids: set[str] = {m.id for m in memories}
-        if seen_ids:
-            memories.extend(
-                await self._collect_graph_traversal_memories(
-                    memories,
-                    seen_ids,
-                    participant_person_ids,
-                    user_id,
-                    chat_type,
-                    max_memories,
-                )
-            )
-
-        # Deduplicate and limit
-        unique: list[SearchResult] = []
-        deduped: set[str] = set()
-        for m in memories:
-            if m.id not in deduped:
-                deduped.add(m.id)
-                unique.append(m)
-                if len(unique) >= max_memories:
-                    break
-
-        return RetrievedContext(memories=unique)
+        """Get context for a message using the retrieval pipeline."""
+        pipeline = RetrievalPipeline(self)
+        context = RetrievalContext(
+            user_id=user_id,
+            query=user_message,
+            chat_id=chat_id,
+            max_memories=max_memories,
+            chat_type=chat_type,
+            participant_person_ids=participant_person_ids or {},
+        )
+        return await pipeline.retrieve(context)
