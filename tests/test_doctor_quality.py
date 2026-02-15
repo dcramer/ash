@@ -1,6 +1,8 @@
 """Tests for memory doctor quality review helpers."""
 
-from ash.cli.commands.memory.doctor import _is_trivial_rewrite
+from ash.cli.commands.memory.doctor._helpers import (
+    is_trivial_rewrite as _is_trivial_rewrite,
+)
 
 
 class TestIsTrivialRewrite:

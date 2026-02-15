@@ -1,13 +1,18 @@
 """Maintenance commands for memory system (gc, rebuild-index, compact)."""
 
-from ash.cli.commands.memory._helpers import get_memory_store
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from ash.cli.console import dim, success, warning
 
+if TYPE_CHECKING:
+    from ash.graph.store import GraphStore
 
-async def memory_gc() -> None:
+
+async def memory_gc(graph_store: GraphStore) -> None:
     """Garbage collect expired and superseded memories."""
-    store = get_memory_store()
-    result = await store.gc()
+    result = await graph_store.gc()
 
     if result.removed_count == 0:
         dim("No memories to clean up")
@@ -19,10 +24,9 @@ async def memory_gc() -> None:
                 dim(f"  ... and {len(result.archived_ids) - 5} more")
 
 
-async def memory_rebuild_index(session) -> None:
+async def memory_rebuild_index(graph_store: GraphStore) -> None:
     """Rebuild vector index from embeddings.jsonl and memories.jsonl."""
     from ash.config.paths import get_embeddings_jsonl_path, get_memories_jsonl_path
-    from ash.memory.index import rebuild_vector_index_from_jsonl
 
     memories_path = get_memories_jsonl_path()
     embeddings_path = get_embeddings_jsonl_path()
@@ -36,16 +40,16 @@ async def memory_rebuild_index(session) -> None:
         return
 
     dim(f"Rebuilding index from {embeddings_path}")
-    count = await rebuild_vector_index_from_jsonl()
+    count = await graph_store.rebuild_index()
 
     success(f"Rebuilt index with {count} embeddings")
 
 
-async def memory_compact(force: bool, older_than_days: int = 90) -> None:
+async def memory_compact(
+    graph_store: GraphStore, force: bool, older_than_days: int = 90
+) -> None:
     """Permanently remove old archived entries."""
     import typer
-
-    store = get_memory_store()
 
     if not force:
         warning(
@@ -55,7 +59,7 @@ async def memory_compact(force: bool, older_than_days: int = 90) -> None:
             dim("Cancelled")
             return
 
-    removed = await store.compact(older_than_days)
+    removed = await graph_store.compact(older_than_days)
 
     if removed == 0:
         dim("No archived entries old enough to compact")

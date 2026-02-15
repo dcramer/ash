@@ -541,9 +541,9 @@ class Agent:
                 for primary_id, secondary_id in candidates:
                     await self._people.merge_people(primary_id, secondary_id)
             except Exception:
-                logger.debug("Self-person dedup failed", exc_info=True)
+                logger.warning("Self-person dedup failed", exc_info=True)
         except Exception:
-            logger.debug("Failed to ensure self-person", exc_info=True)
+            logger.warning("Failed to ensure self-person", exc_info=True)
 
     async def _sync_person_details(
         self,
@@ -718,7 +718,7 @@ class Agent:
                                 if result.created:
                                     newly_created_person_ids.append(result.person_id)
                             except Exception:
-                                logger.debug("Failed to resolve subject: %s", subject)
+                                logger.warning("Failed to resolve subject: %s", subject)
 
                     # For RELATIONSHIP facts, attach the term to the person record
                     # so it shows in the Known People section of the system prompt.
@@ -812,7 +812,7 @@ class Agent:
                                         superseded,
                                     )
                         except Exception:
-                            logger.debug(
+                            logger.warning(
                                 "Failed to check for hearsay supersession",
                                 exc_info=True,
                             )
@@ -832,7 +832,7 @@ class Agent:
                     for primary_id, secondary_id in candidates:
                         await self._people.merge_people(primary_id, secondary_id)
                 except Exception:
-                    logger.debug("Post-extraction dedup failed", exc_info=True)
+                    logger.warning("Post-extraction dedup failed", exc_info=True)
 
         except Exception:
             logger.warning("Background memory extraction failed", exc_info=True)

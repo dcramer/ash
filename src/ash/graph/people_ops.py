@@ -555,7 +555,7 @@ class PeopleOpsMixin:
             )
             return response.message.get_text().strip().upper() == "YES"
         except Exception:
-            logger.debug("llm_verify_same_person_failed", exc_info=True)
+            logger.warning("llm_verify_same_person_failed", exc_info=True)
             return False
 
     @staticmethod
@@ -622,7 +622,7 @@ class PeopleOpsMixin:
                 return None
             return self._find_person_by_id(candidates, result)
         except Exception:
-            logger.debug("fuzzy_find_failed", exc_info=True)
+            logger.warning("fuzzy_find_failed", exc_info=True)
             return None
 
     def _parse_person_reference(

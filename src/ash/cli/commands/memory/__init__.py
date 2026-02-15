@@ -258,9 +258,17 @@ async def _run_memory_action(
                     raise typer.Exit(1)
                 await memory_clear(store, force)
             elif action == "gc":
-                await memory_gc()
+                store = await get_graph_store(config, session)
+                if not store:
+                    error("Memory gc requires [embeddings] configuration")
+                    raise typer.Exit(1)
+                await memory_gc(store)
             elif action == "rebuild-index":
-                await memory_rebuild_index(session)
+                store = await get_graph_store(config, session)
+                if not store:
+                    error("Rebuild-index requires [embeddings] configuration")
+                    raise typer.Exit(1)
+                await memory_rebuild_index(store)
             elif action == "show":
                 if not entry_id:
                     error("Usage: ash memory show <id>")
@@ -277,23 +285,43 @@ async def _run_memory_action(
                     raise typer.Exit(1)
                 await memory_forget(config, session, entry_id, delete_person, force)
             elif action == "compact":
-                await memory_compact(force)
+                store = await get_graph_store(config, session)
+                if not store:
+                    error("Memory compact requires [embeddings] configuration")
+                    raise typer.Exit(1)
+                await memory_compact(store, force)
             elif action == "doctor":
                 from ash.cli.commands.memory.doctor import (
                     memory_doctor_attribution,
                     memory_doctor_contradictions,
                     memory_doctor_dedup,
+                    memory_doctor_embed_missing,
                     memory_doctor_fix_names,
                     memory_doctor_quality,
                     memory_doctor_reclassify,
                 )
 
-                await memory_doctor_attribution(force)
-                await memory_doctor_fix_names(force)
-                await memory_doctor_reclassify(config, force)
-                await memory_doctor_quality(config, force)
-                await memory_doctor_dedup(config, session, force)
-                await memory_doctor_contradictions(config, session, force)
+                store = await get_graph_store(config, session)
+                if not store:
+                    error("Memory doctor requires [embeddings] configuration")
+                    raise typer.Exit(1)
+
+                subcommand = entry_id  # positional arg: ash memory doctor <sub>
+                if subcommand == "embed-missing":
+                    await memory_doctor_embed_missing(store, force)
+                elif subcommand is None:
+                    await memory_doctor_attribution(store, force)
+                    await memory_doctor_fix_names(store, force)
+                    await memory_doctor_reclassify(store, config, force)
+                    await memory_doctor_quality(store, config, force)
+                    await memory_doctor_dedup(store, config, force)
+                    await memory_doctor_contradictions(store, config, force)
+                else:
+                    error(f"Unknown doctor subcommand: {subcommand}")
+                    console.print(
+                        "Valid subcommands: embed-missing (or omit for full check)"
+                    )
+                    raise typer.Exit(1)
             else:
                 error(f"Unknown action: {action}")
                 console.print(

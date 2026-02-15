@@ -110,6 +110,7 @@ def register_memory_methods(
                         created_by=user_id,
                         reference=subject,
                         content_hint=content,
+                        relationship_stated_by=source_username,
                     )
                     subject_person_ids.append(result.person_id)
                 except Exception:

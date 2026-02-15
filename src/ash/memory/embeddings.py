@@ -2,6 +2,14 @@
 
 from ash.llm import LLMRegistry
 
+MODEL_DIMENSIONS: dict[str, int] = {
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "text-embedding-ada-002": 1536,
+}
+
+DEFAULT_MODEL = "text-embedding-3-small"
+
 
 class EmbeddingGenerator:
     """Generate embeddings for text using LLM providers."""
@@ -30,11 +38,15 @@ class EmbeddingGenerator:
 
     @property
     def dimensions(self) -> int:
-        """Get embedding dimensions.
-
-        Note: text-embedding-3-small produces 1536-dimensional vectors.
-        """
-        return 1536
+        """Get embedding dimensions based on the configured model."""
+        model = self._model or DEFAULT_MODEL
+        dims = MODEL_DIMENSIONS.get(model)
+        if dims is None:
+            raise ValueError(
+                f"Unknown embedding model {model!r}. "
+                f"Known models: {', '.join(MODEL_DIMENSIONS)}"
+            )
+        return dims
 
     async def embed(self, text: str) -> list[float]:
         """Generate embedding for a single text.

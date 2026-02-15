@@ -143,7 +143,10 @@ class MemoryOpsMixin:
 
     async def get_memory(self: GraphStore, memory_id: str) -> MemoryEntry | None:
         await self._ensure_graph_built()
-        return self._memory_by_id.get(memory_id)
+        memory = self._memory_by_id.get(memory_id)
+        if memory and memory.archived_at is not None:
+            return None
+        return memory
 
     async def get_memory_by_prefix(self: GraphStore, prefix: str) -> MemoryEntry | None:
         """Find a memory by ID prefix match."""
@@ -203,6 +206,13 @@ class MemoryOpsMixin:
                 logger.debug("Failed to delete embedding for %s", memory_id)
         self._graph_built = False
         return result
+
+    async def compact(self: GraphStore, older_than_days: int = 90) -> int:
+        """Permanently remove old archived entries and clean up vector index."""
+        removed = await self._store.compact(older_than_days)
+        if removed > 0:
+            self._graph_built = False
+        return removed
 
     async def clear(self: GraphStore) -> int:
         """Clear all memories, embeddings JSONL, and vector index."""
@@ -310,3 +320,26 @@ class MemoryOpsMixin:
         self: GraphStore, memory_id: str
     ) -> list[MemoryEntry]:
         return await self._store.get_supersession_chain(memory_id)
+
+    async def batch_update_memories(
+        self: GraphStore, entries: list[MemoryEntry]
+    ) -> int:
+        """Update multiple memories and invalidate graph."""
+        count = await self._store.batch_update_memories(entries)
+        if count > 0:
+            self._graph_built = False
+        return count
+
+    async def archive_memories(
+        self: GraphStore, memory_ids: set[str], reason: str
+    ) -> list[str]:
+        """Archive memories and clean up vector index."""
+        archived_ids = await self._store.archive_memories(memory_ids, reason)
+        for memory_id in archived_ids:
+            try:
+                await self._index.delete_embedding(memory_id)
+            except Exception:
+                logger.debug("Failed to delete embedding for %s", memory_id)
+        if archived_ids:
+            self._graph_built = False
+        return archived_ids

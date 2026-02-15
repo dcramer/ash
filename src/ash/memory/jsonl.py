@@ -38,6 +38,7 @@ class TypedJSONL[T: Serializable]:
     def __init__(self, path: Path, entry_type: type[T]) -> None:
         self.path = path
         self._entry_type = entry_type
+        self.last_error_count: int = 0
         self._ensure_parent()
 
     def _ensure_parent(self) -> None:
@@ -51,11 +52,17 @@ class TypedJSONL[T: Serializable]:
             await f.write(line + "\n")
 
     async def load_all(self) -> list[T]:
-        """Load all entries from the file."""
+        """Load all entries from the file.
+
+        Malformed lines are skipped with a warning. The count of skipped
+        lines is tracked in ``last_error_count`` for diagnostic tools.
+        """
         if not self.path.exists():
+            self.last_error_count = 0
             return []
 
         entries: list[T] = []
+        error_count = 0
         async with aiofiles.open(self.path, encoding="utf-8") as f:
             async for line in f:
                 line = line.strip()
@@ -65,8 +72,15 @@ class TypedJSONL[T: Serializable]:
                     data = json.loads(line)
                     entries.append(self._entry_type.from_dict(data))
                 except Exception as e:
+                    error_count += 1
                     logger.warning("Skipping malformed JSONL line: %s", e)
                     continue
+
+        self.last_error_count = error_count
+        if error_count > 0:
+            logger.warning(
+                "JSONL file %s had %d corrupted lines", self.path.name, error_count
+            )
 
         return entries
 

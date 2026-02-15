@@ -68,7 +68,7 @@ class SupersessionMixin:
         new_content: str,
     ) -> bool:
         if not self._llm:
-            return True
+            return False
         try:
             from ash.llm.types import Message, Role
 
@@ -84,9 +84,9 @@ class SupersessionMixin:
             return answer.startswith("YES")
         except Exception:
             logger.warning(
-                "LLM verification failed, falling back to similarity", exc_info=True
+                "LLM verification failed, skipping supersession", exc_info=True
             )
-            return True
+            return False
 
     async def supersede_conflicting_memories(
         self: GraphStore,

@@ -57,6 +57,11 @@ class FileMemoryStore:
         self._memories_cache: list[MemoryEntry] | None = None
         self._memories_mtime: float | None = None
 
+        # Concurrency protection for read-modify-write cycles
+        import asyncio
+
+        self._write_lock = asyncio.Lock()
+
     # ------------------------------------------------------------------
     # Cache helpers
     # ------------------------------------------------------------------
@@ -207,23 +212,24 @@ class FileMemoryStore:
         superseded_by_id: str,
     ) -> bool:
         """Mark a memory as superseded by another memory."""
-        memories = await self._ensure_memories_loaded()
+        async with self._write_lock:
+            memories = await self._ensure_memories_loaded()
 
-        found = False
-        for m in memories:
-            if m.id == memory_id:
-                m.superseded_at = datetime.now(UTC)
-                m.superseded_by_id = superseded_by_id
-                found = True
-                break
+            found = False
+            for m in memories:
+                if m.id == memory_id:
+                    m.superseded_at = datetime.now(UTC)
+                    m.superseded_by_id = superseded_by_id
+                    found = True
+                    break
 
-        if found:
-            await self._memories_jsonl.rewrite(memories)
-            self._invalidate_memories_cache()
-            logger.info(
-                "memory_superseded",
-                extra={"memory_id": memory_id, "superseded_by": superseded_by_id},
-            )
+            if found:
+                await self._memories_jsonl.rewrite(memories)
+                self._invalidate_memories_cache()
+                logger.info(
+                    "memory_superseded",
+                    extra={"memory_id": memory_id, "superseded_by": superseded_by_id},
+                )
 
         return found
 
@@ -239,41 +245,43 @@ class FileMemoryStore:
         if not pairs:
             return []
 
-        supersede_map = {old_id: new_id for old_id, new_id in pairs}
-        memories = await self._ensure_memories_loaded()
-        now = datetime.now(UTC)
-        marked: list[str] = []
+        async with self._write_lock:
+            supersede_map = {old_id: new_id for old_id, new_id in pairs}
+            memories = await self._ensure_memories_loaded()
+            now = datetime.now(UTC)
+            marked: list[str] = []
 
-        for m in memories:
-            if m.id in supersede_map:
-                m.superseded_at = now
-                m.superseded_by_id = supersede_map[m.id]
-                marked.append(m.id)
+            for m in memories:
+                if m.id in supersede_map:
+                    m.superseded_at = now
+                    m.superseded_by_id = supersede_map[m.id]
+                    marked.append(m.id)
 
-        if marked:
-            await self._memories_jsonl.rewrite(memories)
-            self._invalidate_memories_cache()
-            logger.info(
-                "batch_memories_superseded",
-                extra={"count": len(marked)},
-            )
+            if marked:
+                await self._memories_jsonl.rewrite(memories)
+                self._invalidate_memories_cache()
+                logger.info(
+                    "batch_memories_superseded",
+                    extra={"count": len(marked)},
+                )
 
         return marked
 
     async def update_memory(self, entry: MemoryEntry) -> bool:
         """Update a memory entry in place."""
-        memories = await self._ensure_memories_loaded()
+        async with self._write_lock:
+            memories = await self._ensure_memories_loaded()
 
-        found = False
-        for i, m in enumerate(memories):
-            if m.id == entry.id:
-                memories[i] = entry
-                found = True
-                break
+            found = False
+            for i, m in enumerate(memories):
+                if m.id == entry.id:
+                    memories[i] = entry
+                    found = True
+                    break
 
-        if found:
-            await self._memories_jsonl.rewrite(memories)
-            self._invalidate_memories_cache()
+            if found:
+                await self._memories_jsonl.rewrite(memories)
+                self._invalidate_memories_cache()
 
         return found
 
@@ -289,18 +297,19 @@ class FileMemoryStore:
         if not entries:
             return 0
 
-        updates = {e.id: e for e in entries}
-        memories = await self._ensure_memories_loaded()
-        count = 0
+        async with self._write_lock:
+            updates = {e.id: e for e in entries}
+            memories = await self._ensure_memories_loaded()
+            count = 0
 
-        for i, m in enumerate(memories):
-            if m.id in updates:
-                memories[i] = updates[m.id]
-                count += 1
+            for i, m in enumerate(memories):
+                if m.id in updates:
+                    memories[i] = updates[m.id]
+                    count += 1
 
-        if count > 0:
-            await self._memories_jsonl.rewrite(memories)
-            self._invalidate_memories_cache()
+            if count > 0:
+                await self._memories_jsonl.rewrite(memories)
+                self._invalidate_memories_cache()
 
         return count
 
@@ -311,30 +320,33 @@ class FileMemoryStore:
         chat_id: str | None = None,
     ) -> bool:
         """Archive a memory by ID (sets archived_at instead of removing)."""
-        memories = await self._ensure_memories_loaded()
+        async with self._write_lock:
+            memories = await self._ensure_memories_loaded()
 
-        memory_to_delete = None
-        for m in memories:
-            if m.id == memory_id and self._is_active(m):
-                memory_to_delete = m
-                break
+            memory_to_delete = None
+            for m in memories:
+                if m.id == memory_id and self._is_active(m):
+                    memory_to_delete = m
+                    break
 
-        if not memory_to_delete:
-            return False
-
-        if owner_user_id or chat_id:
-            is_owner = owner_user_id and memory_to_delete.owner_user_id == owner_user_id
-            is_group_member = (
-                memory_to_delete.owner_user_id is None
-                and memory_to_delete.chat_id == chat_id
-            )
-            if not (is_owner or is_group_member):
+            if not memory_to_delete:
                 return False
 
-        memory_to_delete.archived_at = datetime.now(UTC)
-        memory_to_delete.archive_reason = "user_deleted"
-        await self._memories_jsonl.rewrite(memories)
-        self._invalidate_memories_cache()
+            if owner_user_id or chat_id:
+                is_owner = (
+                    owner_user_id and memory_to_delete.owner_user_id == owner_user_id
+                )
+                is_group_member = (
+                    memory_to_delete.owner_user_id is None
+                    and memory_to_delete.chat_id == chat_id
+                )
+                if not (is_owner or is_group_member):
+                    return False
+
+            memory_to_delete.archived_at = datetime.now(UTC)
+            memory_to_delete.archive_reason = "user_deleted"
+            await self._memories_jsonl.rewrite(memories)
+            self._invalidate_memories_cache()
 
         logger.info("memory_deleted", extra={"memory_id": memory_id})
         return True
@@ -356,19 +368,20 @@ class FileMemoryStore:
         if not memory_ids:
             return []
 
-        memories = await self._ensure_memories_loaded()
-        now = datetime.now(UTC)
-        archived: list[str] = []
+        async with self._write_lock:
+            memories = await self._ensure_memories_loaded()
+            now = datetime.now(UTC)
+            archived: list[str] = []
 
-        for memory in memories:
-            if memory.id in memory_ids and self._is_active(memory):
-                memory.archived_at = now
-                memory.archive_reason = reason
-                archived.append(memory.id)
+            for memory in memories:
+                if memory.id in memory_ids and self._is_active(memory):
+                    memory.archived_at = now
+                    memory.archive_reason = reason
+                    archived.append(memory.id)
 
-        if archived:
-            await self._memories_jsonl.rewrite(memories)
-            self._invalidate_memories_cache()
+            if archived:
+                await self._memories_jsonl.rewrite(memories)
+                self._invalidate_memories_cache()
 
         return archived
 
@@ -425,25 +438,26 @@ class FileMemoryStore:
         if now is None:
             now = datetime.now(UTC)
 
-        memories = await self._ensure_memories_loaded()
-        archived_ids: list[str] = []
+        async with self._write_lock:
+            memories = await self._ensure_memories_loaded()
+            archived_ids: list[str] = []
 
-        for memory in memories:
-            if not self._is_active(memory):
-                continue
-            reason = self._should_archive(memory, now)
-            if reason:
-                memory.archived_at = now
-                memory.archive_reason = reason
-                archived_ids.append(memory.id)
-                logger.info(
-                    "gc_archive_memory",
-                    extra={"memory_id": memory.id, "reason": reason},
-                )
+            for memory in memories:
+                if not self._is_active(memory):
+                    continue
+                reason = self._should_archive(memory, now)
+                if reason:
+                    memory.archived_at = now
+                    memory.archive_reason = reason
+                    archived_ids.append(memory.id)
+                    logger.info(
+                        "gc_archive_memory",
+                        extra={"memory_id": memory.id, "reason": reason},
+                    )
 
-        if archived_ids:
-            await self._memories_jsonl.rewrite(memories)
-            self._invalidate_memories_cache()
+            if archived_ids:
+                await self._memories_jsonl.rewrite(memories)
+                self._invalidate_memories_cache()
 
         logger.info(
             "gc_complete",
@@ -469,38 +483,41 @@ class FileMemoryStore:
             Number of entries removed.
         """
         cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
-        memories = await self._ensure_memories_loaded()
 
-        before_count = len(memories)
-        removed_ids: set[str] = set()
-        remaining: list[MemoryEntry] = []
-        for m in memories:
-            if m.archived_at is not None and m.archived_at < cutoff:
-                removed_ids.add(m.id)
-            else:
-                remaining.append(m)
+        async with self._write_lock:
+            memories = await self._ensure_memories_loaded()
 
-        removed = before_count - len(remaining)
+            before_count = len(memories)
+            removed_ids: set[str] = set()
+            remaining: list[MemoryEntry] = []
+            for m in memories:
+                if m.archived_at is not None and m.archived_at < cutoff:
+                    removed_ids.add(m.id)
+                else:
+                    remaining.append(m)
 
-        if removed > 0:
-            await self._memories_jsonl.rewrite(remaining)
-            self._invalidate_memories_cache()
+            removed = before_count - len(remaining)
 
-            # Clean up orphaned embeddings
-            all_embeddings = await self._embeddings_jsonl.load_all()
-            clean_embeddings = [
-                e for e in all_embeddings if e.memory_id not in removed_ids
-            ]
-            if len(clean_embeddings) < len(all_embeddings):
-                await self._embeddings_jsonl.rewrite(clean_embeddings)
+            if removed > 0:
+                await self._memories_jsonl.rewrite(remaining)
+                self._invalidate_memories_cache()
 
-            logger.info(
-                "compact_complete",
-                extra={
-                    "removed_count": removed,
-                    "embeddings_cleaned": len(all_embeddings) - len(clean_embeddings),
-                },
-            )
+                # Clean up orphaned embeddings
+                all_embeddings = await self._embeddings_jsonl.load_all()
+                clean_embeddings = [
+                    e for e in all_embeddings if e.memory_id not in removed_ids
+                ]
+                if len(clean_embeddings) < len(all_embeddings):
+                    await self._embeddings_jsonl.rewrite(clean_embeddings)
+
+                logger.info(
+                    "compact_complete",
+                    extra={
+                        "removed_count": removed,
+                        "embeddings_cleaned": len(all_embeddings)
+                        - len(clean_embeddings),
+                    },
+                )
 
         return removed
 
@@ -510,24 +527,25 @@ class FileMemoryStore:
 
     async def remap_subject_person_id(self, old_id: str, new_id: str) -> int:
         """Replace old_id with new_id in all subject_person_ids."""
-        memories = await self._ensure_memories_loaded()
+        async with self._write_lock:
+            memories = await self._ensure_memories_loaded()
 
-        count = 0
-        for memory in memories:
-            if old_id in memory.subject_person_ids:
-                memory.subject_person_ids = [
-                    new_id if pid == old_id else pid
-                    for pid in memory.subject_person_ids
-                ]
-                count += 1
+            count = 0
+            for memory in memories:
+                if old_id in memory.subject_person_ids:
+                    memory.subject_person_ids = [
+                        new_id if pid == old_id else pid
+                        for pid in memory.subject_person_ids
+                    ]
+                    count += 1
 
-        if count > 0:
-            await self._memories_jsonl.rewrite(memories)
-            self._invalidate_memories_cache()
-            logger.debug(
-                "remapped_subject_person_id",
-                extra={"old_id": old_id, "new_id": new_id, "count": count},
-            )
+            if count > 0:
+                await self._memories_jsonl.rewrite(memories)
+                self._invalidate_memories_cache()
+                logger.debug(
+                    "remapped_subject_person_id",
+                    extra={"old_id": old_id, "new_id": new_id, "count": count},
+                )
 
         return count
 
@@ -544,17 +562,18 @@ class FileMemoryStore:
         Returns:
             Number of entries removed.
         """
-        memories = await self._ensure_memories_loaded()
-        count = len(memories)
+        async with self._write_lock:
+            memories = await self._ensure_memories_loaded()
+            count = len(memories)
 
-        if count > 0:
-            await self._memories_jsonl.rewrite([])
-            self._invalidate_memories_cache()
+            if count > 0:
+                await self._memories_jsonl.rewrite([])
+                self._invalidate_memories_cache()
 
-        # Also clear embeddings
-        all_embeddings = await self._embeddings_jsonl.load_all()
-        if all_embeddings:
-            await self._embeddings_jsonl.rewrite([])
+            # Also clear embeddings
+            all_embeddings = await self._embeddings_jsonl.load_all()
+            if all_embeddings:
+                await self._embeddings_jsonl.rewrite([])
 
         logger.info("clear_complete", extra={"removed_count": count})
         return count
