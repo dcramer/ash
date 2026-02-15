@@ -490,3 +490,34 @@ class TestCoherenceFiltering:
 
         assert len(facts) == 1
         assert facts[0].content == "Spent $100 on a Grand Seiko watch"
+
+
+class TestExtractionPromptContent:
+    """Tests verifying extraction prompt contains key guidance."""
+
+    @pytest.fixture
+    def prompt(self):
+        """Load the extraction prompt (lowercased for case-insensitive checks)."""
+        from ash.memory.extractor import EXTRACTION_PROMPT
+
+        return EXTRACTION_PROMPT.lower()
+
+    def test_prompt_rejects_negative_knowledge(self, prompt):
+        """Extraction prompt should reject negative knowledge."""
+        assert "negative knowledge" in prompt
+        assert "blood type is unknown" in prompt
+        assert "only store what is known" in prompt
+
+    def test_prompt_rejects_meta_knowledge(self, prompt):
+        """Extraction prompt should reject meta-knowledge about the system."""
+        assert "meta-knowledge" in prompt
+        assert "memory system" in prompt
+
+    def test_prompt_rejects_vague_relationships(self, prompt):
+        """Extraction prompt should reject vague relationships."""
+        assert "knows someone named" in prompt
+
+    def test_prompt_rejects_actions_without_specifics(self, prompt):
+        """Extraction prompt should reject actions without specifics."""
+        assert "just arrived at a location" in prompt
+        assert "fixed some issues" in prompt

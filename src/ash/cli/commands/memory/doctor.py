@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import re
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 
 import typer
@@ -46,11 +49,36 @@ If all memories are correctly classified, return: {{}}"""
 
 QUALITY_PROMPT = """Review these memories for quality issues. For each, recommend: KEEP, REWRITE, or ARCHIVE.
 
-REWRITE when: wrong perspective ("Your X" should be "[Name]'s X"), missing subject \
-(fragment like "birthday is August 12" needs a name), minor fixable issues while core \
-content is valuable.
-ARCHIVE when: negative knowledge (storing that something is unknown, e.g. "blood type \
-is unknown"), incoherent/fragment that can't be fixed, too vague to be useful.
+## REWRITE when:
+- Wrong perspective ("Your X" should be "[Name]'s X")
+- Missing subject (fragment like "birthday is August 12" needs a name)
+- Minor fixable issues while core content is valuable
+
+## DO NOT REWRITE:
+- Capitalization-only changes ("Dark Mode" → "dark mode") — KEEP as-is
+- Removing filler words ("really likes coffee" → "likes coffee") — KEEP as-is
+- Rephrasing that doesn't add information ("enjoys hiking" → "likes hiking") — KEEP as-is
+- If in doubt, KEEP it. Only rewrite when there's a clear structural problem.
+
+## Preserve language:
+Do NOT sanitize, censor, or soften the user's language. If the user said "shitty tests", \
+keep "shitty tests". If the user said "crappy code", keep "crappy code". Preserve the \
+exact tone and word choice.
+
+## ARCHIVE when:
+- Negative knowledge (storing that something is unknown, e.g. "blood type is unknown")
+- Truly incoherent text (garbled/nonsensical characters or broken encoding)
+- Too vague to be useful with no way to fix it
+
+## DO NOT ARCHIVE:
+- Specific dates, deadlines, or due dates — these are high value
+- Life events: pregnancy, due dates, marriage, divorce, moves, job changes, graduations
+- Memories that are just short or simple — brevity is not low value
+- A memory missing a subject name is NOT incoherent — that's a REWRITE candidate
+
+## "Incoherent" means:
+Garbled or nonsensical text that cannot be understood. A memory missing a subject name \
+or lacking full context is NOT incoherent — classify those as REWRITE instead.
 
 Memories:
 {memories}
@@ -84,6 +112,24 @@ If NO contradiction, return: {{"contradiction": false}}"""
 
 
 # --- Shared helpers ---
+
+
+def _normalize_for_comparison(s: str) -> str:
+    """Lowercase, strip punctuation, and collapse whitespace."""
+    s = s.lower()
+    s = re.sub(r"[^\w\s]", "", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _is_trivial_rewrite(old: str, new: str, threshold: float = 0.92) -> bool:
+    """Check if a proposed rewrite is trivially similar to the original.
+
+    Normalizes both strings and compares using SequenceMatcher.
+    Returns True if similarity exceeds the threshold.
+    """
+    norm_old = _normalize_for_comparison(old)
+    norm_new = _normalize_for_comparison(new)
+    return SequenceMatcher(None, norm_old, norm_new).ratio() > threshold
 
 
 def _truncate(text: str, length: int = 60) -> str:
@@ -134,8 +180,6 @@ def _confirm_or_cancel(prompt: str, force: bool) -> bool:
 
 def _parse_json_from_response(text: str) -> dict[str, Any]:
     """Extract JSON from an LLM response, handling markdown code blocks."""
-    import json
-    import re
 
     text = text.strip()
     # Strip markdown code fences if present
@@ -250,7 +294,10 @@ async def memory_doctor_quality(config: AshConfig, force: bool) -> None:
                     if action == "REWRITE":
                         new_content = action_data.get("content", "")
                         if new_content:
-                            rewrites.append((mem.id, mem.content, new_content))
+                            if _is_trivial_rewrite(mem.content, new_content):
+                                dim(f"Skipped trivial rewrite for {mem.id[:8]}")
+                            else:
+                                rewrites.append((mem.id, mem.content, new_content))
                     elif action == "ARCHIVE":
                         reason = action_data.get("reason", "low_value")
                         archives.append((mem.id, mem.content, reason))

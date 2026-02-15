@@ -77,6 +77,10 @@ The conversation uses XML tags to clearly separate speakers:
 - Credentials or sensitive data (see CRITICAL section below)
 - Things already in memory (avoid duplicates)
 - Vague or incoherent facts (see "Require coherence" section below)
+- Meta-knowledge about the system itself ("the memory system stores X", "the assistant won't store SSN", "made improvements to the system")
+- Negative knowledge — only store what IS known, not what is unknown ("blood type is unknown", "hasn't explored X yet", "doesn't know their schedule")
+- Vague relationships without context ("knows someone named David" — who is David and why does it matter?)
+- Actions without specifics ("just arrived at a location" — WHERE?, "fixed some issues" — WHAT issues?)
 
 ## CRITICAL: Never store secrets or credentials
 NEVER extract the following - reject with confidence 0.0:
@@ -108,6 +112,13 @@ Examples of INCOHERENT facts to REJECT (confidence 0.0):
 - "Is uncertain about the outcome" - outcome of what?
 - "Had a good experience with that" - with what?
 - "Wants to do the thing we discussed" - what thing?
+- "Blood type is unknown" - negative knowledge, only store what IS known
+- "Hasn't explored the area yet" - absence of action is not a fact
+- "Knows someone named David" - who is David? why does it matter?
+- "Just arrived at a location" - WHERE specifically?
+- "Fixed some issues with the code" - WHAT issues? WHAT code?
+- "The memory system stores personal facts" - meta-knowledge about the system itself
+- "The assistant can help with scheduling" - system capability, not a user fact
 
 If you cannot identify WHAT, WHO, or WHERE specifically, do not extract the fact.
 
