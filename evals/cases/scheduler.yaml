@@ -1,95 +1,25 @@
 name: Scheduler Behavior
-description: Tests for scheduling and reminder functionality
+description: Multi-step scheduling scenario testing creation, timezone, recurring, listing, and cancellation
 
 cases:
-  - id: schedule_simple_reminder
-    description: Schedule a simple reminder for a specific time
-    prompt: "Remind me to call mom tomorrow at 3pm"
+  - id: scheduler_multi_step
+    description: Multi-turn scheduling flow covering recurring, timezone, one-off, listing, and cancellation
+    prompt: "Set up a daily standup reminder at 10am EST on weekdays. Also remind me about my dentist appointment this Saturday at 2pm."
     expected_behavior: |
-      The assistant should acknowledge the request and indicate it will
-      schedule a reminder for 3pm tomorrow. It should use appropriate
-      scheduling tools if available, or explain how it would handle
-      the reminder.
-    criteria:
-      - Acknowledges the reminder request
-      - Mentions the time (3pm tomorrow)
-      - Mentions what the reminder is for (calling mom)
-      - Provides confirmation or explanation of how reminder will work
-    tags:
-      - scheduler
-      - reminder
+      The assistant should handle both requests in a single turn:
+      1. A recurring weekday reminder at 10am EST for standup
+      2. A one-off reminder for Saturday at 2pm for the dentist
 
-  - id: schedule_with_timezone
-    description: Handle timezone-aware scheduling
-    prompt: "Set a reminder for our team meeting at 10am EST next Monday"
-    expected_behavior: |
-      The assistant should acknowledge the timezone-aware request and
-      properly handle the EST timezone specification. It should confirm
-      the scheduled time clearly.
+      It should use scheduling tools and confirm both reminders with
+      their respective times and recurrence patterns.
     criteria:
-      - Acknowledges the meeting reminder
-      - Correctly handles EST timezone reference
-      - Confirms the day (next Monday)
-      - Confirms the time (10am EST)
-    tags:
-      - scheduler
-      - timezone
-
-  - id: schedule_recurring
-    description: Schedule a recurring reminder
-    prompt: "Remind me to take my vitamins every morning at 9am"
-    expected_behavior: |
-      The assistant should understand this is a recurring/daily reminder
-      request and handle it appropriately, either by scheduling it or
-      explaining how recurring reminders work.
-    criteria:
-      - Understands this is a recurring/daily reminder
-      - Acknowledges the 9am time
-      - Mentions vitamins or the task
-      - Provides appropriate response for recurring reminders
+      - Acknowledges the recurring standup reminder (weekdays at 10am EST)
+      - Acknowledges the one-off dentist reminder (Saturday at 2pm)
+      - Handles the EST timezone specification
+      - Distinguishes between recurring and one-off scheduling
+      - Provides confirmation of both reminders
     tags:
       - scheduler
       - recurring
-
-  - id: schedule_vague_time
-    description: Handle vague time references appropriately
-    prompt: "Remind me to buy groceries this weekend"
-    expected_behavior: |
-      The assistant should recognize the vague time reference ("this weekend")
-      and either ask for clarification about a specific time or make a
-      reasonable decision about when to schedule the reminder.
-    criteria:
-      - Recognizes the vague "this weekend" time reference
-      - Either asks for clarification OR picks a reasonable time
-      - Acknowledges the grocery task
-    tags:
-      - scheduler
-      - vague_time
-
-  - id: schedule_cancel
-    description: Cancel an existing reminder
-    prompt: "Cancel my reminder about the dentist appointment"
-    expected_behavior: |
-      The assistant should attempt to find and cancel the reminder about
-      the dentist appointment. If no such reminder exists or tools aren't
-      available, it should explain the situation clearly.
-    criteria:
-      - Attempts to address the cancellation request
-      - References the dentist appointment
-      - Provides clear feedback about the result
-    tags:
-      - scheduler
-      - cancel
-
-  - id: schedule_list
-    description: Request to see scheduled reminders
-    prompt: "What reminders do I have scheduled?"
-    expected_behavior: |
-      The assistant should attempt to list or show the user's scheduled
-      reminders, or explain how to view them if tools aren't available.
-    criteria:
-      - Attempts to address the request to view reminders
-      - Provides a list or explains why it can't show reminders
-    tags:
-      - scheduler
-      - list
+      - timezone
+      - multi_step

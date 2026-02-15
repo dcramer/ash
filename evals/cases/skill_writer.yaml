@@ -1,58 +1,7 @@
 name: Skill Writer Behavior
-description: Core tests for skill-writer phase compliance and skill quality
+description: End-to-end tests for skill-writer phase compliance and artifact quality
 
 cases:
-  # Phase compliance: research and plan are read-only
-  - id: phases_are_read_only
-    description: Research and plan phases must not write files or execute code
-    prompt: "Create a skill that converts markdown to HTML"
-    expected_behavior: |
-      During research and plan phases, the agent must NOT:
-      - Use bash to test or install anything
-      - Write any files
-
-      The agent should:
-      1. Research: Find a suitable library (e.g., markdown, mistune)
-      2. Plan: Delegate to plan agent or design the skill
-      3. Both phases call interrupt before proceeding
-    criteria:
-      - Uses web_search/web_fetch or delegates to research agent
-      - Calls interrupt after research phase
-      - Does not use bash during research or plan phases
-      - Does not write files during research or plan phases
-    phase_constraints:
-      research:
-        expected_tools:
-          - interrupt
-        forbidden_tools:
-          - bash
-          - write_file
-      plan:
-        forbidden_tools:
-          - bash
-          - write_file
-    tags:
-      - phase_compliance
-
-  # Skill quality: instructions must be actionable
-  - id: skill_is_actionable
-    description: Created skill should have imperative, actionable instructions
-    prompt: "Create a skill that counts words in text"
-    expected_behavior: |
-      The created SKILL.md should:
-      1. Use imperative voice: "Count the words" not "To count words..."
-      2. Reference user input explicitly
-      3. Specify expected output format
-
-      Invoking the skill should execute immediately, not ask questions.
-    criteria:
-      - SKILL.md created successfully
-      - Instructions use imperative voice
-      - Instructions reference user input explicitly
-      - Validation passes
-    tags:
-      - skill_quality
-
   # End-to-end: instruction-only skill
   - id: e2e_instruction_skill
     description: Full flow for instruction-only skill

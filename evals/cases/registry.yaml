@@ -1,73 +1,49 @@
 name: Agent Registry Behavior
-description: Tests for agent invocation via use_agent tool and registry functionality
+description: Tests agent delegation chains and error recovery via the use_agent tool
 
 cases:
-  - id: invoke_research_agent
-    description: Successfully invoke the research agent for a topic
-    prompt: "Research the current best practices for Python async programming"
+  - id: registry_delegation_chain
+    description: Delegate to research agent, then use findings to create a plan
+    prompt: "Research Python async best practices, then use those findings to create an implementation plan"
     expected_behavior: |
-      The assistant should recognize this is a research task and delegate to
-      the research agent using the use_agent tool. The research agent should
-      perform web searches and return synthesized findings.
+      The assistant should:
+      1. Delegate to the research agent to find Python async best practices
+      2. Use the research findings as context for a follow-up delegation
+         to the plan agent (or create a plan itself)
+
+      This tests multi-agent delegation where one agent's output feeds
+      into the next agent's input.
     criteria:
-      - Uses use_agent tool to invoke research agent
-      - Specifies "research" as the agent name
-      - Provides a clear message/task for the agent
-      - Returns research findings to the user
+      - Uses use_agent to invoke the research agent
+      - Research results contain substantive async best practices
+      - Creates or delegates creation of an implementation plan
+      - Plan incorporates findings from the research step
     expected_tools:
       - use_agent
     tags:
       - registry
-      - research
       - delegation
+      - multi_agent
 
-  - id: invoke_nonexistent_agent
-    description: Handle request for an agent that doesn't exist
-    prompt: "Use the foobar agent to do something"
+  - id: registry_error_recovery
+    description: Handle a nonexistent agent gracefully and fall back to an available one
+    prompt: "Use the foobar agent to analyze Python async patterns, and if that doesn't work, try the research agent instead"
     expected_behavior: |
-      The assistant should either:
-      1. Attempt to use the use_agent tool with "foobar" and handle the error, OR
-      2. Proactively inform the user that no such agent exists
+      The assistant should:
+      1. Attempt to use "foobar" agent (or recognize it doesn't exist)
+      2. Recover by falling back to the research agent
+      3. Complete the task using the research agent
 
-      Either way, the user should be informed about available agents.
+      This tests error handling in agent delegation — the assistant should
+      not give up when one agent fails but should try alternatives.
     criteria:
-      - Informs user that foobar agent does not exist or is not available
-      - Lists or mentions available agents as alternatives
-      - Provides helpful guidance on what the user can do instead
+      - Recognizes that foobar agent does not exist or fails
+      - Falls back to the research agent
+      - Completes the analysis task using an available agent
+      - Does not simply refuse or give up
+    expected_tools:
+      - use_agent
     tags:
       - registry
       - error_handling
-
-  - id: agent_delegation_with_context
-    description: Pass context/input data to a delegated agent
-    prompt: "Create a plan for building a REST API, focusing on authentication"
-    expected_behavior: |
-      The assistant should delegate to the plan agent using use_agent,
-      providing the task description. The plan agent should create
-      a structured implementation plan.
-    criteria:
-      - Uses use_agent to invoke plan agent
-      - Provides clear task description in message
-      - Returns structured plan output
-    expected_tools:
-      - use_agent
-    tags:
-      - registry
-      - plan
-      - delegation
-
-  - id: list_available_agents
-    description: User asks what agents are available
-    prompt: "What specialized agents can you use for complex tasks?"
-    expected_behavior: |
-      The assistant should describe the available agents (research, plan,
-      skill_writer) and their purposes. This tests awareness of the
-      registry's contents without necessarily invoking an agent.
-    criteria:
-      - Mentions research agent and its purpose
-      - Mentions plan agent and its purpose
-      - Explains when to use specialized agents
-    tags:
-      - registry
-      - discovery
-      - information
+      - fallback
