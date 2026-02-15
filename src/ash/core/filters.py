@@ -85,36 +85,3 @@ def is_owner_name(subject: str, matchers: OwnerMatchers) -> bool:
             return True
 
     return False
-
-
-class OwnerNameFilter:
-    """Filter for detecting owner name references.
-
-    Provides a high-level API for checking if a subject name refers to
-    the owner (speaker) rather than a third party.
-    """
-
-    def __init__(self, owner_names: list[str] | None = None):
-        """Initialize filter with owner identifiers.
-
-        Args:
-            owner_names: Names/handles that refer to the owner
-                (e.g., username, display name).
-        """
-        self._matchers = build_owner_matchers(owner_names)
-
-    def is_owner_reference(self, name: str) -> bool:
-        """Check if a name refers to the owner.
-
-        Args:
-            name: The name to check.
-
-        Returns:
-            True if the name likely refers to the owner.
-        """
-        return is_owner_name(name, self._matchers)
-
-    @property
-    def owner_names(self) -> set[str]:
-        """Get the set of exact owner name matches."""
-        return self._matchers.exact
