@@ -126,41 +126,6 @@ def register(app: typer.Typer) -> None:
                 help="Also delete the person record (for forget action)",
             ),
         ] = False,
-        fix_attribution: Annotated[
-            bool,
-            typer.Option(
-                "--fix-attribution",
-                help="Fix memories missing source_username attribution (doctor action)",
-            ),
-        ] = False,
-        review: Annotated[
-            bool,
-            typer.Option(
-                "--review",
-                help="Content quality review (doctor action)",
-            ),
-        ] = False,
-        dedup: Annotated[
-            bool,
-            typer.Option(
-                "--dedup",
-                help="Semantic deduplication (doctor action)",
-            ),
-        ] = False,
-        fix_names: Annotated[
-            bool,
-            typer.Option(
-                "--fix-names",
-                help="Resolve numeric source usernames (doctor action)",
-            ),
-        ] = False,
-        run_all: Annotated[
-            bool,
-            typer.Option(
-                "--all-checks",
-                help="Run all doctor checks in sequence (doctor action)",
-            ),
-        ] = False,
     ) -> None:
         """Manage memory entries.
 
@@ -206,11 +171,6 @@ def register(app: typer.Typer) -> None:
                     chat_id=chat_id,
                     scope=scope,
                     delete_person=delete_person,
-                    fix_attribution=fix_attribution,
-                    review=review,
-                    dedup=dedup,
-                    fix_names=fix_names,
-                    run_all=run_all,
                 )
             )
         except KeyboardInterrupt:
@@ -232,11 +192,6 @@ async def _run_memory_action(
     chat_id: str | None,
     scope: str | None,
     delete_person: bool = False,
-    fix_attribution: bool = False,
-    review: bool = False,
-    dedup: bool = False,
-    fix_names: bool = False,
-    run_all: bool = False,
 ) -> None:
     """Run memory action asynchronously."""
     from ash.cli.commands.memory._helpers import get_graph_store
@@ -332,21 +287,11 @@ async def _run_memory_action(
                     memory_doctor_reclassify,
                 )
 
-                if run_all:
-                    await memory_doctor_quality(config, force)
-                    await memory_doctor_dedup(config, session, force)
-                    await memory_doctor_fix_names(force)
-                    await memory_doctor_attribution(force)
-                elif review:
-                    await memory_doctor_quality(config, force)
-                elif dedup:
-                    await memory_doctor_dedup(config, session, force)
-                elif fix_names:
-                    await memory_doctor_fix_names(force)
-                elif fix_attribution:
-                    await memory_doctor_attribution(force)
-                else:
-                    await memory_doctor_reclassify(config, force)
+                await memory_doctor_attribution(force)
+                await memory_doctor_fix_names(force)
+                await memory_doctor_reclassify(config, force)
+                await memory_doctor_quality(config, force)
+                await memory_doctor_dedup(config, session, force)
             else:
                 error(f"Unknown action: {action}")
                 console.print(

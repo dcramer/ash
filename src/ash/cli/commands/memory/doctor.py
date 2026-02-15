@@ -159,30 +159,28 @@ async def memory_doctor_attribution(force: bool) -> None:
         success("No memories need attribution fix")
         return
 
-    console.print(f"Found {len(to_fix)} memories missing source_username attribution")
+    table = Table(title="Memories to Fix")
+    table.add_column("ID", style="dim", max_width=8)
+    table.add_column("Source", style="cyan")
+    table.add_column("Owner", style="green")
+    table.add_column("Content", style="white", max_width=40)
 
-    if not force:
-        table = Table(title="Memories to Fix")
-        table.add_column("ID", style="dim", max_width=8)
-        table.add_column("Source", style="cyan")
-        table.add_column("Owner", style="green")
-        table.add_column("Content", style="white", max_width=40)
+    for memory in to_fix[:10]:
+        table.add_row(
+            memory.id[:8],
+            memory.source or "-",
+            memory.owner_user_id or "-",
+            _truncate(memory.content),
+        )
 
-        for memory in to_fix[:10]:
-            table.add_row(
-                memory.id[:8],
-                memory.source or "-",
-                memory.owner_user_id or "-",
-                _truncate(memory.content),
-            )
+    if len(to_fix) > 10:
+        table.add_row("...", "...", "...", f"... and {len(to_fix) - 10} more")
 
-        if len(to_fix) > 10:
-            table.add_row("...", "...", "...", f"... and {len(to_fix) - 10} more")
+    console.print(table)
+    console.print(f"\n[bold]{len(to_fix)} memories need attribution fix[/bold]")
 
-        console.print(table)
-
-        if not _confirm_or_cancel("Fix attribution for these memories?", force):
-            return
+    if not _confirm_or_cancel("Fix attribution for these memories?", force):
+        return
 
     for memory in to_fix:
         memory.source_username = memory.owner_user_id
@@ -564,13 +562,12 @@ async def memory_doctor_reclassify(config: AshConfig, force: bool) -> None:
         f"Found {len(knowledge_memories)} memories with KNOWLEDGE type to review"
     )
 
-    if not _confirm_or_cancel("Proceed with reclassification?", force):
-        return
-
     llm, model = _create_llm(config)
 
     batch_size = 20
-    changes: list[tuple[str, str, str]] = []  # (short_id, old_type, new_type)
+    mem_by_id: dict[str, MemoryEntry] = {m.id: m for m in knowledge_memories}
+    # (full_id, old_type, new_type_str)
+    changes: list[tuple[str, str, str]] = []
 
     with Progress(
         SpinnerColumn(),
@@ -583,7 +580,6 @@ async def memory_doctor_reclassify(config: AshConfig, force: bool) -> None:
 
         for i in range(0, len(knowledge_memories), batch_size):
             batch = knowledge_memories[i : i + batch_size]
-            # Per-batch short-ID map to avoid cross-batch collisions
             batch_by_short_id = {m.id[:8]: m for m in batch}
             memory_text = "\n".join(f"- {m.id[:8]}: {m.content[:200]}" for m in batch)
 
@@ -601,25 +597,43 @@ async def memory_doctor_reclassify(config: AshConfig, force: bool) -> None:
                     except ValueError:
                         continue
                     if new_type != memory.memory_type:
-                        old_type = memory.memory_type.value
-                        memory.memory_type = new_type
-                        await store.update_memory(memory)
-                        changes.append((short_id, old_type, new_type.value))
+                        changes.append(
+                            (memory.id, memory.memory_type.value, new_type.value)
+                        )
             except Exception as e:
                 dim(f"Batch failed: {e}")
 
             progress.advance(task, len(batch))
 
-    if changes:
-        table = Table(title="Reclassified Memories")
-        table.add_column("ID", style="dim", max_width=8)
-        table.add_column("Old Type", style="yellow")
-        table.add_column("New Type", style="green")
+    if not changes:
+        success("No memories needed reclassification")
+        return
 
-        for short_id, old_type, new_type in changes:
-            table.add_row(short_id, old_type, new_type)
+    table = Table(title="Proposed Reclassifications")
+    table.add_column("ID", style="dim", max_width=8)
+    table.add_column("Old Type", style="yellow")
+    table.add_column("New Type", style="green")
+    table.add_column("Content", style="white", max_width=40)
 
-        console.print(table)
-        success(f"Reclassified {len(changes)} memories")
-    else:
-        dim("No memories needed reclassification")
+    for full_id, old_type, new_type in changes:
+        mem = mem_by_id.get(full_id)
+        table.add_row(
+            full_id[:8],
+            old_type,
+            new_type,
+            _truncate(mem.content) if mem else "-",
+        )
+
+    console.print(table)
+    console.print(f"\n[bold]{len(changes)} reclassifications proposed[/bold]")
+
+    if not _confirm_or_cancel("Apply reclassifications?", force):
+        return
+
+    for full_id, _old_type, new_type_str in changes:
+        mem = mem_by_id.get(full_id)
+        if mem:
+            mem.memory_type = MemoryType(new_type_str)
+            await store.update_memory(mem)
+
+    success(f"Reclassified {len(changes)} memories")

@@ -1082,6 +1082,7 @@ class GraphStore:
         relationship: str | None = None,
         aliases: list[str] | None = None,
         updated_by: str | None = None,
+        clear_merged: bool = False,
     ) -> PersonEntry | None:
         people = await self._ensure_people_loaded()
         person = self._find_person_by_id(people, person_id)
@@ -1101,6 +1102,8 @@ class GraphStore:
                 AliasEntry(value=a, added_by=updated_by, created_at=now)
                 for a in aliases
             ]
+        if clear_merged:
+            person.merged_into = None
         person.updated_at = now
         await self._people_jsonl.rewrite(people)
         self._invalidate_people_cache()
