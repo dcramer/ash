@@ -303,6 +303,7 @@ async def _run_memory_action(
                 memory_doctor_fix_names,
                 memory_doctor_quality,
                 memory_doctor_reclassify,
+                memory_doctor_self_facts,
             )
 
             if not store:
@@ -313,6 +314,7 @@ async def _run_memory_action(
             if subcommand == "embed-missing":
                 await memory_doctor_embed_missing(store, force)
             elif subcommand is None:
+                await memory_doctor_self_facts(store, force)
                 await memory_doctor_attribution(store, force)
                 await memory_doctor_fix_names(store, force)
                 await memory_doctor_reclassify(store, config, force)

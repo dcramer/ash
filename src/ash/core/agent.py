@@ -383,7 +383,7 @@ class Agent:
         user_id: str,
         username: str,
         display_name: str,
-    ) -> None:
+    ) -> str | None:
         """Ensure a self-Person exists for the user with username as alias.
 
         This enables proper trust determination by linking the username
@@ -398,9 +398,12 @@ class Agent:
             user_id: The user ID (used as created_by for new records).
             username: The user's handle/username (e.g., "notzeeg").
             display_name: The user's display name (e.g., "David Cramer").
+
+        Returns:
+            The person_id for the self-person, or None if no people store.
         """
         if not self._people:
-            return
+            return None
 
         async with self._people._self_person_lock:
             try:
@@ -420,7 +423,7 @@ class Agent:
                     await self._sync_person_details(
                         existing, display_name, username, user_id
                     )
-                    return
+                    return existing.id
 
                 # No match found -- create new self-person
                 # When no username, use numeric user_id as alias to reconnect the graph
@@ -446,16 +449,22 @@ class Agent:
                 # and would be skipped otherwise. _heuristic_match skips pairs where both are
                 # self-persons created by *different* users, but allows duplicate self-records
                 # from the same user to be detected and merged.
+                result_id = new_person.id
                 try:
                     candidates = await self._people.find_dedup_candidates(
                         [new_person.id], exclude_self=False
                     )
                     for primary_id, secondary_id in candidates:
                         await self._people.merge_people(primary_id, secondary_id)
+                        # If our new person was merged away, track the primary
+                        if secondary_id == new_person.id:
+                            result_id = primary_id
                 except Exception:
                     logger.warning("Self-person dedup failed", exc_info=True)
+                return result_id
             except Exception:
                 logger.warning("Failed to ensure self-person", exc_info=True)
+                return None
 
     async def _sync_person_details(
         self,
@@ -557,10 +566,11 @@ class Agent:
 
             # Ensure self-person exists for proper trust determination.
             # Create whenever we have at least one identifier.
+            speaker_person_id: str | None = None
             if speaker_username or speaker_display_name:
                 effective_display = speaker_display_name or speaker_username
                 assert effective_display is not None  # guaranteed by outer if
-                await self._ensure_self_person(
+                speaker_person_id = await self._ensure_self_person(
                     user_id=user_id,
                     username=speaker_username or "",
                     display_name=effective_display,
@@ -588,18 +598,6 @@ class Agent:
                     fact.subjects,
                     fact.speaker,
                 )
-
-            # Resolve speaker's person ID for linking self-facts
-            speaker_person_id: str | None = None
-            if self._people and speaker_username:
-                try:
-                    pids = await self._people.find_person_ids_for_username(
-                        speaker_username
-                    )
-                    if pids:
-                        speaker_person_id = next(iter(pids))
-                except Exception:
-                    logger.debug("Failed to resolve speaker person ID", exc_info=True)
 
             # Build owner name matchers for filtering self-references
             from ash.core.filters import build_owner_matchers, is_owner_name

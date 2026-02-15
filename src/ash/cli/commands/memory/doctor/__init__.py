@@ -7,6 +7,7 @@ from ash.cli.commands.memory.doctor.embed_missing import memory_doctor_embed_mis
 from ash.cli.commands.memory.doctor.fix_names import memory_doctor_fix_names
 from ash.cli.commands.memory.doctor.quality import memory_doctor_quality
 from ash.cli.commands.memory.doctor.reclassify import memory_doctor_reclassify
+from ash.cli.commands.memory.doctor.self_facts import memory_doctor_self_facts
 
 __all__ = [
     "memory_doctor_attribution",
@@ -16,4 +17,5 @@ __all__ = [
     "memory_doctor_fix_names",
     "memory_doctor_quality",
     "memory_doctor_reclassify",
+    "memory_doctor_self_facts",
 ]
