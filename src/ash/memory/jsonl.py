@@ -141,7 +141,7 @@ def PersonJSONL(path: Path) -> TypedJSONL:
     """Create a TypedJSONL for PersonEntry."""
     from ash.store.types import PersonEntry
 
-    return TypedJSONL(path, PersonEntry)  # type: ignore[arg-type]
+    return TypedJSONL(path, PersonEntry)
 
 
 def EmbeddingJSONL(path: Path) -> TypedJSONL:

@@ -1,5 +1,6 @@
 """Upgrade command for running migrations and setup tasks."""
 
+import asyncio
 import subprocess
 from pathlib import Path
 
@@ -29,8 +30,8 @@ def register(app: typer.Typer) -> None:
             data_dir.mkdir(parents=True, exist_ok=True)
             dim(f"Created data directory: {data_dir}")
 
-        # Run database migrations
-        info("Running database migrations...")
+        # Run Alembic schema migrations
+        info("Running schema migrations...")
         try:
             result = subprocess.run(
                 ["uv", "run", "alembic", "upgrade", "head"],
@@ -40,7 +41,7 @@ def register(app: typer.Typer) -> None:
             if result.returncode == 0:
                 if "Running upgrade" in result.stdout or result.stdout.strip():
                     dim(result.stdout.strip())
-                success("Database migrations complete")
+                success("Schema migrations complete")
             else:
                 # Check for common issues
                 stderr = result.stderr.strip()
@@ -61,7 +62,12 @@ def register(app: typer.Typer) -> None:
                         if lines:
                             dim(lines[-1])
         except FileNotFoundError:
-            warning("Alembic not available, skipping migrations")
+            warning("Alembic not available, skipping schema migrations")
+
+        # Run data migrations (filesystem layout + JSONL -> SQLite)
+        console.print()
+        info("Running data migrations...")
+        asyncio.run(_run_data_migrations())
 
         # Build sandbox
         console.print()
@@ -77,3 +83,55 @@ def register(app: typer.Typer) -> None:
             warning("Sandbox build failed (retry with 'ash sandbox build')")
 
         console.print("\n[bold green]Upgrade complete![/bold green]")
+
+
+async def _run_data_migrations() -> None:
+    """Run filesystem and data migrations."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Filesystem layout migration (move files to new locations)
+    try:
+        from ash.store.migration import migrate_filesystem
+
+        if migrate_filesystem():
+            success("Filesystem layout migrated")
+        else:
+            dim("Filesystem layout up to date")
+    except Exception:
+        logger.warning("Filesystem migration failed", exc_info=True)
+        warning("Filesystem migration failed (see logs)")
+
+    # JSONL directory migration (old scattered paths -> graph/)
+    try:
+        from ash.memory.migration import migrate_to_graph_dir
+
+        if await migrate_to_graph_dir():
+            success("Migrated to graph directory layout")
+        else:
+            dim("Graph directory layout up to date")
+    except Exception:
+        logger.warning("Graph directory migration failed", exc_info=True)
+        warning("Graph directory migration failed (see logs)")
+
+    # JSONL -> SQLite migration
+    try:
+        from ash.cli.context import get_config
+        from ash.db import init_database
+
+        config = get_config()
+        db = init_database(database_path=config.memory.database_path)
+        await db.connect()
+        try:
+            from ash.store.migration_sqlite import migrate_jsonl_to_sqlite
+
+            if await migrate_jsonl_to_sqlite(db):
+                success("Migrated JSONL data to SQLite")
+            else:
+                dim("SQLite data up to date")
+        finally:
+            await db.disconnect()
+    except Exception:
+        logger.warning("JSONL to SQLite migration failed", exc_info=True)
+        warning("JSONL to SQLite migration failed (see logs)")

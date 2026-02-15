@@ -385,6 +385,96 @@ class PersonEntry:
     updated_at: datetime | None = None
     metadata: dict[str, Any] | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to JSON-compatible dict."""
+        d: dict[str, Any] = {
+            "id": self.id,
+            "version": self.version,
+            "created_by": self.created_by,
+            "name": self.name,
+        }
+
+        if self.relationships:
+            d["relationships"] = [
+                {
+                    "relationship": rc.relationship,
+                    **({"stated_by": rc.stated_by} if rc.stated_by else {}),
+                    **(
+                        {"created_at": rc.created_at.isoformat()}
+                        if rc.created_at
+                        else {}
+                    ),
+                }
+                for rc in self.relationships
+            ]
+        if self.aliases:
+            d["aliases"] = [
+                {
+                    "value": a.value,
+                    **({"added_by": a.added_by} if a.added_by else {}),
+                    **(
+                        {"created_at": a.created_at.isoformat()} if a.created_at else {}
+                    ),
+                }
+                for a in self.aliases
+            ]
+        if self.merged_into:
+            d["merged_into"] = self.merged_into
+        if self.created_at:
+            d["created_at"] = self.created_at.isoformat()
+        if self.updated_at:
+            d["updated_at"] = self.updated_at.isoformat()
+        if self.metadata:
+            d["metadata"] = self.metadata
+
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "PersonEntry":
+        """Deserialize from JSON dict."""
+        raw_aliases = d.get("aliases") or []
+        aliases = [
+            AliasEntry(
+                value=a["value"] if isinstance(a, dict) else a,
+                added_by=a.get("added_by") if isinstance(a, dict) else None,
+                created_at=_parse_datetime(a.get("created_at"))
+                if isinstance(a, dict)
+                else None,
+            )
+            for a in raw_aliases
+        ]
+
+        raw_rels = d.get("relationships") or []
+        relationships: list[RelationshipClaim]
+        if isinstance(raw_rels, list):
+            relationships = [
+                RelationshipClaim(
+                    relationship=r["relationship"] if isinstance(r, dict) else r,
+                    stated_by=r.get("stated_by") if isinstance(r, dict) else None,
+                    created_at=_parse_datetime(r.get("created_at"))
+                    if isinstance(r, dict)
+                    else None,
+                )
+                for r in raw_rels
+            ]
+        else:
+            # Old format: single relationship string
+            old_rel = d.get("relationship") or d.get("relation")
+            relationships = [RelationshipClaim(relationship=old_rel)] if old_rel else []
+
+        return cls(
+            id=d["id"],
+            version=d.get("version", 1),
+            created_by=d.get("created_by") or d.get("owner_user_id", ""),
+            name=d.get("name", ""),
+            relationships=relationships,
+            aliases=aliases,
+            merged_into=d.get("merged_into"),
+            created_at=_parse_datetime(d.get("created_at")),
+            updated_at=_parse_datetime(d.get("updated_at")),
+            metadata=d.get("metadata"),
+        )
+
     def matches_username(self, username: str) -> bool:
         """Check if this person matches a username (case-insensitive)."""
         username_lower = username.lower()
