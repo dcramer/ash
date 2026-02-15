@@ -9,7 +9,6 @@ from ash.core.prompt import (
     PromptContext,
     RuntimeInfo,
     SenderInfo,
-    SessionInfo,
     SystemPromptBuilder,
 )
 from ash.core.session import SessionState
@@ -30,7 +29,6 @@ __all__ = [
     "PromptContext",
     "RuntimeInfo",
     "SenderInfo",
-    "SessionInfo",
     "SessionState",
     "SystemPromptBuilder",
     "create_agent",

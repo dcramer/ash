@@ -358,7 +358,6 @@ class TelegramMessageHandler:
                 session,
                 user_id=message.user_id,
                 on_tool_start=tracker.on_tool_start,
-                session_path=session.metadata.get("session_path"),
             ):
                 response_content += chunk
             sent_message_id = await tracker.finalize_response(response_content)
@@ -380,7 +379,6 @@ class TelegramMessageHandler:
                 session,
                 user_id=message.user_id,
                 on_tool_start=tracker.on_tool_start,
-                session_path=session.metadata.get("session_path"),
             )
             sent_message_id = await tracker.finalize_response(response.text or "")
             await self._session_handler.persist_messages(

@@ -82,7 +82,6 @@ class StreamingHandler:
                 user_id=message.user_id,
                 on_tool_start=tracker.on_tool_start,
                 get_steering_messages=get_steering_messages,
-                session_path=session.metadata.get("session_path"),
                 tool_overrides={progress_tool.name: progress_tool},
             ):
                 response_content += chunk

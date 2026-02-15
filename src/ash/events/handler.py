@@ -191,7 +191,6 @@ class ScheduledTaskHandler:
         )
         # Populate metadata so system prompt builder includes full context
         session.metadata["username"] = entry.username or ""
-        session.metadata["session_mode"] = "fresh"
         session.metadata["is_scheduled_task"] = True
         if entry.chat_title:
             session.metadata["chat_title"] = entry.chat_title

@@ -91,14 +91,6 @@ class ChatInfo:
 
 
 @dataclass
-class SessionInfo:
-    """Information about the current session."""
-
-    path: str | None = None
-    mode: str | None = None  # "persistent" or "fresh"
-
-
-@dataclass
 class PromptContext:
     """Context for building system prompts.
 
@@ -108,7 +100,6 @@ class PromptContext:
     - known_people: People the user knows
     - sender: Message sender info (for group chats)
     - chat: Chat context info
-    - session: Session state info
     """
 
     # Core context (composed objects)
@@ -117,7 +108,6 @@ class PromptContext:
     known_people: list[PersonEntry] | None = None
     sender: SenderInfo | None = None
     chat: ChatInfo | None = None
-    session: SessionInfo | None = None
 
     # Conversation state
     conversation_gap_minutes: float | None = None
@@ -160,14 +150,6 @@ class PromptContext:
     def get_is_passive_engagement(self) -> bool:
         """Get passive engagement flag from composed object."""
         return self.chat.is_passive_engagement if self.chat else False
-
-    def get_session_path(self) -> str | None:
-        """Get session path from composed object."""
-        return self.session.path if self.session else None
-
-    def get_session_mode(self) -> str | None:
-        """Get session mode from composed object."""
-        return self.session.mode if self.session else None
 
 
 class SystemPromptBuilder:
@@ -792,60 +774,26 @@ class SystemPromptBuilder:
         return "\n".join(lines)
 
     def _build_session_section(self, context: PromptContext) -> str:
-        session_path = context.get_session_path()
-        if not session_path:
+        # Chat-level history is the primary source for "what was said" questions.
+        # Per-session history is just a thread log — not exposed to the agent.
+        chat_state_path = context.get_chat_state_path()
+        if not chat_state_path:
             return ""
 
-        lines = ["## Session", ""]
+        chat_history_path = f"{chat_state_path}/history.jsonl"
 
-        session_mode = context.get_session_mode()
-        if session_mode == "fresh":
-            lines.extend(
-                [
-                    "This is a **fresh conversation** without prior context loaded.",
-                    "Each message is independent - you don't have access to previous",
-                    "messages in your conversation context.",
-                    "",
-                    f"Chat history file: {session_path}",
-                    "",
-                    "For questions about what was said in THIS conversation,",
-                    "read the file using bash (e.g., `grep` or `tail`).",
-                    "For questions about people's knowledge/opinions/facts,",
-                    "use `ash-sb memory search 'topic'` instead.",
-                ]
-            )
-        else:
-            lines.extend(
-                [
-                    f"Conversation history file: {session_path}",
-                    "",
-                    "This file contains only THIS conversation session, not long-term knowledge.",
-                    "Only search it for 'what did X say earlier in this chat' type questions.",
-                ]
-            )
-
-        # Add chat-level history path for full cross-thread search
-        chat_state_path = context.get_chat_state_path()
-        if chat_state_path:
-            chat_history_path = f"{chat_state_path}/history.jsonl"
-            lines.extend(
-                [
-                    "",
-                    f"Full chat history (all threads): `{chat_history_path}`",
-                ]
-            )
-
-        lines.extend(
-            [
-                "",
-                "**When to use what:**",
-                "- Questions about people's opinions, preferences, facts about them:",
-                "  Use `ash-sb memory search 'topic'` (NOT session file grep)",
-                "- Questions about what was said earlier in THIS conversation:",
-                f"  Search session file: `grep -i 'term' {session_path}`",
-                "",
-                "Session file format: JSONL with id, role, content, created_at, user_id, username",
-            ]
-        )
+        lines = [
+            "## Session",
+            "",
+            f"Chat history (all messages, all threads): `{chat_history_path}`",
+            "",
+            "**When to use what:**",
+            "- Questions about people's opinions, preferences, facts about them:",
+            "  Use `ash-sb memory search 'topic'` (NOT file grep)",
+            "- Questions about what was said in this chat:",
+            f"  Search history: `grep -i 'term' {chat_history_path}`",
+            "",
+            "History file format: JSONL with id, role, content, created_at, user_id, username",
+        ]
 
         return "\n".join(lines)

@@ -204,8 +204,6 @@ class Agent:
         known_people: list[PersonEntry] | None = None,
         conversation_gap_minutes: float | None = None,
         has_reply_context: bool = False,
-        session_path: str | None = None,
-        session_mode: str | None = None,
         sender_username: str | None = None,
         sender_display_name: str | None = None,
         chat_title: str | None = None,
@@ -216,29 +214,8 @@ class Agent:
         is_passive_engagement: bool = False,
         chat_history: list[dict[str, Any]] | None = None,
     ) -> str:
-        """Build system prompt with optional memory context.
-
-        Args:
-            context: Retrieved memory context.
-            known_people: List of known people for the user.
-            conversation_gap_minutes: Time since last message in conversation.
-            has_reply_context: Whether this message is a reply with context.
-            session_path: Path to the session file for self-inspection.
-            session_mode: Session mode ("persistent" or "fresh").
-            sender_username: Username of the current message sender.
-            sender_display_name: Display name of the current message sender.
-            chat_title: Title of the chat (for group chats).
-            chat_type: Type of chat ("group", "supergroup", "private").
-            chat_state_path: Path to chat-level state.json.
-            is_passive_engagement: Whether this is a passive engagement (not mentioned).
-            thread_state_path: Path to thread-specific state.json (when in thread).
-            is_scheduled_task: Whether this is a scheduled task execution.
-            chat_history: Recent chat-level history entries for cross-thread context.
-
-        Returns:
-            Complete system prompt.
-        """
-        from ash.core.prompt import ChatInfo, SenderInfo, SessionInfo
+        """Build system prompt with optional memory context."""
+        from ash.core.prompt import ChatInfo, SenderInfo
 
         prompt_context = PromptContext(
             runtime=self._refresh_runtime_time(),
@@ -255,10 +232,6 @@ class Agent:
                 thread_state_path=thread_state_path,
                 is_scheduled_task=is_scheduled_task,
                 is_passive_engagement=is_passive_engagement,
-            ),
-            session=SessionInfo(
-                path=session_path,
-                mode=session_mode,
             ),
             conversation_gap_minutes=conversation_gap_minutes,
             has_reply_context=has_reply_context,
@@ -327,7 +300,6 @@ class Agent:
         user_message: str,
         session: SessionState,
         user_id: str | None,
-        session_path: str | None = None,
     ) -> _MessageSetup:
         effective_user_id = user_id or session.user_id
 
@@ -346,8 +318,6 @@ class Agent:
             known_people=gathered.known_people,
             conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
             has_reply_context=session.metadata.get("has_reply_context", False),
-            session_path=session_path,
-            session_mode=session.metadata.get("session_mode"),
             sender_username=session.metadata.get("username"),
             sender_display_name=session.metadata.get("display_name"),
             chat_title=session.metadata.get("chat_title"),
@@ -886,13 +856,10 @@ class Agent:
         user_id: str | None = None,
         on_tool_start: OnToolStartCallback | None = None,
         get_steering_messages: GetSteeringMessagesCallback | None = None,
-        session_path: str | None = None,
         session_manager: Any = None,  # Type: SessionManager | None
         tool_overrides: dict[str, Any] | None = None,
     ) -> AgentResponse:
-        setup = await self._prepare_message_context(
-            user_message, session, user_id, session_path
-        )
+        setup = await self._prepare_message_context(user_message, session, user_id)
         session.add_user_message(user_message)
         compaction_info = await self._maybe_compact(session)
 
@@ -992,13 +959,10 @@ class Agent:
         user_id: str | None = None,
         on_tool_start: OnToolStartCallback | None = None,
         get_steering_messages: GetSteeringMessagesCallback | None = None,
-        session_path: str | None = None,
         session_manager: Any = None,  # Type: SessionManager | None
         tool_overrides: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
-        setup = await self._prepare_message_context(
-            user_message, session, user_id, session_path
-        )
+        setup = await self._prepare_message_context(user_message, session, user_id)
         session.add_user_message(user_message)
         await self._maybe_compact(session)
 

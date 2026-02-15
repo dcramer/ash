@@ -113,7 +113,6 @@ class SessionHandler:
             message.chat_id, message.user_id, thread_id
         )
         session_key = session_manager.session_key
-        session_mode = self._config.sessions.mode if self._config else "persistent"
 
         await session_manager.ensure_session()
 
@@ -135,21 +134,11 @@ class SessionHandler:
         if message.metadata.get("passive_engagement"):
             session.metadata["passive_engagement"] = True
 
-        session.metadata["session_path"] = f"/sessions/{session_key}/history.jsonl"
-        session.metadata["session_mode"] = session_mode
-
         if thread_id:
             session.metadata["thread_id"] = thread_id
-            chat_key = make_session_key(
-                self._provider_name, message.chat_id, message.user_id
-            )
-            session.metadata["chat_session_path"] = (
-                f"/sessions/{chat_key}/history.jsonl"
-            )
 
-        if session_mode == "fresh":
-            logger.debug(f"Fresh session for {session_key}")
-        else:
+        session_mode = self._config.sessions.mode if self._config else "persistent"
+        if session_mode != "fresh":
             await self._load_persistent_session(session, session_manager, message)
 
         # Load recent chat-level history for cross-thread context (group chats only)
