@@ -117,19 +117,14 @@ class PeopleOpsMixin:
         return self._find_person_by_id(people, person_id)
 
     async def find_person(self: GraphStore, reference: str) -> PersonEntry | None:
-        ref = self._normalize_reference(reference)
+        graph = await self._ensure_graph_built()
+        candidate_ids = graph.find_person_ids_by_ref(reference)
+        if not candidate_ids:
+            return None
         people = await self._ensure_people_loaded()
         for person in people:
-            if person.merged_into:
-                continue
-            if person.name.lower() == ref:
+            if person.id in candidate_ids:
                 return person
-            for rc in person.relationships:
-                if rc.relationship.lower() == ref:
-                    return person
-            for alias in person.aliases:
-                if self._normalize_reference(alias.value) == ref:
-                    return person
         return None
 
     async def find_person_for_speaker(
@@ -137,24 +132,19 @@ class PeopleOpsMixin:
         reference: str,
         speaker_user_id: str,
     ) -> PersonEntry | None:
-        ref = self._normalize_reference(reference)
+        graph = await self._ensure_graph_built()
+        candidate_ids = graph.find_person_ids_by_ref(reference)
+        if not candidate_ids:
+            return None
         people = await self._ensure_people_loaded()
         for person in people:
-            if person.merged_into:
+            if person.id not in candidate_ids:
                 continue
             is_connected = any(
                 rc.stated_by == speaker_user_id for rc in person.relationships
             ) or any(ae.added_by == speaker_user_id for ae in person.aliases)
-            if not is_connected:
-                continue
-            if person.name.lower() == ref:
+            if is_connected:
                 return person
-            for rc in person.relationships:
-                if rc.relationship.lower() == ref:
-                    return person
-            for alias in person.aliases:
-                if self._normalize_reference(alias.value) == ref:
-                    return person
         return None
 
     async def list_people(self: GraphStore) -> list[PersonEntry]:
@@ -503,7 +493,7 @@ class PeopleOpsMixin:
     def _heuristic_match(a: PersonEntry, b: PersonEntry) -> bool:
         a_rels = {r.relationship.lower() for r in a.relationships}
         b_rels = {r.relationship.lower() for r in b.relationships}
-        if "self" in a_rels and "self" in b_rels:
+        if "self" in a_rels and "self" in b_rels and a.created_by != b.created_by:
             return False
         a_aliases = {alias.value.lower() for alias in a.aliases}
         b_aliases = {alias.value.lower() for alias in b.aliases}

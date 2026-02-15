@@ -101,6 +101,10 @@ class MemoryOpsMixin:
             metadata=metadata,
         )
 
+        # Keep _memory_by_id in sync so subsequent lookups in this
+        # compound operation (supersession, eviction) see the new memory.
+        self._memory_by_id[memory.id] = memory
+
         if embedding_floats:
             embedding_base64 = MemoryEntry.encode_embedding(embedding_floats)
             try:
@@ -187,6 +191,12 @@ class MemoryOpsMixin:
         if not deleted:
             return False
 
+        # Keep _memory_by_id in sync (delete_memory archives in-place)
+        cached = self._memory_by_id.get(full_id)
+        if cached:
+            cached.archived_at = datetime.now(UTC)
+            cached.archive_reason = "user_deleted"
+
         try:
             await self._index.delete_embedding(full_id)
         except Exception:
@@ -265,8 +275,36 @@ class MemoryOpsMixin:
         return evicted
 
     async def rebuild_index(self: GraphStore) -> int:
+        """Rebuild vector index, generating embeddings for any memories missing them."""
         memories = await self._store.get_all_memories()
         embeddings = await self._store.load_embeddings()
+
+        # Find active memories missing embeddings and generate them
+        active_ids = {
+            m.id for m in memories if not m.superseded_at and m.archived_at is None
+        }
+        missing = [m for m in memories if m.id in active_ids and m.id not in embeddings]
+        if missing:
+            generated = 0
+            for memory in missing:
+                try:
+                    floats = await self._embeddings.embed(memory.content)
+                    if floats:
+                        b64 = MemoryEntry.encode_embedding(floats)
+                        await self._store.save_embedding(memory.id, b64)
+                        embeddings[memory.id] = b64
+                        generated += 1
+                except Exception:
+                    logger.debug(
+                        "Failed to generate embedding for %s during rebuild",
+                        memory.id,
+                    )
+            if generated:
+                logger.info(
+                    "Generated missing embeddings during rebuild",
+                    extra={"generated": generated, "total_missing": len(missing)},
+                )
+
         count = await self._index.rebuild_from_embeddings(memories, embeddings)
         logger.info("index_rebuilt", extra={"count": count})
         return count

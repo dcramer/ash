@@ -217,7 +217,10 @@ async def create_graph_store(
                     extra={"memories": mem_count, "people": people_count},
                 )
         except Exception:
-            logger.warning("Migration failed, starting fresh", exc_info=True)
+            logger.warning(
+                "SQLite-to-JSONL migration failed, continuing with existing JSONL state",
+                exc_info=True,
+            )
 
     embedding_generator = EmbeddingGenerator(
         registry=llm_registry,

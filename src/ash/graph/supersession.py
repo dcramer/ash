@@ -39,11 +39,13 @@ class SupersessionMixin:
         similar = await self._index.search(new_content, limit=10)
         now = datetime.now(UTC)
 
+        await self._ensure_graph_built()
+
         conflicts: list[tuple[MemoryEntry, float]] = []
         for result in similar:
             if result.similarity < CONFLICT_SIMILARITY_THRESHOLD:
                 continue
-            memory = await self._store.get_memory(result.memory_id)
+            memory = self._memory_by_id.get(result.memory_id)
             if not memory:
                 continue
             if memory.superseded_at:
@@ -148,7 +150,15 @@ class SupersessionMixin:
                 return False
             return True
         except Exception:
-            logger.warning("Subject authority check failed", exc_info=True)
+            logger.error(
+                "Subject authority check failed, conservatively protecting memory",
+                extra={
+                    "candidate_id": candidate.id,
+                    "new_memory_id": new_memory.id,
+                    "candidate_source": candidate.source_username,
+                },
+                exc_info=True,
+            )
             return True
 
     async def _mark_superseded(
@@ -162,6 +172,11 @@ class SupersessionMixin:
             memory_id=old_memory_id, superseded_by_id=new_memory_id
         )
         if success:
+            # Keep _memory_by_id in sync so lookups see the superseded state
+            old_memory = self._memory_by_id.get(old_memory_id)
+            if old_memory:
+                old_memory.superseded_at = datetime.now(UTC)
+                old_memory.superseded_by_id = new_memory_id
             try:
                 await self._index.delete_embedding(old_memory_id)
             except Exception:
@@ -242,19 +257,27 @@ class SupersessionMixin:
         if not hearsay_candidates:
             return 0
 
+        # Single vector search instead of N per-candidate searches
+        try:
+            similar = await self._index.search(
+                new_memory.content, limit=len(hearsay_candidates) + 5
+            )
+        except Exception:
+            logger.warning("Failed to search for hearsay similarity", exc_info=True)
+            return 0
+
+        similarity_by_id: dict[str, float] = {
+            r.memory_id: r.similarity for r in similar
+        }
+
         count = 0
         for hearsay in hearsay_candidates:
             if hearsay.id == new_memory.id:
                 continue
+            similarity = similarity_by_id.get(hearsay.id, 0.0)
+            if similarity < similarity_threshold:
+                continue
             try:
-                similar = await self._index.search(hearsay.content, limit=5)
-                similarity = 0.0
-                for result in similar:
-                    if result.memory_id == new_memory.id:
-                        similarity = result.similarity
-                        break
-                if similarity < similarity_threshold:
-                    continue
                 if similarity < 0.85 and self._llm:
                     if not await self._verify_conflict_with_llm(
                         old_content=hearsay.content,

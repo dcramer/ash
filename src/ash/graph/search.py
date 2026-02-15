@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Default similarity scores for non-vector results (used for ranking only)
+_CROSS_CONTEXT_SIMILARITY = 0.7
+_GRAPH_TRAVERSAL_SIMILARITY = 0.6
+
 
 class SearchMixin:
     """Search, context retrieval, and privacy filtering."""
@@ -130,6 +134,124 @@ class SearchMixin:
             return chat_type == "private" and is_subject
         return False
 
+    async def _make_cross_context_result(
+        self: GraphStore,
+        memory: MemoryEntry,
+        similarity: float,
+        *,
+        graph_traversal: bool = False,
+    ) -> SearchResult:
+        """Convert a MemoryEntry to a SearchResult for cross-context retrieval."""
+        subject_name = await self._resolve_subject_name(memory.subject_person_ids)
+        meta: dict[str, Any] = {
+            "memory_type": memory.memory_type.value,
+            "subject_person_ids": memory.subject_person_ids,
+            "cross_context": True,
+        }
+        if graph_traversal:
+            meta["graph_traversal"] = True
+        if subject_name:
+            meta["subject_name"] = subject_name
+        return SearchResult(
+            id=memory.id,
+            content=memory.content,
+            similarity=similarity,
+            metadata=meta,
+            source_type="memory",
+        )
+
+    async def _collect_cross_context_memories(
+        self: GraphStore,
+        participant_person_ids: dict[str, set[str]],
+        user_id: str,
+        chat_type: str | None,
+        max_memories: int,
+    ) -> list[SearchResult]:
+        """Retrieve memories from other contexts about chat participants."""
+        results: list[SearchResult] = []
+        for username, person_ids in participant_person_ids.items():
+            if not person_ids:
+                continue
+            try:
+                cross_memories = await self._find_memories_about_persons(
+                    person_ids=person_ids,
+                    exclude_owner_user_id=user_id,
+                    limit=max_memories,
+                )
+                for memory in cross_memories:
+                    if self._passes_privacy_filter(
+                        sensitivity=memory.sensitivity,
+                        subject_person_ids=memory.subject_person_ids,
+                        chat_type=chat_type,
+                        querying_person_ids=person_ids,
+                    ):
+                        results.append(
+                            await self._make_cross_context_result(
+                                memory, _CROSS_CONTEXT_SIMILARITY
+                            )
+                        )
+            except Exception:
+                logger.warning("Failed to get cross-context memories for %s", username)
+        return results
+
+    async def _collect_graph_traversal_memories(
+        self: GraphStore,
+        memories: list[SearchResult],
+        seen_ids: set[str],
+        participant_person_ids: dict[str, set[str]] | None,
+        user_id: str,
+        chat_type: str | None,
+        max_memories: int,
+    ) -> list[SearchResult]:
+        """Find additional memories about people mentioned in existing results."""
+        mentioned_person_ids: set[str] = set()
+        for m in memories:
+            spids = (m.metadata or {}).get("subject_person_ids") or []
+            mentioned_person_ids.update(spids)
+
+        # Exclude participants already handled by cross-context retrieval
+        if participant_person_ids:
+            for pids in participant_person_ids.values():
+                mentioned_person_ids -= pids
+
+        if not mentioned_person_ids:
+            return []
+
+        try:
+            subject_cross = await self._find_memories_about_persons(
+                person_ids=mentioned_person_ids,
+                exclude_owner_user_id=user_id,
+                limit=max_memories,
+            )
+        except Exception:
+            logger.warning("Graph traversal cross-context failed", exc_info=True)
+            return []
+
+        all_participant_ids: set[str] = set()
+        if participant_person_ids:
+            for pids in participant_person_ids.values():
+                all_participant_ids |= pids
+
+        results: list[SearchResult] = []
+        for memory in subject_cross:
+            if memory.id in seen_ids:
+                continue
+            if self._passes_privacy_filter(
+                sensitivity=memory.sensitivity,
+                subject_person_ids=memory.subject_person_ids,
+                chat_type=chat_type,
+                querying_person_ids=all_participant_ids,
+            ):
+                results.append(
+                    await self._make_cross_context_result(
+                        memory,
+                        _GRAPH_TRAVERSAL_SIMILARITY,
+                        graph_traversal=True,
+                    )
+                )
+                seen_ids.add(memory.id)
+        return results
+
     async def get_context_for_message(
         self: GraphStore,
         user_id: str,
@@ -139,6 +261,7 @@ class SearchMixin:
         chat_type: str | None = None,
         participant_person_ids: dict[str, set[str]] | None = None,
     ) -> RetrievedContext:
+        # Primary: vector search scoped to user/chat
         try:
             memories = await self.search(
                 query=user_message,
@@ -147,116 +270,42 @@ class SearchMixin:
                 chat_id=chat_id,
             )
         except Exception:
-            logger.warning(
-                "Failed to search memories, continuing without", exc_info=True
+            logger.error(
+                "Primary memory search failed, returning without context",
+                exc_info=True,
             )
             memories = []
 
-        # Cross-context retrieval
+        # Cross-context: memories about participants from other chats
         if participant_person_ids:
-            for username, person_ids in participant_person_ids.items():
-                if not person_ids:
-                    continue
-                try:
-                    cross_memories = await self._find_memories_about_persons(
-                        person_ids=person_ids,
-                        exclude_owner_user_id=user_id,
-                        limit=max_memories,
-                    )
-                    for memory in cross_memories:
-                        if self._passes_privacy_filter(
-                            sensitivity=memory.sensitivity,
-                            subject_person_ids=memory.subject_person_ids,
-                            chat_type=chat_type,
-                            querying_person_ids=person_ids,
-                        ):
-                            subject_name = await self._resolve_subject_name(
-                                memory.subject_person_ids
-                            )
-                            cross_meta: dict[str, Any] = {
-                                "memory_type": memory.memory_type.value,
-                                "subject_person_ids": memory.subject_person_ids,
-                                "cross_context": True,
-                            }
-                            if subject_name:
-                                cross_meta["subject_name"] = subject_name
-                            memories.append(
-                                SearchResult(
-                                    id=memory.id,
-                                    content=memory.content,
-                                    similarity=0.7,
-                                    metadata=cross_meta,
-                                    source_type="memory",
-                                )
-                            )
-                except Exception:
-                    logger.warning(
-                        "Failed to get cross-context memories for %s", username
-                    )
-
-        # Second pass: graph traversal
-        seen_ids: set[str] = {m.id for m in memories}
-        mentioned_person_ids: set[str] = set()
-        for m in memories:
-            spids = (m.metadata or {}).get("subject_person_ids") or []
-            mentioned_person_ids.update(spids)
-
-        if participant_person_ids:
-            for pids in participant_person_ids.values():
-                mentioned_person_ids -= pids
-
-        if mentioned_person_ids:
-            try:
-                subject_cross = await self._find_memories_about_persons(
-                    person_ids=mentioned_person_ids,
-                    exclude_owner_user_id=user_id,
-                    limit=max_memories,
+            memories.extend(
+                await self._collect_cross_context_memories(
+                    participant_person_ids, user_id, chat_type, max_memories
                 )
-                all_participant_ids: set[str] = set()
-                if participant_person_ids:
-                    for pids in participant_person_ids.values():
-                        all_participant_ids |= pids
-                for memory in subject_cross:
-                    if memory.id in seen_ids:
-                        continue
-                    if self._passes_privacy_filter(
-                        sensitivity=memory.sensitivity,
-                        subject_person_ids=memory.subject_person_ids,
-                        chat_type=chat_type,
-                        querying_person_ids=all_participant_ids,
-                    ):
-                        subject_name = await self._resolve_subject_name(
-                            memory.subject_person_ids
-                        )
-                        cross_meta = {
-                            "memory_type": memory.memory_type.value,
-                            "subject_person_ids": memory.subject_person_ids,
-                            "cross_context": True,
-                            "graph_traversal": True,
-                        }
-                        if subject_name:
-                            cross_meta["subject_name"] = subject_name
-                        memories.append(
-                            SearchResult(
-                                id=memory.id,
-                                content=memory.content,
-                                similarity=0.6,
-                                metadata=cross_meta,
-                                source_type="memory",
-                            )
-                        )
-                        seen_ids.add(memory.id)
-            except Exception:
-                logger.warning("Graph traversal cross-context failed", exc_info=True)
+            )
+
+        # Graph traversal: memories about people mentioned in results so far
+        seen_ids: set[str] = {m.id for m in memories}
+        if seen_ids:
+            memories.extend(
+                await self._collect_graph_traversal_memories(
+                    memories,
+                    seen_ids,
+                    participant_person_ids,
+                    user_id,
+                    chat_type,
+                    max_memories,
+                )
+            )
 
         # Deduplicate and limit
-        unique_memories: list[SearchResult] = []
-        final_seen: set[str] = set()
+        unique: list[SearchResult] = []
+        deduped: set[str] = set()
         for m in memories:
-            if m.id not in final_seen:
-                final_seen.add(m.id)
-                unique_memories.append(m)
-                if len(unique_memories) >= max_memories:
+            if m.id not in deduped:
+                deduped.add(m.id)
+                unique.append(m)
+                if len(unique) >= max_memories:
                     break
 
-        return RetrievedContext(memories=unique_memories)
+        return RetrievedContext(memories=unique)

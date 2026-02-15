@@ -1188,19 +1188,37 @@ class TestHeuristicMatch:
         b = PersonEntry(id="b", name="Sarah Jane")
         assert GraphStore._heuristic_match(a, b) is True
 
-    def test_skip_both_self(self):
-        """Should skip pairs where both have relationship self."""
+    def test_skip_both_self_different_users(self):
+        """Should skip pairs where both have relationship self from different users."""
         a = PersonEntry(
             id="a",
+            created_by="user-1",
             name="David",
             relationships=[RelationshipClaim(relationship="self")],
         )
         b = PersonEntry(
             id="b",
+            created_by="user-2",
             name="David Cramer",
             relationships=[RelationshipClaim(relationship="self")],
         )
         assert GraphStore._heuristic_match(a, b) is False
+
+    def test_both_self_same_user_matches(self):
+        """Same-user self-persons should match (duplicate self-records)."""
+        a = PersonEntry(
+            id="a",
+            created_by="user-1",
+            name="David",
+            relationships=[RelationshipClaim(relationship="self")],
+        )
+        b = PersonEntry(
+            id="b",
+            created_by="user-1",
+            name="David Cramer",
+            relationships=[RelationshipClaim(relationship="self")],
+        )
+        assert GraphStore._heuristic_match(a, b) is True
 
     def test_no_match_unrelated(self):
         """Unrelated people should not match."""
@@ -1441,6 +1459,46 @@ class TestFindDedupCandidates:
         assert len(result) == 2
         primaries = {r[0] for r in result}
         assert primaries == {sa1.id, sb1.id}
+
+    async def test_same_user_self_persons_detected(self, graph_store: GraphStore):
+        """Duplicate self-persons from the same user should be detected as candidates."""
+        p1 = await graph_store.create_person(
+            created_by="user-1",
+            name="David Cramer",
+            relationship="self",
+        )
+        p2 = await graph_store.create_person(
+            created_by="user-1",
+            name="David Cramer",
+            relationship="self",
+        )
+
+        graph_store.set_llm(_make_mock_llm("YES"), "test-model")
+
+        result = await graph_store.find_dedup_candidates([p1.id, p2.id])
+        assert len(result) == 1
+
+    async def test_different_user_self_persons_not_detected(
+        self, graph_store: GraphStore
+    ):
+        """Self-persons from different users should NOT be detected as candidates."""
+        p1 = await graph_store.create_person(
+            created_by="user-1",
+            name="David Cramer",
+            relationship="self",
+        )
+        p2 = await graph_store.create_person(
+            created_by="user-2",
+            name="David Cramer",
+            relationship="self",
+        )
+
+        mock_llm = _make_mock_llm("YES")
+        graph_store.set_llm(mock_llm, "test-model")
+
+        result = await graph_store.find_dedup_candidates([p1.id, p2.id])
+        assert result == []
+        mock_llm.complete.assert_not_called()
 
 
 class TestAutoRemapOnMerge:

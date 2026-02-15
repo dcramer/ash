@@ -19,6 +19,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _normalize_ref(text: str) -> str:
+    """Normalize a person reference for lookup (matches PeopleOpsMixin._normalize_reference)."""
+    result = text.lower().strip()
+    for prefix in ("my ", "the ", "@"):
+        result = result.removeprefix(prefix)
+    return result
+
+
 class GraphIndex:
     """In-memory adjacency lists built from node fields.
 
@@ -39,6 +47,8 @@ class GraphIndex:
         self._provider_to_user: dict[str, str] = {}  # provider_id -> user.id
         self._username_to_user: dict[str, str] = {}  # username -> user.id
         self._chat_provider_to_id: dict[str, str] = {}  # chat provider_id -> chat.id
+        # Person reference lookup: normalized_ref -> set of person_ids
+        self._ref_to_person_ids: dict[str, set[str]] = {}
 
     def build(
         self,
@@ -57,6 +67,7 @@ class GraphIndex:
         self._provider_to_user.clear()
         self._username_to_user.clear()
         self._chat_provider_to_id.clear()
+        self._ref_to_person_ids.clear()
 
         # Build user lookup tables
         for user in users:
@@ -101,7 +112,7 @@ class GraphIndex:
             if memory.superseded_by_id:
                 self._add_edge(EdgeType.SUPERSEDES, memory.id, memory.superseded_by_id)
 
-        # Extract person edges
+        # Extract person edges and build reference lookup
         for person in people:
             # KNOWS: User -> Person (via relationships[].stated_by)
             for rc in person.relationships:
@@ -116,6 +127,10 @@ class GraphIndex:
             if person.merged_into:
                 self._add_edge(EdgeType.MERGED_INTO, person.id, person.merged_into)
 
+            # Person reference lookup (skip merged people)
+            if not person.merged_into:
+                self._index_person_ref(person)
+
         # Extract user edges
         for user in users:
             # IS_PERSON: User -> Person
@@ -126,6 +141,21 @@ class GraphIndex:
         """Add a directed edge."""
         self._outgoing[edge_type].setdefault(source, set()).add(target)
         self._incoming[edge_type].setdefault(target, set()).add(source)
+
+    def _index_person_ref(self, person: PersonEntry) -> None:
+        """Index a person's name, aliases, and relationships for O(1) lookup."""
+        if person.name:
+            self._ref_to_person_ids.setdefault(person.name.lower(), set()).add(
+                person.id
+            )
+        for alias in person.aliases:
+            ref = _normalize_ref(alias.value)
+            if ref:
+                self._ref_to_person_ids.setdefault(ref, set()).add(person.id)
+        for rc in person.relationships:
+            ref = rc.relationship.lower()
+            if ref:
+                self._ref_to_person_ids.setdefault(ref, set()).add(person.id)
 
     def neighbors(
         self,
@@ -199,6 +229,11 @@ class GraphIndex:
     def people_known_by_user(self, user_node_id: str) -> set[str]:
         """Get person IDs known by a user (via KNOWS edges). O(1)."""
         return self.neighbors(user_node_id, EdgeType.KNOWS, "outgoing")
+
+    def find_person_ids_by_ref(self, reference: str) -> set[str]:
+        """Find person IDs matching a normalized reference. O(1)."""
+        ref = _normalize_ref(reference)
+        return set(self._ref_to_person_ids.get(ref, set()))
 
     def edge_counts(self) -> dict[EdgeType, int]:
         """Return number of edges per edge type."""

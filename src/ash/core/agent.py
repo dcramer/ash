@@ -533,8 +533,9 @@ class Agent:
 
                 # Dedup: merge new self-person against any existing person with same name.
                 # Use exclude_self=False because the new person always has "self" relationship
-                # and would be skipped otherwise. _heuristic_match still skips pairs where
-                # *both* are self-persons (two different users' self-records).
+                # and would be skipped otherwise. _heuristic_match skips pairs where both are
+                # self-persons created by *different* users, but allows duplicate self-records
+                # from the same user to be detected and merged.
                 try:
                     candidates = await self._people.find_dedup_candidates(
                         [new_person.id], exclude_self=False
