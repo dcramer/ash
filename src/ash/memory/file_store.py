@@ -171,7 +171,7 @@ class FileMemoryStore:
 
     async def get_memories(
         self,
-        limit: int = 100,
+        limit: int | None = 100,
         include_expired: bool = False,
         include_superseded: bool = False,
         owner_user_id: str | None = None,
@@ -197,7 +197,9 @@ class FileMemoryStore:
             key=lambda x: x.created_at or datetime.min.replace(tzinfo=UTC), reverse=True
         )
 
-        return result[:limit]
+        if limit is not None:
+            return result[:limit]
+        return result
 
     async def mark_memory_superseded(
         self,
@@ -225,6 +227,39 @@ class FileMemoryStore:
 
         return found
 
+    async def batch_mark_superseded(self, pairs: list[tuple[str, str]]) -> list[str]:
+        """Mark multiple memories as superseded in a single rewrite.
+
+        Args:
+            pairs: List of (old_memory_id, new_memory_id) tuples.
+
+        Returns:
+            List of old memory IDs that were actually marked.
+        """
+        if not pairs:
+            return []
+
+        supersede_map = {old_id: new_id for old_id, new_id in pairs}
+        memories = await self._ensure_memories_loaded()
+        now = datetime.now(UTC)
+        marked: list[str] = []
+
+        for m in memories:
+            if m.id in supersede_map:
+                m.superseded_at = now
+                m.superseded_by_id = supersede_map[m.id]
+                marked.append(m.id)
+
+        if marked:
+            await self._memories_jsonl.rewrite(memories)
+            self._invalidate_memories_cache()
+            logger.info(
+                "batch_memories_superseded",
+                extra={"count": len(marked)},
+            )
+
+        return marked
+
     async def update_memory(self, entry: MemoryEntry) -> bool:
         """Update a memory entry in place."""
         memories = await self._ensure_memories_loaded()
@@ -241,6 +276,33 @@ class FileMemoryStore:
             self._invalidate_memories_cache()
 
         return found
+
+    async def batch_update_memories(self, entries: list[MemoryEntry]) -> int:
+        """Update multiple memory entries in a single rewrite.
+
+        Args:
+            entries: List of updated MemoryEntry objects.
+
+        Returns:
+            Number of entries that were actually updated.
+        """
+        if not entries:
+            return 0
+
+        updates = {e.id: e for e in entries}
+        memories = await self._ensure_memories_loaded()
+        count = 0
+
+        for i, m in enumerate(memories):
+            if m.id in updates:
+                memories[i] = updates[m.id]
+                count += 1
+
+        if count > 0:
+            await self._memories_jsonl.rewrite(memories)
+            self._invalidate_memories_cache()
+
+        return count
 
     async def delete_memory(
         self,

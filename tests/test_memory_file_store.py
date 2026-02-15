@@ -708,3 +708,109 @@ class TestGetAllMemories:
 
         all_memories = await file_memory_store.get_all_memories()
         assert len(all_memories) == 2
+
+
+class TestGetMemoriesLimitNone:
+    """Tests for limit=None returning all results."""
+
+    async def test_limit_none_returns_all(self, file_memory_store: FileMemoryStore):
+        """limit=None should return all matching memories."""
+        for i in range(150):
+            await file_memory_store.add_memory(content=f"Memory {i}")
+
+        memories = await file_memory_store.get_memories(limit=None)
+        assert len(memories) == 150
+
+    async def test_default_limit_truncates(self, file_memory_store: FileMemoryStore):
+        """Default limit=100 should truncate results."""
+        for i in range(150):
+            await file_memory_store.add_memory(content=f"Memory {i}")
+
+        memories = await file_memory_store.get_memories()
+        assert len(memories) == 100
+
+
+class TestBatchMarkSuperseded:
+    """Tests for batch_mark_superseded."""
+
+    async def test_marks_multiple(self, file_memory_store: FileMemoryStore):
+        """Batch mark should supersede multiple memories in one rewrite."""
+        m1 = await file_memory_store.add_memory(content="Old 1")
+        m2 = await file_memory_store.add_memory(content="Old 2")
+        m3 = await file_memory_store.add_memory(content="New 1")
+        m4 = await file_memory_store.add_memory(content="New 2")
+
+        marked = await file_memory_store.batch_mark_superseded(
+            [
+                (m1.id, m3.id),
+                (m2.id, m4.id),
+            ]
+        )
+
+        assert set(marked) == {m1.id, m2.id}
+
+        # Superseded should be excluded by default
+        active = await file_memory_store.get_memories(limit=None)
+        active_ids = {m.id for m in active}
+        assert m1.id not in active_ids
+        assert m2.id not in active_ids
+        assert m3.id in active_ids
+        assert m4.id in active_ids
+
+    async def test_empty_pairs(self, file_memory_store: FileMemoryStore):
+        """Empty pairs list should be a no-op."""
+        marked = await file_memory_store.batch_mark_superseded([])
+        assert marked == []
+
+    async def test_nonexistent_ids(self, file_memory_store: FileMemoryStore):
+        """Non-existent IDs should be silently skipped."""
+        m1 = await file_memory_store.add_memory(content="Real")
+        marked = await file_memory_store.batch_mark_superseded(
+            [
+                ("nonexistent", m1.id),
+            ]
+        )
+        assert marked == []
+
+
+class TestBatchUpdateMemories:
+    """Tests for batch_update_memories."""
+
+    async def test_updates_multiple(self, file_memory_store: FileMemoryStore):
+        """Batch update should modify multiple memories in one rewrite."""
+        m1 = await file_memory_store.add_memory(content="Original 1")
+        m2 = await file_memory_store.add_memory(content="Original 2")
+        m3 = await file_memory_store.add_memory(content="Untouched")
+
+        m1.content = "Updated 1"
+        m2.content = "Updated 2"
+
+        count = await file_memory_store.batch_update_memories([m1, m2])
+
+        assert count == 2
+
+        # Verify updates persisted
+        file_memory_store._invalidate_memories_cache()
+        r1 = await file_memory_store.get_memory(m1.id)
+        r2 = await file_memory_store.get_memory(m2.id)
+        r3 = await file_memory_store.get_memory(m3.id)
+        assert r1 is not None and r1.content == "Updated 1"
+        assert r2 is not None and r2.content == "Updated 2"
+        assert r3 is not None and r3.content == "Untouched"
+
+    async def test_empty_list(self, file_memory_store: FileMemoryStore):
+        """Empty entries list should be a no-op."""
+        count = await file_memory_store.batch_update_memories([])
+        assert count == 0
+
+    async def test_nonexistent_entry(self, file_memory_store: FileMemoryStore):
+        """Non-existent entries should be silently skipped."""
+        entry = MemoryEntry(
+            id="nonexistent",
+            version=1,
+            content="Ghost",
+            memory_type=MemoryType.KNOWLEDGE,
+            source="test",
+        )
+        count = await file_memory_store.batch_update_memories([entry])
+        assert count == 0

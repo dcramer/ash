@@ -114,6 +114,23 @@ class VectorIndex:
         )
         await self._session.commit()
 
+    async def delete_embeddings(self, memory_ids: list[str]) -> None:
+        """Delete embeddings for multiple memories in a single operation.
+
+        Args:
+            memory_ids: List of memory UUIDs.
+        """
+        if not memory_ids:
+            return
+        # Use individual parameterized deletes to avoid SQL injection
+        # while staying compatible with sqlite-vec virtual tables
+        for memory_id in memory_ids:
+            await self._session.execute(
+                text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
+                {"id": memory_id},
+            )
+        await self._session.commit()
+
     async def search(
         self,
         query: str,

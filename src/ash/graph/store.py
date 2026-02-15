@@ -462,7 +462,7 @@ class GraphStore:
 
     async def list_memories(
         self,
-        limit: int = 20,
+        limit: int | None = 20,
         include_expired: bool = False,
         include_superseded: bool = False,
         owner_user_id: str | None = None,
@@ -529,10 +529,35 @@ class GraphStore:
         """Mark a memory as superseded (public API for doctor/dedup)."""
         return await self._mark_superseded(old_memory_id, new_memory_id)
 
+    async def batch_mark_superseded(self, pairs: list[tuple[str, str]]) -> list[str]:
+        """Mark multiple memories as superseded in a single batch.
+
+        Args:
+            pairs: List of (old_memory_id, new_memory_id) tuples.
+
+        Returns:
+            List of old memory IDs that were actually marked.
+        """
+        if not pairs:
+            return []
+
+        marked = await self._store.batch_mark_superseded(pairs)
+        if marked:
+            try:
+                await self._index.delete_embeddings(marked)
+            except Exception:
+                logger.warning(
+                    "Failed to delete embeddings for superseded memories",
+                    extra={"count": len(marked)},
+                    exc_info=True,
+                )
+            self._graph_built = False
+        return marked
+
     async def enforce_max_entries(self, max_entries: int) -> int:
         now = datetime.now(UTC)
         memories = await self._store.get_memories(
-            limit=10000,
+            limit=None,
             include_expired=False,
             include_superseded=False,
         )
@@ -706,8 +731,13 @@ class GraphStore:
                     old_content=memory.content, new_content=new_memory.content
                 ):
                     continue
-            if await self._mark_superseded(memory.id, new_memory.id):
+            if await self._mark_superseded(
+                memory.id, new_memory.id, invalidate_graph=False
+            ):
                 count += 1
+
+        if count > 0:
+            self._graph_built = False
 
         return count
 
@@ -739,7 +769,13 @@ class GraphStore:
             logger.debug("Subject authority check failed", exc_info=True)
             return False
 
-    async def _mark_superseded(self, old_memory_id: str, new_memory_id: str) -> bool:
+    async def _mark_superseded(
+        self,
+        old_memory_id: str,
+        new_memory_id: str,
+        *,
+        invalidate_graph: bool = True,
+    ) -> bool:
         success = await self._store.mark_memory_superseded(
             memory_id=old_memory_id, superseded_by_id=new_memory_id
         )
@@ -752,7 +788,8 @@ class GraphStore:
                     extra={"memory_id": old_memory_id},
                     exc_info=True,
                 )
-            self._graph_built = False
+            if invalidate_graph:
+                self._graph_built = False
         return success
 
     async def supersede_confirmed_hearsay(
@@ -810,7 +847,9 @@ class GraphStore:
                         new_content=new_memory.content,
                     ):
                         continue
-                if await self._mark_superseded(hearsay.id, new_memory.id):
+                if await self._mark_superseded(
+                    hearsay.id, new_memory.id, invalidate_graph=False
+                ):
                     count += 1
                     logger.info(
                         "Hearsay superseded by fact",
@@ -826,6 +865,9 @@ class GraphStore:
                     extra={"hearsay_id": hearsay.id},
                     exc_info=True,
                 )
+
+        if count > 0:
+            self._graph_built = False
 
         return count
 

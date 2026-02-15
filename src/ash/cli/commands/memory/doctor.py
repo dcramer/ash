@@ -70,6 +70,18 @@ Memories:
 Return JSON: {{"duplicates": true, "canonical_id": "<id>", "duplicate_ids": ["<id>", ...]}}
 If NOT duplicates, return: {{"duplicates": false}}"""
 
+CONTRADICTION_PROMPT = """Do any of these memories contradict each other? A contradiction \
+means two memories make conflicting claims about the same topic (e.g. "lives in Portland" \
+vs "just moved to Denver", or "favorite color is blue" vs "favorite color is green").
+
+Memories:
+{memories}
+
+If there are contradictions, identify which memory is outdated and which is current. \
+Prefer the more specific or recent-sounding memory as current.
+Return JSON: {{"contradiction": true, "current_id": "<id>", "outdated_ids": ["<id>", ...]}}
+If NO contradiction, return: {{"contradiction": false}}"""
+
 
 # --- Shared helpers ---
 
@@ -144,7 +156,7 @@ async def memory_doctor_attribution(force: bool) -> None:
     """
     store = get_memory_store()
     memories = await store.get_memories(
-        limit=10000, include_expired=True, include_superseded=True
+        limit=None, include_expired=True, include_superseded=True
     )
 
     to_fix = [
@@ -184,7 +196,7 @@ async def memory_doctor_attribution(force: bool) -> None:
 
     for memory in to_fix:
         memory.source_username = memory.owner_user_id
-        await store.update_memory(memory)
+    await store.batch_update_memories(to_fix)
 
     success(f"Fixed attribution for {len(to_fix)} memories")
 
@@ -192,7 +204,7 @@ async def memory_doctor_attribution(force: bool) -> None:
 async def memory_doctor_quality(config: AshConfig, force: bool) -> None:
     """Content quality review: wrong perspective, fragments, negative knowledge."""
     store = get_memory_store()
-    memories = await store.get_memories(limit=10000, include_expired=True)
+    memories = await store.get_memories(limit=None, include_expired=True)
 
     if not memories:
         warning("No memories to review")
@@ -277,11 +289,14 @@ async def memory_doctor_quality(config: AshConfig, force: bool) -> None:
         return
 
     # Apply rewrites
+    updated: list[MemoryEntry] = []
     for full_id, _old, new_content in rewrites:
         mem = mem_by_id.get(full_id)
         if mem:
             mem.content = new_content
-            await store.update_memory(mem)
+            updated.append(mem)
+    if updated:
+        await store.batch_update_memories(updated)
 
     # Archive in groups by reason
     if archives:
@@ -305,7 +320,7 @@ async def memory_doctor_dedup(
         warning("Dedup requires [embeddings] configuration")
         return
 
-    memories = await graph_store.list_memories(limit=10000, include_expired=True)
+    memories = await graph_store.list_memories(limit=None, include_expired=True)
 
     if not memories:
         warning("No memories to deduplicate")
@@ -444,11 +459,172 @@ async def memory_doctor_dedup(
     if not _confirm_or_cancel("Supersede duplicate memories?", force):
         return
 
-    for canonical_id, dup_ids in confirmed:
-        for dup_id in dup_ids:
-            await graph_store.mark_superseded(dup_id, canonical_id)
+    pairs = [
+        (dup_id, canonical_id)
+        for canonical_id, dup_ids in confirmed
+        for dup_id in dup_ids
+    ]
+    await graph_store.batch_mark_superseded(pairs)
 
     success(f"Superseded {total_dups} duplicate memories")
+
+
+async def memory_doctor_contradictions(
+    config: AshConfig, session: AsyncSession, force: bool
+) -> None:
+    """Find and resolve contradictory memories using vector similarity + LLM verification."""
+    from ash.cli.commands.memory._helpers import get_graph_store
+
+    graph_store = await get_graph_store(config, session)
+    if not graph_store:
+        warning("Contradiction check requires [embeddings] configuration")
+        return
+
+    memories = await graph_store.list_memories(limit=None, include_expired=True)
+
+    if not memories:
+        warning("No memories to check for contradictions")
+        return
+
+    console.print(f"Scanning {len(memories)} memories for contradictions...")
+
+    mem_by_id: dict[str, MemoryEntry] = {m.id: m for m in memories}
+
+    # Union-find for clustering topically related memories
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        while parent.get(x, x) != x:
+            parent[x] = parent.get(parent[x], parent[x])
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    seen_pairs: set[frozenset[str]] = set()
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Finding related memories...", total=len(memories))
+
+        for memory in memories:
+            try:
+                results = await graph_store.search(memory.content, limit=10)
+                for result in results:
+                    if result.id == memory.id:
+                        continue
+                    # Lower threshold than dedup (0.85) - contradictions are
+                    # topically related but not identical
+                    if result.similarity < 0.65:
+                        continue
+                    if result.id not in mem_by_id:
+                        continue
+                    pair = frozenset({memory.id, result.id})
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+                    union(memory.id, result.id)
+            except Exception as e:
+                dim(f"Search failed for {memory.id[:8]}: {e}")
+
+            progress.advance(task, 1)
+
+    # Build clusters, keeping only groups of 2+
+    clusters: dict[str, list[str]] = {}
+    for mid in mem_by_id:
+        root = find(mid)
+        clusters.setdefault(root, []).append(mid)
+
+    candidate_clusters = {k: v for k, v in clusters.items() if len(v) > 1}
+
+    if not candidate_clusters:
+        success("No contradictory memories found")
+        return
+
+    console.print(
+        f"Found {len(candidate_clusters)} related groups, checking for contradictions..."
+    )
+
+    llm, model = _create_llm(config)
+    confirmed: list[tuple[str, list[str]]] = []  # (current_id, outdated_ids)
+
+    for cluster_ids in candidate_clusters.values():
+        cluster_mems = [mem_by_id[mid] for mid in cluster_ids if mid in mem_by_id]
+        if len(cluster_mems) < 2:
+            continue
+
+        memory_text = "\n".join(
+            f"- {m.id[:8]}: {m.content[:200]} (type: {m.memory_type.value})"
+            for m in cluster_mems
+        )
+
+        try:
+            result = await _llm_complete(
+                llm,
+                model,
+                CONTRADICTION_PROMPT.format(memories=memory_text),
+                max_tokens=512,
+            )
+
+            if result.get("contradiction"):
+                short_to_full = {m.id[:8]: m.id for m in cluster_mems}
+                current_full = short_to_full.get(result.get("current_id", ""))
+                outdated_fulls = [
+                    short_to_full[s]
+                    for s in result.get("outdated_ids", [])
+                    if s in short_to_full
+                ]
+                if current_full and outdated_fulls:
+                    confirmed.append((current_full, outdated_fulls))
+        except Exception as e:
+            dim(f"Verification failed for cluster: {e}")
+
+    if not confirmed:
+        success("No contradictions found after LLM verification")
+        return
+
+    # Show results
+    table = Table(title="Confirmed Contradictions")
+    table.add_column("Current", style="green", max_width=50)
+    table.add_column("Outdated", style="red", max_width=50)
+
+    total_outdated = 0
+    for current_id, outdated_ids in confirmed:
+        current_mem = mem_by_id.get(current_id)
+        current_text = current_mem.content[:50] if current_mem else current_id[:8]
+        outdated_texts = []
+        for oid in outdated_ids:
+            om = mem_by_id.get(oid)
+            outdated_texts.append(om.content[:40] if om else oid[:8])
+        table.add_row(
+            f"{current_id[:8]}: {current_text}",
+            "\n".join(
+                f"{oid[:8]}: {t}"
+                for oid, t in zip(outdated_ids, outdated_texts, strict=True)
+            ),
+        )
+        total_outdated += len(outdated_ids)
+
+    console.print(table)
+    console.print(
+        f"\n[bold]{total_outdated} outdated memories to archive across "
+        f"{len(confirmed)} contradictions[/bold]"
+    )
+
+    if not _confirm_or_cancel("Archive outdated contradicted memories?", force):
+        return
+
+    store = get_memory_store()
+    all_outdated_ids = {oid for _, outdated_ids in confirmed for oid in outdated_ids}
+    await store.archive_memories(all_outdated_ids, "quality_contradicted")
+
+    success(f"Archived {total_outdated} contradicted memories")
 
 
 async def memory_doctor_fix_names(force: bool) -> None:
@@ -457,7 +633,7 @@ async def memory_doctor_fix_names(force: bool) -> None:
 
     store = get_memory_store()
     memories = await store.get_memories(
-        limit=10000, include_expired=True, include_superseded=True
+        limit=None, include_expired=True, include_superseded=True
     )
 
     to_fix = [
@@ -525,6 +701,7 @@ async def memory_doctor_fix_names(force: bool) -> None:
     if not _confirm_or_cancel("Apply name resolution?", force):
         return
 
+    to_update: list[MemoryEntry] = []
     for memory, person in fixes:
         memory.source_display_name = person.name
         # If person has a non-numeric alias, prefer it as the username
@@ -534,7 +711,9 @@ async def memory_doctor_fix_names(force: bool) -> None:
         )
         if non_numeric_alias:
             memory.source_username = non_numeric_alias
-        await store.update_memory(memory)
+        to_update.append(memory)
+    if to_update:
+        await store.batch_update_memories(to_update)
 
     success(f"Resolved {len(fixes)} numeric usernames to display names")
 
@@ -545,7 +724,7 @@ async def memory_doctor_reclassify(config: AshConfig, force: bool) -> None:
 
     store = get_memory_store()
     memories = await store.get_memories(
-        limit=10000, include_expired=True, include_superseded=True
+        limit=None, include_expired=True, include_superseded=True
     )
 
     if not memories:
@@ -630,10 +809,13 @@ async def memory_doctor_reclassify(config: AshConfig, force: bool) -> None:
     if not _confirm_or_cancel("Apply reclassifications?", force):
         return
 
+    to_update: list[MemoryEntry] = []
     for full_id, _old_type, new_type_str in changes:
         mem = mem_by_id.get(full_id)
         if mem:
             mem.memory_type = MemoryType(new_type_str)
-            await store.update_memory(mem)
+            to_update.append(mem)
+    if to_update:
+        await store.batch_update_memories(to_update)
 
     success(f"Reclassified {len(changes)} memories")

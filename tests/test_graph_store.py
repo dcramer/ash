@@ -28,6 +28,7 @@ def mock_index():
     index.search = AsyncMock(return_value=[])
     index.add_embedding = AsyncMock()
     index.delete_embedding = AsyncMock()
+    index.delete_embeddings = AsyncMock()
     return index
 
 
@@ -328,3 +329,35 @@ class TestGetContextViaGraph:
 
         # SENSITIVE memory about Bob should NOT appear (querier is not subject)
         assert len(ctx.memories) == 0
+
+
+class TestBatchMarkSuperseded:
+    """Tests for GraphStore.batch_mark_superseded."""
+
+    async def test_batch_supersedes_and_deletes_embeddings(
+        self, graph_store: GraphStore
+    ):
+        """batch_mark_superseded should mark memories and delete embeddings."""
+        m1 = await graph_store._store.add_memory(content="Old 1")
+        m2 = await graph_store._store.add_memory(content="Old 2")
+        m3 = await graph_store._store.add_memory(content="New 1")
+        m4 = await graph_store._store.add_memory(content="New 2")
+
+        marked = await graph_store.batch_mark_superseded(
+            [
+                (m1.id, m3.id),
+                (m2.id, m4.id),
+            ]
+        )
+
+        assert set(marked) == {m1.id, m2.id}
+        # Embeddings should be deleted for superseded memories
+        graph_store._index.delete_embeddings.assert_called_once_with(marked)
+        # Graph should be invalidated
+        assert graph_store._graph_built is False
+
+    async def test_empty_pairs(self, graph_store: GraphStore):
+        """Empty pairs should be a no-op."""
+        marked = await graph_store.batch_mark_superseded([])
+        assert marked == []
+        graph_store._index.delete_embeddings.assert_not_called()

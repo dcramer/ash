@@ -71,7 +71,7 @@ async def memory_remove(
                 return
 
         entries = await manager.list_memories(
-            limit=10000, include_expired=True, include_superseded=True
+            limit=None, include_expired=True, include_superseded=True
         )
         to_remove = []
 
