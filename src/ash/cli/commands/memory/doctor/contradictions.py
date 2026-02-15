@@ -20,8 +20,14 @@ if TYPE_CHECKING:
     from ash.memory.types import MemoryEntry
 
 CONTRADICTION_PROMPT = """Do any of these memories contradict each other? A contradiction \
-means two memories make conflicting claims about the same topic (e.g. "lives in Portland" \
+means two memories make conflicting claims about the SAME specific attribute (e.g. "lives in Portland" \
 vs "just moved to Denver", or "favorite color is blue" vs "favorite color is green").
+
+## NOT contradictions (do not flag these):
+- Personal opinion vs observation about others ("thinks X is ugly" vs "people love X") — both can be true
+- Facts about different aspects of the same topic ("lives in SF" and "travels often")
+- Different levels of specificity ("likes coffee" and "prefers dark roast")
+- Complementary facts ("works as engineer" and "works at Google")
 
 Memories:
 {memories}

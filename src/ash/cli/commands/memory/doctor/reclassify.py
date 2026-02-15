@@ -25,7 +25,7 @@ CLASSIFY_PROMPT = """Classify each memory into the correct type based on its con
 ## Memory Types:
 Long-lived (no automatic expiration):
 - preference: likes, dislikes, habits (e.g., "prefers dark mode", "hates olives")
-- identity: facts about the user themselves (e.g., "works as engineer", "lives in SF", "is 52 years old")
+- identity: facts about HUMAN users/people (e.g., "works as engineer", "lives in SF", "is 52 years old")
 - relationship: people in user's life (e.g., "Sarah is my wife", "boss is John")
 - knowledge: factual info about external things (e.g., "project uses Python", "company uses Slack")
 
@@ -34,6 +34,11 @@ Ephemeral (decay over time):
 - event: past occurrences with dates (e.g., "had dinner with Sarah Tuesday")
 - task: things to do (e.g., "needs to call dentist")
 - observation: fleeting observations (e.g., "seemed tired today")
+
+## Important:
+- "identity" is for facts about HUMAN users/people, not about AI/assistant capabilities
+- Facts about what the assistant can/cannot do should remain "knowledge" (e.g., "can debug using the debug skill", "cannot self-debug in real-time")
+- System meta-knowledge about tools or capabilities is "knowledge", not "identity"
 
 ## Memories to classify:
 {memories}

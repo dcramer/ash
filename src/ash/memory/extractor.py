@@ -6,9 +6,10 @@ running asynchronously after each exchange.
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ash.llm.types import Message, Role
 from ash.memory.secrets import contains_secret
@@ -107,6 +108,18 @@ Only extract facts that are COMPLETE and USEFUL on their own:
 - Reject if recalling this fact months later would be meaningless without conversation context
 - Facts must be actionable - "Spent $100 on something" is useless; "Spent $100 on a watch" is useful
 
+## CRITICAL: Content must be self-contained
+The "content" field must be understandable on its own, without the subjects array:
+- WRONG: "birthday is August 12" (whose birthday?)
+- RIGHT: "David's birthday is August 12"
+- WRONG: "Located in San Francisco" (who?)
+- RIGHT: "User is located in San Francisco" (or use their name)
+- WRONG: "Prefers dark mode" (who prefers it?)
+- RIGHT: "User prefers dark mode" (or use their name)
+
+If the fact is about the speaker and there's no name available, prefix with "User".
+If the fact is about a third party, their name MUST appear in the content.
+
 Examples of INCOHERENT facts to REJECT (confidence 0.0):
 - "Spent money on something" - what was bought?
 - "Is uncertain about the outcome" - outcome of what?
@@ -119,6 +132,8 @@ Examples of INCOHERENT facts to REJECT (confidence 0.0):
 - "Fixed some issues with the code" - WHAT issues? WHAT code?
 - "The memory system stores personal facts" - meta-knowledge about the system itself
 - "The assistant can help with scheduling" - system capability, not a user fact
+- "Expecting a child and planning to prepare" - too vague; WHAT preparations?
+- "Made improvements to the system" - meta-knowledge AND too vague
 
 If you cannot identify WHAT, WHO, or WHERE specifically, do not extract the fact.
 
@@ -264,45 +279,10 @@ class MemoryExtractor:
         if not conversation_text.strip():
             return []
 
-        # Build owner section
-        owner_section = ""
-        if owner_names:
-            names_str = ", ".join(f'"{n}"' for n in owner_names)
-            owner_section = f"""
-## The user (owner)
-The following names refer to the user themselves: {names_str}
-Facts about these names are facts about the user - use subjects: [] (empty array).
-Do NOT put the user's own name in subjects - subjects is for OTHER people in their life.
-"""
+        owner_section = self._build_owner_section(owner_names)
+        existing_section = self._build_existing_memories_section(existing_memories)
+        datetime_section = self._build_datetime_section(current_datetime)
 
-        # Build existing memories section
-        existing_section = ""
-        if existing_memories:
-            memory_list = "\n".join(f"- {m}" for m in existing_memories[:20])
-            existing_section = f"""## Already in memory (don't re-extract):
-{memory_list}
-"""
-
-        # Build datetime section for temporal context
-        datetime_section = ""
-        if current_datetime:
-            formatted_dt = current_datetime.strftime("%B %d, %Y at %H:%M")
-            weekday = current_datetime.strftime("%A")
-            datetime_section = f"""
-## Current date and time
-The current datetime is: {weekday}, {formatted_dt}
-
-CRITICAL: Convert ALL relative time references to absolute dates in extracted facts:
-- "this weekend" → "the weekend of [actual date]"
-- "next Tuesday" → "[actual weekday, Month Day, Year]"
-- "tomorrow" → "[actual Month Day, Year]"
-- "last week" → "the week of [actual date range]"
-- "in 2 days" → "[actual Month Day, Year]"
-
-This ensures memories remain meaningful when recalled later.
-"""
-
-        # Build the extraction prompt
         prompt = EXTRACTION_PROMPT.format(
             owner_section=owner_section,
             existing_memories_section=existing_section,
@@ -325,26 +305,57 @@ This ensures memories remain meaningful when recalled later.
             logger.warning("Memory extraction failed: %s", e)
             return []
 
+    @staticmethod
+    def _build_owner_section(owner_names: list[str] | None) -> str:
+        if not owner_names:
+            return ""
+        names_str = ", ".join(f'"{n}"' for n in owner_names)
+        return f"""
+## The user (owner)
+The following names refer to the user themselves: {names_str}
+Facts about these names are facts about the user - use subjects: [] (empty array).
+Do NOT put the user's own name in subjects - subjects is for OTHER people in their life.
+"""
+
+    @staticmethod
+    def _build_existing_memories_section(
+        existing_memories: list[str] | None,
+    ) -> str:
+        if not existing_memories:
+            return ""
+        memory_list = "\n".join(f"- {m}" for m in existing_memories[:20])
+        return f"""## Already in memory (don't re-extract):
+{memory_list}
+"""
+
+    @staticmethod
+    def _build_datetime_section(current_datetime: datetime | None) -> str:
+        if not current_datetime:
+            return ""
+        formatted_dt = current_datetime.strftime("%B %d, %Y at %H:%M")
+        weekday = current_datetime.strftime("%A")
+        return f"""
+## Current date and time
+The current datetime is: {weekday}, {formatted_dt}
+
+CRITICAL: Convert ALL relative time references to absolute dates in extracted facts:
+- "this weekend" \u2192 "the weekend of [actual date]"
+- "next Tuesday" \u2192 "[actual weekday, Month Day, Year]"
+- "tomorrow" \u2192 "[actual Month Day, Year]"
+- "last week" \u2192 "the week of [actual date range]"
+- "in 2 days" \u2192 "[actual Month Day, Year]"
+
+This ensures memories remain meaningful when recalled later.
+"""
+
     def _format_conversation(
         self,
         messages: list[Message],
         speaker_info: SpeakerInfo | None = None,
     ) -> str:
-        """Format messages into a readable conversation transcript.
-
-        Uses XML tags to clearly separate user and assistant messages,
-        making it unambiguous which content comes from which speaker.
-
-        Args:
-            messages: Messages to format.
-            speaker_info: Optional speaker info for user messages.
-
-        Returns:
-            Formatted conversation text with XML tags for speaker separation.
-        """
+        """Format messages into an XML-tagged transcript for the extraction prompt."""
         lines = []
         for msg in messages:
-            # Skip tool results and system messages
             if msg.role == Role.SYSTEM:
                 continue
 
@@ -352,13 +363,10 @@ This ensures memories remain meaningful when recalled later.
             if not text.strip():
                 continue
 
-            # Truncate very long messages
             if len(text) > 2000:
                 text = text[:2000] + "..."
 
-            # Use XML tags to clearly separate speakers
             if msg.role == Role.USER:
-                # Include speaker info in the content for attribution
                 if speaker_info:
                     label = speaker_info.format_label()
                     lines.append(f"<user>\n{label}: {text}\n</user>")
@@ -370,30 +378,13 @@ This ensures memories remain meaningful when recalled later.
         return "\n\n".join(lines)
 
     def _parse_extraction_response(self, response_text: str) -> list[ExtractedFact]:
-        """Parse the LLM's JSON response into ExtractedFact objects.
-
-        Args:
-            response_text: Raw response from LLM.
-
-        Returns:
-            List of parsed facts.
-        """
-        # Try to extract JSON from the response
+        """Parse the LLM's JSON response into ExtractedFact objects."""
         text = response_text.strip()
 
-        # Handle markdown code blocks
-        if text.startswith("```"):
-            # Find the JSON content between code blocks
-            lines = text.split("\n")
-            json_lines = []
-            in_block = False
-            for line in lines:
-                if line.startswith("```"):
-                    in_block = not in_block
-                    continue
-                if in_block:
-                    json_lines.append(line)
-            text = "\n".join(json_lines)
+        # Strip markdown code fences if present
+        match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
+        if match:
+            text = match.group(1).strip()
 
         try:
             data = json.loads(text)
@@ -409,71 +400,60 @@ This ensures memories remain meaningful when recalled later.
         for item in data:
             if not isinstance(item, dict):
                 continue
-
-            content = item.get("content", "").strip()
-            if not content:
-                continue
-
-            confidence = float(item.get("confidence", 0.0))
-            if confidence < self._confidence_threshold:
-                continue
-
-            # Filter out potential secrets (defense in depth)
-            if contains_secret(content):
-                logger.warning(
-                    "Filtered potential secret from extraction: %s...", content[:30]
-                )
-                continue
-
-            subjects = item.get("subjects", [])
-            if not isinstance(subjects, list):
-                subjects = []
-            subjects = [str(s) for s in subjects if s]
-
-            shared = bool(item.get("shared", False))
-
-            # Parse memory type - fall back to KNOWLEDGE for invalid values
-            type_str = item.get("type", "knowledge")
-            try:
-                memory_type = MemoryType(type_str)
-            except ValueError:
-                memory_type = MemoryType.KNOWLEDGE
-
-            # Parse speaker (who stated this fact)
-            speaker = item.get("speaker")
-            if speaker:
-                speaker = str(speaker).strip()
-                # Remove @ prefix if present
-                if speaker.startswith("@"):
-                    speaker = speaker[1:]
-            else:
-                speaker = None
-
-            # Parse sensitivity - default to None (treated as PUBLIC)
-            sensitivity_str = item.get("sensitivity")
-            sensitivity = None
-            if sensitivity_str:
-                try:
-                    sensitivity = Sensitivity(sensitivity_str)
-                except ValueError:
-                    pass  # Leave as None (default PUBLIC)
-
-            # Parse portable - default to True
-            portable = item.get("portable", True)
-            if not isinstance(portable, bool):
-                portable = True
-
-            facts.append(
-                ExtractedFact(
-                    content=content,
-                    subjects=subjects,
-                    shared=shared,
-                    confidence=confidence,
-                    memory_type=memory_type,
-                    speaker=speaker,
-                    sensitivity=sensitivity,
-                    portable=portable,
-                )
-            )
-
+            fact = self._parse_fact_item(item)
+            if fact is not None:
+                facts.append(fact)
         return facts
+
+    def _parse_fact_item(self, item: dict[str, Any]) -> ExtractedFact | None:
+        """Parse a single fact dict from the LLM response. Returns None if invalid."""
+        content = item.get("content", "").strip()
+        if not content:
+            return None
+
+        confidence = float(item.get("confidence", 0.0))
+        if confidence < self._confidence_threshold:
+            return None
+
+        if contains_secret(content):
+            logger.warning(
+                "Filtered potential secret from extraction: %s...", content[:30]
+            )
+            return None
+
+        subjects = item.get("subjects", [])
+        if not isinstance(subjects, list):
+            subjects = []
+        subjects = [str(s) for s in subjects if s]
+
+        try:
+            memory_type = MemoryType(item.get("type", "knowledge"))
+        except ValueError:
+            memory_type = MemoryType.KNOWLEDGE
+
+        speaker = item.get("speaker")
+        if speaker:
+            speaker = str(speaker).strip().lstrip("@") or None
+
+        sensitivity = None
+        sensitivity_str = item.get("sensitivity")
+        if sensitivity_str:
+            try:
+                sensitivity = Sensitivity(sensitivity_str)
+            except ValueError:
+                pass
+
+        portable = item.get("portable", True)
+        if not isinstance(portable, bool):
+            portable = True
+
+        return ExtractedFact(
+            content=content,
+            subjects=subjects,
+            shared=bool(item.get("shared", False)),
+            confidence=confidence,
+            memory_type=memory_type,
+            speaker=speaker,
+            sensitivity=sensitivity,
+            portable=portable,
+        )
