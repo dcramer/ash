@@ -1396,9 +1396,11 @@ class GraphStore:
                 if pair_key in seen:
                     continue
                 if exclude_self:
-                    a_rels = {r.relationship.lower() for r in new_person.relationships}
-                    b_rels = {r.relationship.lower() for r in existing.relationships}
-                    if "self" in a_rels or "self" in b_rels:
+                    has_self = any(
+                        r.relationship.lower() == "self"
+                        for r in (*new_person.relationships, *existing.relationships)
+                    )
+                    if has_self:
                         continue
                 if self._heuristic_match(new_person, existing):
                     seen.add(pair_key)
@@ -1407,11 +1409,60 @@ class GraphStore:
         if not candidates:
             return []
 
-        results: list[tuple[str, str]] = []
+        # Collect LLM-verified pairs
+        verified_pairs: list[tuple[PersonEntry, PersonEntry]] = []
         for person_a, person_b in candidates:
             if await self._llm_verify_same_person(person_a, person_b):
-                primary_id, secondary_id = self._pick_primary(person_a, person_b)
-                results.append((primary_id, secondary_id))
+                verified_pairs.append((person_a, person_b))
+
+        if not verified_pairs:
+            return []
+
+        # Cluster verified pairs with union-find so that 3+ duplicates
+        # produce exactly N-1 merges into a single primary, rather than
+        # redundant/conflicting pairwise merges.
+        parent: dict[str, str] = {}
+
+        def find(x: str) -> str:
+            while parent.get(x, x) != x:
+                parent[x] = parent.get(parent[x], parent[x])
+                x = parent[x]
+            return x
+
+        def union(a: str, b: str) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        person_by_id: dict[str, PersonEntry] = {}
+        for a, b in verified_pairs:
+            person_by_id[a.id] = a
+            person_by_id[b.id] = b
+            union(a.id, b.id)
+
+        # Group into clusters
+        clusters: dict[str, list[PersonEntry]] = {}
+        for pid, person in person_by_id.items():
+            root = find(pid)
+            clusters.setdefault(root, []).append(person)
+
+        # For each cluster, pick the best primary and emit N-1 merges.
+        # Sort key matches _pick_primary: most data first, then earliest.
+        _epoch = datetime.min.replace(tzinfo=UTC)
+
+        def _sort_key(p: PersonEntry) -> tuple[int, datetime]:
+            score = len(p.aliases) + len(p.relationships)
+            return (-score, p.created_at or _epoch)
+
+        results: list[tuple[str, str]] = []
+        for members in clusters.values():
+            if len(members) < 2:
+                continue
+            members.sort(key=_sort_key)
+            primary = members[0]
+            for secondary in members[1:]:
+                results.append((primary.id, secondary.id))
+
         return results
 
     # ------------------------------------------------------------------

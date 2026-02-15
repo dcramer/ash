@@ -28,6 +28,15 @@ from ash.memory.index import VectorIndex
 from ash.people.types import AliasEntry, PersonEntry, RelationshipClaim
 
 
+def _make_mock_llm(response_text: str = "YES") -> AsyncMock:
+    """Create a mock LLM that returns the given text for complete() calls."""
+    mock_llm = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.message.get_text.return_value = response_text
+    mock_llm.complete.return_value = mock_response
+    return mock_llm
+
+
 @pytest.fixture
 def mock_index():
     index = MagicMock(spec=VectorIndex)
@@ -1357,15 +1366,85 @@ class TestFindDedupCandidates:
         )
         p2 = await graph_store.create_person(created_by="user-2", name="David")
 
-        mock_llm = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.message.get_text.return_value = "YES"
-        mock_llm.complete.return_value = mock_response
-        graph_store.set_llm(mock_llm, "test-model")
+        graph_store.set_llm(_make_mock_llm("YES"), "test-model")
 
         # Without exclude_self (default=False), should find candidates
         result = await graph_store.find_dedup_candidates([p2.id])
         assert len(result) == 1
+
+    async def test_three_duplicates_cluster_into_minimal_merges(
+        self, graph_store: GraphStore
+    ):
+        """Three records for the same person should produce exactly 2 merges
+        into a single primary, not 3 redundant pairwise merges."""
+        p1 = await graph_store.create_person(created_by="user-1", name="Evan Purkhiser")
+        p2 = await graph_store.create_person(created_by="user-1", name="Evan Purkhiser")
+        p3 = await graph_store.create_person(
+            created_by="user-1",
+            name="Evan Purkhiser",
+            relationship="coworker",
+        )
+
+        graph_store.set_llm(_make_mock_llm("YES"), "test-model")
+
+        result = await graph_store.find_dedup_candidates([p1.id, p2.id, p3.id])
+
+        # Should produce exactly 2 merges (N-1 for a cluster of 3)
+        assert len(result) == 2
+        # All merges should target the same primary (p3 has most data)
+        primaries = {r[0] for r in result}
+        assert primaries == {p3.id}
+        # Secondaries should be the other two
+        secondaries = {r[1] for r in result}
+        assert secondaries == {p1.id, p2.id}
+
+    async def test_four_duplicates_cluster_into_minimal_merges(
+        self, graph_store: GraphStore
+    ):
+        """Four records for the same person should produce exactly 3 merges."""
+        p1 = await graph_store.create_person(created_by="user-1", name="Sukhpreet")
+        p2 = await graph_store.create_person(
+            created_by="user-1", name="Sukhpreet Sembhi"
+        )
+        p3 = await graph_store.create_person(created_by="user-1", name="Sukhpreet")
+        p4 = await graph_store.create_person(
+            created_by="user-1",
+            name="Sukhpreet Sembhi",
+            relationship="friend",
+        )
+
+        graph_store.set_llm(_make_mock_llm("YES"), "test-model")
+
+        result = await graph_store.find_dedup_candidates([p1.id, p2.id, p3.id, p4.id])
+
+        # Exactly 3 merges (N-1 for cluster of 4), all into same primary
+        assert len(result) == 3
+        primaries = {r[0] for r in result}
+        assert primaries == {p4.id}
+
+    async def test_two_separate_clusters(self, graph_store: GraphStore):
+        """Two distinct groups of duplicates should produce independent clusters."""
+        # Cluster A: two Sarahs
+        sa1 = await graph_store.create_person(
+            created_by="user-1", name="Sarah", relationship="wife"
+        )
+        sa2 = await graph_store.create_person(created_by="user-1", name="Sarah Jane")
+        # Cluster B: two Bobs
+        sb1 = await graph_store.create_person(
+            created_by="user-1", name="Bob", relationship="brother"
+        )
+        sb2 = await graph_store.create_person(created_by="user-1", name="Bobby")
+
+        graph_store.set_llm(_make_mock_llm("YES"), "test-model")
+
+        result = await graph_store.find_dedup_candidates(
+            [sa1.id, sa2.id, sb1.id, sb2.id]
+        )
+
+        # Two clusters of 2 -> 2 merges total
+        assert len(result) == 2
+        primaries = {r[0] for r in result}
+        assert primaries == {sa1.id, sb1.id}
 
 
 class TestAutoRemapOnMerge:

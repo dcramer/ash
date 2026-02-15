@@ -537,6 +537,10 @@ async def _doctor_check_orphans(graph_store: GraphStore, force: bool) -> None:
         # Skip recently created
         if person.created_at and person.created_at > cutoff:
             continue
+        # People with relationships or aliases have meaningful data even
+        # without memories — they're known contacts, not orphans.
+        if person.relationships or person.aliases:
+            continue
         memory_ids = graph.memories_about(person.id)
         user_links = graph.neighbors(person.id, EdgeType.IS_PERSON, "incoming")
         if not memory_ids and not user_links:
