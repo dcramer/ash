@@ -28,17 +28,19 @@ class MemoryOpsMixin:
     ) -> str | None:
         if not person_ids:
             return None
+        names: list[str] = []
         for pid in person_ids:
             if pid in self._person_name_cache:
-                return self._person_name_cache[pid]
+                names.append(self._person_name_cache[pid])
+                continue
             try:
                 person = await self.get_person(pid)
                 if person:
                     self._person_name_cache[pid] = person.name
-                    return person.name
+                    names.append(person.name)
             except Exception:
                 logger.debug("Failed to resolve person name for %s", pid)
-        return None
+        return ", ".join(names) if names else None
 
     async def add_memory(
         self: GraphStore,

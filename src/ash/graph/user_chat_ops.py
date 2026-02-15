@@ -28,50 +28,51 @@ class UserChatOpsMixin:
         person_id: str | None = None,
     ) -> UserEntry:
         """Upsert a user node. Creates if not found, updates if changed."""
-        users = await self._ensure_users_loaded()
-        now = datetime.now(UTC)
+        async with self._user_write_lock:
+            users = await self._ensure_users_loaded()
+            now = datetime.now(UTC)
 
-        for user in users:
-            if user.provider == provider and user.provider_id == provider_id:
-                changed = False
-                if username is not None and user.username != username:
-                    user.username = username
-                    changed = True
-                if display_name is not None and user.display_name != display_name:
-                    user.display_name = display_name
-                    changed = True
-                if person_id is not None and user.person_id != person_id:
-                    user.person_id = person_id
-                    changed = True
-                if changed:
-                    user.updated_at = now
-                    await self._user_jsonl.rewrite(users)
-                    self._invalidate_users_cache()
-                return user
+            for user in users:
+                if user.provider == provider and user.provider_id == provider_id:
+                    changed = False
+                    if username is not None and user.username != username:
+                        user.username = username
+                        changed = True
+                    if display_name is not None and user.display_name != display_name:
+                        user.display_name = display_name
+                        changed = True
+                    if person_id is not None and user.person_id != person_id:
+                        user.person_id = person_id
+                        changed = True
+                    if changed:
+                        user.updated_at = now
+                        await self._user_jsonl.rewrite(users)
+                        self._invalidate_users_cache()
+                    return user
 
-        # Create new user
-        entry = UserEntry(
-            id=str(uuid.uuid4()),
-            version=1,
-            provider=provider,
-            provider_id=provider_id,
-            username=username,
-            display_name=display_name,
-            person_id=person_id,
-            created_at=now,
-            updated_at=now,
-        )
-        await self._user_jsonl.append(entry)
-        self._invalidate_users_cache()
-        logger.debug(
-            "user_created",
-            extra={
-                "user_id": entry.id,
-                "provider": provider,
-                "provider_id": provider_id,
-            },
-        )
-        return entry
+            # Create new user
+            entry = UserEntry(
+                id=str(uuid.uuid4()),
+                version=1,
+                provider=provider,
+                provider_id=provider_id,
+                username=username,
+                display_name=display_name,
+                person_id=person_id,
+                created_at=now,
+                updated_at=now,
+            )
+            await self._user_jsonl.append(entry)
+            self._invalidate_users_cache()
+            logger.debug(
+                "user_created",
+                extra={
+                    "user_id": entry.id,
+                    "provider": provider,
+                    "provider_id": provider_id,
+                },
+            )
+            return entry
 
     async def get_user(self: GraphStore, user_id: str) -> UserEntry | None:
         users = await self._ensure_users_loaded()
@@ -132,45 +133,46 @@ class UserChatOpsMixin:
         title: str | None = None,
     ) -> ChatEntry:
         """Upsert a chat node. Creates if not found, updates if changed."""
-        chats = await self._ensure_chats_loaded()
-        now = datetime.now(UTC)
+        async with self._chat_write_lock:
+            chats = await self._ensure_chats_loaded()
+            now = datetime.now(UTC)
 
-        for chat in chats:
-            if chat.provider == provider and chat.provider_id == provider_id:
-                changed = False
-                if chat_type is not None and chat.chat_type != chat_type:
-                    chat.chat_type = chat_type
-                    changed = True
-                if title is not None and chat.title != title:
-                    chat.title = title
-                    changed = True
-                if changed:
-                    chat.updated_at = now
-                    await self._chat_jsonl.rewrite(chats)
-                    self._invalidate_chats_cache()
-                return chat
+            for chat in chats:
+                if chat.provider == provider and chat.provider_id == provider_id:
+                    changed = False
+                    if chat_type is not None and chat.chat_type != chat_type:
+                        chat.chat_type = chat_type
+                        changed = True
+                    if title is not None and chat.title != title:
+                        chat.title = title
+                        changed = True
+                    if changed:
+                        chat.updated_at = now
+                        await self._chat_jsonl.rewrite(chats)
+                        self._invalidate_chats_cache()
+                    return chat
 
-        entry = ChatEntry(
-            id=str(uuid.uuid4()),
-            version=1,
-            provider=provider,
-            provider_id=provider_id,
-            chat_type=chat_type,
-            title=title,
-            created_at=now,
-            updated_at=now,
-        )
-        await self._chat_jsonl.append(entry)
-        self._invalidate_chats_cache()
-        logger.debug(
-            "chat_created",
-            extra={
-                "chat_id": entry.id,
-                "provider": provider,
-                "provider_id": provider_id,
-            },
-        )
-        return entry
+            entry = ChatEntry(
+                id=str(uuid.uuid4()),
+                version=1,
+                provider=provider,
+                provider_id=provider_id,
+                chat_type=chat_type,
+                title=title,
+                created_at=now,
+                updated_at=now,
+            )
+            await self._chat_jsonl.append(entry)
+            self._invalidate_chats_cache()
+            logger.debug(
+                "chat_created",
+                extra={
+                    "chat_id": entry.id,
+                    "provider": provider,
+                    "provider_id": provider_id,
+                },
+            )
+            return entry
 
     async def get_chat(self: GraphStore, chat_id: str) -> ChatEntry | None:
         chats = await self._ensure_chats_loaded()

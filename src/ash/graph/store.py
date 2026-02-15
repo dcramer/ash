@@ -13,6 +13,7 @@ Implementation is split across focused mixin modules:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -87,6 +88,12 @@ class GraphStore(
 
         self._graph = GraphIndex()
         self._graph_built: bool = False
+
+        # Write locks for JSONL read-modify-write cycles
+        self._people_write_lock = asyncio.Lock()
+        self._user_write_lock = asyncio.Lock()
+        self._chat_write_lock = asyncio.Lock()
+        self._self_person_lock = asyncio.Lock()
 
         # Caches
         self._people_cache: list[PersonEntry] | None = None

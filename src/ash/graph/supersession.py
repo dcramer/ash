@@ -77,6 +77,7 @@ class SupersessionMixin:
             )
             response = await self._llm.complete(
                 messages=[Message(role=Role.USER, content=prompt)],
+                model=self._llm_model,
                 max_tokens=10,
                 temperature=0.0,
             )

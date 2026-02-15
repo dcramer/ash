@@ -1,20 +1,10 @@
 """Public types for the people subsystem."""
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
-
-def _parse_datetime(s: str | None) -> datetime | None:
-    """Parse ISO datetime string, handling Z suffix and ensuring timezone awareness."""
-    if not s:
-        return None
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    dt = datetime.fromisoformat(s)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt
+from ash.memory.types import _parse_datetime as _parse_datetime
 
 
 @dataclass

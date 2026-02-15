@@ -197,11 +197,13 @@ class TestPersonCRUD:
         updated = await graph_store.update_person(
             person_id=person.id,
             name="Sara",
-            relationship="wife",
         )
-
         assert updated is not None
         assert updated.name == "Sara"
+
+        # Use dedicated add_relationship for relationship changes
+        updated = await graph_store.add_relationship(person.id, "wife")
+        assert updated is not None
         assert len(updated.relationships) == 1
         assert updated.relationships[0].relationship == "wife"
 
@@ -760,15 +762,15 @@ class TestParsePersonReference:
 
 
 class TestUpdateProvenance:
-    """Tests for update_person() provenance tracking."""
+    """Tests for add_relationship/add_alias provenance tracking."""
 
-    async def test_update_relationship_with_provenance(self, graph_store: GraphStore):
+    async def test_add_relationship_with_provenance(self, graph_store: GraphStore):
         person = await graph_store.create_person(created_by="user-1", name="Sarah")
 
-        updated = await graph_store.update_person(
-            person_id=person.id,
-            relationship="wife",
-            updated_by="dcramer",
+        updated = await graph_store.add_relationship(
+            person.id,
+            "wife",
+            stated_by="dcramer",
         )
 
         assert updated is not None
@@ -778,14 +780,11 @@ class TestUpdateProvenance:
         assert rc.stated_by == "dcramer"
         assert rc.created_at is not None
 
-    async def test_update_aliases_with_provenance(self, graph_store: GraphStore):
+    async def test_add_aliases_with_provenance(self, graph_store: GraphStore):
         person = await graph_store.create_person(created_by="user-1", name="Sarah")
 
-        updated = await graph_store.update_person(
-            person_id=person.id,
-            aliases=["sksembhi", "honey"],
-            updated_by="dcramer",
-        )
+        for alias in ["sksembhi", "honey"]:
+            updated = await graph_store.add_alias(person.id, alias, added_by="dcramer")
 
         assert updated is not None
         assert len(updated.aliases) == 2
@@ -793,14 +792,11 @@ class TestUpdateProvenance:
             assert alias.added_by == "dcramer"
             assert alias.created_at is not None
 
-    async def test_update_without_updated_by(self, graph_store: GraphStore):
-        """Provenance fields are None when updated_by is not provided."""
+    async def test_add_relationship_without_stated_by(self, graph_store: GraphStore):
+        """Provenance fields are None when stated_by is not provided."""
         person = await graph_store.create_person(created_by="user-1", name="Sarah")
 
-        updated = await graph_store.update_person(
-            person_id=person.id,
-            relationship="wife",
-        )
+        updated = await graph_store.add_relationship(person.id, "wife")
 
         assert updated is not None
         assert updated.relationships[0].stated_by is None

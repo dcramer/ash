@@ -492,58 +492,59 @@ class Agent:
         if not self._people:
             return
 
-        try:
-            # Try display name first, then username
-            existing = await self._people.find_person(display_name)
-            if not existing and username:
-                existing = await self._people.find_person(username)
-
-            if existing:
-                is_self = any(
-                    rc.relationship == "self" for rc in existing.relationships
-                )
-                if not is_self:
-                    await self._people.add_relationship(
-                        existing.id, "self", stated_by=username
-                    )
-                await self._sync_person_details(
-                    existing, display_name, username, user_id
-                )
-                return
-
-            # No match found -- create new self-person
-            # When no username, use numeric user_id as alias to reconnect the graph
-            aliases = [username] if username else [user_id]
-            new_person = await self._people.create_person(
-                created_by=user_id,
-                name=display_name,
-                relationship="self",
-                aliases=aliases,
-                relationship_stated_by=username or None,
-            )
-            logger.debug(
-                "Created self-person for user",
-                extra={
-                    "user_id": user_id,
-                    "person_name": display_name,
-                    "username": username,
-                },
-            )
-
-            # Dedup: merge new self-person against any existing person with same name.
-            # Use exclude_self=False because the new person always has "self" relationship
-            # and would be skipped otherwise. _heuristic_match still skips pairs where
-            # *both* are self-persons (two different users' self-records).
+        async with self._people._self_person_lock:
             try:
-                candidates = await self._people.find_dedup_candidates(
-                    [new_person.id], exclude_self=False
+                # Try display name first, then username
+                existing = await self._people.find_person(display_name)
+                if not existing and username:
+                    existing = await self._people.find_person(username)
+
+                if existing:
+                    is_self = any(
+                        rc.relationship == "self" for rc in existing.relationships
+                    )
+                    if not is_self:
+                        await self._people.add_relationship(
+                            existing.id, "self", stated_by=username
+                        )
+                    await self._sync_person_details(
+                        existing, display_name, username, user_id
+                    )
+                    return
+
+                # No match found -- create new self-person
+                # When no username, use numeric user_id as alias to reconnect the graph
+                aliases = [username] if username else [user_id]
+                new_person = await self._people.create_person(
+                    created_by=user_id,
+                    name=display_name,
+                    relationship="self",
+                    aliases=aliases,
+                    relationship_stated_by=username or None,
                 )
-                for primary_id, secondary_id in candidates:
-                    await self._people.merge_people(primary_id, secondary_id)
+                logger.debug(
+                    "Created self-person for user",
+                    extra={
+                        "user_id": user_id,
+                        "person_name": display_name,
+                        "username": username,
+                    },
+                )
+
+                # Dedup: merge new self-person against any existing person with same name.
+                # Use exclude_self=False because the new person always has "self" relationship
+                # and would be skipped otherwise. _heuristic_match still skips pairs where
+                # *both* are self-persons (two different users' self-records).
+                try:
+                    candidates = await self._people.find_dedup_candidates(
+                        [new_person.id], exclude_self=False
+                    )
+                    for primary_id, secondary_id in candidates:
+                        await self._people.merge_people(primary_id, secondary_id)
+                except Exception:
+                    logger.warning("Self-person dedup failed", exc_info=True)
             except Exception:
-                logger.warning("Self-person dedup failed", exc_info=True)
-        except Exception:
-            logger.warning("Failed to ensure self-person", exc_info=True)
+                logger.warning("Failed to ensure self-person", exc_info=True)
 
     async def _sync_person_details(
         self,
@@ -567,7 +568,7 @@ class Agent:
                 person_id=person.id, name=display_name, updated_by=user_id
             )
         if username:
-            aliases_lower = [a.value.lower() for a in (person.aliases or [])]
+            aliases_lower = [a.value.lower() for a in person.aliases]
             if username.lower() not in aliases_lower:
                 await self._people.add_alias(person.id, username, user_id)
 

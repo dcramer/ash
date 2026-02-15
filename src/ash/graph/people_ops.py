@@ -15,6 +15,9 @@ from ash.people.types import (
     RelationshipClaim,
 )
 
+# Sentinel for sort key when created_at is None
+_EPOCH = datetime.min.replace(tzinfo=UTC)
+
 if TYPE_CHECKING:
     from ash.graph.store import GraphStore
 
@@ -167,35 +170,23 @@ class PeopleOpsMixin:
         self: GraphStore,
         person_id: str,
         name: str | None = None,
-        relationship: str | None = None,
-        aliases: list[str] | None = None,
         updated_by: str | None = None,
         clear_merged: bool = False,
     ) -> PersonEntry | None:
-        people = await self._ensure_people_loaded()
-        person = self._find_person_by_id(people, person_id)
-        if not person:
-            return None
-        now = datetime.now(UTC)
-        if name is not None:
-            person.name = name
-        if relationship is not None:
-            person.relationships = [
-                RelationshipClaim(
-                    relationship=relationship, stated_by=updated_by, created_at=now
-                )
-            ]
-        if aliases is not None:
-            person.aliases = [
-                AliasEntry(value=a, added_by=updated_by, created_at=now)
-                for a in aliases
-            ]
-        if clear_merged:
-            person.merged_into = None
-        person.updated_at = now
-        await self._people_jsonl.rewrite(people)
-        self._invalidate_people_cache()
-        return person
+        async with self._people_write_lock:
+            people = await self._ensure_people_loaded()
+            person = self._find_person_by_id(people, person_id)
+            if not person:
+                return None
+            now = datetime.now(UTC)
+            if name is not None:
+                person.name = name
+            if clear_merged:
+                person.merged_into = None
+            person.updated_at = now
+            await self._people_jsonl.rewrite(people)
+            self._invalidate_people_cache()
+            return person
 
     async def add_alias(
         self: GraphStore,
@@ -203,19 +194,22 @@ class PeopleOpsMixin:
         alias: str,
         added_by: str | None = None,
     ) -> PersonEntry | None:
-        people = await self._ensure_people_loaded()
-        person = self._find_person_by_id(people, person_id)
-        if not person:
-            return None
-        existing_values = [a.value.lower() for a in person.aliases]
-        if alias.lower() not in existing_values:
-            person.aliases.append(
-                AliasEntry(value=alias, added_by=added_by, created_at=datetime.now(UTC))
-            )
-            person.updated_at = datetime.now(UTC)
-            await self._people_jsonl.rewrite(people)
-            self._invalidate_people_cache()
-        return person
+        async with self._people_write_lock:
+            people = await self._ensure_people_loaded()
+            person = self._find_person_by_id(people, person_id)
+            if not person:
+                return None
+            existing_values = [a.value.lower() for a in person.aliases]
+            if alias.lower() not in existing_values:
+                person.aliases.append(
+                    AliasEntry(
+                        value=alias, added_by=added_by, created_at=datetime.now(UTC)
+                    )
+                )
+                person.updated_at = datetime.now(UTC)
+                await self._people_jsonl.rewrite(people)
+                self._invalidate_people_cache()
+            return person
 
     async def add_relationship(
         self: GraphStore,
@@ -223,89 +217,95 @@ class PeopleOpsMixin:
         relationship: str,
         stated_by: str | None = None,
     ) -> PersonEntry | None:
-        people = await self._ensure_people_loaded()
-        person = self._find_person_by_id(people, person_id)
-        if not person:
-            return None
-        existing_rels = [r.relationship.lower() for r in person.relationships]
-        if relationship.lower() not in existing_rels:
-            person.relationships.append(
-                RelationshipClaim(
-                    relationship=relationship,
-                    stated_by=stated_by,
-                    created_at=datetime.now(UTC),
+        async with self._people_write_lock:
+            people = await self._ensure_people_loaded()
+            person = self._find_person_by_id(people, person_id)
+            if not person:
+                return None
+            existing_rels = [r.relationship.lower() for r in person.relationships]
+            if relationship.lower() not in existing_rels:
+                person.relationships.append(
+                    RelationshipClaim(
+                        relationship=relationship,
+                        stated_by=stated_by,
+                        created_at=datetime.now(UTC),
+                    )
                 )
-            )
-            person.updated_at = datetime.now(UTC)
-            await self._people_jsonl.rewrite(people)
-            self._invalidate_people_cache()
-        return person
+                person.updated_at = datetime.now(UTC)
+                await self._people_jsonl.rewrite(people)
+                self._invalidate_people_cache()
+            return person
 
     async def delete_person(self: GraphStore, person_id: str) -> bool:
-        people = await self._ensure_people_loaded()
-        person = self._find_person_by_id(people, person_id)
-        if not person:
-            return False
-        people.remove(person)
-        for p in people:
-            if p.merged_into == person_id:
-                p.merged_into = None
-        await self._people_jsonl.rewrite(people)
-        self._invalidate_people_cache()
-        logger.debug(
-            "person_deleted", extra={"person_id": person_id, "person_name": person.name}
-        )
-        return True
+        async with self._people_write_lock:
+            people = await self._ensure_people_loaded()
+            person = self._find_person_by_id(people, person_id)
+            if not person:
+                return False
+            people.remove(person)
+            for p in people:
+                if p.merged_into == person_id:
+                    p.merged_into = None
+            await self._people_jsonl.rewrite(people)
+            self._invalidate_people_cache()
+            logger.debug(
+                "person_deleted",
+                extra={"person_id": person_id, "person_name": person.name},
+            )
+            return True
 
     async def merge_people(
         self: GraphStore,
         primary_id: str,
         secondary_id: str,
     ) -> PersonEntry | None:
-        people = await self._ensure_people_loaded()
-        primary = self._find_person_by_id(people, primary_id)
-        secondary = self._find_person_by_id(people, secondary_id)
-        if not primary or not secondary:
-            return None
-        if secondary.merged_into:
-            logger.debug(
-                "Skipping merge: secondary %s already merged into %s",
-                secondary_id,
-                secondary.merged_into,
-            )
-            return None
-
-        existing_values = {a.value.lower() for a in primary.aliases}
-        for alias in secondary.aliases:
-            if alias.value.lower() not in existing_values:
-                primary.aliases.append(alias)
-                existing_values.add(alias.value.lower())
-        if (
-            secondary.name.lower() != primary.name.lower()
-            and secondary.name.lower() not in existing_values
-        ):
-            primary.aliases.append(
-                AliasEntry(
-                    value=secondary.name, added_by=None, created_at=datetime.now(UTC)
+        async with self._people_write_lock:
+            people = await self._ensure_people_loaded()
+            primary = self._find_person_by_id(people, primary_id)
+            secondary = self._find_person_by_id(people, secondary_id)
+            if not primary or not secondary:
+                return None
+            if secondary.merged_into:
+                logger.debug(
+                    "Skipping merge: secondary %s already merged into %s",
+                    secondary_id,
+                    secondary.merged_into,
                 )
-            )
-        existing_rels = {r.relationship.lower() for r in primary.relationships}
-        for rc in secondary.relationships:
-            if rc.relationship.lower() not in existing_rels:
-                primary.relationships.append(rc)
-                existing_rels.add(rc.relationship.lower())
+                return None
 
-        secondary.merged_into = primary_id
-        primary.updated_at = datetime.now(UTC)
-        await self._people_jsonl.rewrite(people)
-        self._invalidate_people_cache()
+            existing_values = {a.value.lower() for a in primary.aliases}
+            for alias in secondary.aliases:
+                if alias.value.lower() not in existing_values:
+                    primary.aliases.append(alias)
+                    existing_values.add(alias.value.lower())
+            if (
+                secondary.name.lower() != primary.name.lower()
+                and secondary.name.lower() not in existing_values
+            ):
+                primary.aliases.append(
+                    AliasEntry(
+                        value=secondary.name,
+                        added_by=None,
+                        created_at=datetime.now(UTC),
+                    )
+                )
+            existing_rels = {r.relationship.lower() for r in primary.relationships}
+            for rc in secondary.relationships:
+                if rc.relationship.lower() not in existing_rels:
+                    primary.relationships.append(rc)
+                    existing_rels.add(rc.relationship.lower())
+
+            secondary.merged_into = primary_id
+            primary.updated_at = datetime.now(UTC)
+            await self._people_jsonl.rewrite(people)
+            self._invalidate_people_cache()
 
         logger.debug(
             "person_merged",
             extra={"primary_id": primary_id, "secondary_id": secondary_id},
         )
 
-        # Auto-remap memory references
+        # Auto-remap memory references (outside lock — uses FileMemoryStore's own lock)
         try:
             remapped = await self.remap_subject_person_id(secondary_id, primary_id)
             if remapped:
@@ -461,18 +461,11 @@ class PeopleOpsMixin:
             clusters.setdefault(root, []).append(person)
 
         # For each cluster, pick the best primary and emit N-1 merges.
-        # Sort key matches _pick_primary: most data first, then earliest.
-        _epoch = datetime.min.replace(tzinfo=UTC)
-
-        def _sort_key(p: PersonEntry) -> tuple[int, datetime]:
-            score = len(p.aliases) + len(p.relationships)
-            return (-score, p.created_at or _epoch)
-
         results: list[tuple[str, str]] = []
         for members in clusters.values():
             if len(members) < 2:
                 continue
-            members.sort(key=_sort_key)
+            members.sort(key=self._primary_sort_key)
             primary = members[0]
             for secondary in members[1:]:
                 results.append((primary.id, secondary.id))
@@ -559,14 +552,14 @@ class PeopleOpsMixin:
             return False
 
     @staticmethod
+    def _primary_sort_key(p: PersonEntry) -> tuple[int, datetime]:
+        """Sort key for picking merge primary: most data first, then earliest."""
+        score = len(p.aliases) + len(p.relationships)
+        return (-score, p.created_at or _EPOCH)
+
+    @staticmethod
     def _pick_primary(a: PersonEntry, b: PersonEntry) -> tuple[str, str]:
-        _epoch = datetime.min.replace(tzinfo=UTC)
-
-        def _sort_key(p: PersonEntry) -> tuple[int, datetime]:
-            score = len(p.aliases) + len(p.relationships)
-            return (-score, p.created_at or _epoch)
-
-        first, second = sorted([a, b], key=_sort_key)
+        first, second = sorted([a, b], key=PeopleOpsMixin._primary_sort_key)
         return first.id, second.id
 
     async def _fuzzy_find(
@@ -640,7 +633,9 @@ class PeopleOpsMixin:
                 if name:
                     return name, relationship
             return relationship.title(), relationship
-        return ref_lower.title(), None
+        # Clean username-like references: strip trailing digits, replace underscores
+        cleaned = re.sub(r"\d+$", "", ref_lower).replace("_", " ").strip()
+        return (cleaned or ref_lower).title(), None
 
     @staticmethod
     def _extract_name_from_content(content: str, relationship: str) -> str | None:
