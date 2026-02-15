@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -10,43 +9,14 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
-from ash.store.types import ChatEntry, UserEntry, _parse_datetime
+from ash.store.mappers import row_to_chat as _row_to_chat
+from ash.store.mappers import row_to_user as _row_to_user
+from ash.store.types import ChatEntry, UserEntry
 
 if TYPE_CHECKING:
     from ash.store.store import Store
 
 logger = logging.getLogger(__name__)
-
-
-def _row_to_user(row) -> UserEntry:
-    """Convert a SQLite row to a UserEntry."""
-    return UserEntry(
-        id=row.id,
-        version=row.version,
-        provider=row.provider,
-        provider_id=row.provider_id,
-        username=row.username,
-        display_name=row.display_name,
-        person_id=row.person_id,
-        created_at=_parse_datetime(row.created_at),
-        updated_at=_parse_datetime(row.updated_at),
-        metadata=json.loads(row.metadata) if row.metadata else None,
-    )
-
-
-def _row_to_chat(row) -> ChatEntry:
-    """Convert a SQLite row to a ChatEntry."""
-    return ChatEntry(
-        id=row.id,
-        version=row.version,
-        provider=row.provider,
-        provider_id=row.provider_id,
-        chat_type=row.chat_type,
-        title=row.title,
-        created_at=_parse_datetime(row.created_at),
-        updated_at=_parse_datetime(row.updated_at),
-        metadata=json.loads(row.metadata) if row.metadata else None,
-    )
 
 
 class UserChatOpsMixin:

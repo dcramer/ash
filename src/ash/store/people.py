@@ -11,11 +11,13 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
+from ash.store.mappers import row_to_person as _row_to_person
 from ash.store.types import (
     AliasEntry,
     PersonEntry,
     PersonResolutionResult,
     RelationshipClaim,
+    _parse_datetime,
 )
 
 # Sentinel for sort key when created_at is None
@@ -78,26 +80,6 @@ RELATIONSHIP_TERMS = {
 }
 
 
-def _row_to_person(
-    row, aliases: list[AliasEntry], relationships: list[RelationshipClaim]
-) -> PersonEntry:
-    """Convert a SQLite row + loaded sub-records to a PersonEntry."""
-    from ash.store.types import _parse_datetime
-
-    return PersonEntry(
-        id=row.id,
-        version=row.version,
-        created_by=row.created_by,
-        name=row.name,
-        relationships=relationships,
-        aliases=aliases,
-        merged_into=row.merged_into,
-        created_at=_parse_datetime(row.created_at),
-        updated_at=_parse_datetime(row.updated_at),
-        metadata=json.loads(row.metadata) if row.metadata else None,
-    )
-
-
 async def _load_person_full(session, person_id: str) -> PersonEntry | None:
     """Load a person with aliases and relationships."""
     result = await session.execute(
@@ -114,8 +96,6 @@ async def _load_person_full(session, person_id: str) -> PersonEntry | None:
 
 
 async def _load_aliases(session, person_id: str) -> list[AliasEntry]:
-    from ash.store.types import _parse_datetime
-
     result = await session.execute(
         text(
             "SELECT value, added_by, created_at FROM person_aliases WHERE person_id = :id"
@@ -133,8 +113,6 @@ async def _load_aliases(session, person_id: str) -> list[AliasEntry]:
 
 
 async def _load_relationships(session, person_id: str) -> list[RelationshipClaim]:
-    from ash.store.types import _parse_datetime
-
     result = await session.execute(
         text(
             "SELECT relationship, stated_by, created_at FROM person_relationships WHERE person_id = :id"

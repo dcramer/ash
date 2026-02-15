@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import text
 
 from ash.memory.secrets import contains_secret
+from ash.store.mappers import row_to_memory as _row_to_memory
 from ash.store.types import (
     EPHEMERAL_TYPES,
     TYPE_TTL,
@@ -25,44 +26,6 @@ if TYPE_CHECKING:
     from ash.store.store import Store
 
 logger = logging.getLogger(__name__)
-
-
-def _row_to_memory(row) -> MemoryEntry:
-    """Convert a SQLite row to a MemoryEntry."""
-    return MemoryEntry(
-        id=row.id,
-        version=row.version,
-        content=row.content,
-        memory_type=MemoryType(row.memory_type),
-        created_at=_parse_dt(row.created_at),
-        observed_at=_parse_dt(row.observed_at),
-        owner_user_id=row.owner_user_id,
-        chat_id=row.chat_id,
-        subject_person_ids=[],  # Loaded separately from memory_subjects
-        source=row.source,
-        source_username=row.source_username,
-        source_display_name=row.source_display_name,
-        source_session_id=row.source_session_id,
-        source_message_id=row.source_message_id,
-        extraction_confidence=row.extraction_confidence,
-        sensitivity=Sensitivity(row.sensitivity) if row.sensitivity else None,
-        portable=bool(row.portable),
-        expires_at=_parse_dt(row.expires_at),
-        superseded_at=_parse_dt(row.superseded_at),
-        superseded_by_id=row.superseded_by_id,
-        archived_at=_parse_dt(row.archived_at),
-        archive_reason=row.archive_reason,
-        metadata=json.loads(row.metadata) if row.metadata else None,
-    )
-
-
-def _parse_dt(val: str | None) -> datetime | None:
-    """Parse ISO datetime string from SQLite."""
-    if not val:
-        return None
-    from ash.store.types import _parse_datetime
-
-    return _parse_datetime(val)
 
 
 async def _load_subjects(session, memory_id: str) -> list[str]:
