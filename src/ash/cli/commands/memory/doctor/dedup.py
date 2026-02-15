@@ -29,11 +29,9 @@ Return JSON: {{"duplicates": true, "canonical_id": "<id>", "duplicate_ids": ["<i
 If NOT duplicates, return: {{"duplicates": false}}"""
 
 
-async def memory_doctor_dedup(
-    graph_store: Store, config: AshConfig, force: bool
-) -> None:
+async def memory_doctor_dedup(store: Store, config: AshConfig, force: bool) -> None:
     """Find and merge semantically duplicate memories."""
-    memories = await graph_store.list_memories(limit=None, include_expired=True)
+    memories = await store.list_memories(limit=None, include_expired=True)
 
     if not memories:
         warning("No memories to deduplicate")
@@ -68,7 +66,7 @@ async def memory_doctor_dedup(
 
         for memory in memories:
             try:
-                results = await graph_store.search(memory.content, limit=10)
+                results = await store.search(memory.content, limit=10)
                 for result in results:
                     if result.id == memory.id:
                         continue
@@ -177,6 +175,6 @@ async def memory_doctor_dedup(
         for canonical_id, dup_ids in confirmed
         for dup_id in dup_ids
     ]
-    await graph_store.batch_mark_superseded(pairs)
+    await store.batch_mark_superseded(pairs)
 
     success(f"Superseded {total_dups} duplicate memories")

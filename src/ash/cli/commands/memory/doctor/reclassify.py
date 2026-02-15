@@ -50,12 +50,12 @@ If all memories are correctly classified, return: {{}}"""
 
 
 async def memory_doctor_reclassify(
-    graph_store: Store, config: AshConfig, force: bool
+    store: Store, config: AshConfig, force: bool
 ) -> None:
     """Reclassify KNOWLEDGE-type memories using LLM analysis."""
     from ash.store.types import MemoryType
 
-    memories = await graph_store.list_memories(
+    memories = await store.list_memories(
         limit=None, include_expired=True, include_superseded=True
     )
 
@@ -147,6 +147,6 @@ async def memory_doctor_reclassify(
             mem.memory_type = MemoryType(new_type_str)
             to_update.append(mem)
     if to_update:
-        await graph_store.batch_update_memories(to_update)
+        await store.batch_update_memories(to_update)
 
     success(f"Reclassified {len(changes)} memories")

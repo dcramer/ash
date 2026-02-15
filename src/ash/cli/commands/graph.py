@@ -279,11 +279,18 @@ async def _graph_stats(store: Store) -> None:
     users = await store.list_users()
     chats = await store.list_chats()
     people = await store.list_people()
-    memories = await store.list_memories(limit=100000)
 
-    # Count edges via SQL
+    # Count nodes and edges via SQL
+    node_counts: dict[str, int] = {}
     edge_counts: dict[str, int] = {}
     async with store._db.session() as session:
+        result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM memories WHERE archived_at IS NULL AND superseded_at IS NULL"
+            )
+        )
+        node_counts["memories"] = result.scalar() or 0
+
         result = await session.execute(text("SELECT COUNT(*) FROM memory_subjects"))
         edge_counts["about"] = result.scalar() or 0
 
@@ -312,7 +319,7 @@ async def _graph_stats(store: Store) -> None:
     console.print(f"  Users:    {len(users)}")
     console.print(f"  Chats:    {len(chats)}")
     console.print(f"  People:   {len(people)}")
-    console.print(f"  Memories: {len(memories)}")
+    console.print(f"  Memories: {node_counts['memories']}")
     console.print()
 
     if edge_counts:

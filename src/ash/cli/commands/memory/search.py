@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 async def memory_search(
-    manager: Store,
+    store: Store,
     query: str,
     limit: int,
     user_id: str | None,
@@ -20,7 +20,7 @@ async def memory_search(
     """Search memories using semantic similarity."""
     from rich.table import Table
 
-    results = await manager.search(
+    results = await store.search(
         query=query,
         limit=limit,
         owner_user_id=user_id,
@@ -32,7 +32,7 @@ async def memory_search(
         return
 
     # Load people for subject name resolution
-    people = await manager.list_people()
+    people = await store.list_people()
     people_by_id = {p.id: p for p in people}
 
     table = Table(title=f"Memory Search: '{query}'")

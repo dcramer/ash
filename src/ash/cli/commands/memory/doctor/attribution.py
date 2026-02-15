@@ -13,13 +13,13 @@ if TYPE_CHECKING:
     from ash.store.store import Store
 
 
-async def memory_doctor_attribution(graph_store: Store, force: bool) -> None:
+async def memory_doctor_attribution(store: Store, force: bool) -> None:
     """Fix memories missing source_username attribution.
 
     For personal memories created by agent/cli without source_username,
     infers the speaker from owner_user_id (personal memories = owner spoke).
     """
-    memories = await graph_store.list_memories(
+    memories = await store.list_memories(
         limit=None, include_expired=True, include_superseded=True
     )
 
@@ -60,6 +60,6 @@ async def memory_doctor_attribution(graph_store: Store, force: bool) -> None:
 
     for memory in to_fix:
         memory.source_username = memory.owner_user_id
-    await graph_store.batch_update_memories(to_fix)
+    await store.batch_update_memories(to_fix)
 
     success(f"Fixed attribution for {len(to_fix)} memories")

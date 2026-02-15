@@ -75,7 +75,7 @@ If all are fine, return: {{}}"""
 
 
 async def _resolve_subject_names(
-    graph_store: Store, memories: list[MemoryEntry]
+    store: Store, memories: list[MemoryEntry]
 ) -> dict[str, list[str]]:
     """Map memory IDs to resolved person display names.
 
@@ -87,7 +87,7 @@ async def _resolve_subject_names(
 
     person_names: dict[str, str] = {}
     for pid in all_person_ids:
-        person = await graph_store.get_person(pid)
+        person = await store.get_person(pid)
         if person and person.name:
             person_names[pid] = person.name
 
@@ -110,11 +110,9 @@ def _format_memory_line(m: MemoryEntry, subject_names: dict[str, list[str]]) -> 
     return line
 
 
-async def memory_doctor_quality(
-    graph_store: Store, config: AshConfig, force: bool
-) -> None:
+async def memory_doctor_quality(store: Store, config: AshConfig, force: bool) -> None:
     """Content quality review: wrong perspective, fragments, negative knowledge."""
-    memories = await graph_store.list_memories(limit=None, include_expired=True)
+    memories = await store.list_memories(limit=None, include_expired=True)
 
     if not memories:
         warning("No memories to review")
@@ -123,7 +121,7 @@ async def memory_doctor_quality(
     console.print(f"Reviewing {len(memories)} memories for quality issues...")
 
     # Pre-resolve subject person IDs to display names
-    subject_names = await _resolve_subject_names(graph_store, memories)
+    subject_names = await _resolve_subject_names(store, memories)
 
     llm, model = create_llm(config)
 
@@ -221,13 +219,13 @@ async def memory_doctor_quality(
             mem.content = new_content
             updated.append(mem)
     if updated:
-        await graph_store.batch_update_memories(updated)
+        await store.batch_update_memories(updated)
 
     if archives:
         by_reason: dict[str, set[str]] = {}
         for full_id, _content, reason in archives:
             by_reason.setdefault(f"quality_{reason}", set()).add(full_id)
         for qualified_reason, ids in by_reason.items():
-            await graph_store.archive_memories(ids, qualified_reason)
+            await store.archive_memories(ids, qualified_reason)
 
     success(f"Applied {len(rewrites)} rewrites and {len(archives)} archives")

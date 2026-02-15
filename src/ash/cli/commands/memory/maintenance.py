@@ -10,9 +10,9 @@ if TYPE_CHECKING:
     from ash.store.store import Store
 
 
-async def memory_gc(graph_store: Store) -> None:
+async def memory_gc(store: Store) -> None:
     """Garbage collect expired and superseded memories."""
-    result = await graph_store.gc()
+    result = await store.gc()
 
     if result.removed_count == 0:
         dim("No memories to clean up")
@@ -24,30 +24,18 @@ async def memory_gc(graph_store: Store) -> None:
                 dim(f"  ... and {len(result.archived_ids) - 5} more")
 
 
-async def memory_rebuild_index(graph_store: Store) -> None:
-    """Rebuild vector index from embeddings.jsonl and memories.jsonl."""
-    from ash.config.paths import get_embeddings_jsonl_path, get_memories_jsonl_path
+async def memory_rebuild_index(store: Store) -> None:
+    """Rebuild vector index by re-embedding active memories."""
+    dim("Rebuilding vector index from active memories...")
+    count = await store.rebuild_index()
 
-    memories_path = get_memories_jsonl_path()
-    embeddings_path = get_embeddings_jsonl_path()
-
-    if not memories_path.exists():
-        warning("No memories.jsonl file found")
-        return
-
-    if not embeddings_path.exists():
-        warning("No embeddings.jsonl file found")
-        return
-
-    dim(f"Rebuilding index from {embeddings_path}")
-    count = await graph_store.rebuild_index()
-
-    success(f"Rebuilt index with {count} embeddings")
+    if count == 0:
+        warning("No active memories to index")
+    else:
+        success(f"Rebuilt index with {count} embeddings")
 
 
-async def memory_compact(
-    graph_store: Store, force: bool, older_than_days: int = 90
-) -> None:
+async def memory_compact(store: Store, force: bool, older_than_days: int = 90) -> None:
     """Permanently remove old archived entries."""
     import typer
 
@@ -59,7 +47,7 @@ async def memory_compact(
             dim("Cancelled")
             return
 
-    removed = await graph_store.compact(older_than_days)
+    removed = await store.compact(older_than_days)
 
     if removed == 0:
         dim("No archived entries old enough to compact")

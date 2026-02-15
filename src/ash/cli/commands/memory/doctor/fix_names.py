@@ -14,9 +14,9 @@ if TYPE_CHECKING:
     from ash.store.types import MemoryEntry, PersonEntry
 
 
-async def memory_doctor_fix_names(graph_store: Store, force: bool) -> None:
+async def memory_doctor_fix_names(store: Store, force: bool) -> None:
     """Resolve numeric source_username to display names via people records."""
-    memories = await graph_store.list_memories(
+    memories = await store.list_memories(
         limit=None, include_expired=True, include_superseded=True
     )
 
@@ -32,7 +32,7 @@ async def memory_doctor_fix_names(graph_store: Store, force: bool) -> None:
         success("No numeric source usernames to resolve")
         return
 
-    all_people = await graph_store.get_all_people()
+    all_people = await store.get_all_people()
 
     # Build mapping: numeric_id -> person (self-relationship from created_by, then aliases)
     numeric_to_person: dict[str, PersonEntry] = {}
@@ -97,6 +97,6 @@ async def memory_doctor_fix_names(graph_store: Store, force: bool) -> None:
             memory.source_username = non_numeric_alias
         to_update.append(memory)
     if to_update:
-        await graph_store.batch_update_memories(to_update)
+        await store.batch_update_memories(to_update)
 
     success(f"Resolved {len(fixes)} numeric usernames to display names")

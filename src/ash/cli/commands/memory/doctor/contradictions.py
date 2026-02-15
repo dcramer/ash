@@ -39,10 +39,10 @@ If NO contradiction, return: {{"contradiction": false}}"""
 
 
 async def memory_doctor_contradictions(
-    graph_store: Store, config: AshConfig, force: bool
+    store: Store, config: AshConfig, force: bool
 ) -> None:
     """Find and resolve contradictory memories using vector similarity + LLM verification."""
-    memories = await graph_store.list_memories(limit=None, include_expired=True)
+    memories = await store.list_memories(limit=None, include_expired=True)
 
     if not memories:
         warning("No memories to check for contradictions")
@@ -77,7 +77,7 @@ async def memory_doctor_contradictions(
 
         for memory in memories:
             try:
-                results = await graph_store.search(memory.content, limit=10)
+                results = await store.search(memory.content, limit=10)
                 for result in results:
                     if result.id == memory.id:
                         continue
@@ -183,6 +183,6 @@ async def memory_doctor_contradictions(
         return
 
     all_outdated_ids = {oid for _, outdated_ids in confirmed for oid in outdated_ids}
-    await graph_store.archive_memories(all_outdated_ids, "quality_contradicted")
+    await store.archive_memories(all_outdated_ids, "quality_contradicted")
 
     success(f"Archived {total_outdated} contradicted memories")

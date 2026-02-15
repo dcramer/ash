@@ -14,9 +14,9 @@ if TYPE_CHECKING:
     from ash.store.store import Store
 
 
-async def memory_doctor_embed_missing(graph_store: Store, force: bool) -> None:
+async def memory_doctor_embed_missing(store: Store, force: bool) -> None:
     """Find and backfill memories that have no embedding."""
-    memories = await graph_store.list_memories(limit=None, include_expired=True)
+    memories = await store.list_memories(limit=None, include_expired=True)
     if not memories:
         warning("No memories found")
         return
@@ -25,7 +25,7 @@ async def memory_doctor_embed_missing(graph_store: Store, force: bool) -> None:
     from sqlalchemy import text
 
     embedded_ids: set[str] = set()
-    async with graph_store._db.session() as session:
+    async with store._db.session() as session:
         result = await session.execute(text("SELECT memory_id FROM memory_embeddings"))
         for row in result.fetchall():
             embedded_ids.add(row[0])
@@ -63,8 +63,8 @@ async def memory_doctor_embed_missing(graph_store: Store, force: bool) -> None:
         task = progress.add_task("Generating embeddings...", total=len(missing))
         for memory in missing:
             try:
-                embedding_floats = await graph_store._embeddings.embed(memory.content)
-                await graph_store._index.add_embedding(memory.id, embedding_floats)
+                embedding_floats = await store._embeddings.embed(memory.content)
+                await store._index.add_embedding(memory.id, embedding_floats)
                 embedded += 1
             except Exception as e:
                 dim(f"Failed to embed {memory.id[:8]}: {e}")

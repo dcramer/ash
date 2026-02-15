@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 async def memory_add(
-    manager: "Store",
+    store: "Store",
     content: str,
     source: str | None,
     expires_days: int | None,
@@ -27,7 +27,7 @@ async def memory_add(
     source_display_name = os.environ.get("ASH_DISPLAY_NAME") or None
 
     try:
-        entry = await manager.add_memory(
+        entry = await store.add_memory(
             content=content,
             source=source or "cli",
             expires_in_days=expires_days,
@@ -47,7 +47,7 @@ async def memory_add(
 
 
 async def memory_remove(
-    manager: "Store",
+    store: "Store",
     entry_id: str | None,
     all_entries: bool,
     force: bool,
@@ -70,7 +70,7 @@ async def memory_remove(
                 dim("Cancelled")
                 return
 
-        entries = await manager.list_memories(
+        entries = await store.list_memories(
             limit=None, include_expired=True, include_superseded=True
         )
         to_remove = []
@@ -90,7 +90,7 @@ async def memory_remove(
 
         removed_count = 0
         for entry in to_remove:
-            deleted = await manager.delete_memory(entry.id)
+            deleted = await store.delete_memory(entry.id)
             if deleted:
                 removed_count += 1
 
@@ -99,7 +99,7 @@ async def memory_remove(
         assert entry_id is not None  # Guaranteed by caller validation
 
         # delete_memory handles prefix matching, JSONL deletion, and embedding cleanup
-        deleted = await manager.delete_memory(entry_id)
+        deleted = await store.delete_memory(entry_id)
 
         if deleted:
             success(f"Removed memory entry: {entry_id}")
@@ -108,7 +108,7 @@ async def memory_remove(
             raise typer.Exit(1)
 
 
-async def memory_clear(manager: "Store", force: bool) -> None:
+async def memory_clear(store: "Store", force: bool) -> None:
     """Clear all memory entries via Store."""
     if not force:
         warning("This will delete ALL memory entries.")
@@ -116,6 +116,6 @@ async def memory_clear(manager: "Store", force: bool) -> None:
             dim("Cancelled")
             return
 
-    count = await manager.clear()
+    count = await store.clear()
 
     success(f"Cleared {count} memory entries")
