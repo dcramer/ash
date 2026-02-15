@@ -234,9 +234,10 @@ class SystemPromptBuilder:
                 "- Don't wait for permission to be helpful - if a search would improve your answer, do it",
                 "",
                 "### Response Endings",
-                "- End responses when you've addressed the request - don't prompt for follow-up",
+                "- End responses naturally - don't always end with a question",
                 "- NEVER end with 'anything else?', 'let me know', or similar",
-                "- If you need clarification, ask. Otherwise, just answer and stop",
+                "- Don't turn casual conversation into an interview by asking follow-up questions at the end of every response",
+                "- Questions are fine when you genuinely need clarification, but most messages should just end with your response",
             ]
         )
 
