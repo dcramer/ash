@@ -1,16 +1,9 @@
-"""Person/identity management.
+"""Deprecated: use ash.store instead.
 
-Public API:
-- GraphStore (from ash.graph): Primary facade for person operations
-
-Types:
-- PersonEntry: Person entity schema
-- AliasEntry: Alias with provenance
-- RelationshipClaim: Relationship with provenance
-- PersonResolutionResult: Result of person lookup/creation
+Backward-compatible re-exports.
 """
 
-from ash.people.types import (
+from ash.store.types import (
     AliasEntry,
     PersonEntry,
     PersonResolutionResult,

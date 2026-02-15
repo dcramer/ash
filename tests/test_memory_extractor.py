@@ -220,7 +220,7 @@ class TestSensitivityParsing:
 
     def test_parses_public_sensitivity(self, extractor):
         """Test parsing public sensitivity."""
-        from ash.memory.types import Sensitivity
+        from ash.store.types import Sensitivity
 
         response = """[
             {"content": "Likes pizza", "subjects": [], "shared": false, "confidence": 0.9, "sensitivity": "public"}
@@ -233,7 +233,7 @@ class TestSensitivityParsing:
 
     def test_parses_personal_sensitivity(self, extractor):
         """Test parsing personal sensitivity."""
-        from ash.memory.types import Sensitivity
+        from ash.store.types import Sensitivity
 
         response = """[
             {"content": "Looking for new job", "subjects": [], "shared": false, "confidence": 0.9, "sensitivity": "personal"}
@@ -246,7 +246,7 @@ class TestSensitivityParsing:
 
     def test_parses_sensitive_sensitivity(self, extractor):
         """Test parsing sensitive sensitivity."""
-        from ash.memory.types import Sensitivity
+        from ash.store.types import Sensitivity
 
         response = """[
             {"content": "Has anxiety disorder", "subjects": [], "shared": false, "confidence": 0.9, "sensitivity": "sensitive"}

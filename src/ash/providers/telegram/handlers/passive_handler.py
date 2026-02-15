@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
-    from ash.graph.store import GraphStore
     from ash.llm import LLMProvider
     from ash.memory.extractor import MemoryExtractor
     from ash.providers.telegram.passive import (
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
         PassiveMemoryExtractor,
     )
     from ash.providers.telegram.provider import TelegramProvider
+    from ash.store.store import Store
 
 from ash.providers.base import IncomingMessage
 
@@ -42,7 +42,7 @@ class PassiveHandler:
         provider: "TelegramProvider",
         config: "AshConfig | None",
         llm_provider: "LLMProvider | None",
-        memory_manager: "GraphStore | None",
+        memory_manager: "Store | None",
         memory_extractor: "MemoryExtractor | None",
         handle_message: Callable[[IncomingMessage], Awaitable[None]],
     ):

@@ -16,8 +16,8 @@ from ash.cli.console import console, dim, success, warning
 
 if TYPE_CHECKING:
     from ash.config.models import AshConfig
-    from ash.graph.store import GraphStore
-    from ash.memory.types import MemoryEntry
+    from ash.store.store import Store
+    from ash.store.types import MemoryEntry
 
 CONTRADICTION_PROMPT = """Do any of these memories contradict each other? A contradiction \
 means two memories make conflicting claims about the SAME specific attribute (e.g. "lives in Portland" \
@@ -39,7 +39,7 @@ If NO contradiction, return: {{"contradiction": false}}"""
 
 
 async def memory_doctor_contradictions(
-    graph_store: GraphStore, config: AshConfig, force: bool
+    graph_store: Store, config: AshConfig, force: bool
 ) -> None:
     """Find and resolve contradictory memories using vector similarity + LLM verification."""
     memories = await graph_store.list_memories(limit=None, include_expired=True)

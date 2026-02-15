@@ -20,8 +20,8 @@ from ash.cli.console import console, dim, success, warning
 
 if TYPE_CHECKING:
     from ash.config.models import AshConfig
-    from ash.graph.store import GraphStore
-    from ash.memory.types import MemoryEntry
+    from ash.store.store import Store
+    from ash.store.types import MemoryEntry
 
 QUALITY_PROMPT = """Review these memories for quality issues. For each, recommend: KEEP, REWRITE, or ARCHIVE.
 
@@ -75,7 +75,7 @@ If all are fine, return: {{}}"""
 
 
 async def _resolve_subject_names(
-    graph_store: GraphStore, memories: list[MemoryEntry]
+    graph_store: Store, memories: list[MemoryEntry]
 ) -> dict[str, list[str]]:
     """Map memory IDs to resolved person display names.
 
@@ -111,7 +111,7 @@ def _format_memory_line(m: MemoryEntry, subject_names: dict[str, list[str]]) -> 
 
 
 async def memory_doctor_quality(
-    graph_store: GraphStore, config: AshConfig, force: bool
+    graph_store: Store, config: AshConfig, force: bool
 ) -> None:
     """Content quality review: wrong perspective, fragments, negative knowledge."""
     memories = await graph_store.list_memories(limit=None, include_expired=True)

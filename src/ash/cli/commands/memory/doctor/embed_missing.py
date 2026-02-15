@@ -11,19 +11,25 @@ from ash.cli.commands.memory.doctor._helpers import confirm_or_cancel, truncate
 from ash.cli.console import console, dim, success, warning
 
 if TYPE_CHECKING:
-    from ash.graph.store import GraphStore
+    from ash.store.store import Store
 
 
-async def memory_doctor_embed_missing(graph_store: GraphStore, force: bool) -> None:
+async def memory_doctor_embed_missing(graph_store: Store, force: bool) -> None:
     """Find and backfill memories that have no embedding."""
     memories = await graph_store.list_memories(limit=None, include_expired=True)
     if not memories:
         warning("No memories found")
         return
 
-    # Load existing embeddings to find which memories lack them
-    embeddings = await graph_store._store.load_embeddings()
-    missing = [m for m in memories if m.id not in embeddings]
+    # Check which memories have embeddings in the vector index
+    from sqlalchemy import text
+
+    embedded_ids: set[str] = set()
+    async with graph_store._db.session() as session:
+        result = await session.execute(text("SELECT memory_id FROM memory_embeddings"))
+        for row in result.fetchall():
+            embedded_ids.add(row[0])
+    missing = [m for m in memories if m.id not in embedded_ids]
 
     if not missing:
         success(f"All {len(memories)} memories have embeddings")
@@ -47,8 +53,6 @@ async def memory_doctor_embed_missing(graph_store: GraphStore, force: bool) -> N
     if not confirm_or_cancel("Generate embeddings for these memories?", force):
         return
 
-    from ash.memory.types import MemoryEntry
-
     embedded = 0
     failed = 0
     with Progress(
@@ -60,8 +64,6 @@ async def memory_doctor_embed_missing(graph_store: GraphStore, force: bool) -> N
         for memory in missing:
             try:
                 embedding_floats = await graph_store._embeddings.embed(memory.content)
-                embedding_base64 = MemoryEntry.encode_embedding(embedding_floats)
-                await graph_store._store.save_embedding(memory.id, embedding_base64)
                 await graph_store._index.add_embedding(memory.id, embedding_floats)
                 embedded += 1
             except Exception as e:

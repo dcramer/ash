@@ -10,8 +10,8 @@ if TYPE_CHECKING:
     from ash.agents import AgentRegistry
     from ash.config import AshConfig, Workspace
     from ash.memory import RetrievedContext
-    from ash.people.types import PersonEntry
     from ash.skills import SkillRegistry
+    from ash.store.types import PersonEntry
     from ash.tools import ToolRegistry
 
 

@@ -116,11 +116,10 @@ async def _run_server(
     # This session lives for the duration of the server
     # Use the factory directly to avoid the auto-commit context manager
     logger.info("Setting up agent")
-    memory_session = database.session_factory()
     components = await create_agent(
         config=ash_config,
         workspace=workspace,
-        db_session=memory_session,
+        db=database,
         model_alias="default",
     )
     agent = components.agent
@@ -314,7 +313,6 @@ async def _run_server(
             telegram_provider,
             rpc_server,
             components.sandbox_executor,
-            memory_session,
             pid_path,
         )
 
@@ -324,7 +322,6 @@ async def _cleanup_server(
     telegram_provider,
     rpc_server,
     sandbox_executor,
-    memory_session,
     pid_path: Path,
 ) -> None:
     """Clean up server resources."""
@@ -338,7 +335,6 @@ async def _cleanup_server(
         (telegram_provider, "stop"),
         (rpc_server, "stop"),
         (sandbox_executor, "cleanup"),
-        (memory_session, "close"),
     ]:
         if resource:
             try:

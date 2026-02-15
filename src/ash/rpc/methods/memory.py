@@ -4,23 +4,23 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ash.graph.store import GraphStore
     from ash.rpc.server import RPCServer
+    from ash.store.store import Store
 
 logger = logging.getLogger(__name__)
 
 
 def register_memory_methods(
     server: "RPCServer",
-    memory_manager: "GraphStore",
-    person_manager: "GraphStore | None" = None,
+    memory_manager: "Store",
+    person_manager: "Store | None" = None,
 ) -> None:
     """Register memory-related RPC methods.
 
     Args:
         server: RPC server to register methods on.
-        memory_manager: GraphStore instance.
-        person_manager: GraphStore instance (for subject resolution).
+        memory_manager: Store instance.
+        person_manager: Store instance (for subject resolution).
     """
 
     async def memory_search(params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -92,8 +92,8 @@ def register_memory_methods(
         )
 
         # Apply scoping rules:
-        # - Group memory: shared=True with chat_id → owner_user_id=None, chat_id=chat_id
-        # - Personal memory: everything else → owner_user_id=user_id, chat_id=None
+        # - Group memory: shared=True with chat_id -> owner_user_id=None, chat_id=chat_id
+        # - Personal memory: everything else -> owner_user_id=user_id, chat_id=None
         if shared and chat_id:
             owner_user_id = None
             effective_chat_id = chat_id

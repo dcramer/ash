@@ -17,8 +17,8 @@ from ash.cli.console import console, dim, success, warning
 
 if TYPE_CHECKING:
     from ash.config.models import AshConfig
-    from ash.graph.store import GraphStore
-    from ash.memory.types import MemoryEntry
+    from ash.store.store import Store
+    from ash.store.types import MemoryEntry
 
 CLASSIFY_PROMPT = """Classify each memory into the correct type based on its content.
 
@@ -50,10 +50,10 @@ If all memories are correctly classified, return: {{}}"""
 
 
 async def memory_doctor_reclassify(
-    graph_store: GraphStore, config: AshConfig, force: bool
+    graph_store: Store, config: AshConfig, force: bool
 ) -> None:
     """Reclassify KNOWLEDGE-type memories using LLM analysis."""
-    from ash.memory.types import MemoryType
+    from ash.store.types import MemoryType
 
     memories = await graph_store.list_memories(
         limit=None, include_expired=True, include_superseded=True

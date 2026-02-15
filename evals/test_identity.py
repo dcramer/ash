@@ -77,7 +77,7 @@ async def _drain_extraction_tasks() -> None:
 async def _dump_state(agent: "AgentComponents") -> None:
     """Log extracted memories and people for eval debugging."""
     if agent.memory_manager:
-        store = agent.memory_manager._store
+        store = agent.memory_manager
         memories = await store.get_all_memories()
         logger.info("=== Extracted memories (%d) ===", len(memories))
         for m in memories:

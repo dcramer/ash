@@ -153,15 +153,51 @@ class SessionHandler:
             await self._load_persistent_session(session, session_manager, message)
 
         async with self._database.session() as db_session:
-            from ash.db.user_profiles import get_or_create_user_profile
+            from sqlalchemy import text as _text
 
-            await get_or_create_user_profile(
-                session=db_session,
-                user_id=message.user_id,
-                provider=self._provider_name,
-                username=message.username,
-                display_name=message.display_name,
+            now_iso = datetime.now(UTC).isoformat()
+            # Upsert user into the users table
+            existing = await db_session.execute(
+                _text(
+                    "SELECT id FROM users WHERE provider = :provider AND provider_id = :provider_id"
+                ),
+                {"provider": self._provider_name, "provider_id": message.user_id},
             )
+            if not existing.fetchone():
+                import uuid
+
+                await db_session.execute(
+                    _text("""
+                        INSERT INTO users (id, version, provider, provider_id, username,
+                            display_name, created_at, updated_at)
+                        VALUES (:id, 1, :provider, :provider_id, :username,
+                            :display_name, :created_at, :updated_at)
+                    """),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "provider": self._provider_name,
+                        "provider_id": message.user_id,
+                        "username": message.username,
+                        "display_name": message.display_name,
+                        "created_at": now_iso,
+                        "updated_at": now_iso,
+                    },
+                )
+            else:
+                await db_session.execute(
+                    _text("""
+                        UPDATE users SET username = :username, display_name = :display_name,
+                            updated_at = :updated_at
+                        WHERE provider = :provider AND provider_id = :provider_id
+                    """),
+                    {
+                        "username": message.username,
+                        "display_name": message.display_name,
+                        "updated_at": now_iso,
+                        "provider": self._provider_name,
+                        "provider_id": message.user_id,
+                    },
+                )
 
         # Update chat state with participant info
         self._update_chat_state(message, thread_id)

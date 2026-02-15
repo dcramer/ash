@@ -33,18 +33,17 @@ from ash.llm.types import (
     TextContent,
     ToolUse,
 )
-from ash.memory.types import MemoryType
+from ash.store.types import MemoryType
 from ash.tools import ToolContext, ToolExecutor, ToolRegistry
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
-    from ash.graph.store import GraphStore
+    from ash.db.engine import Database
     from ash.memory import MemoryExtractor, RetrievedContext
-    from ash.people.types import PersonEntry
     from ash.providers.base import IncomingMessage
+    from ash.store.store import Store
+    from ash.store.types import PersonEntry
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +119,7 @@ def _extract_relationship_term(content: str) -> str | None:
     attach to person records when a RELATIONSHIP-type fact is extracted.
     Returns the first match found, or None.
     """
-    from ash.graph.store import RELATIONSHIP_TERMS
+    from ash.store.people import RELATIONSHIP_TERMS
 
     content_lower = content.lower()
     # Check multi-word terms first (e.g., "best friend" before "friend")
@@ -198,7 +197,7 @@ class Agent:
         runtime: RuntimeInfo | None = None,
         memory_extractor: MemoryExtractor | None = None,
         config: AgentConfig | None = None,
-        graph_store: GraphStore | None = None,
+        graph_store: Store | None = None,
     ):
         """Initialize agent.
 
@@ -216,9 +215,9 @@ class Agent:
         self._prompt_builder = prompt_builder
         self._runtime = runtime
         self._graph_store = graph_store
-        self._memory: GraphStore | None = graph_store
+        self._memory: Store | None = graph_store
         self._extractor = memory_extractor
-        self._people: GraphStore | None = graph_store
+        self._people: Store | None = graph_store
         self._config = config or AgentConfig()
         self._last_extraction_time: float | None = None
 
@@ -1182,18 +1181,18 @@ class Agent:
 async def create_agent(
     config: AshConfig,
     workspace: Workspace,
-    db_session: AsyncSession | None = None,
+    db: Database | None = None,
     model_alias: str = "default",
 ) -> AgentComponents:
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.agents.builtin import register_builtin_agents
     from ash.core.prompt import RuntimeInfo
-    from ash.graph import create_graph_store
     from ash.llm import create_llm_provider, create_registry
     from ash.memory import MemoryExtractor
     from ash.sandbox import SandboxExecutor
     from ash.sandbox.packages import build_setup_command, collect_skill_packages
     from ash.skills import SkillRegistry
+    from ash.store import create_store
     from ash.tools.base import build_sandbox_manager_config
     from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
     from ash.tools.builtin.agents import UseAgentTool
@@ -1253,9 +1252,9 @@ async def create_agent(
         )
 
     # Create unified graph store (replaces separate memory_manager + person_manager)
-    graph_store: GraphStore | None = None
-    if not db_session:
-        logger.info("Memory tools disabled: no database session")
+    graph_store: Store | None = None
+    if not db:
+        logger.info("Memory tools disabled: no database")
     elif not config.embeddings:
         logger.info("Memory tools disabled: [embeddings] not configured")
     else:
@@ -1283,14 +1282,14 @@ async def create_agent(
                 if config.embeddings.provider == "openai"
                 else None,
             )
-            graph_store = await create_graph_store(
-                db_session=db_session,
+            graph_store = await create_store(
+                db=db,
                 llm_registry=llm_registry,
                 embedding_model=config.embeddings.model,
                 embedding_provider=config.embeddings.provider,
                 max_entries=config.memory.max_entries,
             )
-            logger.debug("Graph store initialized")
+            logger.debug("Store initialized")
         except ValueError as e:
             logger.debug(f"Memory disabled: {e}")
         except Exception:

@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from ash.db.engine import Database
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.index import VectorIndex
-from ash.memory.types import MemoryEntry, MemoryType
+from ash.store.types import MemoryEntry, MemoryType
 
 _SUPERSEDED_AT = datetime(2024, 1, 1, tzinfo=UTC)
 _ARCHIVED_AT = datetime(2024, 1, 1, tzinfo=UTC)
@@ -28,26 +28,19 @@ def mock_embedding_generator():
 
 
 @pytest.fixture
-async def db_session_with_vec(tmp_path):
-    """Create a session with sqlite-vec loaded via Database class."""
-    from ash.db.engine import Database
-
+async def vec_database(tmp_path):
+    """Create a Database with sqlite-vec loaded."""
     db_path = tmp_path / "test_vec.db"
     db = Database(database_path=db_path)
     await db.connect()
-
-    async with db.session() as session:
-        yield session
-
+    yield db
     await db.disconnect()
 
 
 @pytest.fixture
-async def vector_index(
-    db_session_with_vec: AsyncSession, mock_embedding_generator
-) -> VectorIndex:
+async def vector_index(vec_database: Database, mock_embedding_generator) -> VectorIndex:
     """Create a VectorIndex with real sqlite-vec, 4 dimensions."""
-    index = VectorIndex(db_session_with_vec, mock_embedding_generator)
+    index = VectorIndex(vec_database, mock_embedding_generator)
     await index.initialize()
     return index
 

@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 from ash.cli.console import dim, success, warning
 
 if TYPE_CHECKING:
-    from ash.graph.store import GraphStore
+    from ash.store.store import Store
 
 
-async def memory_gc(graph_store: GraphStore) -> None:
+async def memory_gc(graph_store: Store) -> None:
     """Garbage collect expired and superseded memories."""
     result = await graph_store.gc()
 
@@ -24,7 +24,7 @@ async def memory_gc(graph_store: GraphStore) -> None:
                 dim(f"  ... and {len(result.archived_ids) - 5} more")
 
 
-async def memory_rebuild_index(graph_store: GraphStore) -> None:
+async def memory_rebuild_index(graph_store: Store) -> None:
     """Rebuild vector index from embeddings.jsonl and memories.jsonl."""
     from ash.config.paths import get_embeddings_jsonl_path, get_memories_jsonl_path
 
@@ -46,7 +46,7 @@ async def memory_rebuild_index(graph_store: GraphStore) -> None:
 
 
 async def memory_compact(
-    graph_store: GraphStore, force: bool, older_than_days: int = 90
+    graph_store: Store, force: bool, older_than_days: int = 90
 ) -> None:
     """Permanently remove old archived entries."""
     import typer

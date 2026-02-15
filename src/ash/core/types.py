@@ -19,12 +19,12 @@ if TYPE_CHECKING:
     from ash.agents import AgentRegistry
     from ash.core.agent import Agent
     from ash.core.prompt import SystemPromptBuilder
-    from ash.graph.store import GraphStore
     from ash.llm import LLMProvider
     from ash.memory import MemoryExtractor
     from ash.providers.base import IncomingMessage
     from ash.sandbox import SandboxExecutor
     from ash.skills import SkillRegistry
+    from ash.store.store import Store
     from ash.tools import ToolExecutor, ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -109,8 +109,8 @@ class AgentComponents:
     tool_executor: ToolExecutor
     prompt_builder: SystemPromptBuilder
     skill_registry: SkillRegistry
-    memory_manager: GraphStore | None
-    person_manager: GraphStore | None = None
+    memory_manager: Store | None
+    person_manager: Store | None = None
     memory_extractor: MemoryExtractor | None = None
     sandbox_executor: SandboxExecutor | None = None
     agent_registry: AgentRegistry | None = None

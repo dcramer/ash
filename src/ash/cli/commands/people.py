@@ -14,8 +14,8 @@ from ash.cli.console import console, create_table, dim, error, success, warning
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
-    from ash.graph.store import GraphStore
-    from ash.people.types import PersonEntry
+    from ash.store.store import Store
+    from ash.store.types import PersonEntry
 
 
 def register(app: typer.Typer) -> None:
@@ -88,22 +88,21 @@ def register(app: typer.Typer) -> None:
             console.print("\n[dim]Cancelled[/dim]")
 
 
-async def _with_graph_store(
+async def _with_store(
     config: AshConfig,
     action_name: str,
-    callback: Callable[[GraphStore], Awaitable[None]],
+    callback: Callable[[Store], Awaitable[None]],
 ) -> None:
-    """Run a callback with a GraphStore, handling database lifecycle."""
+    """Run a callback with a Store, handling database lifecycle."""
     from ash.cli.context import get_database
 
     database = await get_database(config)
     try:
-        async with database.session() as session:
-            graph_store = await _create_graph_store(config, session)
-            if not graph_store:
-                error(f"{action_name} requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await callback(graph_store)
+        store = await _create_store(config, database)
+        if not store:
+            error(f"{action_name} requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await callback(store)
     finally:
         await database.disconnect()
 
@@ -121,29 +120,29 @@ async def _run_people_action(
     config = get_config(config_path)
 
     if action == "list":
-        await _people_list()
+        await _with_store(config, "List", _people_list)
     elif action == "show":
         if not target:
             error("Usage: ash people show <id>")
             raise typer.Exit(1)
-        await _with_graph_store(config, "Show", lambda gs: _people_show(gs, target))
+        await _with_store(config, "Show", lambda gs: _people_show(gs, target))
     elif action == "search":
         if not target:
             error("Usage: ash people search <query>")
             raise typer.Exit(1)
-        await _people_search(target)
+        await _with_store(config, "Search", lambda gs: _people_search(gs, target))
     elif action == "merge":
         if not target or not target2:
             error("Usage: ash people merge <id1> <id2>")
             raise typer.Exit(1)
-        await _with_graph_store(
+        await _with_store(
             config, "Merge", lambda gs: _people_merge(gs, target, target2, force)
         )
     elif action == "delete":
         if not target:
             error("Usage: ash people delete <id>")
             raise typer.Exit(1)
-        await _with_graph_store(
+        await _with_store(
             config, "Delete", lambda gs: _people_delete(gs, target, force)
         )
     elif action == "doctor":
@@ -154,11 +153,9 @@ async def _run_people_action(
         raise typer.Exit(1)
 
 
-async def _people_list() -> None:
+async def _people_list(store: Store) -> None:
     """List all non-merged people."""
-    from ash.cli.commands.memory._helpers import get_all_people
-
-    people = await get_all_people()
+    people = await store.list_people()
 
     if not people:
         console.print("[dim]No people found.[/dim]")
@@ -190,12 +187,12 @@ async def _people_list() -> None:
     console.print(table)
 
 
-async def _resolve_person(graph_store: GraphStore, person_id: str) -> PersonEntry:
+async def _resolve_person(store: Store, person_id: str) -> PersonEntry:
     """Resolve a person by exact ID or unique prefix match.
 
     Raises typer.Exit(1) on ambiguous or missing matches.
     """
-    people = await graph_store.get_all_people()
+    people = await store.get_all_people()
 
     # Exact match
     for p in people:
@@ -214,14 +211,12 @@ async def _resolve_person(graph_store: GraphStore, person_id: str) -> PersonEntr
     raise typer.Exit(1)
 
 
-async def _people_show(graph_store: GraphStore, person_id: str) -> None:
+async def _people_show(store: Store, person_id: str) -> None:
     """Show detailed person info with connected memories and user links."""
     from rich.panel import Panel
     from rich.table import Table
 
-    from ash.graph.types import EdgeType
-
-    person = await _resolve_person(graph_store, person_id)
+    person = await _resolve_person(store, person_id)
 
     # Build details table
     table = Table(show_header=False, box=None, padding=(0, 2))
@@ -255,27 +250,16 @@ async def _people_show(graph_store: GraphStore, person_id: str) -> None:
     if person.merged_into:
         table.add_row("Merged Into", person.merged_into)
 
-    # Connected data from graph
-    graph = await graph_store.get_graph()
-
-    # Memories about this person
-    memory_ids = graph.memories_about(person.id)
+    # Connected data via SQL
+    memory_ids = await store.memories_about_person(person.id)
     table.add_row("Memories", str(len(memory_ids)))
 
-    # User links (IS_PERSON edges pointing to this person)
-    user_node_ids = graph.neighbors(person.id, EdgeType.IS_PERSON, "incoming")
-    if user_node_ids:
-        users = await graph_store.list_users()
-        users_by_id = {u.id: u for u in users}
-        user_strs = []
-        for uid in user_node_ids:
-            user = users_by_id.get(uid)
-            if user:
-                user_strs.append(
-                    f"@{user.username or user.provider_id} ({user.provider})"
-                )
-            else:
-                user_strs.append(uid[:12])
+    # User links (users whose person_id points to this person)
+    linked_users = await store.users_for_person(person.id)
+    if linked_users:
+        user_strs = [
+            f"@{u.username or u.provider_id} ({u.provider})" for u in linked_users
+        ]
         table.add_row("User Links", ", ".join(user_strs))
     else:
         table.add_row("User Links", "-")
@@ -283,11 +267,9 @@ async def _people_show(graph_store: GraphStore, person_id: str) -> None:
     console.print(Panel(table, title=f"Person: {person.name or person.id[:12]}"))
 
 
-async def _people_search(query: str) -> None:
+async def _people_search(store: Store, query: str) -> None:
     """Search people by name or alias."""
-    from ash.cli.commands.memory._helpers import get_all_people
-
-    people = await get_all_people()
+    people = await store.list_people()
 
     if not people:
         console.print("[dim]No people found.[/dim]")
@@ -332,15 +314,15 @@ async def _people_search(query: str) -> None:
 
 
 async def _people_merge(
-    graph_store: GraphStore,
+    store: Store,
     id1: str,
     id2: str,
     force: bool,
 ) -> None:
     """Merge two person records."""
 
-    primary = await _resolve_person(graph_store, id1)
-    secondary = await _resolve_person(graph_store, id2)
+    primary = await _resolve_person(store, id1)
+    secondary = await _resolve_person(store, id2)
 
     if primary.id == secondary.id:
         error("Cannot merge a person with themselves")
@@ -355,7 +337,7 @@ async def _people_merge(
             dim("Cancelled")
             return
 
-    result = await graph_store.merge_people(primary.id, secondary.id)
+    result = await store.merge_people(primary.id, secondary.id)
     if result:
         success(f"Merged {secondary.name} into {primary.name}")
     else:
@@ -363,17 +345,16 @@ async def _people_merge(
 
 
 async def _people_delete(
-    graph_store: GraphStore,
+    store: Store,
     person_id: str,
     force: bool,
 ) -> None:
     """Delete a person record."""
 
-    person = await _resolve_person(graph_store, person_id)
+    person = await _resolve_person(store, person_id)
 
     # Check for connected memories
-    graph = await graph_store.get_graph()
-    memory_ids = graph.memories_about(person.id)
+    memory_ids = await store.memories_about_person(person.id)
 
     if not force:
         warning(f"Delete person: {person.name} ({person.id[:8]})")
@@ -388,26 +369,26 @@ async def _people_delete(
 
     # Archive connected memories first
     if memory_ids:
-        await graph_store.forget_person(person.id, delete_person_record=True)
+        await store.forget_person(person.id, delete_person_record=True)
         success(
             f"Deleted {person.name} and archived {len(memory_ids)} connected memories"
         )
     else:
-        await graph_store.delete_person(person.id)
+        await store.delete_person(person.id)
         success(f"Deleted {person.name}")
 
 
-async def _create_graph_store(config: AshConfig, session: object) -> GraphStore | None:
-    """Create a GraphStore for commands that need it."""
-    from ash.cli.commands.memory._helpers import get_graph_store
+async def _create_store(config: AshConfig, db: object) -> Store | None:
+    """Create a Store for commands that need it."""
+    from ash.cli.commands.memory._helpers import get_store
 
-    return await get_graph_store(config, session)  # type: ignore[arg-type]
+    return await get_store(config, db)  # type: ignore[arg-type]
 
 
 async def _people_doctor(config: AshConfig, force: bool) -> None:
     """Run all people health checks: duplicates, broken merges, orphans."""
 
-    async def _run(graph_store: GraphStore) -> None:
+    async def _run(store: Store) -> None:
         # Set up LLM for dedup verification
         try:
             from ash.llm import create_llm_provider
@@ -419,22 +400,22 @@ async def _people_doctor(config: AshConfig, force: bool) -> None:
                 model_config.provider,
                 api_key=api_key.get_secret_value() if api_key else None,
             )
-            graph_store.set_llm(llm, model_config.model)
+            store.set_llm(llm, model_config.model)
         except Exception as e:
             error(f"Failed to initialize LLM for verification: {e}")
             dim("Doctor requires an LLM to verify merge candidates.")
             raise typer.Exit(1) from None
 
-        await _doctor_check_duplicates(graph_store, force)
-        await _doctor_check_broken_merges(graph_store, force)
-        await _doctor_check_orphans(graph_store, force)
+        await _doctor_check_duplicates(store, force)
+        await _doctor_check_broken_merges(store, force)
+        await _doctor_check_orphans(store, force)
 
-    await _with_graph_store(config, "Doctor", _run)
+    await _with_store(config, "Doctor", _run)
 
 
-async def _doctor_check_duplicates(graph_store: GraphStore, force: bool) -> None:
+async def _doctor_check_duplicates(store: Store, force: bool) -> None:
     """Check 1: Find and merge duplicate people."""
-    people = await graph_store.list_people()
+    people = await store.list_people()
     if len(people) < 2:
         dim("Not enough people for dedup (need at least 2)")
         return
@@ -442,7 +423,7 @@ async def _doctor_check_duplicates(graph_store: GraphStore, force: bool) -> None
     all_ids = [p.id for p in people]
     console.print(f"[dim]Scanning {len(people)} people for duplicates...[/dim]")
 
-    candidates = await graph_store.find_dedup_candidates(all_ids)
+    candidates = await store.find_dedup_candidates(all_ids)
     if not candidates:
         success("No duplicate people found")
         return
@@ -450,8 +431,8 @@ async def _doctor_check_duplicates(graph_store: GraphStore, force: bool) -> None
     # Resolve candidate details for preview
     merges: list[tuple[PersonEntry, PersonEntry]] = []
     for primary_id, secondary_id in candidates:
-        primary = await graph_store.get_person(primary_id)
-        secondary = await graph_store.get_person(secondary_id)
+        primary = await store.get_person(primary_id)
+        secondary = await store.get_person(secondary_id)
         if primary and secondary:
             merges.append((primary, secondary))
 
@@ -479,16 +460,16 @@ async def _doctor_check_duplicates(graph_store: GraphStore, force: bool) -> None
 
     merged = 0
     for primary, secondary in merges:
-        result = await graph_store.merge_people(primary.id, secondary.id)
+        result = await store.merge_people(primary.id, secondary.id)
         if result:
             merged += 1
 
     success(f"Merged {merged} duplicate(s)")
 
 
-async def _doctor_check_broken_merges(graph_store: GraphStore, force: bool) -> None:
+async def _doctor_check_broken_merges(store: Store, force: bool) -> None:
     """Check 2: Find people with broken merged_into references."""
-    all_people = await graph_store.get_all_people()
+    all_people = await store.get_all_people()
     people_by_id = {p.id: p for p in all_people}
 
     broken: list[PersonEntry] = []
@@ -517,18 +498,15 @@ async def _doctor_check_broken_merges(graph_store: GraphStore, force: bool) -> N
         return
 
     for person in broken:
-        await graph_store.update_person(person.id, clear_merged=True)
+        await store.update_person(person.id, clear_merged=True)
     success(f"Cleared {len(broken)} broken merge reference(s)")
 
 
-async def _doctor_check_orphans(graph_store: GraphStore, force: bool) -> None:
+async def _doctor_check_orphans(store: Store, force: bool) -> None:
     """Check 3: Find people with no memories and no user links."""
     from datetime import UTC, datetime, timedelta
 
-    from ash.graph.types import EdgeType
-
-    people = await graph_store.list_people()
-    graph = await graph_store.get_graph()
+    people = await store.list_people()
 
     cutoff = datetime.now(tz=UTC) - timedelta(days=7)
     orphans: list[PersonEntry] = []
@@ -541,8 +519,8 @@ async def _doctor_check_orphans(graph_store: GraphStore, force: bool) -> None:
         # without memories — they're known contacts, not orphans.
         if person.relationships or person.aliases:
             continue
-        memory_ids = graph.memories_about(person.id)
-        user_links = graph.neighbors(person.id, EdgeType.IS_PERSON, "incoming")
+        memory_ids = await store.memories_about_person(person.id)
+        user_links = await store.users_for_person(person.id)
         if not memory_ids and not user_links:
             orphans.append(person)
 
@@ -568,5 +546,5 @@ async def _doctor_check_orphans(graph_store: GraphStore, force: bool) -> None:
         return
 
     for person in orphans:
-        await graph_store.delete_person(person.id)
+        await store.delete_person(person.id)
     success(f"Deleted {len(orphans)} orphaned person record(s)")

@@ -1,17 +1,22 @@
 """Show and history commands for memory entries."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import typer
 
-from ash.cli.commands.memory._helpers import get_memory_store, is_source_self_reference
+from ash.cli.commands.memory._helpers import is_source_self_reference
 from ash.cli.console import console, dim, error
 
+if TYPE_CHECKING:
+    from ash.store.store import Store
 
-async def memory_show(memory_id: str) -> None:
+
+async def memory_show(store: Store, memory_id: str) -> None:
     """Show full details of a memory entry."""
     from rich.panel import Panel
     from rich.table import Table
-
-    store = get_memory_store()
 
     # Find the memory by prefix
     memory = await store.get_memory_by_prefix(memory_id)
@@ -20,9 +25,7 @@ async def memory_show(memory_id: str) -> None:
         raise typer.Exit(1)
 
     # Load people for name lookup
-    from ash.cli.commands.memory._helpers import get_all_people
-
-    people = await get_all_people()
+    people = await store.list_people()
     people_by_id = {p.id: p for p in people}
 
     # Build details table
@@ -64,14 +67,13 @@ async def memory_show(memory_id: str) -> None:
                 subject_names.append(person_id)
         table.add_row("About", ", ".join(subject_names))
     elif memory.source_display_name:
-        # No subjects means speaking about self
         table.add_row("About", f"{memory.source_display_name} (self)")
     elif memory.source_username:
         table.add_row("About", f"@{memory.source_username} (self)")
     else:
         table.add_row("About", "-")
 
-    # Trust level - check if source user matches any subject person (self-reference)
+    # Trust level
     is_self_ref = is_source_self_reference(
         memory.source_username,
         memory.owner_user_id,
@@ -104,18 +106,14 @@ async def memory_show(memory_id: str) -> None:
     if memory.extraction_confidence is not None:
         table.add_row("Confidence", f"{memory.extraction_confidence:.2f}")
 
-    # Embedding info is now in embeddings.jsonl, not on the memory entry
-
     console.print(Panel(table, title=f"Memory {memory.id[:8]}"))
     console.print()
     console.print(Panel(memory.content, title="Content"))
 
 
-async def memory_history(memory_id: str) -> None:
+async def memory_history(store: Store, memory_id: str) -> None:
     """Show supersession chain for a memory."""
     from rich.table import Table
-
-    store = get_memory_store()
 
     # First, find the memory
     memory = await store.get_memory_by_prefix(memory_id)

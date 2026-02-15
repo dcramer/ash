@@ -10,15 +10,12 @@ from ash.cli.commands.memory.doctor._helpers import confirm_or_cancel, truncate
 from ash.cli.console import console, success
 
 if TYPE_CHECKING:
-    from ash.graph.store import GraphStore
-    from ash.memory.types import MemoryEntry
-    from ash.people.types import PersonEntry
+    from ash.store.store import Store
+    from ash.store.types import MemoryEntry, PersonEntry
 
 
-async def memory_doctor_fix_names(graph_store: GraphStore, force: bool) -> None:
+async def memory_doctor_fix_names(graph_store: Store, force: bool) -> None:
     """Resolve numeric source_username to display names via people records."""
-    from ash.cli.commands.memory._helpers import get_all_people
-
     memories = await graph_store.list_memories(
         limit=None, include_expired=True, include_superseded=True
     )
@@ -35,7 +32,7 @@ async def memory_doctor_fix_names(graph_store: GraphStore, force: bool) -> None:
         success("No numeric source usernames to resolve")
         return
 
-    all_people = await get_all_people()
+    all_people = await graph_store.get_all_people()
 
     # Build mapping: numeric_id -> person (self-relationship from created_by, then aliases)
     numeric_to_person: dict[str, PersonEntry] = {}

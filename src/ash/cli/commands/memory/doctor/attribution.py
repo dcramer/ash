@@ -10,10 +10,10 @@ from ash.cli.commands.memory.doctor._helpers import confirm_or_cancel, truncate
 from ash.cli.console import console, success
 
 if TYPE_CHECKING:
-    from ash.graph.store import GraphStore
+    from ash.store.store import Store
 
 
-async def memory_doctor_attribution(graph_store: GraphStore, force: bool) -> None:
+async def memory_doctor_attribution(graph_store: Store, force: bool) -> None:
     """Fix memories missing source_username attribution.
 
     For personal memories created by agent/cli without source_username,

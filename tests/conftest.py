@@ -132,20 +132,6 @@ def ash_home(_isolate_ash_home: Path) -> Path:
     return _isolate_ash_home
 
 
-@pytest.fixture
-async def file_memory_store(tmp_path: Path):
-    """Create a FileMemoryStore with temporary paths."""
-    from ash.memory.file_store import FileMemoryStore
-
-    memories_path = tmp_path / "memories.jsonl"
-    embeddings_path = tmp_path / "embeddings.jsonl"
-
-    return FileMemoryStore(
-        memories_path=memories_path,
-        embeddings_path=embeddings_path,
-    )
-
-
 # =============================================================================
 # LLM Fixtures and Mocks
 # =============================================================================

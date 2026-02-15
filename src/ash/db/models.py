@@ -1,25 +1,18 @@
 """SQLAlchemy ORM models.
 
-Note: Memory and Person data is now stored in JSONL files (source of truth).
-These SQLAlchemy models exist for:
-1. Schema creation for the database
-2. Migration from old SQLite-based storage to JSONL
-3. Vector embeddings storage (memory_embeddings table via sqlite-vec)
+These models define the database schema for test setup (Base.metadata.create_all)
+and Alembic migrations. The production code uses raw SQL via sqlalchemy.text().
 
-The MemoryEntry and PersonEntry types in ash.memory.types are the authoritative
-schemas. The Memory and Person models here may have fewer fields as the DB
-is now primarily used for vector search, not full data storage.
-
-Session and Message models have been removed in favor of JSONL storage.
-See ash.sessions module for the new session management system.
+The graph tables (memories, people, users, chats, and their join tables) are the
+primary schema. The memory_embeddings virtual table is created by VectorIndex.
 """
 
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Float, Integer, String, Text
 from sqlalchemy.dialects.sqlite import JSON
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 def utc_now() -> datetime:
@@ -35,96 +28,113 @@ class Base(DeclarativeBase):
     }
 
 
-class Person(Base):
-    """Person entity that memories can be about.
-
-    Tracks people the user mentions (wife, boss, friends, etc.) so that
-    memories can be properly attributed and retrieved.
-    """
-
-    __tablename__ = "people"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    owner_user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    relationship: Mapped[str | None] = mapped_column(
-        "relation", String, nullable=True
-    )  # Column name 'relation' for backward compat
-    aliases: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
-        "metadata", JSON, nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utc_now, nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utc_now, onupdate=utc_now, nullable=False
-    )
-
-
 class Memory(Base):
-    """Memory entry - a stored fact or piece of information.
-
-    IMPORTANT: This model is for migration and legacy purposes only.
-    The source of truth is JSONL (see MemoryEntry in ash.memory.types).
-    This model intentionally omits several fields (source_user_id, extraction_confidence,
-    etc.) that exist in MemoryEntry, as the DB is now used only for vector embeddings.
-
-    Memory scoping:
-    - Personal: owner_user_id set, chat_id NULL - only visible to that user
-    - Group: owner_user_id NULL, chat_id set - visible to everyone in that chat
-    - Global: both NULL - visible everywhere (rare)
-
-    Supersession:
-    - When a new memory conflicts with an old one, the old one is marked superseded
-    - Superseded memories are preserved for history but excluded from retrieval
-    """
+    """Memory entry stored in the graph."""
 
     __tablename__ = "memories"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    source: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utc_now, nullable=False
+    memory_type: Mapped[str] = mapped_column(
+        String, nullable=False, default="knowledge"
     )
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
-        "metadata", JSON, nullable=True
-    )
-
-    # Owner tracking - who added this fact (NULL for group/shared memories)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="user")
     owner_user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-
-    # Chat/group scoping - which chat this memory belongs to (NULL for personal memories)
     chat_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    source_username: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    extraction_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sensitivity: Mapped[str | None] = mapped_column(String, nullable=True)
+    portable: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    observed_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    expires_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    superseded_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    superseded_by_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    archived_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    archive_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    metadata_: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
 
-    # Subject tracking - who/what is this fact about (list of person IDs)
-    subject_person_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
-    # Supersession tracking - soft delete with history
-    superseded_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, index=True
-    )
-    superseded_by_id: Mapped[str | None] = mapped_column(
-        String, ForeignKey("memories.id", ondelete="SET NULL"), nullable=True
-    )
+class MemorySubject(Base):
+    """Join table: memory -> person (subject)."""
 
-    superseded_by: Mapped["Memory | None"] = relationship(
-        "Memory", remote_side="Memory.id", foreign_keys=[superseded_by_id]
-    )
+    __tablename__ = "memory_subjects"
+
+    memory_id: Mapped[str] = mapped_column(String, primary_key=True)
+    person_id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
 
 
-class UserProfile(Base):
-    """User profile information."""
+class Person(Base):
+    """Person entity in the graph."""
 
-    __tablename__ = "user_profiles"
+    __tablename__ = "people"
 
-    user_id: Mapped[str] = mapped_column(String, primary_key=True)
-    provider: Mapped[str] = mapped_column(String, nullable=False)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_by: Mapped[str] = mapped_column(String, nullable=False, default="")
+    name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    merged_into: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    metadata_: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
+
+
+class PersonAlias(Base):
+    """Alias for a person."""
+
+    __tablename__ = "person_aliases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    person_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    value: Mapped[str] = mapped_column(String, nullable=False)
+    added_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class PersonRelationship(Base):
+    """Relationship claim for a person."""
+
+    __tablename__ = "person_relationships"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    person_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    relationship: Mapped[str] = mapped_column(String, nullable=False)
+    stated_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class User(Base):
+    """Provider user identity."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    provider: Mapped[str] = mapped_column(String, nullable=False, default="")
+    provider_id: Mapped[str] = mapped_column(String, nullable=False, default="")
     username: Mapped[str | None] = mapped_column(String, nullable=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    profile_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utc_now, onupdate=utc_now, nullable=False
-    )
+    person_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    metadata_: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
+
+
+class Chat(Base):
+    """Chat/channel identity."""
+
+    __tablename__ = "chats"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    provider: Mapped[str] = mapped_column(String, nullable=False, default="")
+    provider_id: Mapped[str] = mapped_column(String, nullable=False, default="")
+    chat_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    metadata_: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from ash.cli.commands.memory._helpers import get_memory_store
+from typing import TYPE_CHECKING
+
 from ash.cli.console import console, dim, warning
+
+if TYPE_CHECKING:
+    from ash.store.store import Store
 
 
 async def memory_list(
-    session,
+    store: Store,
     limit: int,
     include_expired: bool,
     user_id: str | None,
@@ -17,8 +21,6 @@ async def memory_list(
     """List memory entries."""
     from rich.table import Table
 
-    store = get_memory_store()
-
     # Apply scope-based filters
     owner_user_id = None
     filter_chat_id = None
@@ -26,7 +28,6 @@ async def memory_list(
     if scope == "personal":
         if user_id:
             owner_user_id = user_id
-        # else: no DB filter -- post-filter catches all personal memories below
     elif scope == "shared":
         if chat_id:
             filter_chat_id = chat_id
@@ -35,7 +36,7 @@ async def memory_list(
     elif chat_id:
         filter_chat_id = chat_id
 
-    entries = await store.get_memories(
+    entries = await store.list_memories(
         limit=limit * 2,  # Get more to filter
         include_expired=include_expired,
         include_superseded=False,
@@ -46,7 +47,6 @@ async def memory_list(
     # Apply additional filters
     filtered_entries = []
     for entry in entries:
-        # Scope filter
         if scope == "personal" and not entry.owner_user_id:
             continue
         if scope == "shared" and entry.owner_user_id:
@@ -59,9 +59,7 @@ async def memory_list(
             break
 
     # Load people for name lookup
-    from ash.cli.commands.memory._helpers import get_all_people
-
-    people = await get_all_people()
+    people = await store.list_people()
     people_by_id = {p.id: p for p in people}
 
     # Build username -> person name lookup

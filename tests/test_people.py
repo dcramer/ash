@@ -1,7 +1,7 @@
-"""Tests for person/identity management via GraphStore.
+"""Tests for person/identity management via Store.
 
 Tests focus on:
-- GraphStore person CRUD operations (global model)
+- Store person CRUD operations (global model)
 - Alias management with provenance
 - Relationship management with provenance
 - Username matching and resolution
@@ -11,7 +11,6 @@ Tests focus on:
 """
 
 from datetime import UTC
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,11 +20,11 @@ from ash.core.agent import (
     _extract_relationship_term,
     _is_owner_name,
 )
-from ash.graph.store import GraphStore
+from ash.db.engine import Database
 from ash.memory.embeddings import EmbeddingGenerator
-from ash.memory.file_store import FileMemoryStore
 from ash.memory.index import VectorIndex
-from ash.people.types import AliasEntry, PersonEntry, RelationshipClaim
+from ash.store.store import Store
+from ash.store.types import AliasEntry, PersonEntry, RelationshipClaim
 
 
 def _make_mock_llm(response_text: str = "YES") -> AsyncMock:
@@ -43,6 +42,7 @@ def mock_index():
     index.search = AsyncMock(return_value=[])
     index.add_embedding = AsyncMock()
     index.delete_embedding = AsyncMock()
+    index.delete_embeddings = AsyncMock()
     return index
 
 
@@ -55,25 +55,19 @@ def mock_embedding_generator():
 
 @pytest.fixture
 async def graph_store(
-    ash_home: Path, mock_index, mock_embedding_generator
-) -> GraphStore:
-    store = FileMemoryStore()
-    graph_dir = ash_home / "graph"
-    graph_dir.mkdir(exist_ok=True)
-    return GraphStore(
-        memory_store=store,
+    database: Database, mock_index, mock_embedding_generator
+) -> Store:
+    return Store(
+        db=database,
         vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
-        people_path=graph_dir / "people.jsonl",
-        users_path=graph_dir / "users.jsonl",
-        chats_path=graph_dir / "chats.jsonl",
     )
 
 
 class TestPersonCRUD:
     """Tests for person CRUD operations."""
 
-    async def test_create_person(self, graph_store: GraphStore):
+    async def test_create_person(self, graph_store: Store):
         """Test creating a person."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -90,7 +84,7 @@ class TestPersonCRUD:
         assert person.aliases[0].value == "my wife"
         assert person.aliases[0].added_by == "user-1"
 
-    async def test_create_person_tracks_created_by(self, graph_store: GraphStore):
+    async def test_create_person_tracks_created_by(self, graph_store: Store):
         """Test that created_by is set on new records."""
         person = await graph_store.create_person(
             created_by="dcramer",
@@ -99,7 +93,7 @@ class TestPersonCRUD:
 
         assert person.created_by == "dcramer"
 
-    async def test_get_person(self, graph_store: GraphStore):
+    async def test_get_person(self, graph_store: Store):
         """Test getting a person by ID."""
         created = await graph_store.create_person(
             created_by="user-1",
@@ -112,7 +106,7 @@ class TestPersonCRUD:
         assert found.id == created.id
         assert found.name == "Sarah"
 
-    async def test_find_person_by_name(self, graph_store: GraphStore):
+    async def test_find_person_by_name(self, graph_store: Store):
         """Test finding a person by name (globally)."""
         await graph_store.create_person(
             created_by="user-1",
@@ -124,7 +118,7 @@ class TestPersonCRUD:
         assert found is not None
         assert found.name == "Sarah"
 
-    async def test_find_person_by_relationship(self, graph_store: GraphStore):
+    async def test_find_person_by_relationship(self, graph_store: Store):
         """Test finding a person by relationship."""
         await graph_store.create_person(
             created_by="user-1",
@@ -137,7 +131,7 @@ class TestPersonCRUD:
         assert found is not None
         assert found.name == "Sarah"
 
-    async def test_find_person_by_alias(self, graph_store: GraphStore):
+    async def test_find_person_by_alias(self, graph_store: Store):
         """Test finding a person by alias."""
         await graph_store.create_person(
             created_by="user-1",
@@ -150,7 +144,7 @@ class TestPersonCRUD:
         assert found is not None
         assert found.name == "Sarah"
 
-    async def test_find_person_case_insensitive(self, graph_store: GraphStore):
+    async def test_find_person_case_insensitive(self, graph_store: Store):
         """Test that person lookup is case-insensitive."""
         await graph_store.create_person(
             created_by="user-1",
@@ -163,7 +157,7 @@ class TestPersonCRUD:
         found = await graph_store.find_person("SARAH")
         assert found is not None
 
-    async def test_find_is_global(self, graph_store: GraphStore):
+    async def test_find_is_global(self, graph_store: Store):
         """Test that find searches all records regardless of creator."""
         await graph_store.create_person(
             created_by="user-1",
@@ -174,7 +168,7 @@ class TestPersonCRUD:
         found = await graph_store.find_person("Sarah")
         assert found is not None
 
-    async def test_list_all(self, graph_store: GraphStore):
+    async def test_list_all(self, graph_store: Store):
         """Test listing all people, sorted by name."""
         await graph_store.create_person(created_by="user-1", name="Charlie")
         await graph_store.create_person(created_by="user-1", name="Alice")
@@ -187,7 +181,7 @@ class TestPersonCRUD:
         assert all_people[1].name == "Bob"
         assert all_people[2].name == "Charlie"
 
-    async def test_update_person(self, graph_store: GraphStore):
+    async def test_update_person(self, graph_store: Store):
         """Test updating person details."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -207,7 +201,7 @@ class TestPersonCRUD:
         assert len(updated.relationships) == 1
         assert updated.relationships[0].relationship == "wife"
 
-    async def test_get_all(self, graph_store: GraphStore):
+    async def test_get_all(self, graph_store: Store):
         """Test getting all people across owners."""
         await graph_store.create_person(created_by="user-1", name="Alice")
         await graph_store.create_person(created_by="user-2", name="Bob")
@@ -220,7 +214,7 @@ class TestPersonCRUD:
 class TestAliasManagement:
     """Tests for alias management."""
 
-    async def test_add_alias(self, graph_store: GraphStore):
+    async def test_add_alias(self, graph_store: Store):
         """Test adding an alias to a person."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -232,7 +226,7 @@ class TestAliasManagement:
         assert updated is not None
         assert any(a.value == "honey" for a in updated.aliases)
 
-    async def test_add_alias_no_duplicates(self, graph_store: GraphStore):
+    async def test_add_alias_no_duplicates(self, graph_store: Store):
         """Test that duplicate aliases are not added."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -246,7 +240,7 @@ class TestAliasManagement:
         # Should still only have one alias (case-insensitive dedup)
         assert len(updated.aliases) == 1
 
-    async def test_add_alias_anyone_can_add(self, graph_store: GraphStore):
+    async def test_add_alias_anyone_can_add(self, graph_store: Store):
         """Test that any user can add an alias (no owner check)."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -261,7 +255,7 @@ class TestAliasManagement:
 class TestAliasProvenance:
     """Tests for alias provenance tracking."""
 
-    async def test_alias_tracks_added_by(self, graph_store: GraphStore):
+    async def test_alias_tracks_added_by(self, graph_store: Store):
         """Test that aliases record who added them."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -275,7 +269,7 @@ class TestAliasProvenance:
         assert alias.added_by == "user-2"
         assert alias.created_at is not None
 
-    async def test_create_aliases_track_added_by(self, graph_store: GraphStore):
+    async def test_create_aliases_track_added_by(self, graph_store: Store):
         """Test that aliases from create_person() have provenance."""
         person = await graph_store.create_person(
             created_by="dcramer",
@@ -286,30 +280,27 @@ class TestAliasProvenance:
         assert person.aliases[0].value == "my wife"
         assert person.aliases[0].added_by == "dcramer"
 
-    async def test_backward_compat_plain_string_aliases(self, tmp_path: Path):
-        """Test that old plain-string aliases load correctly."""
-        old_data = {
-            "id": "test-123",
-            "version": 1,
-            "owner_user_id": "user-1",
-            "name": "Sarah",
-            "aliases": ["my wife", "honey"],
-        }
+    async def test_backward_compat_plain_string_aliases(self, graph_store: Store):
+        """Test that old plain-string aliases are handled correctly."""
+        person = await graph_store.create_person(
+            created_by="user-1",
+            name="Sarah",
+        )
+        await graph_store.add_alias(person.id, "my wife", added_by="user-1")
+        await graph_store.add_alias(person.id, "honey", added_by="user-1")
 
-        entry = PersonEntry.from_dict(old_data)
-
-        assert len(entry.aliases) == 2
-        assert entry.aliases[0].value == "my wife"
-        assert entry.aliases[0].added_by is None
-        assert entry.aliases[1].value == "honey"
-        # created_by should be migrated from owner_user_id
-        assert entry.created_by == "user-1"
+        refreshed = await graph_store.get_person(person.id)
+        assert refreshed is not None
+        assert len(refreshed.aliases) == 2
+        alias_values = {a.value for a in refreshed.aliases}
+        assert "my wife" in alias_values
+        assert "honey" in alias_values
 
 
 class TestRelationshipProvenance:
     """Tests for relationship provenance tracking."""
 
-    async def test_relationship_tracks_stated_by(self, graph_store: GraphStore):
+    async def test_relationship_tracks_stated_by(self, graph_store: Store):
         """Test that relationships record who stated them."""
         person = await graph_store.create_person(
             created_by="dcramer",
@@ -323,7 +314,7 @@ class TestRelationshipProvenance:
         assert rc.stated_by == "dcramer"
         assert rc.created_at is not None
 
-    async def test_add_relationship(self, graph_store: GraphStore):
+    async def test_add_relationship(self, graph_store: Store):
         """Test adding a relationship claim."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -337,7 +328,7 @@ class TestRelationshipProvenance:
         assert updated.relationships[0].relationship == "wife"
         assert updated.relationships[0].stated_by == "dcramer"
 
-    async def test_add_relationship_no_duplicates(self, graph_store: GraphStore):
+    async def test_add_relationship_no_duplicates(self, graph_store: Store):
         """Test that duplicate relationships are not added."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -350,40 +341,22 @@ class TestRelationshipProvenance:
         assert updated is not None
         assert len(updated.relationships) == 1
 
-    async def test_backward_compat_plain_string_relationship(self):
-        """Test that old single-string relationship loads correctly."""
-        old_data = {
-            "id": "test-123",
-            "version": 1,
-            "owner_user_id": "user-1",
-            "name": "Sarah",
-            "relationship": "wife",
-        }
+    async def test_add_relationship_string(self, graph_store: Store):
+        """Test adding a relationship via the store API."""
+        person = await graph_store.create_person(
+            created_by="user-1",
+            name="Sarah",
+            relationship="wife",
+        )
 
-        entry = PersonEntry.from_dict(old_data)
-
-        assert len(entry.relationships) == 1
-        assert entry.relationships[0].relationship == "wife"
-        assert entry.relationships[0].stated_by is None
-
-    async def test_backward_compat_relation_key(self):
-        """Test that old 'relation' key also works."""
-        old_data = {
-            "id": "test-123",
-            "version": 1,
-            "name": "Sarah",
-            "relation": "wife",
-        }
-
-        entry = PersonEntry.from_dict(old_data)
-        assert len(entry.relationships) == 1
-        assert entry.relationships[0].relationship == "wife"
+        assert len(person.relationships) == 1
+        assert person.relationships[0].relationship == "wife"
 
 
 class TestUsernameMatching:
     """Tests for username matching."""
 
-    async def test_matches_username_by_name(self, graph_store: GraphStore):
+    async def test_matches_username_by_name(self, graph_store: Store):
         """Test matching by name."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -394,7 +367,7 @@ class TestUsernameMatching:
         assert person.matches_username("Bob")
         assert not person.matches_username("alice")
 
-    async def test_matches_username_by_alias(self, graph_store: GraphStore):
+    async def test_matches_username_by_alias(self, graph_store: Store):
         """Test matching by alias."""
         person = await graph_store.create_person(
             created_by="user-1",
@@ -409,7 +382,7 @@ class TestUsernameMatching:
 class TestResolution:
     """Tests for person resolution."""
 
-    async def test_resolve_existing(self, graph_store: GraphStore):
+    async def test_resolve_existing(self, graph_store: Store):
         """Test resolving an existing person."""
         created = await graph_store.create_person(
             created_by="user-1",
@@ -422,7 +395,7 @@ class TestResolution:
         assert result.created is False
         assert result.person_name == "Sarah"
 
-    async def test_resolve_creates_new(self, graph_store: GraphStore):
+    async def test_resolve_creates_new(self, graph_store: Store):
         """Test that resolve creates a new person if not found."""
         result = await graph_store.resolve_or_create_person("user-1", "Bob")
 
@@ -434,7 +407,7 @@ class TestResolution:
         assert found is not None
         assert found.name == "Bob"
 
-    async def test_resolve_relationship_term(self, graph_store: GraphStore):
+    async def test_resolve_relationship_term(self, graph_store: Store):
         """Test resolving a relationship term (e.g., 'my wife')."""
         result = await graph_store.resolve_or_create_person(
             "user-1",
@@ -450,7 +423,7 @@ class TestResolution:
         assert len(person.relationships) == 1
         assert person.relationships[0].relationship == "wife"
 
-    async def test_resolve_names(self, graph_store: GraphStore):
+    async def test_resolve_names(self, graph_store: Store):
         """Test resolving person IDs to names."""
         p1 = await graph_store.create_person(created_by="user-1", name="Alice")
         p2 = await graph_store.create_person(created_by="user-1", name="Bob")
@@ -459,7 +432,7 @@ class TestResolution:
 
         assert names == {p1.id: "Alice", p2.id: "Bob"}
 
-    async def test_resolve_names_missing_id(self, graph_store: GraphStore):
+    async def test_resolve_names_missing_id(self, graph_store: Store):
         """Test that missing IDs are omitted from results."""
         p1 = await graph_store.create_person(created_by="user-1", name="Alice")
 
@@ -467,7 +440,7 @@ class TestResolution:
 
         assert names == {p1.id: "Alice"}
 
-    async def test_resolve_global(self, graph_store: GraphStore):
+    async def test_resolve_global(self, graph_store: Store):
         """Test that resolution finds people created by other users."""
         created = await graph_store.create_person(
             created_by="user-1",
@@ -484,7 +457,7 @@ class TestResolution:
 class TestFindPersonIdsForUsername:
     """Tests for find_person_ids_for_username."""
 
-    async def test_finds_globally(self, graph_store: GraphStore):
+    async def test_finds_globally(self, graph_store: Store):
         """Test finding person IDs across all creators."""
         p1 = await graph_store.create_person(
             created_by="alice", name="Bob", aliases=["bob"]
@@ -497,7 +470,7 @@ class TestFindPersonIdsForUsername:
 
         assert ids == {p1.id, p2.id}
 
-    async def test_handles_at_prefix(self, graph_store: GraphStore):
+    async def test_handles_at_prefix(self, graph_store: Store):
         """Test that @ prefix is stripped during matching."""
         p = await graph_store.create_person(
             created_by="alice", name="Bob", aliases=["bob"]
@@ -507,13 +480,13 @@ class TestFindPersonIdsForUsername:
 
         assert ids == {p.id}
 
-    async def test_returns_empty_for_unknown(self, graph_store: GraphStore):
+    async def test_returns_empty_for_unknown(self, graph_store: Store):
         """Test that unknown username returns empty set."""
         ids = await graph_store.find_person_ids_for_username("nobody")
 
         assert ids == set()
 
-    async def test_remaps_merged_ids(self, graph_store: GraphStore):
+    async def test_remaps_merged_ids(self, graph_store: Store):
         """Test that merged person IDs are remapped to primary."""
         p1 = await graph_store.create_person(
             created_by="user-1", name="Sarah", aliases=["sarah"]
@@ -533,7 +506,7 @@ class TestFindPersonIdsForUsername:
 class TestPersonMerge:
     """Tests for person merging."""
 
-    async def test_merge_combines_aliases(self, graph_store: GraphStore):
+    async def test_merge_combines_aliases(self, graph_store: Store):
         """Test that merge copies aliases from secondary to primary."""
         p1 = await graph_store.create_person(
             created_by="user-1", name="Sarah", aliases=["my wife"]
@@ -549,7 +522,7 @@ class TestPersonMerge:
         assert "my wife" in alias_values
         assert "sksembhi" in alias_values
 
-    async def test_merge_sets_merged_into(self, graph_store: GraphStore):
+    async def test_merge_sets_merged_into(self, graph_store: Store):
         """Test that secondary gets merged_into set."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-2", name="Sksembhi")
@@ -560,7 +533,7 @@ class TestPersonMerge:
         assert secondary is not None
         assert secondary.merged_into == p1.id
 
-    async def test_merge_adds_secondary_name_as_alias(self, graph_store: GraphStore):
+    async def test_merge_adds_secondary_name_as_alias(self, graph_store: Store):
         """Test that secondary's name becomes an alias on primary."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-2", name="Sksembhi")
@@ -571,7 +544,7 @@ class TestPersonMerge:
         alias_values = [a.value for a in result.aliases]
         assert "Sksembhi" in alias_values
 
-    async def test_merge_does_not_duplicate_same_name(self, graph_store: GraphStore):
+    async def test_merge_does_not_duplicate_same_name(self, graph_store: Store):
         """Test that merge doesn't add name as alias if same as primary."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-2", name="Sarah")
@@ -583,7 +556,7 @@ class TestPersonMerge:
         alias_values = [a.value.lower() for a in result.aliases]
         assert "sarah" not in alias_values
 
-    async def test_merged_person_excluded_from_list(self, graph_store: GraphStore):
+    async def test_merged_person_excluded_from_list(self, graph_store: Store):
         """Test that merged records don't appear in list_people."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-2", name="Sksembhi")
@@ -594,7 +567,7 @@ class TestPersonMerge:
         assert len(people) == 1
         assert people[0].id == p1.id
 
-    async def test_merged_person_excluded_from_find(self, graph_store: GraphStore):
+    async def test_merged_person_excluded_from_find(self, graph_store: Store):
         """Test that merged records don't appear in find results."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(
@@ -609,7 +582,7 @@ class TestPersonMerge:
         assert found is not None
         assert found.id == p1.id
 
-    async def test_resolve_follows_merge_chain(self, graph_store: GraphStore):
+    async def test_resolve_follows_merge_chain(self, graph_store: Store):
         """Test that resolve_or_create_person follows merge chain."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(
@@ -623,7 +596,7 @@ class TestPersonMerge:
         assert result.person_id == p1.id
         assert result.created is False
 
-    async def test_merge_copies_relationships(self, graph_store: GraphStore):
+    async def test_merge_copies_relationships(self, graph_store: Store):
         """Test that merge copies relationships from secondary."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(
@@ -636,16 +609,14 @@ class TestPersonMerge:
         assert len(result.relationships) == 1
         assert result.relationships[0].relationship == "wife"
 
-    async def test_merge_returns_none_for_missing(self, graph_store: GraphStore):
+    async def test_merge_returns_none_for_missing(self, graph_store: Store):
         """Test that merge returns None if either ID is missing."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
 
         result = await graph_store.merge_people(p1.id, "nonexistent")
         assert result is None
 
-    async def test_merge_refuses_already_merged_secondary(
-        self, graph_store: GraphStore
-    ):
+    async def test_merge_refuses_already_merged_secondary(self, graph_store: Store):
         """Merge should refuse if secondary is already merged (prevents chain corruption)."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
@@ -667,7 +638,7 @@ class TestPersonMerge:
 class TestCacheBehavior:
     """Tests for cache invalidation."""
 
-    async def test_cache_invalidates_after_create(self, graph_store: GraphStore):
+    async def test_cache_invalidates_after_create(self, graph_store: Store):
         """Test that cache is invalidated after creating a person."""
         await graph_store.create_person(created_by="user-1", name="Alice")
         people1 = await graph_store.get_all_people()
@@ -677,7 +648,7 @@ class TestCacheBehavior:
         people2 = await graph_store.get_all_people()
         assert len(people2) == 2
 
-    async def test_cache_invalidates_after_update(self, graph_store: GraphStore):
+    async def test_cache_invalidates_after_update(self, graph_store: Store):
         """Test that cache is invalidated after update."""
         person = await graph_store.create_person(created_by="user-1", name="Alice")
 
@@ -689,10 +660,10 @@ class TestCacheBehavior:
 
 
 class TestSerialization:
-    """Tests for to_dict/from_dict roundtripping."""
+    """Tests for PersonEntry construction."""
 
-    def test_roundtrip(self):
-        """Test that PersonEntry survives serialization."""
+    def test_construction(self):
+        """Test that PersonEntry can be constructed with all fields."""
         entry = PersonEntry(
             id="test-123",
             version=1,
@@ -707,55 +678,52 @@ class TestSerialization:
             ],
         )
 
-        d = entry.to_dict()
-        restored = PersonEntry.from_dict(d)
-
-        assert restored.id == entry.id
-        assert restored.created_by == entry.created_by
-        assert restored.name == entry.name
-        assert len(restored.relationships) == 1
-        assert restored.relationships[0].relationship == "wife"
-        assert restored.relationships[0].stated_by == "dcramer"
-        assert len(restored.aliases) == 2
-        assert restored.aliases[0].value == "my wife"
-        assert restored.aliases[1].value == "sksembhi"
+        assert entry.id == "test-123"
+        assert entry.created_by == "dcramer"
+        assert entry.name == "Sarah"
+        assert len(entry.relationships) == 1
+        assert entry.relationships[0].relationship == "wife"
+        assert entry.relationships[0].stated_by == "dcramer"
+        assert len(entry.aliases) == 2
+        assert entry.aliases[0].value == "my wife"
+        assert entry.aliases[1].value == "sksembhi"
 
 
 class TestNormalizeReference:
     """Tests for _normalize_reference prefix stripping."""
 
     def test_strips_my_prefix(self):
-        assert GraphStore._normalize_reference("my wife") == "wife"
+        assert Store._normalize_reference("my wife") == "wife"
 
     def test_strips_the_prefix(self):
-        assert GraphStore._normalize_reference("the boss") == "boss"
+        assert Store._normalize_reference("the boss") == "boss"
 
     def test_strips_at_prefix(self):
-        assert GraphStore._normalize_reference("@dcramer") == "dcramer"
+        assert Store._normalize_reference("@dcramer") == "dcramer"
 
     def test_strips_my_then_at(self):
         """After stripping 'my ', '@dcramer' should also strip '@'."""
-        assert GraphStore._normalize_reference("my @dcramer") == "dcramer"
+        assert Store._normalize_reference("my @dcramer") == "dcramer"
 
     def test_no_prefix(self):
-        assert GraphStore._normalize_reference("sarah") == "sarah"
+        assert Store._normalize_reference("sarah") == "sarah"
 
 
 class TestParsePersonReference:
     """Tests for _parse_person_reference relationship filtering."""
 
-    def test_valid_relationship_term(self, graph_store: GraphStore):
+    def test_valid_relationship_term(self, graph_store: Store):
         name, rel = graph_store._parse_person_reference("my wife")
         assert rel == "wife"
 
-    def test_invalid_relationship_term_returns_none(self, graph_store: GraphStore):
+    def test_invalid_relationship_term_returns_none(self, graph_store: Store):
         """Non-relationship terms like 'cat' should not be stored as relationships."""
         name, rel = graph_store._parse_person_reference("my cat")
         assert rel is None
         # "my cat" is not a recognized relationship, so full string is title-cased
         assert name == "My Cat"
 
-    def test_plain_name_no_relationship(self, graph_store: GraphStore):
+    def test_plain_name_no_relationship(self, graph_store: Store):
         name, rel = graph_store._parse_person_reference("Sarah")
         assert rel is None
         assert name == "Sarah"
@@ -764,7 +732,7 @@ class TestParsePersonReference:
 class TestUpdateProvenance:
     """Tests for add_relationship/add_alias provenance tracking."""
 
-    async def test_add_relationship_with_provenance(self, graph_store: GraphStore):
+    async def test_add_relationship_with_provenance(self, graph_store: Store):
         person = await graph_store.create_person(created_by="user-1", name="Sarah")
 
         updated = await graph_store.add_relationship(
@@ -780,7 +748,7 @@ class TestUpdateProvenance:
         assert rc.stated_by == "dcramer"
         assert rc.created_at is not None
 
-    async def test_add_aliases_with_provenance(self, graph_store: GraphStore):
+    async def test_add_aliases_with_provenance(self, graph_store: Store):
         person = await graph_store.create_person(created_by="user-1", name="Sarah")
 
         for alias in ["sksembhi", "honey"]:
@@ -792,7 +760,7 @@ class TestUpdateProvenance:
             assert alias.added_by == "dcramer"
             assert alias.created_at is not None
 
-    async def test_add_relationship_without_stated_by(self, graph_store: GraphStore):
+    async def test_add_relationship_without_stated_by(self, graph_store: Store):
         """Provenance fields are None when stated_by is not provided."""
         person = await graph_store.create_person(created_by="user-1", name="Sarah")
 
@@ -805,7 +773,7 @@ class TestUpdateProvenance:
 class TestPersonDelete:
     """Tests for person deletion."""
 
-    async def test_delete_person(self, graph_store: GraphStore):
+    async def test_delete_person(self, graph_store: Store):
         """Test deleting a person."""
         person = await graph_store.create_person(created_by="user-1", name="Sarah")
 
@@ -815,12 +783,12 @@ class TestPersonDelete:
         found = await graph_store.get_person(person.id)
         assert found is None
 
-    async def test_delete_nonexistent(self, graph_store: GraphStore):
+    async def test_delete_nonexistent(self, graph_store: Store):
         """Test deleting a person that doesn't exist."""
         result = await graph_store.delete_person("nonexistent")
         assert result is False
 
-    async def test_delete_clears_merged_into(self, graph_store: GraphStore):
+    async def test_delete_clears_merged_into(self, graph_store: Store):
         """Test that deleting a person clears merged_into references."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
@@ -834,7 +802,7 @@ class TestPersonDelete:
         assert p2_after is not None
         assert p2_after.merged_into is None
 
-    async def test_delete_removes_from_list(self, graph_store: GraphStore):
+    async def test_delete_removes_from_list(self, graph_store: Store):
         """Test that deleted person is gone from list_people."""
         p1 = await graph_store.create_person(created_by="user-1", name="Alice")
         p2 = await graph_store.create_person(created_by="user-1", name="Bob")
@@ -851,28 +819,24 @@ class TestMultiWordNameExtraction:
 
     def test_extracts_two_word_name(self):
         """Test extracting 'Sarah Jane' from 'my wife Sarah Jane loves hiking'."""
-        result = GraphStore._extract_name_from_content(
+        result = Store._extract_name_from_content(
             "My wife Sarah Jane loves hiking", "wife"
         )
         assert result == "Sarah Jane"
 
     def test_extracts_single_word_name(self):
         """Test extracting single-word name still works."""
-        result = GraphStore._extract_name_from_content(
-            "My wife Sarah loves hiking", "wife"
-        )
+        result = Store._extract_name_from_content("My wife Sarah loves hiking", "wife")
         assert result == "Sarah"
 
     def test_extracts_name_from_is_named(self):
         """Test 'wife is named Sarah Jane' pattern."""
-        result = GraphStore._extract_name_from_content(
-            "My wife is named Sarah Jane", "wife"
-        )
+        result = Store._extract_name_from_content("My wife is named Sarah Jane", "wife")
         assert result == "Sarah Jane"
 
     def test_extracts_name_from_possessive(self):
         """Test 'wife's name is Sarah Jane' pattern."""
-        result = GraphStore._extract_name_from_content(
+        result = Store._extract_name_from_content(
             "My wife's name is Sarah Jane", "wife"
         )
         assert result == "Sarah Jane"
@@ -885,7 +849,7 @@ class TestFuzzyResolution:
     (evals/test_identity.py) which uses real LLM calls.
     """
 
-    async def test_no_llm_degrades_to_create(self, graph_store: GraphStore):
+    async def test_no_llm_degrades_to_create(self, graph_store: Store):
         """Without LLM configured, fuzzy match is skipped and a new person is created."""
         await graph_store.create_person(
             created_by="user-1",
@@ -898,7 +862,7 @@ class TestFuzzyResolution:
         assert result.created is True
         assert result.person_name == "Sukhpreet"
 
-    async def test_llm_error_degrades_to_create(self, graph_store: GraphStore):
+    async def test_llm_error_degrades_to_create(self, graph_store: Store):
         """LLM exception degrades gracefully to creating a new person."""
         await graph_store.create_person(
             created_by="user-1",
@@ -917,7 +881,7 @@ class TestFuzzyResolution:
 class TestRelationshipStatedBy:
     """Tests for relationship_stated_by override (Bug 1 fix)."""
 
-    async def test_create_with_relationship_stated_by(self, graph_store: GraphStore):
+    async def test_create_with_relationship_stated_by(self, graph_store: Store):
         """stated_by uses the override, not created_by."""
         person = await graph_store.create_person(
             created_by="123456789",
@@ -929,9 +893,7 @@ class TestRelationshipStatedBy:
         assert person.relationships[0].stated_by == "dcramer"
         assert person.created_by == "123456789"
 
-    async def test_create_relationship_stated_by_fallback(
-        self, graph_store: GraphStore
-    ):
+    async def test_create_relationship_stated_by_fallback(self, graph_store: Store):
         """Falls back to created_by when relationship_stated_by not provided."""
         person = await graph_store.create_person(
             created_by="dcramer",
@@ -942,7 +904,7 @@ class TestRelationshipStatedBy:
         assert person.relationships[0].stated_by == "dcramer"
 
     async def test_resolve_or_create_passes_relationship_stated_by(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """relationship_stated_by flows through to created person."""
         result = await graph_store.resolve_or_create_person(
@@ -1033,7 +995,7 @@ class TestOwnerNameMatchers:
 class TestContentAwareFuzzyFind:
     """Tests for content_hint and speaker passing in fuzzy matching."""
 
-    async def test_fuzzy_find_passes_content_hint(self, graph_store: GraphStore):
+    async def test_fuzzy_find_passes_content_hint(self, graph_store: Store):
         """Verify content_hint is forwarded to _fuzzy_find via resolve_or_create_person."""
         await graph_store.create_person(
             created_by="user-1",
@@ -1057,7 +1019,7 @@ class TestContentAwareFuzzyFind:
         prompt = call_args.kwargs["messages"][0].content
         assert "my wife Sarah's birthday is March 15" in prompt
 
-    async def test_fuzzy_find_without_content_hint(self, graph_store: GraphStore):
+    async def test_fuzzy_find_without_content_hint(self, graph_store: Store):
         """Verify _fuzzy_find works without content_hint (no Context line)."""
         await graph_store.create_person(
             created_by="user-1",
@@ -1076,7 +1038,7 @@ class TestContentAwareFuzzyFind:
         prompt = call_args.kwargs["messages"][0].content
         assert "Context:" not in prompt
 
-    async def test_fuzzy_find_includes_speaker(self, graph_store: GraphStore):
+    async def test_fuzzy_find_includes_speaker(self, graph_store: Store):
         """Speaker is included in the fuzzy match prompt."""
         await graph_store.create_person(
             created_by="user-1",
@@ -1103,7 +1065,7 @@ class TestContentAwareFuzzyFind:
         assert 'Speaker: "dcramer"' in prompt
 
     async def test_fuzzy_find_includes_stated_by_on_relationships(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """Relationship stated_by provenance appears in the fuzzy match prompt."""
         await graph_store.create_person(
@@ -1128,7 +1090,7 @@ class TestContentAwareFuzzyFind:
         assert "stated by dcramer" in prompt
 
     async def test_fuzzy_find_speaker_falls_back_to_created_by(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """Without relationship_stated_by, speaker falls back to created_by."""
         await graph_store.create_person(created_by="user-1", name="Sarah")
@@ -1161,7 +1123,7 @@ class TestHeuristicMatch:
             name="Sukhpreet",
             aliases=[AliasEntry(value="sks")],
         )
-        assert GraphStore._heuristic_match(a, b) is True
+        assert Store._heuristic_match(a, b) is True
 
     def test_name_matches_relationship(self):
         """One's name matching another's relationship should match."""
@@ -1174,19 +1136,19 @@ class TestHeuristicMatch:
             name="Sarah",
             relationships=[RelationshipClaim(relationship="wife")],
         )
-        assert GraphStore._heuristic_match(a, b) is True
+        assert Store._heuristic_match(a, b) is True
 
     def test_name_substring(self):
         """Name substring should match."""
         a = PersonEntry(id="a", name="Sukhpreet")
         b = PersonEntry(id="b", name="Sukhpreet Sembhi")
-        assert GraphStore._heuristic_match(a, b) is True
+        assert Store._heuristic_match(a, b) is True
 
     def test_first_name_overlap(self):
         """First name matching another's full name should match."""
         a = PersonEntry(id="a", name="Sarah")
         b = PersonEntry(id="b", name="Sarah Jane")
-        assert GraphStore._heuristic_match(a, b) is True
+        assert Store._heuristic_match(a, b) is True
 
     def test_skip_both_self_different_users(self):
         """Should skip pairs where both have relationship self from different users."""
@@ -1202,7 +1164,7 @@ class TestHeuristicMatch:
             name="David Cramer",
             relationships=[RelationshipClaim(relationship="self")],
         )
-        assert GraphStore._heuristic_match(a, b) is False
+        assert Store._heuristic_match(a, b) is False
 
     def test_both_self_same_user_matches(self):
         """Same-user self-persons should match (duplicate self-records)."""
@@ -1218,31 +1180,31 @@ class TestHeuristicMatch:
             name="David Cramer",
             relationships=[RelationshipClaim(relationship="self")],
         )
-        assert GraphStore._heuristic_match(a, b) is True
+        assert Store._heuristic_match(a, b) is True
 
     def test_no_match_unrelated(self):
         """Unrelated people should not match."""
         a = PersonEntry(id="a", name="Sarah")
         b = PersonEntry(id="b", name="Bob")
-        assert GraphStore._heuristic_match(a, b) is False
+        assert Store._heuristic_match(a, b) is False
 
     def test_short_names_no_substring(self):
         """Names shorter than 3 chars should not trigger substring match."""
         a = PersonEntry(id="a", name="Al")
         b = PersonEntry(id="b", name="Alice")
-        assert GraphStore._heuristic_match(a, b) is False
+        assert Store._heuristic_match(a, b) is False
 
     def test_two_multiword_names_shared_first_name_no_match(self):
         """Two multi-word names sharing only a first name should NOT match."""
         a = PersonEntry(id="a", name="David Chen")
         b = PersonEntry(id="b", name="David Cramer")
-        assert GraphStore._heuristic_match(a, b) is False
+        assert Store._heuristic_match(a, b) is False
 
     def test_single_word_vs_multiword_shared_name_matches(self):
         """Single-word name matching a part of multi-word name SHOULD match."""
         a = PersonEntry(id="a", name="David")
         b = PersonEntry(id="b", name="David Cramer")
-        assert GraphStore._heuristic_match(a, b) is True
+        assert Store._heuristic_match(a, b) is True
 
 
 class TestPickPrimary:
@@ -1257,7 +1219,7 @@ class TestPickPrimary:
             relationships=[RelationshipClaim(relationship="wife")],
         )
         b = PersonEntry(id="b", name="Sukhpreet")
-        primary_id, secondary_id = GraphStore._pick_primary(a, b)
+        primary_id, secondary_id = Store._pick_primary(a, b)
         assert primary_id == "a"
         assert secondary_id == "b"
 
@@ -1275,7 +1237,7 @@ class TestPickPrimary:
             name="Sarah Jane",
             created_at=datetime(2024, 6, 1, tzinfo=UTC),
         )
-        primary_id, secondary_id = GraphStore._pick_primary(a, b)
+        primary_id, secondary_id = Store._pick_primary(a, b)
         assert primary_id == "a"
         assert secondary_id == "b"
 
@@ -1283,7 +1245,7 @@ class TestPickPrimary:
 class TestFindDedupCandidates:
     """Tests for find_dedup_candidates."""
 
-    async def test_no_llm_returns_empty(self, graph_store: GraphStore):
+    async def test_no_llm_returns_empty(self, graph_store: Store):
         """Without LLM, dedup returns empty list."""
         await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sarah Jane")
@@ -1291,7 +1253,7 @@ class TestFindDedupCandidates:
         result = await graph_store.find_dedup_candidates([p2.id])
         assert result == []
 
-    async def test_finds_heuristic_match_with_llm_yes(self, graph_store: GraphStore):
+    async def test_finds_heuristic_match_with_llm_yes(self, graph_store: Store):
         """Heuristic match confirmed by LLM returns merge candidate."""
         p1 = await graph_store.create_person(
             created_by="user-1",
@@ -1311,7 +1273,7 @@ class TestFindDedupCandidates:
         # p1 has more data (relationship), so it's primary
         assert result[0] == (p1.id, p2.id)
 
-    async def test_heuristic_match_with_llm_no(self, graph_store: GraphStore):
+    async def test_heuristic_match_with_llm_no(self, graph_store: Store):
         """Heuristic match rejected by LLM returns no candidates."""
         await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sarah Connor")
@@ -1325,7 +1287,7 @@ class TestFindDedupCandidates:
         result = await graph_store.find_dedup_candidates([p2.id])
         assert result == []
 
-    async def test_no_heuristic_match_no_llm_call(self, graph_store: GraphStore):
+    async def test_no_heuristic_match_no_llm_call(self, graph_store: Store):
         """No heuristic match means no LLM verification call."""
         await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Bob")
@@ -1337,7 +1299,7 @@ class TestFindDedupCandidates:
         assert result == []
         mock_llm.complete.assert_not_called()
 
-    async def test_all_ids_no_duplicate_pairs(self, graph_store: GraphStore):
+    async def test_all_ids_no_duplicate_pairs(self, graph_store: Store):
         """When all IDs are passed (doctor mode), each pair is checked only once."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sarah Jane")
@@ -1354,7 +1316,7 @@ class TestFindDedupCandidates:
         # LLM should be called exactly once, not twice
         assert mock_llm.complete.call_count == 1
 
-    async def test_exclude_self_skips_self_person(self, graph_store: GraphStore):
+    async def test_exclude_self_skips_self_person(self, graph_store: Store):
         """exclude_self=True skips candidates where either person has 'self' relationship."""
         await graph_store.create_person(
             created_by="user-1",
@@ -1371,7 +1333,7 @@ class TestFindDedupCandidates:
         assert result == []
         mock_llm.complete.assert_not_called()
 
-    async def test_exclude_self_false_allows_self_person(self, graph_store: GraphStore):
+    async def test_exclude_self_false_allows_self_person(self, graph_store: Store):
         """exclude_self=False (default) allows matching against self-persons."""
         await graph_store.create_person(
             created_by="user-1",
@@ -1387,7 +1349,7 @@ class TestFindDedupCandidates:
         assert len(result) == 1
 
     async def test_three_duplicates_cluster_into_minimal_merges(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """Three records for the same person should produce exactly 2 merges
         into a single primary, not 3 redundant pairwise merges."""
@@ -1413,7 +1375,7 @@ class TestFindDedupCandidates:
         assert secondaries == {p1.id, p2.id}
 
     async def test_four_duplicates_cluster_into_minimal_merges(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """Four records for the same person should produce exactly 3 merges."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sukhpreet")
@@ -1436,7 +1398,7 @@ class TestFindDedupCandidates:
         primaries = {r[0] for r in result}
         assert primaries == {p4.id}
 
-    async def test_two_separate_clusters(self, graph_store: GraphStore):
+    async def test_two_separate_clusters(self, graph_store: Store):
         """Two distinct groups of duplicates should produce independent clusters."""
         # Cluster A: two Sarahs
         sa1 = await graph_store.create_person(
@@ -1460,7 +1422,7 @@ class TestFindDedupCandidates:
         primaries = {r[0] for r in result}
         assert primaries == {sa1.id, sb1.id}
 
-    async def test_same_user_self_persons_detected(self, graph_store: GraphStore):
+    async def test_same_user_self_persons_detected(self, graph_store: Store):
         """Duplicate self-persons from the same user should be detected as candidates."""
         p1 = await graph_store.create_person(
             created_by="user-1",
@@ -1478,9 +1440,7 @@ class TestFindDedupCandidates:
         result = await graph_store.find_dedup_candidates([p1.id, p2.id])
         assert len(result) == 1
 
-    async def test_different_user_self_persons_not_detected(
-        self, graph_store: GraphStore
-    ):
+    async def test_different_user_self_persons_not_detected(self, graph_store: Store):
         """Self-persons from different users should NOT be detected as candidates."""
         p1 = await graph_store.create_person(
             created_by="user-1",
@@ -1504,7 +1464,7 @@ class TestFindDedupCandidates:
 class TestAutoRemapOnMerge:
     """Tests for automatic memory remap on merge."""
 
-    async def test_merge_calls_remap(self, graph_store: GraphStore):
+    async def test_merge_calls_remap(self, graph_store: Store):
         """Merge should remap subject_person_ids in memories from secondary to primary."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
@@ -1519,13 +1479,13 @@ class TestAutoRemapOnMerge:
         await graph_store.merge_people(p1.id, p2.id)
 
         # Verify that memories now point to the primary
-        memories = await graph_store._store.get_all_memories()
+        memories = await graph_store.get_all_memories()
         for mem in memories:
             if mem.subject_person_ids:
                 assert p2.id not in mem.subject_person_ids
                 assert p1.id in mem.subject_person_ids
 
-    async def test_merge_without_memories(self, graph_store: GraphStore):
+    async def test_merge_without_memories(self, graph_store: Store):
         """Merge should work fine when no memories reference the secondary."""
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
@@ -1538,7 +1498,7 @@ class TestAutoRemapOnMerge:
 class TestSpeakerScopedResolution:
     """Tests for speaker-scoped resolution via find_person_for_speaker."""
 
-    async def test_alice_and_bob_separate_sarahs(self, graph_store: GraphStore):
+    async def test_alice_and_bob_separate_sarahs(self, graph_store: Store):
         """Alice's wife Sarah and Bob's coworker Sarah are distinct persons."""
         # Alice creates "my wife Sarah"
         alice_result = await graph_store.resolve_or_create_person(
@@ -1559,9 +1519,7 @@ class TestSpeakerScopedResolution:
         # Should be two distinct persons
         assert alice_result.person_id != bob_result.person_id
 
-    async def test_find_for_speaker_returns_connected_person(
-        self, graph_store: GraphStore
-    ):
+    async def test_find_for_speaker_returns_connected_person(self, graph_store: Store):
         """find_person_for_speaker returns person connected to speaker via KNOWS edge."""
         # Create Sarah with Alice's relationship
         sarah = await graph_store.create_person(
@@ -1575,7 +1533,7 @@ class TestSpeakerScopedResolution:
         assert result is not None
         assert result.id == sarah.id
 
-    async def test_find_for_speaker_by_relationship_term(self, graph_store: GraphStore):
+    async def test_find_for_speaker_by_relationship_term(self, graph_store: Store):
         """find_person_for_speaker matches by relationship term (e.g., 'wife')."""
         sarah = await graph_store.create_person(
             created_by="alice-id",
@@ -1589,7 +1547,7 @@ class TestSpeakerScopedResolution:
         assert result.id == sarah.id
 
     async def test_find_for_speaker_different_speaker_no_match(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """find_person_for_speaker returns None when speaker has no edges to any Sarah."""
         await graph_store.create_person(
@@ -1603,9 +1561,7 @@ class TestSpeakerScopedResolution:
         result = await graph_store.find_person_for_speaker("Sarah", "charlie-id")
         assert result is None
 
-    async def test_find_for_speaker_falls_through_to_global(
-        self, graph_store: GraphStore
-    ):
+    async def test_find_for_speaker_falls_through_to_global(self, graph_store: Store):
         """When speaker has no match, resolve_or_create_person falls through to global find."""
         sarah = await graph_store.create_person(
             created_by="alice-id",
@@ -1623,9 +1579,7 @@ class TestSpeakerScopedResolution:
         assert result.person_id == sarah.id
         assert result.created is False
 
-    async def test_find_for_speaker_scopes_by_alias_added_by(
-        self, graph_store: GraphStore
-    ):
+    async def test_find_for_speaker_scopes_by_alias_added_by(self, graph_store: Store):
         """find_person_for_speaker matches via ALIAS edge (added_by)."""
         sarah = await graph_store.create_person(
             created_by="alice-id",
@@ -1637,9 +1591,7 @@ class TestSpeakerScopedResolution:
         assert result is not None
         assert result.id == sarah.id
 
-    async def test_resolve_or_create_prefers_speaker_match(
-        self, graph_store: GraphStore
-    ):
+    async def test_resolve_or_create_prefers_speaker_match(self, graph_store: Store):
         """resolve_or_create_person prefers speaker-scoped match over global."""
         # Create two Sarahs - one connected to Alice, one to Bob
         alice_sarah = await graph_store.create_person(
@@ -1670,7 +1622,7 @@ class TestNoUsernameFallback:
     """Tests for no-username user fallback (numeric ID as alias)."""
 
     async def test_self_person_with_no_username_gets_user_id_alias(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """Self-person created with no username uses numeric user_id as alias."""
         from ash.core.agent import Agent
@@ -1692,7 +1644,7 @@ class TestNoUsernameFallback:
         alias_values = [a.value for a in people[0].aliases]
         assert "123456789" in alias_values
 
-    async def test_no_username_user_id_resolves(self, graph_store: GraphStore):
+    async def test_no_username_user_id_resolves(self, graph_store: Store):
         """find_person_ids_for_username with numeric ID resolves after no-username create."""
         from ash.core.agent import Agent
 
@@ -1709,7 +1661,7 @@ class TestNoUsernameFallback:
         assert len(ids) == 1
 
     async def test_self_person_with_username_uses_username_alias(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """Self-person created with username uses username as alias (not user_id)."""
         from ash.core.agent import Agent

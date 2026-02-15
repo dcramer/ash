@@ -8,13 +8,13 @@ import typer
 from ash.cli.console import dim, error, success, warning
 
 if TYPE_CHECKING:
-    from ash.graph.store import GraphStore
+    from ash.store.store import Store
 
 logger = logging.getLogger(__name__)
 
 
 async def memory_add(
-    manager: "GraphStore",
+    manager: "Store",
     content: str,
     source: str | None,
     expires_days: int | None,
@@ -47,7 +47,7 @@ async def memory_add(
 
 
 async def memory_remove(
-    manager: "GraphStore",
+    manager: "Store",
     entry_id: str | None,
     all_entries: bool,
     force: bool,
@@ -55,7 +55,7 @@ async def memory_remove(
     chat_id: str | None,
     scope: str | None,
 ) -> None:
-    """Remove memory entries via GraphStore (handles JSONL + vector index cleanup)."""
+    """Remove memory entries via Store (handles JSONL + vector index cleanup)."""
     if all_entries:
         filter_desc = [
             f"{k}={v}"
@@ -108,8 +108,8 @@ async def memory_remove(
             raise typer.Exit(1)
 
 
-async def memory_clear(manager: "GraphStore", force: bool) -> None:
-    """Clear all memory entries via GraphStore."""
+async def memory_clear(manager: "Store", force: bool) -> None:
+    """Clear all memory entries via Store."""
     if not force:
         warning("This will delete ALL memory entries.")
         if not typer.confirm("Are you sure?"):

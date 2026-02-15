@@ -141,155 +141,150 @@ async def _run_chat(
     components = None
     rpc_server: RPCServer | None = None
     try:
-        async with database.session() as db_session:
-            # Create agent with all dependencies
-            components = await create_agent(
-                config=ash_config,
-                workspace=workspace,
-                db_session=db_session,
-                model_alias=resolved_alias,
+        # Create agent with all dependencies
+        components = await create_agent(
+            config=ash_config,
+            workspace=workspace,
+            db=database,
+            model_alias=resolved_alias,
+        )
+        agent = components.agent
+
+        # Start RPC server for sandbox memory access
+        if components.memory_manager:
+            rpc_server = RPCServer(get_rpc_socket_path())
+            register_memory_methods(
+                rpc_server, components.memory_manager, components.person_manager
             )
-            agent = components.agent
+            await rpc_server.start()
 
-            # Start RPC server for sandbox memory access
-            if components.memory_manager:
-                rpc_server = RPCServer(get_rpc_socket_path())
-                register_memory_methods(
-                    rpc_server, components.memory_manager, components.person_manager
-                )
-                await rpc_server.start()
-
-            # Dump prompt mode: print system prompt and exit
-            if dump_prompt:
-                system_prompt = agent.system_prompt
-                console.print(
-                    Panel(
-                        "[bold]System Prompt[/bold]\n\n"
-                        f"Model: {resolved_alias}\n"
-                        f"Length: {len(system_prompt)} chars",
-                        title="Prompt Info",
-                        border_style="blue",
-                    )
-                )
-                console.print()
-                console.print(system_prompt)
-                console.print()
-                console.print(
-                    Panel(
-                        "[dim]Note: This is the base prompt without memory context.\n"
-                        "At runtime, memory and conversation context are added dynamically.[/dim]",
-                        border_style="dim",
-                    )
-                )
-                return
-
-            # Create session manager for JSONL persistence
-            session_manager = SessionManager(
-                provider="cli",
-                user_id="local-user",
-            )
-
-            # Ensure session exists (creates header if new)
-            session_header = await session_manager.ensure_session()
-
-            # Load previous context from JSONL if exists
-            messages, message_ids = await session_manager.load_messages_for_llm()
-
-            # Create in-memory session state
-            session = SessionState(
-                session_id=session_header.id,
-                provider="cli",
-                chat_id="local",
-                user_id="local-user",
-            )
-
-            # Populate session with previous messages
-            for msg in messages:
-                session.messages.append(msg)
-            session.set_message_ids(message_ids)
-
-            if messages:
-                logger.info(f"Loaded {len(messages)} messages from previous session")
-
-            async def process_message(
-                user_input: str, show_prefix: bool = False, show_meta: bool = False
-            ) -> None:
-                await session_manager.add_user_message(user_input)
-
-                if streaming:
-                    if show_prefix:
-                        console.print("[bold green]Ash:[/bold green] ", end="")
-                    response_text = ""
-                    async for chunk in agent.process_message_streaming(
-                        user_input, session
-                    ):
-                        console.print(chunk, end="")
-                        response_text += chunk
-                    console.print("\n" if show_prefix else "")
-                    if response_text:
-                        await session_manager.add_assistant_message(response_text)
-                else:
-                    with console.status("[dim]Thinking...[/dim]"):
-                        response = await agent.process_message(user_input, session)
-
-                    if show_prefix:
-                        console.print("[bold green]Ash:[/bold green]")
-                        console.print(Markdown(response.text))
-                        if show_meta and response.tool_calls:
-                            console.print(
-                                f"[dim]({len(response.tool_calls)} tool calls, "
-                                f"{response.iterations} iterations)[/dim]"
-                            )
-                        console.print()
-                    else:
-                        console.print(response.text)
-
-                    if response.text:
-                        await session_manager.add_assistant_message(response.text)
-
-                    for tool_call in response.tool_calls:
-                        await session_manager.add_tool_use(
-                            tool_use_id=tool_call["id"],
-                            name=tool_call["name"],
-                            input_data=tool_call["input"],
-                        )
-                        await session_manager.add_tool_result(
-                            tool_use_id=tool_call["id"],
-                            output=tool_call["result"],
-                            success=not tool_call.get("is_error", False),
-                        )
-
-                await db_session.commit()
-
-            if prompt:
-                await process_message(prompt)
-                return
-
+        # Dump prompt mode: print system prompt and exit
+        if dump_prompt:
+            system_prompt = agent.system_prompt
             console.print(
                 Panel(
-                    "[bold]Ash Chat[/bold]\n\n"
-                    "Type your message and press Enter. "
-                    "Type 'exit' or 'quit' to end the session.\n"
-                    "Press Ctrl+C to cancel a response.",
-                    title="Welcome",
+                    "[bold]System Prompt[/bold]\n\n"
+                    f"Model: {resolved_alias}\n"
+                    f"Length: {len(system_prompt)} chars",
+                    title="Prompt Info",
                     border_style="blue",
                 )
             )
             console.print()
+            console.print(system_prompt)
+            console.print()
+            console.print(
+                Panel(
+                    "[dim]Note: This is the base prompt without memory context.\n"
+                    "At runtime, memory and conversation context are added dynamically.[/dim]",
+                    border_style="dim",
+                )
+            )
+            return
 
-            while True:
-                try:
-                    user_input = console.input("[bold cyan]You:[/bold cyan] ").strip()
-                    if not user_input:
-                        continue
-                    if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
-                        console.print("\n[dim]Goodbye![/dim]")
-                        break
+        # Create session manager for JSONL persistence
+        session_manager = SessionManager(
+            provider="cli",
+            user_id="local-user",
+        )
+
+        # Ensure session exists (creates header if new)
+        session_header = await session_manager.ensure_session()
+
+        # Load previous context from JSONL if exists
+        messages, message_ids = await session_manager.load_messages_for_llm()
+
+        # Create in-memory session state
+        session = SessionState(
+            session_id=session_header.id,
+            provider="cli",
+            chat_id="local",
+            user_id="local-user",
+        )
+
+        # Populate session with previous messages
+        for msg in messages:
+            session.messages.append(msg)
+        session.set_message_ids(message_ids)
+
+        if messages:
+            logger.info(f"Loaded {len(messages)} messages from previous session")
+
+        async def process_message(
+            user_input: str, show_prefix: bool = False, show_meta: bool = False
+        ) -> None:
+            await session_manager.add_user_message(user_input)
+
+            if streaming:
+                if show_prefix:
+                    console.print("[bold green]Ash:[/bold green] ", end="")
+                response_text = ""
+                async for chunk in agent.process_message_streaming(user_input, session):
+                    console.print(chunk, end="")
+                    response_text += chunk
+                console.print("\n" if show_prefix else "")
+                if response_text:
+                    await session_manager.add_assistant_message(response_text)
+            else:
+                with console.status("[dim]Thinking...[/dim]"):
+                    response = await agent.process_message(user_input, session)
+
+                if show_prefix:
+                    console.print("[bold green]Ash:[/bold green]")
+                    console.print(Markdown(response.text))
+                    if show_meta and response.tool_calls:
+                        console.print(
+                            f"[dim]({len(response.tool_calls)} tool calls, "
+                            f"{response.iterations} iterations)[/dim]"
+                        )
                     console.print()
-                    await process_message(user_input, show_prefix=True, show_meta=True)
-                except KeyboardInterrupt:
-                    console.print("\n[dim]Cancelled[/dim]\n")
+                else:
+                    console.print(response.text)
+
+                if response.text:
+                    await session_manager.add_assistant_message(response.text)
+
+                for tool_call in response.tool_calls:
+                    await session_manager.add_tool_use(
+                        tool_use_id=tool_call["id"],
+                        name=tool_call["name"],
+                        input_data=tool_call["input"],
+                    )
+                    await session_manager.add_tool_result(
+                        tool_use_id=tool_call["id"],
+                        output=tool_call["result"],
+                        success=not tool_call.get("is_error", False),
+                    )
+
+        if prompt:
+            await process_message(prompt)
+            return
+
+        console.print(
+            Panel(
+                "[bold]Ash Chat[/bold]\n\n"
+                "Type your message and press Enter. "
+                "Type 'exit' or 'quit' to end the session.\n"
+                "Press Ctrl+C to cancel a response.",
+                title="Welcome",
+                border_style="blue",
+            )
+        )
+        console.print()
+
+        while True:
+            try:
+                user_input = console.input("[bold cyan]You:[/bold cyan] ").strip()
+                if not user_input:
                     continue
+                if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
+                    console.print("\n[dim]Goodbye![/dim]")
+                    break
+                console.print()
+                await process_message(user_input, show_prefix=True, show_meta=True)
+            except KeyboardInterrupt:
+                console.print("\n[dim]Cancelled[/dim]\n")
+                continue
     finally:
         # Stop RPC server
         if rpc_server:

@@ -45,10 +45,10 @@ from ash.llm.types import Message, Role
 
 if TYPE_CHECKING:
     from ash.config.models import PassiveListeningConfig
-    from ash.graph.store import GraphStore
     from ash.llm import LLMProvider
     from ash.memory.extractor import MemoryExtractor, SpeakerInfo
     from ash.providers.base import IncomingMessage
+    from ash.store.store import Store
 
 
 logger = logging.getLogger("telegram.passive")
@@ -390,7 +390,7 @@ class PassiveMemoryExtractor:
     def __init__(
         self,
         extractor: MemoryExtractor,
-        memory_manager: GraphStore,
+        memory_manager: Store,
     ):
         """Initialize the passive extractor.
 

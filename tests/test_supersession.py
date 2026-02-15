@@ -4,16 +4,15 @@ Tests _is_protected_by_subject_authority, supersede_confirmed_hearsay,
 and the LLM verification branch (similarity 0.75-0.85).
 """
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.graph.store import GraphStore
+from ash.db.engine import Database
 from ash.memory.embeddings import EmbeddingGenerator
-from ash.memory.file_store import FileMemoryStore
 from ash.memory.index import VectorIndex, VectorSearchResult
-from ash.memory.types import MemoryEntry, MemoryType
+from ash.store.store import Store
+from ash.store.types import MemoryEntry, MemoryType
 
 
 def _make_search_results(
@@ -41,18 +40,12 @@ def mock_embedding_generator():
 
 @pytest.fixture
 async def graph_store(
-    ash_home: Path, mock_index, mock_embedding_generator
-) -> GraphStore:
-    store = FileMemoryStore()
-    graph_dir = ash_home / "graph"
-    graph_dir.mkdir(exist_ok=True)
-    return GraphStore(
-        memory_store=store,
+    database: Database, mock_index, mock_embedding_generator
+) -> Store:
+    return Store(
+        db=database,
         vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
-        people_path=graph_dir / "people.jsonl",
-        users_path=graph_dir / "users.jsonl",
-        chats_path=graph_dir / "chats.jsonl",
     )
 
 
@@ -64,7 +57,7 @@ class TestIsProtectedBySubjectAuthority:
     overwrite what Bob said about himself).
     """
 
-    async def test_not_protected_when_same_source(self, graph_store: GraphStore):
+    async def test_not_protected_when_same_source(self, graph_store: Store):
         """If both memories come from the same source, no protection."""
         person = await graph_store.create_person(
             created_by="bob", name="Bob", aliases=["bob"]
@@ -94,7 +87,7 @@ class TestIsProtectedBySubjectAuthority:
         assert result is False
 
     async def test_not_protected_when_subject_speaks_about_self(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """When the new memory's source IS the subject, not protected."""
         person = await graph_store.create_person(
@@ -130,7 +123,7 @@ class TestIsProtectedBySubjectAuthority:
         assert result is False
 
     async def test_protected_when_subject_authored_and_third_party_updates(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """First-person fact is protected from third-party overwrite."""
         bob = await graph_store.create_person(
@@ -165,7 +158,7 @@ class TestIsProtectedBySubjectAuthority:
         )
         assert result is True
 
-    async def test_not_protected_when_no_source_username(self, graph_store: GraphStore):
+    async def test_not_protected_when_no_source_username(self, graph_store: Store):
         """If either memory lacks source_username, not protected."""
         person = await graph_store.create_person(created_by="user", name="Bob")
 
@@ -189,9 +182,7 @@ class TestIsProtectedBySubjectAuthority:
         )
         assert result is False
 
-    async def test_not_protected_when_no_subject_person_ids(
-        self, graph_store: GraphStore
-    ):
+    async def test_not_protected_when_no_subject_person_ids(self, graph_store: Store):
         """If candidate has no subject_person_ids, not protected."""
         candidate = MemoryEntry(
             id="old-1",
@@ -212,7 +203,7 @@ class TestIsProtectedBySubjectAuthority:
         )
         assert result is False
 
-    async def test_exception_returns_true_protected(self, graph_store: GraphStore):
+    async def test_exception_returns_true_protected(self, graph_store: Store):
         """On exception, returns True (fail-safe: protects the memory)."""
         person = await graph_store.create_person(
             created_by="bob", name="Bob", aliases=["bob"]
@@ -250,17 +241,17 @@ class TestIsProtectedBySubjectAuthority:
 class TestSupersedeConflictingMemories:
     """Tests for the LLM verification branch in supersession."""
 
-    async def test_high_similarity_skips_llm(self, graph_store: GraphStore):
+    async def test_high_similarity_skips_llm(self, graph_store: Store):
         """Similarity >= 0.85 should supersede without LLM call."""
         mock_llm = MagicMock()
         mock_llm.complete = AsyncMock()
         graph_store._llm = mock_llm
 
-        m_old = await graph_store._store.add_memory(
+        m_old = await graph_store.add_memory(
             content="User likes red",
             owner_user_id="user-1",
         )
-        m_new = await graph_store._store.add_memory(
+        m_new = await graph_store.add_memory(
             content="User likes blue",
             owner_user_id="user-1",
         )
@@ -278,7 +269,7 @@ class TestSupersedeConflictingMemories:
         assert count == 1
         mock_llm.complete.assert_not_called()
 
-    async def test_medium_similarity_triggers_llm(self, graph_store: GraphStore):
+    async def test_medium_similarity_triggers_llm(self, graph_store: Store):
         """Similarity between 0.75 and 0.85 should trigger LLM verification."""
         from ash.llm.types import Message, Role
 
@@ -288,11 +279,11 @@ class TestSupersedeConflictingMemories:
         )
         graph_store._llm = mock_llm
 
-        m_old = await graph_store._store.add_memory(
+        m_old = await graph_store.add_memory(
             content="User's birthday is in May",
             owner_user_id="user-1",
         )
-        m_new = await graph_store._store.add_memory(
+        m_new = await graph_store.add_memory(
             content="User's birthday is in June",
             owner_user_id="user-1",
         )
@@ -309,7 +300,7 @@ class TestSupersedeConflictingMemories:
         assert count == 1
         mock_llm.complete.assert_called_once()
 
-    async def test_medium_similarity_llm_says_no(self, graph_store: GraphStore):
+    async def test_medium_similarity_llm_says_no(self, graph_store: Store):
         """When LLM says NO, memory should not be superseded."""
         from ash.llm.types import Message, Role
 
@@ -319,11 +310,11 @@ class TestSupersedeConflictingMemories:
         )
         graph_store._llm = mock_llm
 
-        m_old = await graph_store._store.add_memory(
+        m_old = await graph_store.add_memory(
             content="User likes hiking",
             owner_user_id="user-1",
         )
-        m_new = await graph_store._store.add_memory(
+        m_new = await graph_store.add_memory(
             content="User likes swimming",
             owner_user_id="user-1",
         )
@@ -343,14 +334,14 @@ class TestSupersedeConflictingMemories:
 class TestSupersedeConfirmedHearsay:
     """Tests for supersede_confirmed_hearsay."""
 
-    async def test_hearsay_superseded_by_first_person(self, graph_store: GraphStore):
+    async def test_hearsay_superseded_by_first_person(self, graph_store: Store):
         """Third-party hearsay is superseded when the subject speaks."""
         bob = await graph_store.create_person(
             created_by="bob", name="Bob", aliases=["bob"]
         )
 
         # Hearsay: Alice says Bob likes hiking
-        hearsay = await graph_store._store.add_memory(
+        hearsay = await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-1",
             source_username="alice",
@@ -358,16 +349,16 @@ class TestSupersedeConfirmedHearsay:
         )
 
         # First-person: Bob says he likes swimming
-        fact = await graph_store._store.add_memory(
+        fact = await graph_store.add_memory(
             content="I like swimming",
             owner_user_id="user-1",
             source_username="bob",
             subject_person_ids=[bob.id],
         )
 
-        # Mock index: when searching hearsay content, return the fact
+        # Mock index: searching fact content returns the hearsay as similar
         graph_store._index.search = AsyncMock(  # type: ignore[assignment]
-            return_value=_make_search_results([(fact.id, 0.88)])
+            return_value=_make_search_results([(hearsay.id, 0.88)])
         )
 
         count = await graph_store.supersede_confirmed_hearsay(
@@ -379,20 +370,18 @@ class TestSupersedeConfirmedHearsay:
 
         assert count == 1
         # Verify hearsay was actually marked superseded
-        updated = await graph_store._store.get_memory(hearsay.id)
+        updated = await graph_store.get_memory(hearsay.id)
         assert updated is not None
         assert updated.superseded_at is not None
 
-    async def test_first_person_not_superseded_by_hearsay(
-        self, graph_store: GraphStore
-    ):
+    async def test_first_person_not_superseded_by_hearsay(self, graph_store: Store):
         """First-person facts should not be treated as hearsay candidates."""
         bob = await graph_store.create_person(
             created_by="bob", name="Bob", aliases=["bob"]
         )
 
         # First-person fact: Bob's own statement
-        fact = await graph_store._store.add_memory(
+        fact = await graph_store.add_memory(
             content="I like hiking",
             owner_user_id="user-1",
             source_username="bob",
@@ -400,7 +389,7 @@ class TestSupersedeConfirmedHearsay:
         )
 
         # Another statement from Bob
-        new_fact = await graph_store._store.add_memory(
+        new_fact = await graph_store.add_memory(
             content="I like swimming",
             owner_user_id="user-1",
             source_username="bob",
@@ -421,24 +410,24 @@ class TestSupersedeConfirmedHearsay:
 
         assert count == 0
         # Original fact should still be active
-        original = await graph_store._store.get_memory(fact.id)
+        original = await graph_store.get_memory(fact.id)
         assert original is not None
         assert original.superseded_at is None
 
-    async def test_below_threshold_not_superseded(self, graph_store: GraphStore):
+    async def test_below_threshold_not_superseded(self, graph_store: Store):
         """Hearsay below similarity threshold is not superseded."""
         bob = await graph_store.create_person(
             created_by="bob", name="Bob", aliases=["bob"]
         )
 
-        await graph_store._store.add_memory(
+        await graph_store.add_memory(
             content="Bob works at Google",
             owner_user_id="user-1",
             source_username="alice",
             subject_person_ids=[bob.id],
         )
 
-        fact = await graph_store._store.add_memory(
+        fact = await graph_store.add_memory(
             content="I like swimming",
             owner_user_id="user-1",
             source_username="bob",
@@ -459,20 +448,20 @@ class TestSupersedeConfirmedHearsay:
 
         assert count == 0
 
-    async def test_hearsay_similarity_exception_logged(self, graph_store: GraphStore):
+    async def test_hearsay_similarity_exception_logged(self, graph_store: Store):
         """Exceptions checking individual hearsay are caught and logged."""
         bob = await graph_store.create_person(
             created_by="bob", name="Bob", aliases=["bob"]
         )
 
-        await graph_store._store.add_memory(
+        await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-1",
             source_username="alice",
             subject_person_ids=[bob.id],
         )
 
-        fact = await graph_store._store.add_memory(
+        fact = await graph_store.add_memory(
             content="I like swimming",
             owner_user_id="user-1",
             source_username="bob",

@@ -1,19 +1,18 @@
-"""Tests for GraphStore graph-based optimizations.
+"""Tests for Store graph-based optimizations.
 
-Verifies that GraphStore uses the GraphIndex for O(1) lookups
+Verifies that Store uses SQL-indexed lookups for O(1) queries
 instead of linear scans over all memories.
 """
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.graph.store import GraphStore
+from ash.db.engine import Database
 from ash.memory.embeddings import EmbeddingGenerator
-from ash.memory.file_store import FileMemoryStore
 from ash.memory.index import VectorIndex, VectorSearchResult
-from ash.memory.types import Sensitivity
+from ash.store.store import Store
+from ash.store.types import Sensitivity
 
 
 def _make_search_results(
@@ -41,34 +40,28 @@ def mock_embedding_generator():
 
 @pytest.fixture
 async def graph_store(
-    ash_home: Path, mock_index, mock_embedding_generator
-) -> GraphStore:
-    store = FileMemoryStore()
-    graph_dir = ash_home / "graph"
-    graph_dir.mkdir(exist_ok=True)
-    return GraphStore(
-        memory_store=store,
+    database: Database, mock_index, mock_embedding_generator
+) -> Store:
+    return Store(
+        db=database,
         vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
-        people_path=graph_dir / "people.jsonl",
-        users_path=graph_dir / "users.jsonl",
-        chats_path=graph_dir / "chats.jsonl",
     )
 
 
 class TestFindMemoriesAboutPersons:
     """Test graph-based memory lookup by subject person."""
 
-    async def test_finds_memories_about_person(self, graph_store: GraphStore):
+    async def test_finds_memories_about_person(self, graph_store: Store):
         """Graph-based lookup returns memories about a given person."""
         person = await graph_store.create_person(created_by="user-1", name="Bob")
 
-        m1 = await graph_store._store.add_memory(
+        m1 = await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
         )
-        await graph_store._store.add_memory(
+        await graph_store.add_memory(
             content="Alice likes cooking",
             owner_user_id="user-1",
         )
@@ -80,16 +73,16 @@ class TestFindMemoriesAboutPersons:
         assert len(results) == 1
         assert results[0].id == m1.id
 
-    async def test_excludes_owner(self, graph_store: GraphStore):
+    async def test_excludes_owner(self, graph_store: Store):
         """Excludes memories owned by the specified user."""
         person = await graph_store.create_person(created_by="user-1", name="Bob")
 
-        await graph_store._store.add_memory(
+        await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
         )
-        m2 = await graph_store._store.add_memory(
+        m2 = await graph_store.add_memory(
             content="Bob enjoys music",
             owner_user_id="user-2",
             subject_person_ids=[person.id],
@@ -103,17 +96,17 @@ class TestFindMemoriesAboutPersons:
         assert len(results) == 1
         assert results[0].id == m2.id
 
-    async def test_excludes_archived(self, graph_store: GraphStore):
+    async def test_excludes_archived(self, graph_store: Store):
         """Archived memories are not returned."""
         person = await graph_store.create_person(created_by="user-1", name="Bob")
 
-        m1 = await graph_store._store.add_memory(
+        m1 = await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
         )
         # Archive it
-        await graph_store._store.delete_memory(m1.id)
+        await graph_store.delete_memory(m1.id)
 
         results = await graph_store._find_memories_about_persons(
             person_ids={person.id},
@@ -121,24 +114,21 @@ class TestFindMemoriesAboutPersons:
 
         assert len(results) == 0
 
-    async def test_excludes_superseded(self, graph_store: GraphStore):
+    async def test_excludes_superseded(self, graph_store: Store):
         """Superseded memories are not returned."""
         person = await graph_store.create_person(created_by="user-1", name="Bob")
 
-        old_m = await graph_store._store.add_memory(
+        old_m = await graph_store.add_memory(
             content="Bob likes red",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
         )
-        new_m = await graph_store._store.add_memory(
+        new_m = await graph_store.add_memory(
             content="Bob likes blue",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
         )
-        await graph_store._store.mark_memory_superseded(old_m.id, new_m.id)
-
-        # Rebuild graph after supersession
-        graph_store._graph_built = False
+        await graph_store.batch_mark_superseded([(old_m.id, new_m.id)])
 
         results = await graph_store._find_memories_about_persons(
             person_ids={person.id},
@@ -147,17 +137,17 @@ class TestFindMemoriesAboutPersons:
         assert len(results) == 1
         assert results[0].id == new_m.id
 
-    async def test_excludes_non_portable(self, graph_store: GraphStore):
+    async def test_excludes_non_portable(self, graph_store: Store):
         """Non-portable memories are excluded when portable_only=True."""
         person = await graph_store.create_person(created_by="user-1", name="Bob")
 
-        await graph_store._store.add_memory(
+        await graph_store.add_memory(
             content="Bob is presenting next",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
             portable=False,
         )
-        m2 = await graph_store._store.add_memory(
+        m2 = await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
@@ -172,17 +162,17 @@ class TestFindMemoriesAboutPersons:
         assert len(results) == 1
         assert results[0].id == m2.id
 
-    async def test_multiple_person_ids(self, graph_store: GraphStore):
+    async def test_multiple_person_ids(self, graph_store: Store):
         """Finds memories about any of the given person IDs."""
         p1 = await graph_store.create_person(created_by="user-1", name="Bob")
         p2 = await graph_store.create_person(created_by="user-1", name="Carol")
 
-        m1 = await graph_store._store.add_memory(
+        m1 = await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-1",
             subject_person_ids=[p1.id],
         )
-        m2 = await graph_store._store.add_memory(
+        m2 = await graph_store.add_memory(
             content="Carol likes cooking",
             owner_user_id="user-1",
             subject_person_ids=[p2.id],
@@ -199,16 +189,16 @@ class TestFindMemoriesAboutPersons:
 class TestForgetPersonViaGraph:
     """Test that forget_person uses graph index."""
 
-    async def test_archives_memories_about_person(self, graph_store: GraphStore):
+    async def test_archives_memories_about_person(self, graph_store: Store):
         """forget_person archives memories with ABOUT edges to the person."""
         person = await graph_store.create_person(created_by="user-1", name="Bob")
 
-        about_bob = await graph_store._store.add_memory(
+        about_bob = await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
         )
-        unrelated = await graph_store._store.add_memory(
+        unrelated = await graph_store.add_memory(
             content="Alice likes cooking",
             owner_user_id="user-1",
         )
@@ -216,10 +206,10 @@ class TestForgetPersonViaGraph:
         archived_count = await graph_store.forget_person(person_id=person.id)
 
         assert archived_count == 1
-        assert await graph_store._store.get_memory(about_bob.id) is None
-        assert await graph_store._store.get_memory(unrelated.id) is not None
+        assert await graph_store.get_memory(about_bob.id) is None
+        assert await graph_store.get_memory(unrelated.id) is not None
 
-    async def test_returns_zero_for_unknown_person(self, graph_store: GraphStore):
+    async def test_returns_zero_for_unknown_person(self, graph_store: Store):
         """Returns 0 when person has no memories."""
         archived_count = await graph_store.forget_person(person_id="nonexistent")
         assert archived_count == 0
@@ -228,7 +218,7 @@ class TestForgetPersonViaGraph:
 class TestFindPersonIdsForUsernameViaGraph:
     """Test graph-based username -> person resolution."""
 
-    async def test_resolves_via_user_node(self, graph_store: GraphStore):
+    async def test_resolves_via_user_node(self, graph_store: Store):
         """Resolves username -> user node -> person via IS_PERSON edge."""
         person = await graph_store.create_person(
             created_by="100",
@@ -249,7 +239,7 @@ class TestFindPersonIdsForUsernameViaGraph:
         result = await graph_store.find_person_ids_for_username("alice")
         assert person.id in result
 
-    async def test_falls_back_to_linear_scan(self, graph_store: GraphStore):
+    async def test_falls_back_to_linear_scan(self, graph_store: Store):
         """Falls back to linear scan when no user node exists."""
         person = await graph_store.create_person(
             created_by="system",
@@ -260,7 +250,7 @@ class TestFindPersonIdsForUsernameViaGraph:
         result = await graph_store.find_person_ids_for_username("alice")
         assert person.id in result
 
-    async def test_strips_at_prefix(self, graph_store: GraphStore):
+    async def test_strips_at_prefix(self, graph_store: Store):
         """Handles @username prefix."""
         person = await graph_store.create_person(
             created_by="100",
@@ -282,12 +272,12 @@ class TestFindPersonIdsForUsernameViaGraph:
 class TestGetContextViaGraph:
     """Test that get_context_for_message uses graph for cross-context retrieval."""
 
-    async def test_cross_context_retrieval_via_graph(self, graph_store: GraphStore):
+    async def test_cross_context_retrieval_via_graph(self, graph_store: Store):
         """Cross-context memories are found via graph lookups."""
         person = await graph_store.create_person(created_by="user-1", name="Bob")
 
         # Memory about Bob from user-2 (cross-context)
-        cross_mem = await graph_store._store.add_memory(
+        cross_mem = await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-2",
             subject_person_ids=[person.id],
@@ -306,12 +296,12 @@ class TestGetContextViaGraph:
         memory_ids = {m.id for m in ctx.memories}
         assert cross_mem.id in memory_ids
 
-    async def test_cross_context_privacy_filter(self, graph_store: GraphStore):
+    async def test_cross_context_privacy_filter(self, graph_store: Store):
         """SENSITIVE memories about others are filtered in group chats."""
         person = await graph_store.create_person(created_by="user-2", name="Bob")
 
         # SENSITIVE memory about Bob from user-2
-        await graph_store._store.add_memory(
+        await graph_store.add_memory(
             content="Bob has health issue",
             owner_user_id="user-2",
             subject_person_ids=[person.id],
@@ -339,22 +329,20 @@ class TestGraphTraversalPass:
     match the query directly.
     """
 
-    async def test_graph_traversal_finds_related_memories(
-        self, graph_store: GraphStore
-    ):
+    async def test_graph_traversal_finds_related_memories(self, graph_store: Store):
         """Memories about a mentioned person are surfaced via graph traversal."""
         alice = await graph_store.create_person(created_by="user-1", name="Alice")
         bob = await graph_store.create_person(created_by="user-1", name="Bob")
 
         # Memory about Alice that mentions Bob via subject_person_ids
-        m_alice = await graph_store._store.add_memory(
+        m_alice = await graph_store.add_memory(
             content="Alice and Bob went hiking together",
             owner_user_id="user-1",
             subject_person_ids=[alice.id, bob.id],
         )
 
         # Additional memory about Bob from user-2 (cross-context, not in search)
-        m_bob_extra = await graph_store._store.add_memory(
+        m_bob_extra = await graph_store.add_memory(
             content="Bob is training for a marathon",
             owner_user_id="user-2",
             subject_person_ids=[bob.id],
@@ -375,11 +363,11 @@ class TestGraphTraversalPass:
         assert m_alice.id in memory_ids
         assert m_bob_extra.id in memory_ids
 
-    async def test_graph_traversal_excludes_already_seen(self, graph_store: GraphStore):
+    async def test_graph_traversal_excludes_already_seen(self, graph_store: Store):
         """Memories already in results are not duplicated by graph traversal."""
         person = await graph_store.create_person(created_by="user-1", name="Bob")
 
-        m1 = await graph_store._store.add_memory(
+        m1 = await graph_store.add_memory(
             content="Bob likes hiking",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
@@ -401,21 +389,21 @@ class TestGraphTraversalPass:
         assert len(ids) == len(set(ids))
 
     async def test_graph_traversal_excludes_participant_persons(
-        self, graph_store: GraphStore
+        self, graph_store: Store
     ):
         """Graph traversal skips person IDs that are already handled as participants."""
         bob = await graph_store.create_person(created_by="user-1", name="Bob")
         carol = await graph_store.create_person(created_by="user-1", name="Carol")
 
         # Memory mentioning both Bob and Carol
-        m1 = await graph_store._store.add_memory(
+        m1 = await graph_store.add_memory(
             content="Bob and Carol met at the park",
             owner_user_id="user-1",
             subject_person_ids=[bob.id, carol.id],
         )
 
         # Memory about Bob from user-2
-        m_bob = await graph_store._store.add_memory(
+        m_bob = await graph_store.add_memory(
             content="Bob enjoys running",
             owner_user_id="user-2",
             subject_person_ids=[bob.id],
@@ -437,17 +425,17 @@ class TestGraphTraversalPass:
         # Bob's extra memory should come from cross-context (pass 1), not graph traversal
         assert m_bob.id in memory_ids
 
-    async def test_graph_traversal_marks_metadata(self, graph_store: GraphStore):
+    async def test_graph_traversal_marks_metadata(self, graph_store: Store):
         """Graph-traversal memories have graph_traversal=True in metadata."""
         person = await graph_store.create_person(created_by="user-1", name="Bob")
 
-        m1 = await graph_store._store.add_memory(
+        m1 = await graph_store.add_memory(
             content="Bob was mentioned in a conversation",
             owner_user_id="user-1",
             subject_person_ids=[person.id],
         )
 
-        m_extra = await graph_store._store.add_memory(
+        m_extra = await graph_store.add_memory(
             content="Bob's birthday is June 15",
             owner_user_id="user-2",
             subject_person_ids=[person.id],
@@ -471,16 +459,14 @@ class TestGraphTraversalPass:
 
 
 class TestBatchMarkSuperseded:
-    """Tests for GraphStore.batch_mark_superseded."""
+    """Tests for Store.batch_mark_superseded."""
 
-    async def test_batch_supersedes_and_deletes_embeddings(
-        self, graph_store: GraphStore
-    ):
+    async def test_batch_supersedes_and_deletes_embeddings(self, graph_store: Store):
         """batch_mark_superseded should mark memories and delete embeddings."""
-        m1 = await graph_store._store.add_memory(content="Old 1")
-        m2 = await graph_store._store.add_memory(content="Old 2")
-        m3 = await graph_store._store.add_memory(content="New 1")
-        m4 = await graph_store._store.add_memory(content="New 2")
+        m1 = await graph_store.add_memory(content="Old 1")
+        m2 = await graph_store.add_memory(content="Old 2")
+        m3 = await graph_store.add_memory(content="New 1")
+        m4 = await graph_store.add_memory(content="New 2")
 
         marked = await graph_store.batch_mark_superseded(
             [
@@ -492,10 +478,8 @@ class TestBatchMarkSuperseded:
         assert set(marked) == {m1.id, m2.id}
         # Embeddings should be deleted for superseded memories
         graph_store._index.delete_embeddings.assert_called_once_with(marked)
-        # Graph should be invalidated
-        assert graph_store._graph_built is False
 
-    async def test_empty_pairs(self, graph_store: GraphStore):
+    async def test_empty_pairs(self, graph_store: Store):
         """Empty pairs should be a no-op."""
         marked = await graph_store.batch_mark_superseded([])
         assert marked == []

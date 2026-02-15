@@ -195,18 +195,17 @@ async def eval_agent(
     if not api_key:
         pytest.skip("ANTHROPIC_API_KEY not set")
 
-    async with eval_database.session() as db_session:
-        components = await create_agent(
-            config=eval_config,
-            workspace=eval_workspace,
-            db_session=db_session,
-        )
+    components = await create_agent(
+        config=eval_config,
+        workspace=eval_workspace,
+        db=eval_database,
+    )
 
-        yield components
+    yield components
 
-        # Cleanup: stop sandbox if running
-        if components.sandbox_executor:
-            await components.sandbox_executor.cleanup()
+    # Cleanup: stop sandbox if running
+    if components.sandbox_executor:
+        await components.sandbox_executor.cleanup()
 
 
 @pytest.fixture
@@ -260,14 +259,13 @@ async def eval_memory_agent(
     if not api_key:
         pytest.skip("ANTHROPIC_API_KEY not set")
 
-    async with eval_database.session() as db_session:
-        components = await create_agent(
-            config=eval_memory_config,
-            workspace=eval_workspace,
-            db_session=db_session,
-        )
+    components = await create_agent(
+        config=eval_memory_config,
+        workspace=eval_workspace,
+        db=eval_database,
+    )
 
-        yield components
+    yield components
 
-        if components.sandbox_executor:
-            await components.sandbox_executor.cleanup()
+    if components.sandbox_executor:
+        await components.sandbox_executor.cleanup()

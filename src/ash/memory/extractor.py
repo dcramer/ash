@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from ash.llm.types import Message, Role
 from ash.memory.secrets import contains_secret
-from ash.memory.types import ExtractedFact, MemoryType, Sensitivity
+from ash.store.types import ExtractedFact, MemoryType, Sensitivity
 
 if TYPE_CHECKING:
     from ash.llm import LLMProvider

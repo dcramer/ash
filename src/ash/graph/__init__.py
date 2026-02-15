@@ -1,24 +1,16 @@
-"""Unified graph architecture for memory, people, users, and chats.
+"""Deprecated: use ash.store instead.
 
-Public API:
-- GraphStore: Unified facade replacing MemoryManager + PersonManager
-- create_graph_store: Factory to create wired GraphStore
-
-Types:
-- UserEntry: Provider user identity node
-- ChatEntry: Chat/channel node
-- EdgeType: Edge type enumeration
-
-Internal:
-- GraphIndex: In-memory adjacency list index (use GraphStore instead)
+Backward-compatible re-exports.
 """
 
-from ash.graph.store import GraphStore, create_graph_store
-from ash.graph.types import ChatEntry, EdgeType, UserEntry
+from ash.store import ChatEntry, Store, UserEntry, create_store
+
+# Backward compat aliases
+GraphStore = Store
+create_graph_store = create_store
 
 __all__ = [
     "ChatEntry",
-    "EdgeType",
     "GraphStore",
     "UserEntry",
     "create_graph_store",

@@ -16,8 +16,8 @@ from ash.cli.console import console, dim, success, warning
 
 if TYPE_CHECKING:
     from ash.config.models import AshConfig
-    from ash.graph.store import GraphStore
-    from ash.memory.types import MemoryEntry
+    from ash.store.store import Store
+    from ash.store.types import MemoryEntry
 
 DEDUP_VERIFY_PROMPT = """Are these memories duplicates (same fact, just different wording)?
 If so, which is the canonical (most complete/clear) version?
@@ -30,7 +30,7 @@ If NOT duplicates, return: {{"duplicates": false}}"""
 
 
 async def memory_doctor_dedup(
-    graph_store: GraphStore, config: AshConfig, force: bool
+    graph_store: Store, config: AshConfig, force: bool
 ) -> None:
     """Find and merge semantically duplicate memories."""
     memories = await graph_store.list_memories(limit=None, include_expired=True)

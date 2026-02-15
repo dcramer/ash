@@ -60,7 +60,7 @@ class TestMemoryEvals:
 
         # Dump extracted state for debugging
         if eval_memory_agent.memory_manager:
-            store = eval_memory_agent.memory_manager._store
+            store = eval_memory_agent.memory_manager
             memories = await store.get_all_memories()
             logger.info("=== Extracted memories (%d) ===", len(memories))
             for m in memories:

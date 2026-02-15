@@ -6,34 +6,12 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     from ash.config import AshConfig
-    from ash.graph.store import GraphStore
-    from ash.memory.file_store import FileMemoryStore
-    from ash.people.types import PersonEntry
+    from ash.db.engine import Database
+    from ash.store.store import Store
+    from ash.store.types import PersonEntry
 
 logger = logging.getLogger(__name__)
-
-
-def get_memory_store() -> FileMemoryStore:
-    """Get a configured FileMemoryStore instance."""
-    from ash.memory.file_store import FileMemoryStore
-
-    return FileMemoryStore()
-
-
-async def get_all_people() -> list[PersonEntry]:
-    """Load all non-merged people from JSONL."""
-    from ash.config.paths import get_people_jsonl_path
-    from ash.memory.jsonl import TypedJSONL
-    from ash.people.types import PersonEntry
-
-    jsonl: TypedJSONL[PersonEntry] = TypedJSONL(get_people_jsonl_path(), PersonEntry)
-    if not jsonl.exists():
-        return []
-    people = await jsonl.load_all()
-    return [p for p in people if not p.merged_into]
 
 
 def _matches_username(person: PersonEntry, username: str) -> bool:
@@ -75,15 +53,13 @@ def is_source_self_reference(
     return False
 
 
-async def get_graph_store(
-    config: AshConfig, db_session: AsyncSession
-) -> GraphStore | None:
-    """Create a GraphStore from CLI context.
+async def get_store(config: AshConfig, db: Database) -> Store | None:
+    """Create a Store from CLI context.
 
     Returns None if embeddings are not configured.
     """
-    from ash.graph import create_graph_store
     from ash.llm.registry import create_registry
+    from ash.store import create_store
 
     if not config.embeddings:
         return None
@@ -106,8 +82,8 @@ async def get_graph_store(
         else None,
     )
 
-    return await create_graph_store(
-        db_session=db_session,
+    return await create_store(
+        db=db,
         llm_registry=llm_registry,
         embedding_model=config.embeddings.model,
         embedding_provider=config.embeddings.provider,

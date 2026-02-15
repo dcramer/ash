@@ -65,91 +65,86 @@ async def main():
     await database.connect()
     print("[OK] Database connected")
 
-    async with database.session() as session:
-        # Create LLM registry for embeddings
-        llm_registry = create_registry(
-            openai_api_key=embeddings_key.get_secret_value()
-            if config.embeddings.provider == "openai"
-            else None,
-        )
+    # Create LLM registry for embeddings
+    llm_registry = create_registry(
+        openai_api_key=embeddings_key.get_secret_value()
+        if config.embeddings.provider == "openai"
+        else None,
+    )
 
-        # Create graph store (handles JSONL storage + vector index)
-        from ash.graph import create_graph_store
+    # Create store (handles SQLite storage + vector index)
+    from ash.store import create_store
 
-        memory = await create_graph_store(
-            db_session=session,
-            llm_registry=llm_registry,
-            embedding_model=config.embeddings.model,
-            embedding_provider=config.embeddings.provider,
-        )
+    memory = await create_store(
+        db=database,
+        llm_registry=llm_registry,
+        embedding_model=config.embeddings.model,
+        embedding_provider=config.embeddings.provider,
+    )
 
-        print("-" * 60)
-        print("Test 1: Store memory")
-        print("-" * 60)
+    print("-" * 60)
+    print("Test 1: Store memory")
+    print("-" * 60)
 
-        test_content = "User's favorite color is purple"
-        memory_entry = await memory.add_memory(
-            test_content, source="test_script", owner_user_id="test-user"
-        )
-        print(f"[OK] Stored: '{test_content}'")
-        print(f"    ID: {memory_entry.id}")
+    test_content = "User's favorite color is purple"
+    memory_entry = await memory.add_memory(
+        test_content, source="test_script", owner_user_id="test-user"
+    )
+    print(f"[OK] Stored: '{test_content}'")
+    print(f"    ID: {memory_entry.id}")
 
-        print("-" * 60)
-        print("Test 2: Search for knowledge")
-        print("-" * 60)
+    print("-" * 60)
+    print("Test 2: Search for knowledge")
+    print("-" * 60)
 
-        query = "What is the user's favorite color?"
-        results = await memory.search(query, limit=5)
-        print(f"Query: '{query}'")
-        print(f"Results: {len(results)}")
+    query = "What is the user's favorite color?"
+    results = await memory.search(query, limit=5)
+    print(f"Query: '{query}'")
+    print(f"Results: {len(results)}")
 
-        found = False
-        for r in results:
-            print(
-                f"  - [{r.source_type}] {r.content[:50]}... (sim: {r.similarity:.3f})"
-            )
-            if "purple" in r.content.lower():
-                found = True
+    found = False
+    for r in results:
+        print(f"  - [{r.source_type}] {r.content[:50]}... (sim: {r.similarity:.3f})")
+        if "purple" in r.content.lower():
+            found = True
 
-        if found:
-            print("[OK] Found relevant knowledge!")
-        else:
-            print("[WARNING] Didn't find the stored knowledge")
+    if found:
+        print("[OK] Found relevant knowledge!")
+    else:
+        print("[WARNING] Didn't find the stored knowledge")
 
-        print("-" * 60)
-        print("Test 3: Context retrieval")
-        print("-" * 60)
+    print("-" * 60)
+    print("Test 3: Context retrieval")
+    print("-" * 60)
 
-        context = await memory.get_context_for_message(
-            user_id="test-user",
-            user_message="What's my favorite color?",
-        )
+    context = await memory.get_context_for_message(
+        user_id="test-user",
+        user_message="What's my favorite color?",
+    )
 
-        print(f"Retrieved memories: {len(context.memories)}")
+    print(f"Retrieved memories: {len(context.memories)}")
 
-        for m in context.memories:
-            print(f"  - {m.content[:50]}... (sim: {m.similarity:.3f})")
+    for m in context.memories:
+        print(f"  - {m.content[:50]}... (sim: {m.similarity:.3f})")
 
-        if context.memories:
-            print("[OK] Context retrieval working!")
-        else:
-            print(
-                "[WARNING] No memories in context (may be below similarity threshold)"
-            )
+    if context.memories:
+        print("[OK] Context retrieval working!")
+    else:
+        print("[WARNING] No memories in context (may be below similarity threshold)")
 
-        print("-" * 60)
-        print("Test 4: Check JSONL storage")
-        print("-" * 60)
+    print("-" * 60)
+    print("Test 4: Check JSONL storage")
+    print("-" * 60)
 
-        from ash.config.paths import get_memories_jsonl_path
+    from ash.config.paths import get_memories_jsonl_path
 
-        memories_path = get_memories_jsonl_path()
-        if memories_path.exists():
-            line_count = sum(1 for _ in memories_path.read_text().splitlines())
-            print(f"JSONL file: {memories_path}")
-            print(f"Memory entries: {line_count}")
-        else:
-            print(f"JSONL file not found: {memories_path}")
+    memories_path = get_memories_jsonl_path()
+    if memories_path.exists():
+        line_count = sum(1 for _ in memories_path.read_text().splitlines())
+        print(f"JSONL file: {memories_path}")
+        print(f"Memory entries: {line_count}")
+    else:
+        print(f"JSONL file not found: {memories_path}")
 
     await database.disconnect()
     print("-" * 60)
