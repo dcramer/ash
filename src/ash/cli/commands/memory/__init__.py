@@ -281,6 +281,7 @@ async def _run_memory_action(
             elif action == "doctor":
                 from ash.cli.commands.memory.doctor import (
                     memory_doctor_attribution,
+                    memory_doctor_contradictions,
                     memory_doctor_dedup,
                     memory_doctor_fix_names,
                     memory_doctor_quality,
@@ -292,6 +293,7 @@ async def _run_memory_action(
                 await memory_doctor_reclassify(config, force)
                 await memory_doctor_quality(config, force)
                 await memory_doctor_dedup(config, session, force)
+                await memory_doctor_contradictions(config, session, force)
             else:
                 error(f"Unknown action: {action}")
                 console.print(

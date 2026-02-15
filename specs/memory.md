@@ -12,6 +12,8 @@ The memory subsystem solves a fundamental problem: conversations are ephemeral, 
 4. **Knowledge evolution** - New information supersedes outdated facts
 5. **Smart decay** - Ephemeral facts expire naturally based on their type
 
+**Scale expectations:** Tens of users in a chat, each with thousands of memories. Operations like doctor, search, and GC must handle this without degrading.
+
 Memory is NOT for:
 - Conversation history (that's sessions)
 - Temporary task state (that's session context)
