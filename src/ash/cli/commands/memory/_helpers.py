@@ -38,13 +38,7 @@ async def get_all_people() -> list[PersonEntry]:
 
 def _matches_username(person: PersonEntry, username: str) -> bool:
     """Check if a person matches a username (case-insensitive)."""
-    username_lower = username.lower()
-    if person.name and person.name.lower() == username_lower:
-        return True
-    for alias in person.aliases:
-        if alias.value.lower() == username_lower:
-            return True
-    return False
+    return person.matches_username(username)
 
 
 def is_source_self_reference(

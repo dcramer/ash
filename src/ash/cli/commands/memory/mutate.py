@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from ash.cli.commands.memory._helpers import get_memory_store
 from ash.cli.console import dim, error, success, warning
 
 if TYPE_CHECKING:
@@ -48,7 +47,7 @@ async def memory_add(
 
 
 async def memory_remove(
-    session,
+    manager: "GraphStore",
     entry_id: str | None,
     all_entries: bool,
     force: bool,
@@ -56,15 +55,7 @@ async def memory_remove(
     chat_id: str | None,
     scope: str | None,
 ) -> None:
-    """Remove memory entries."""
-    from sqlalchemy import text
-
-    if not entry_id and not all_entries:
-        error("--id or --all is required to remove entries")
-        raise typer.Exit(1)
-
-    store = get_memory_store()
-
+    """Remove memory entries via GraphStore (handles JSONL + vector index cleanup)."""
     if all_entries:
         filter_desc = [
             f"{k}={v}"
@@ -79,8 +70,7 @@ async def memory_remove(
                 dim("Cancelled")
                 return
 
-        # Get active entries only and filter
-        entries = await store.get_memories(
+        entries = await manager.list_memories(
             limit=10000, include_expired=True, include_superseded=True
         )
         to_remove = []
@@ -100,79 +90,32 @@ async def memory_remove(
 
         removed_count = 0
         for entry in to_remove:
-            deleted = await store.delete_memory(entry.id)
+            deleted = await manager.delete_memory(entry.id)
             if deleted:
                 removed_count += 1
-            try:
-                await session.execute(
-                    text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
-                    {"id": entry.id},
-                )
-            except Exception:
-                logger.debug(
-                    "Failed to delete embedding for memory %s", entry.id, exc_info=True
-                )
 
-        await session.commit()
         success(f"Removed {removed_count} memory entries")
     else:
-        # Find entry by ID prefix
-        assert entry_id is not None  # Guaranteed by check above
-        entry = await store.get_memory_by_prefix(entry_id)
+        assert entry_id is not None  # Guaranteed by caller validation
 
-        if not entry:
+        # delete_memory handles prefix matching, JSONL deletion, and embedding cleanup
+        deleted = await manager.delete_memory(entry_id)
+
+        if deleted:
+            success(f"Removed memory entry: {entry_id}")
+        else:
             error(f"No memory entry found with ID: {entry_id}")
             raise typer.Exit(1)
 
-        if not force:
-            warning(f"Content: {entry.content[:100]}...")
-            confirm = typer.confirm("Remove this entry?")
-            if not confirm:
-                dim("Cancelled")
-                return
 
-        # Delete the memory entry
-        deleted = await store.delete_memory(entry.id)
-
-        if deleted:
-            # Delete embedding if exists
-            try:
-                await session.execute(
-                    text("DELETE FROM memory_embeddings WHERE memory_id = :id"),
-                    {"id": entry.id},
-                )
-                await session.commit()
-            except Exception:
-                logger.debug(
-                    "Failed to delete embedding for memory %s", entry.id, exc_info=True
-                )
-
-            success(f"Removed memory entry: {entry.id[:8]}")
-        else:
-            error(f"Failed to remove memory entry: {entry.id[:8]}")
-
-
-async def memory_clear(session, force: bool) -> None:
-    """Clear all memory entries."""
-    from sqlalchemy import text
-
+async def memory_clear(manager: "GraphStore", force: bool) -> None:
+    """Clear all memory entries via GraphStore."""
     if not force:
         warning("This will delete ALL memory entries.")
-        confirm = typer.confirm("Are you sure?")
-        if not confirm:
+        if not typer.confirm("Are you sure?"):
             dim("Cancelled")
             return
 
-    store = get_memory_store()
-
-    # Physically wipe memories and embeddings JSONL files
-    count = await store.clear()
-
-    # Clear vector index
-    try:
-        await session.execute(text("DELETE FROM memory_embeddings"))
-        await session.commit()
-    except Exception:
-        logger.debug("Failed to clear embeddings table", exc_info=True)
+    count = await manager.clear()
 
     success(f"Cleared {count} memory entries")

@@ -286,11 +286,22 @@ async def _run_memory_action(
                     raise typer.Exit(1)
                 await memory_add(store, query, source, expires_days)
             elif action == "remove":
+                if not entry_id and not all_entries:
+                    error("--id or --all is required to remove entries")
+                    raise typer.Exit(1)
+                store = await get_graph_store(config, session)
+                if not store:
+                    error("Memory remove requires [embeddings] configuration")
+                    raise typer.Exit(1)
                 await memory_remove(
-                    session, entry_id, all_entries, force, user_id, chat_id, scope
+                    store, entry_id, all_entries, force, user_id, chat_id, scope
                 )
             elif action == "clear":
-                await memory_clear(session, force)
+                store = await get_graph_store(config, session)
+                if not store:
+                    error("Memory clear requires [embeddings] configuration")
+                    raise typer.Exit(1)
+                await memory_clear(store, force)
             elif action == "gc":
                 await memory_gc()
             elif action == "rebuild-index":

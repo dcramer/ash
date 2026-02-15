@@ -307,8 +307,7 @@ async def memory_doctor_dedup(
         warning("Dedup requires [embeddings] configuration")
         return
 
-    store = get_memory_store()
-    memories = await store.get_memories(limit=10000, include_expired=True)
+    memories = await graph_store.list_memories(limit=10000, include_expired=True)
 
     if not memories:
         warning("No memories to deduplicate")
@@ -333,7 +332,6 @@ async def memory_doctor_dedup(
             parent[ra] = rb
 
     seen_pairs: set[frozenset[str]] = set()
-    index = graph_store._index
 
     with Progress(
         SpinnerColumn(),
@@ -344,19 +342,19 @@ async def memory_doctor_dedup(
 
         for memory in memories:
             try:
-                results = await index.search(memory.content, limit=10)
+                results = await graph_store.search(memory.content, limit=10)
                 for result in results:
-                    if result.memory_id == memory.id:
+                    if result.id == memory.id:
                         continue
                     if result.similarity < 0.85:
                         continue
-                    if result.memory_id not in mem_by_id:
+                    if result.id not in mem_by_id:
                         continue
-                    pair = frozenset({memory.id, result.memory_id})
+                    pair = frozenset({memory.id, result.id})
                     if pair in seen_pairs:
                         continue
                     seen_pairs.add(pair)
-                    union(memory.id, result.memory_id)
+                    union(memory.id, result.id)
             except Exception as e:
                 dim(f"Search failed for {memory.id[:8]}: {e}")
 
@@ -450,11 +448,7 @@ async def memory_doctor_dedup(
 
     for canonical_id, dup_ids in confirmed:
         for dup_id in dup_ids:
-            await store.mark_memory_superseded(dup_id, canonical_id)
-            try:
-                await index.delete_embedding(dup_id)
-            except Exception as e:
-                dim(f"Embedding cleanup failed for {dup_id[:8]}: {e}")
+            await graph_store.mark_superseded(dup_id, canonical_id)
 
     success(f"Superseded {total_dups} duplicate memories")
 
@@ -589,6 +583,8 @@ async def memory_doctor_reclassify(config: AshConfig, force: bool) -> None:
 
         for i in range(0, len(knowledge_memories), batch_size):
             batch = knowledge_memories[i : i + batch_size]
+            # Per-batch short-ID map to avoid cross-batch collisions
+            batch_by_short_id = {m.id[:8]: m for m in batch}
             memory_text = "\n".join(f"- {m.id[:8]}: {m.content[:200]}" for m in batch)
 
             try:
@@ -596,18 +592,19 @@ async def memory_doctor_reclassify(config: AshConfig, force: bool) -> None:
                     llm, model, CLASSIFY_PROMPT.format(memories=memory_text)
                 )
 
-                for memory in batch:
-                    short_id = memory.id[:8]
-                    if short_id in classifications:
-                        try:
-                            new_type = MemoryType(classifications[short_id])
-                        except ValueError:
-                            continue
-                        if new_type != memory.memory_type:
-                            old_type = memory.memory_type.value
-                            memory.memory_type = new_type
-                            await store.update_memory(memory)
-                            changes.append((short_id, old_type, new_type.value))
+                for short_id, new_type_str in classifications.items():
+                    memory = batch_by_short_id.get(short_id)
+                    if not memory:
+                        continue
+                    try:
+                        new_type = MemoryType(new_type_str)
+                    except ValueError:
+                        continue
+                    if new_type != memory.memory_type:
+                        old_type = memory.memory_type.value
+                        memory.memory_type = new_type
+                        await store.update_memory(memory)
+                        changes.append((short_id, old_type, new_type.value))
             except Exception as e:
                 dim(f"Batch failed: {e}")
 

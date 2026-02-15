@@ -106,6 +106,13 @@ class PersonEntry:
 
         return d
 
+    def matches_username(self, username: str) -> bool:
+        """Check if this person matches a username (case-insensitive)."""
+        username_lower = username.lower()
+        if self.name and self.name.lower() == username_lower:
+            return True
+        return any(alias.value.lower() == username_lower for alias in self.aliases)
+
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "PersonEntry":
         """Deserialize from JSON dict.

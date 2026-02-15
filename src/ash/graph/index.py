@@ -199,3 +199,10 @@ class GraphIndex:
     def people_known_by_user(self, user_node_id: str) -> set[str]:
         """Get person IDs known by a user (via KNOWS edges). O(1)."""
         return self.neighbors(user_node_id, EdgeType.KNOWS, "outgoing")
+
+    def edge_counts(self) -> dict[EdgeType, int]:
+        """Return number of edges per edge type."""
+        return {
+            et: sum(len(targets) for targets in adj.values())
+            for et, adj in self._outgoing.items()
+        }

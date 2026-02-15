@@ -403,6 +403,10 @@ class GraphStore:
         await self._ensure_graph_built()
         return self._memory_by_id.get(memory_id)
 
+    async def get_memory_by_prefix(self, prefix: str) -> MemoryEntry | None:
+        """Find a memory by ID prefix match."""
+        return await self._store.get_memory_by_prefix(prefix)
+
     async def search(
         self,
         query: str,
@@ -460,12 +464,13 @@ class GraphStore:
         self,
         limit: int = 20,
         include_expired: bool = False,
+        include_superseded: bool = False,
         owner_user_id: str | None = None,
         chat_id: str | None = None,
     ) -> list[MemoryEntry]:
         return await self._store.get_memories(
             include_expired=include_expired,
-            include_superseded=False,
+            include_superseded=include_superseded,
             owner_user_id=owner_user_id,
             chat_id=chat_id,
             limit=limit,
@@ -509,6 +514,20 @@ class GraphStore:
                 logger.debug("Failed to delete embedding for %s", memory_id)
         self._graph_built = False
         return result
+
+    async def clear(self) -> int:
+        """Clear all memories, embeddings JSONL, and vector index."""
+        count = await self._store.clear()
+        try:
+            await self._index.clear()
+        except Exception:
+            logger.debug("Failed to clear vector index", exc_info=True)
+        self._graph_built = False
+        return count
+
+    async def mark_superseded(self, old_memory_id: str, new_memory_id: str) -> bool:
+        """Mark a memory as superseded (public API for doctor/dedup)."""
+        return await self._mark_superseded(old_memory_id, new_memory_id)
 
     async def enforce_max_entries(self, max_entries: int) -> int:
         now = datetime.now(UTC)
@@ -1540,10 +1559,7 @@ class GraphStore:
 
     @staticmethod
     def _matches_username(person: PersonEntry, username: str) -> bool:
-        username_lower = username.lower()
-        if person.name.lower() == username_lower:
-            return True
-        return any(alias.value.lower() == username_lower for alias in person.aliases)
+        return person.matches_username(username)
 
     @staticmethod
     def _heuristic_match(a: PersonEntry, b: PersonEntry) -> bool:
