@@ -15,9 +15,7 @@ from ash.providers.base import OutgoingMessage
 from ash.providers.telegram.handlers import (
     ToolTracker,
     escape_markdown_v2,
-    format_thinking_status,
     format_tool_brief,
-    format_tool_summary,
 )
 from ash.providers.telegram.provider import TelegramProvider
 
@@ -105,39 +103,6 @@ class TestMessageConversion:
         assert incoming.metadata["chat_type"] == "supergroup"
         assert incoming.metadata["chat_title"] == "Test Group"
         assert incoming.metadata["thread_id"] == "42"
-
-
-class TestThinkingMessages:
-    """Test thinking message formatting per spec."""
-
-    def test_format_thinking_status_no_tools(self):
-        """Test thinking status with no tool calls."""
-        status = format_thinking_status(0)
-        # MarkdownV2 escaped: _Thinking..._
-        assert status == "_Thinking\\.\\.\\._"
-
-    def test_format_thinking_status_one_tool(self):
-        """Test thinking status with one tool call."""
-        status = format_thinking_status(1)
-        assert "1 tool call" in status
-        assert "calls" not in status
-
-    def test_format_thinking_status_multiple_tools(self):
-        """Test thinking status with multiple tool calls."""
-        status = format_thinking_status(5)
-        assert "5 tool calls" in status
-
-    def test_format_tool_summary(self):
-        """Test tool summary for final message."""
-        summary = format_tool_summary(3, 5.2)
-        # Regular MARKDOWN, not escaped
-        assert summary == "_Made 3 tool calls in 5.2s_"
-
-    def test_format_tool_summary_singular(self):
-        """Test tool summary with singular call."""
-        summary = format_tool_summary(1, 2.0)
-        assert "1 tool call" in summary
-        assert "calls" not in summary
 
 
 class TestToolBriefFormatting:
@@ -382,18 +347,19 @@ class TestToolTracker:
         assert msg_id == "msg_123"
         mock_provider.send.assert_called_once()
 
-    def test_get_summary_prefix_with_tools(self, tracker):
-        """Test summary prefix includes tool count and time."""
-        import time
+    async def test_finalize_response_with_progress_messages(
+        self, tracker, mock_provider
+    ):
+        """Test finalize_response includes progress messages in final content."""
+        await tracker.on_tool_start("bash", {"command": "ls"})
+        tracker.add_progress_message("Step 1 done")
+        msg_id = await tracker.finalize_response("Here's the result")
 
-        tracker.tool_count = 3
-        tracker.start_time = time.monotonic() - 5.0  # 5 seconds ago
-
-        summary = tracker.get_summary_prefix()
-        assert "3 tool calls" in summary
-        assert "5." in summary  # Should show ~5s elapsed
-
-    def test_get_summary_prefix_no_tools(self, tracker):
-        """Test summary prefix is empty when no tools used."""
-        summary = tracker.get_summary_prefix()
-        assert summary == ""
+        assert msg_id == "msg_123"
+        final_call = mock_provider.edit.call_args
+        final_text = final_call[0][2]
+        assert "Step 1 done" in final_text
+        assert "Here's the result" in final_text
+        # No stats or thinking text in final output
+        assert "Thinking" not in final_text
+        assert "tool call" not in final_text

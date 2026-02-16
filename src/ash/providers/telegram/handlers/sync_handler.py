@@ -50,22 +50,25 @@ class SyncHandler:
         message: IncomingMessage,
         session: SessionState,
         ctx: SessionContext,
+        tracker: ToolTracker | None = None,
     ) -> None:
         """Handle message with synchronous response."""
-        await self.handle_sync_with_response(message, session, ctx)
+        await self.handle_sync_with_response(message, session, ctx, tracker=tracker)
 
     async def handle_sync_with_response(
         self,
         message: IncomingMessage,
         session: SessionState,
         ctx: SessionContext,
+        tracker: ToolTracker | None = None,
     ) -> AgentResponse:
         """Handle message with synchronous response, returning the AgentResponse."""
         from ash.providers.telegram.handlers.tool_tracker import ProgressMessageTool
 
         # Store current message ID so send_message tool can reply to it
         session.metadata["current_message_id"] = message.id
-        tracker = self._create_tool_tracker(message)
+        if tracker is None:
+            tracker = self._create_tool_tracker(message)
         progress_tool = ProgressMessageTool(tracker)
 
         async def get_steering_messages() -> list[IncomingMessage]:
@@ -121,12 +124,12 @@ class SyncHandler:
             self._log_response("[NO_REPLY]")
             return response
 
-        summary = tracker.get_summary_prefix()
-        if summary or tracker.progress_messages:
-            # Final response uses regular MARKDOWN, not MarkdownV2
-            final_content = tracker._build_display_message(
-                summary, response_text, escape_progress=False
+        # Build final content: progress messages + response (no stats)
+        if tracker.progress_messages:
+            parts = tracker.progress_messages + (
+                ["", response_text] if response_text else []
             )
+            final_content = "\n".join(parts)
         else:
             final_content = response_text
 
@@ -162,10 +165,12 @@ class SyncHandler:
             )
             reply_markup = create_checkpoint_keyboard(checkpoint)
             checkpoint_msg = format_checkpoint_message(checkpoint)
-            # Checkpoint message uses regular MARKDOWN, not MarkdownV2
-            final_content = tracker._build_display_message(
-                summary, checkpoint_msg, escape_progress=False
-            )
+            # Checkpoint replaces response content
+            if tracker.progress_messages:
+                parts = tracker.progress_messages + ["", checkpoint_msg]
+                final_content = "\n".join(parts)
+            else:
+                final_content = checkpoint_msg
             logger.info(
                 "Checkpoint detected, showing inline keyboard (id=%s, agent=%s)",
                 truncated_id,

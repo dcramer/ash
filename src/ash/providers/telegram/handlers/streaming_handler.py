@@ -51,6 +51,7 @@ class StreamingHandler:
         message: IncomingMessage,
         session: SessionState,
         ctx: SessionContext,
+        tracker: ToolTracker | None = None,
     ) -> None:
         """Handle message with streaming response."""
         from ash.providers.telegram.handlers.tool_tracker import ProgressMessageTool
@@ -59,7 +60,8 @@ class StreamingHandler:
         session.metadata["current_message_id"] = message.id
         await self._provider.send_typing(message.chat_id)
 
-        tracker = self._create_tool_tracker(message)
+        if tracker is None:
+            tracker = self._create_tool_tracker(message)
         progress_tool = ProgressMessageTool(tracker)
         response_msg_id: str | None = None
         response_content = ""
@@ -93,14 +95,11 @@ class StreamingHandler:
                     and response_content.strip()
                     and since_last_edit >= MIN_EDIT_INTERVAL
                 ):
-                    summary_prefix = (
-                        tracker.get_summary_prefix() if not response_msg_id else ""
-                    )
-                    display_content = summary_prefix + response_content
-
                     if tracker.thinking_msg_id and response_msg_id is None:
                         await self._provider.edit(
-                            message.chat_id, tracker.thinking_msg_id, display_content
+                            message.chat_id,
+                            tracker.thinking_msg_id,
+                            response_content,
                         )
                         response_msg_id = tracker.thinking_msg_id
                         tracker.thinking_msg_id = None
@@ -108,13 +107,13 @@ class StreamingHandler:
                         response_msg_id = await self._provider.send(
                             OutgoingMessage(
                                 chat_id=message.chat_id,
-                                text=display_content,
+                                text=response_content,
                                 reply_to_message_id=message.id,
                             )
                         )
                     else:
                         await self._provider.edit(
-                            message.chat_id, response_msg_id, display_content
+                            message.chat_id, response_msg_id, response_content
                         )
                     last_edit_time = time.time()
         except Exception:
@@ -158,12 +157,12 @@ class StreamingHandler:
             self._log_response("[NO_REPLY]")
             return
 
-        summary = tracker.get_summary_prefix()
-        if summary or tracker.progress_messages:
-            # Final response uses regular MARKDOWN, not MarkdownV2
-            final_content = tracker._build_display_message(
-                summary, response_content, escape_progress=False
+        # Build final content: progress messages + response (no stats)
+        if tracker.progress_messages:
+            parts = tracker.progress_messages + (
+                ["", response_content] if response_content else []
             )
+            final_content = "\n".join(parts)
         else:
             final_content = response_content
 

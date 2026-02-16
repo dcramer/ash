@@ -16,8 +16,6 @@ Other Classes:
 
 Utilities (utils.py):
 - escape_markdown_v2: Escape text for MarkdownV2 format
-- format_thinking_status: Format thinking status line
-- format_tool_summary: Format tool call summary
 - format_tool_brief: Format individual tool execution
 """
 
@@ -38,9 +36,7 @@ from ash.providers.telegram.handlers.utils import (
     STREAM_DELAY,
     escape_markdown_v2,
     extract_text_content,
-    format_thinking_status,
     format_tool_brief,
-    format_tool_summary,
     get_domain,
     get_filename,
     resolve_agent_model,
@@ -63,9 +59,7 @@ __all__ = [
     "STREAM_DELAY",
     # Formatting functions
     "escape_markdown_v2",
-    "format_thinking_status",
     "format_tool_brief",
-    "format_tool_summary",
     # Utility functions
     "extract_text_content",
     "get_domain",

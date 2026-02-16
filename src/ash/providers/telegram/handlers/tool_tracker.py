@@ -7,16 +7,13 @@ This module provides:
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 
 from ash.providers.base import OutgoingMessage
 from ash.providers.telegram.handlers.utils import (
     MAX_MESSAGE_LENGTH,
     escape_markdown_v2,
-    format_thinking_status,
     format_tool_brief,
-    format_tool_summary,
 )
 
 if TYPE_CHECKING:
@@ -86,13 +83,16 @@ class ProgressMessageTool:
         }
 
 
+THINKING_STATUS = "_Thinking\\.\\.\\._"
+
+
 class ToolTracker:
     """Tracks tool calls and manages thinking message updates.
 
     Consolidates all progress into a single message that gets edited:
-    - Status line: "Thinking... (N tool calls)" or "Made N tool calls in Xs"
-    - Progress messages: Appended via add_progress_message()
-    - Final response: Appended at the end
+    - Progress messages at the top (via add_progress_message)
+    - "Thinking..." status always at the bottom
+    - Final response replaces "Thinking..." with response content
     """
 
     def __init__(
@@ -113,40 +113,26 @@ class ToolTracker:
         self.thinking_msg_id: str | None = None
         self.tool_count: int = 0
         self.progress_messages: list[str] = []
-        self.start_time: float | None = None
 
-    def _build_display_message(
-        self, status: str, final_content: str = "", *, escape_progress: bool = True
-    ) -> str:
-        """Build the consolidated message, truncating if needed.
+    def _build_display_message(self, *, include_thinking: bool = True) -> str:
+        """Build the consolidated message with progress on top and status on bottom.
 
         Args:
-            status: The status line (pre-escaped for MarkdownV2 if used with that mode)
-            final_content: Optional final response content (NOT escaped)
-            escape_progress: Whether to escape progress messages for MarkdownV2.
-                Set to True when the message will be sent with parse_mode="markdown_v2".
+            include_thinking: Whether to include the "Thinking..." line at the bottom.
 
         Returns:
             Message content, truncated to fit Telegram's limit.
-
-        Note:
-            This method combines MarkdownV2-escaped status with progress messages.
-            Progress messages are escaped when escape_progress=True to prevent
-            special characters from breaking the MarkdownV2 parsing.
         """
-        parts = [status]
+        parts: list[str] = []
 
         if self.progress_messages:
-            parts.append("")  # Blank line after status
-            if escape_progress:
-                escaped = [escape_markdown_v2(m) for m in self.progress_messages]
-                parts.extend(escaped)
-            else:
-                parts.extend(self.progress_messages)
+            escaped = [escape_markdown_v2(m) for m in self.progress_messages]
+            parts.extend(escaped)
 
-        if final_content:
-            parts.append("")  # Blank line before final content
-            parts.append(final_content)
+        if include_thinking:
+            if parts:
+                parts.append("")  # Blank line before thinking
+            parts.append(THINKING_STATUS)
 
         message = "\n".join(parts)
 
@@ -155,27 +141,19 @@ class ToolTracker:
             return message
 
         # Truncate oldest progress messages until it fits
-        # Keep status + final content, drop progress messages from the start
         truncated_progress = self.progress_messages.copy()
-        truncation_notice = (
-            escape_markdown_v2("[...earlier messages truncated...]")
-            if escape_progress
-            else "[...earlier messages truncated...]"
-        )
+        truncation_notice = escape_markdown_v2("[...earlier messages truncated...]")
 
         while truncated_progress and len(message) > MAX_MESSAGE_LENGTH:
             truncated_progress.pop(0)
-            parts = [status]
+            parts = []
             if truncated_progress:
-                parts.append("")
                 parts.append(truncation_notice)
-                if escape_progress:
-                    parts.extend(escape_markdown_v2(m) for m in truncated_progress)
-                else:
-                    parts.extend(truncated_progress)
-            if final_content:
-                parts.append("")
-                parts.append(final_content)
+                parts.extend(escape_markdown_v2(m) for m in truncated_progress)
+            if include_thinking:
+                if parts:
+                    parts.append("")
+                parts.append(THINKING_STATUS)
             message = "\n".join(parts)
 
         return message
@@ -191,12 +169,8 @@ class ToolTracker:
             skill_registry=self._skill_registry,
         )
 
-        if self.start_time is None:
-            self.start_time = time.monotonic()
-
         self.tool_count += 1
-        status = format_thinking_status(self.tool_count)
-        display_message = self._build_display_message(status)
+        display_message = self._build_display_message()
 
         if self.thinking_msg_id is None:
             self.thinking_msg_id = await self._provider.send(
@@ -221,10 +195,9 @@ class ToolTracker:
 
     async def update_display(self) -> None:
         """Update the thinking message with current progress."""
+        display_message = self._build_display_message()
+
         if self.thinking_msg_id is None:
-            # Create initial message if none exists
-            status = format_thinking_status(self.tool_count)
-            display_message = self._build_display_message(status)
             self.thinking_msg_id = await self._provider.send(
                 OutgoingMessage(
                     chat_id=self._chat_id,
@@ -234,8 +207,6 @@ class ToolTracker:
                 )
             )
         else:
-            status = format_thinking_status(self.tool_count)
-            display_message = self._build_display_message(status)
             await self._provider.edit(
                 self._chat_id,
                 self.thinking_msg_id,
@@ -243,35 +214,20 @@ class ToolTracker:
                 parse_mode="markdown_v2",
             )
 
-    def get_summary_prefix(self) -> str:
-        """Get the summary line for the final message."""
-        if self.tool_count > 0 and self.start_time:
-            elapsed = time.monotonic() - self.start_time
-            return format_tool_summary(self.tool_count, elapsed)
-        return ""
-
     async def finalize_response(self, response_content: str) -> str:
-        """Send or edit the final response, returning the message ID.
+        """Build final content and edit/send the response, returning message ID.
 
-        The final response is edited with regular MARKDOWN mode (not MarkdownV2),
-        so progress messages are NOT escaped. This allows the response content
-        to use standard markdown formatting.
+        Final content = progress messages + response content (no "Thinking...", no stats).
         """
-        summary = self.get_summary_prefix()
-        final_content = (
-            self._build_display_message(
-                summary, response_content, escape_progress=False
-            )
-            if summary
-            else response_content
-        )
-
-        # Include progress messages in final content if we have them but no summary
-        if not summary and self.progress_messages:
-            parts = self.progress_messages + (
-                ["", response_content] if response_content else []
+        if self.progress_messages:
+            parts = (
+                self.progress_messages + ["", response_content]
+                if response_content
+                else list(self.progress_messages)
             )
             final_content = "\n".join(parts)
+        else:
+            final_content = response_content
 
         if self.thinking_msg_id:
             await self._provider.edit(

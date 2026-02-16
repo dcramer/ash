@@ -130,49 +130,6 @@ def format_tool_brief(
             return f"Running: {display_name}"
 
 
-def format_thinking_status(num_tools: int) -> str:
-    """Format a thinking status line with tool count, pre-escaped for MarkdownV2.
-
-    Returns a MarkdownV2-formatted italic string. All special characters are
-    pre-escaped in the string literal (double backslashes in Python source).
-
-    Examples:
-        format_thinking_status(0) → "_Thinking\\.\\.\\._"
-            Renders as: _Thinking..._  (italic)
-
-        format_thinking_status(2) → "_Thinking\\.\\.\\. \\(2 tool calls\\)_"
-            Renders as: _Thinking... (2 tool calls)_  (italic)
-
-    Note:
-        This function returns MarkdownV2-escaped text. It must be sent with
-        parse_mode="markdown_v2" to render correctly. Using regular MARKDOWN
-        mode will show literal backslashes.
-    """
-    if num_tools == 0:
-        return "_Thinking\\.\\.\\._"
-    call_word = "call" if num_tools == 1 else "calls"
-    return f"_Thinking\\.\\.\\. \\({num_tools} tool {call_word}\\)_"
-
-
-def format_tool_summary(num_tools: int, elapsed_seconds: float) -> str:
-    """Format a summary of tool calls for regular MARKDOWN (not MarkdownV2).
-
-    Returns a MARKDOWN-formatted italic string. Unlike format_thinking_status(),
-    this function does NOT escape for MarkdownV2 because the final response
-    is edited with regular MARKDOWN mode (more forgiving of special chars).
-
-    Examples:
-        format_tool_summary(3, 5.2) → "_Made 3 tool calls in 5.2s_"
-            Renders as: _Made 3 tool calls in 5.2s_  (italic)
-
-    Note:
-        This is used in final responses, not thinking messages. The period in
-        the elapsed time is NOT escaped because regular MARKDOWN doesn't require it.
-    """
-    call_word = "call" if num_tools == 1 else "calls"
-    return f"_Made {num_tools} tool {call_word} in {elapsed_seconds:.1f}s_"
-
-
 def extract_text_content(content: list[dict[str, Any]]) -> str:
     """Extract text content from content blocks."""
     texts = [

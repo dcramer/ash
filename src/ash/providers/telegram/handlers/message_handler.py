@@ -331,11 +331,18 @@ class TelegramMessageHandler:
             _truncate(message.text),
         )
 
+        # Create tracker before try/except so it's accessible in ChildActivated handler
+        tracker = self._create_tool_tracker(message)
+
         try:
             if self._streaming:
-                await self._streaming_handler.handle_streaming(message, session, ctx)
+                await self._streaming_handler.handle_streaming(
+                    message, session, ctx, tracker=tracker
+                )
             else:
-                await self._sync_handler.handle_sync(message, session, ctx)
+                await self._sync_handler.handle_sync(
+                    message, session, ctx, tracker=tracker
+                )
         except ChildActivated as ca:
             # A tool spawned an interactive child subagent (streaming or sync).
             # ChildActivated carries both main_frame and child_frame.
@@ -349,9 +356,33 @@ class TelegramMessageHandler:
                     stack.depth,
                     ca.child_frame.agent_name,
                 )
-                await self._run_orchestration_loop(
-                    message, session_key, entry_user_message=None
+                bot_response_id = await self._run_orchestration_loop(
+                    message,
+                    session_key,
+                    entry_user_message=None,
+                    thinking_msg_id=tracker.thinking_msg_id,
                 )
+                # Persist messages so thread_index registers the bot response
+                thread_id = message.metadata.get("thread_id")
+                await self._session_handler.persist_messages(
+                    message.chat_id,
+                    message.user_id,
+                    message.text,
+                    assistant_message=None,
+                    external_id=message.id,
+                    bot_response_id=bot_response_id,
+                    thread_id=thread_id,
+                    username=message.username,
+                    display_name=message.display_name,
+                )
+                # Clean up orphaned thinking message if no response sent
+                if not bot_response_id and tracker.thinking_msg_id:
+                    try:
+                        await self._provider.delete(
+                            message.chat_id, tracker.thinking_msg_id
+                        )
+                    except Exception:
+                        logger.debug("Failed to delete orphaned thinking message")
             else:
                 logger.warning("ChildActivated raised but agent_executor not available")
         finally:
@@ -373,20 +404,29 @@ class TelegramMessageHandler:
             message.username or message.user_id,
             _truncate(message.text),
         )
-        await self._run_orchestration_loop(
+        bot_response_id = await self._run_orchestration_loop(
             message, session_key, entry_user_message=message.text
         )
+        # Register bot response in thread_index so follow-up replies get routed
+        if bot_response_id:
+            thread_id = message.metadata.get("thread_id")
+            if thread_id:
+                thread_index = self._session_handler.get_thread_index(message.chat_id)
+                thread_index.register_message(bot_response_id, thread_id)
 
     async def _run_orchestration_loop(
         self,
         message: IncomingMessage,
         session_key: str,
         entry_user_message: str | None = None,
-    ) -> None:
+        thinking_msg_id: str | None = None,
+    ) -> str | None:
         """Run the interactive subagent orchestration loop.
 
         Processes TurnResults until we need user input (SEND_TEXT)
         or the stack is fully unwound.
+
+        Returns the message ID of the last bot response sent, or None.
         """
         from ash.agents.types import TurnAction
 
@@ -400,13 +440,14 @@ class TelegramMessageHandler:
         )
 
         entry_tool_result: tuple[str, str, bool] | None = None
+        bot_response_id: str | None = None
 
         while True:
             top = stack.top
             if top is None:
                 # Stack is empty — shouldn't normally happen here
                 logger.warning("Orchestration loop: stack is empty")
-                return
+                return bot_response_id
 
             result = await self._agent_executor.execute_turn(
                 top,
@@ -419,7 +460,10 @@ class TelegramMessageHandler:
 
             match result.action:
                 case TurnAction.SEND_TEXT:
-                    await self._send_stack_response(message, result.text)
+                    bot_response_id = await self._send_stack_response(
+                        message, result.text, thinking_msg_id=thinking_msg_id
+                    )
+                    thinking_msg_id = None  # Consume after first use
                     # If top is the main agent, pop it (main agent done)
                     if top.agent_type == "main":
                         main_frame = stack.pop()
@@ -429,7 +473,7 @@ class TelegramMessageHandler:
                             main_frame.session,
                         )
                         self._stack_manager.clear(session_key)
-                    return  # Wait for next user message
+                    return bot_response_id  # Wait for next user message
 
                 case TurnAction.COMPLETE:
                     completed = stack.pop()
@@ -441,9 +485,14 @@ class TelegramMessageHandler:
                     if stack.is_empty:
                         # Edge case: no parent to cascade to
                         if result.text:
-                            await self._send_stack_response(message, result.text)
+                            bot_response_id = await self._send_stack_response(
+                                message,
+                                result.text,
+                                thinking_msg_id=thinking_msg_id,
+                            )
+                            thinking_msg_id = None
                         self._stack_manager.clear(session_key)
-                        return
+                        return bot_response_id
                     # Inject result into parent's pending tool_use
                     assert completed.parent_tool_use_id is not None
                     entry_tool_result = (
@@ -465,8 +514,11 @@ class TelegramMessageHandler:
 
                 case TurnAction.INTERRUPT:
                     # For now, treat interrupts in stack mode as text to user
-                    await self._send_stack_response(message, result.text)
-                    return
+                    bot_response_id = await self._send_stack_response(
+                        message, result.text, thinking_msg_id=thinking_msg_id
+                    )
+                    thinking_msg_id = None
+                    return bot_response_id
 
                 case TurnAction.MAX_ITERATIONS:
                     failed = stack.pop()
@@ -474,11 +526,14 @@ class TelegramMessageHandler:
                         "Stack frame hit max iterations: %s", failed.agent_name
                     )
                     if stack.is_empty:
-                        await self._send_stack_response(
-                            message, "Agent reached maximum steps."
+                        bot_response_id = await self._send_stack_response(
+                            message,
+                            "Agent reached maximum steps.",
+                            thinking_msg_id=thinking_msg_id,
                         )
+                        thinking_msg_id = None
                         self._stack_manager.clear(session_key)
-                        return
+                        return bot_response_id
                     assert failed.parent_tool_use_id is not None
                     entry_tool_result = (
                         failed.parent_tool_use_id,
@@ -495,12 +550,14 @@ class TelegramMessageHandler:
                         result.text,
                     )
                     if stack.is_empty:
-                        await self._send_stack_response(
+                        bot_response_id = await self._send_stack_response(
                             message,
                             result.text or "An error occurred.",
+                            thinking_msg_id=thinking_msg_id,
                         )
+                        thinking_msg_id = None
                         self._stack_manager.clear(session_key)
-                        return
+                        return bot_response_id
                     assert failed.parent_tool_use_id is not None
                     entry_tool_result = (
                         failed.parent_tool_use_id,
@@ -509,13 +566,37 @@ class TelegramMessageHandler:
                     )
                     continue
 
-    async def _send_stack_response(self, message: IncomingMessage, text: str) -> None:
-        """Send a response from the interactive subagent stack."""
+    async def _send_stack_response(
+        self,
+        message: IncomingMessage,
+        text: str,
+        *,
+        thinking_msg_id: str | None = None,
+    ) -> str | None:
+        """Send a response from the interactive subagent stack.
+
+        If thinking_msg_id is provided and the content fits, edits the
+        thinking message instead of sending a new one. Returns the message ID.
+        """
         if not text.strip():
-            return
+            return None
         bot_name = self._provider.bot_username or "bot"
         logger.info("[cyan]%s:[/cyan] %s", bot_name, _truncate(text))
-        await self._provider.send(
+
+        from ash.providers.telegram.provider import MAX_SEND_LENGTH
+
+        if thinking_msg_id and len(text) <= MAX_SEND_LENGTH:
+            await self._provider.edit(message.chat_id, thinking_msg_id, text)
+            return thinking_msg_id
+
+        if thinking_msg_id:
+            # Content too long for edit — delete thinking message, send chunked
+            try:
+                await self._provider.delete(message.chat_id, thinking_msg_id)
+            except Exception:
+                logger.debug("Failed to delete thinking message before chunked send")
+
+        return await self._provider.send(
             OutgoingMessage(
                 chat_id=message.chat_id,
                 text=text,
