@@ -6,7 +6,6 @@ Centralizes row-to-object conversion logic, making it reusable and testable.
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ash.store.types import (
@@ -105,45 +104,3 @@ def row_to_chat(row: Row[Any]) -> ChatEntry:
         updated_at=_parse_datetime(row.updated_at),
         metadata=json.loads(row.metadata) if row.metadata else None,
     )
-
-
-def row_to_alias(row: Row[Any]) -> AliasEntry:
-    """Convert a SQLite row to an AliasEntry.
-
-    Handles both tuple rows (from index-based queries) and named rows.
-    """
-    return AliasEntry(
-        value=row[0] if isinstance(row, tuple) else row.value,
-        added_by=row[1] if isinstance(row, tuple) else row.added_by,
-        created_at=_parse_datetime(
-            row[2] if isinstance(row, tuple) else row.created_at
-        ),
-    )
-
-
-def row_to_relationship(row: Row[Any]) -> RelationshipClaim:
-    """Convert a SQLite row to a RelationshipClaim.
-
-    Handles both tuple rows (from index-based queries) and named rows.
-    """
-    return RelationshipClaim(
-        relationship=row[0] if isinstance(row, tuple) else row.relationship,
-        stated_by=row[1] if isinstance(row, tuple) else row.stated_by,
-        created_at=_parse_datetime(
-            row[2] if isinstance(row, tuple) else row.created_at
-        ),
-    )
-
-
-def parse_dt(val: str | datetime | None) -> datetime | None:
-    """Parse ISO datetime string from SQLite.
-
-    Handles both string and datetime inputs for flexibility.
-    A convenience wrapper around _parse_datetime that also accepts
-    datetime objects passthrough.
-    """
-    if val is None:
-        return None
-    if isinstance(val, datetime):
-        return val
-    return _parse_datetime(val)

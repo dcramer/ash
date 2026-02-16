@@ -293,8 +293,3 @@ class PeopleDedupMixin:
         except Exception:
             logger.warning("llm_verify_same_person_failed", exc_info=True)
             return False
-
-    @staticmethod
-    def _pick_primary(a: PersonEntry, b: PersonEntry) -> tuple[str, str]:
-        first, second = sorted([a, b], key=primary_sort_key)
-        return first.id, second.id

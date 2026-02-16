@@ -243,20 +243,6 @@ class MemoryEntry:
             metadata=d.get("metadata"),
         )
 
-    def get_embedding_bytes(self) -> bytes | None:
-        """Decode base64 embedding to bytes for sqlite-vec."""
-        if not self.embedding:
-            return None
-        return base64.b64decode(self.embedding)
-
-    def get_embedding_floats(self) -> list[float] | None:
-        """Decode base64 embedding to list of floats."""
-        data = self.get_embedding_bytes()
-        if not data:
-            return None
-        count = len(data) // 4
-        return list(struct.unpack(f"{count}f", data))
-
     @staticmethod
     def encode_embedding(floats: list[float]) -> str:
         """Encode float list to base64 string."""
@@ -516,44 +502,6 @@ class UserEntry:
     updated_at: datetime | None = None
     metadata: dict[str, Any] | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to JSON-compatible dict."""
-        d: dict[str, Any] = {
-            "id": self.id,
-            "version": self.version,
-            "provider": self.provider,
-            "provider_id": self.provider_id,
-        }
-        if self.username:
-            d["username"] = self.username
-        if self.display_name:
-            d["display_name"] = self.display_name
-        if self.person_id:
-            d["person_id"] = self.person_id
-        if self.created_at:
-            d["created_at"] = self.created_at.isoformat()
-        if self.updated_at:
-            d["updated_at"] = self.updated_at.isoformat()
-        if self.metadata:
-            d["metadata"] = self.metadata
-        return d
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "UserEntry":
-        """Deserialize from JSON dict."""
-        return cls(
-            id=d["id"],
-            version=d.get("version", 1),
-            provider=d.get("provider", ""),
-            provider_id=d.get("provider_id", ""),
-            username=d.get("username"),
-            display_name=d.get("display_name"),
-            person_id=d.get("person_id"),
-            created_at=_parse_datetime(d.get("created_at")),
-            updated_at=_parse_datetime(d.get("updated_at")),
-            metadata=d.get("metadata"),
-        )
-
 
 @dataclass
 class ChatEntry:
@@ -571,38 +519,3 @@ class ChatEntry:
     created_at: datetime | None = None
     updated_at: datetime | None = None
     metadata: dict[str, Any] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to JSON-compatible dict."""
-        d: dict[str, Any] = {
-            "id": self.id,
-            "version": self.version,
-            "provider": self.provider,
-            "provider_id": self.provider_id,
-        }
-        if self.chat_type:
-            d["chat_type"] = self.chat_type
-        if self.title:
-            d["title"] = self.title
-        if self.created_at:
-            d["created_at"] = self.created_at.isoformat()
-        if self.updated_at:
-            d["updated_at"] = self.updated_at.isoformat()
-        if self.metadata:
-            d["metadata"] = self.metadata
-        return d
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ChatEntry":
-        """Deserialize from JSON dict."""
-        return cls(
-            id=d["id"],
-            version=d.get("version", 1),
-            provider=d.get("provider", ""),
-            provider_id=d.get("provider_id", ""),
-            chat_type=d.get("chat_type"),
-            title=d.get("title"),
-            created_at=_parse_datetime(d.get("created_at")),
-            updated_at=_parse_datetime(d.get("updated_at")),
-            metadata=d.get("metadata"),
-        )

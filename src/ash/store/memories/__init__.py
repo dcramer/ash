@@ -27,11 +27,6 @@ class MemoryOpsMixin(
     """
 
 
-# Re-exports for backward compatibility
-_load_subjects = load_subjects
-_load_subjects_batch = load_subjects_batch
-_row_to_memory_full = row_to_memory_full
-
 __all__ = [
     "MemoryOpsMixin",
     "load_subjects",

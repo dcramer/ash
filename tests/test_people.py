@@ -10,7 +10,6 @@ Tests focus on:
 - Person merging
 """
 
-from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1244,41 +1243,6 @@ class TestHeuristicMatch:
             aliases=[AliasEntry(value="notzeeg")],
         )
         assert Store._heuristic_match(a, b) is True
-
-
-class TestPickPrimary:
-    """Tests for _pick_primary merge direction."""
-
-    def test_more_aliases_is_primary(self):
-        """Person with more aliases/relationships becomes primary."""
-        a = PersonEntry(
-            id="a",
-            name="Sarah",
-            aliases=[AliasEntry(value="sks"), AliasEntry(value="honey")],
-            relationships=[RelationshipClaim(relationship="wife")],
-        )
-        b = PersonEntry(id="b", name="Sukhpreet")
-        primary_id, secondary_id = Store._pick_primary(a, b)
-        assert primary_id == "a"
-        assert secondary_id == "b"
-
-    def test_tie_break_by_created_at(self):
-        """On tie, older record is primary."""
-        from datetime import datetime
-
-        a = PersonEntry(
-            id="a",
-            name="Sarah",
-            created_at=datetime(2024, 1, 1, tzinfo=UTC),
-        )
-        b = PersonEntry(
-            id="b",
-            name="Sarah Jane",
-            created_at=datetime(2024, 6, 1, tzinfo=UTC),
-        )
-        primary_id, secondary_id = Store._pick_primary(a, b)
-        assert primary_id == "a"
-        assert secondary_id == "b"
 
 
 class TestFindDedupCandidates:
