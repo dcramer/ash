@@ -140,19 +140,19 @@ async def memory_doctor_dedup(store: Store, config: AshConfig, force: bool) -> N
 
     # Show results
     table = Table(title="Confirmed Duplicates")
-    table.add_column("Canonical", style="green", max_width=50)
-    table.add_column("Duplicates", style="red", max_width=50)
+    table.add_column("Canonical", style="green", max_width=80)
+    table.add_column("Duplicates", style="red", max_width=80)
 
     total_dups = 0
     for canonical_id, dup_ids in confirmed:
         canonical_mem = mem_by_id.get(canonical_id)
         canonical_text = (
-            canonical_mem.content[:50] if canonical_mem else canonical_id[:8]
+            canonical_mem.content[:100] if canonical_mem else canonical_id[:8]
         )
         dup_texts = []
         for did in dup_ids:
             dm = mem_by_id.get(did)
-            dup_texts.append(dm.content[:40] if dm else did[:8])
+            dup_texts.append(dm.content[:80] if dm else did[:8])
         table.add_row(
             f"{canonical_id[:8]}: {canonical_text}",
             "\n".join(

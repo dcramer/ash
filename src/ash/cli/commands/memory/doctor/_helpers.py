@@ -86,7 +86,7 @@ def should_block_archive(content: str, reason: str) -> str | None:
     return None
 
 
-def truncate(text: str, length: int = 60) -> str:
+def truncate(text: str, length: int = 120) -> str:
     """Truncate text to length, replacing newlines with spaces."""
     flat = text.replace("\n", " ")
     if len(flat) > length:

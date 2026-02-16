@@ -15,11 +15,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.core.agent import _extract_relationship_term
 from ash.core.filters import build_owner_matchers, is_owner_name
 from ash.db.engine import Database
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.index import VectorIndex
+from ash.memory.processing import extract_relationship_term
 from ash.store.store import Store
 from ash.store.types import AliasEntry, PersonEntry, RelationshipClaim
 
@@ -1741,20 +1741,20 @@ class TestNoUsernameFallback:
 
 
 class TestExtractRelationshipTerm:
-    """Tests for _extract_relationship_term helper."""
+    """Tests for extract_relationship_term helper."""
 
     def test_extracts_wife(self):
-        assert _extract_relationship_term("Sarah is the user's wife") == "wife"
+        assert extract_relationship_term("Sarah is the user's wife") == "wife"
 
     def test_extracts_boss(self):
-        assert _extract_relationship_term("John is the boss") == "boss"
+        assert extract_relationship_term("John is the boss") == "boss"
 
     def test_extracts_best_friend_over_friend(self):
         """Multi-word terms matched before single-word substrings."""
-        assert _extract_relationship_term("Alex is my best friend") == "best friend"
+        assert extract_relationship_term("Alex is my best friend") == "best friend"
 
     def test_no_match(self):
-        assert _extract_relationship_term("Sarah likes hiking") is None
+        assert extract_relationship_term("Sarah likes hiking") is None
 
     def test_case_insensitive(self):
-        assert _extract_relationship_term("Sarah is my Wife") == "wife"
+        assert extract_relationship_term("Sarah is my Wife") == "wife"

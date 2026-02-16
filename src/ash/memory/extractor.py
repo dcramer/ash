@@ -212,7 +212,7 @@ Only include facts with confidence >= 0.7. If you cannot resolve a reference, do
 
 Return ONLY valid JSON, no other text. Example:
 [
-  {{"content": "Prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference", "sensitivity": "public", "portable": true}},
+  {{"content": "David prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference", "sensitivity": "public", "portable": true}},
   {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship", "sensitivity": "public", "portable": true}},
   {{"content": "Has been dealing with anxiety", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "identity", "sensitivity": "sensitive", "portable": true}}
 ]

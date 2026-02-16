@@ -36,7 +36,6 @@ from ash.llm.types import (
     TextContent,
     ToolUse,
 )
-from ash.store.types import MemoryType
 from ash.tools import ToolContext, ToolExecutor, ToolRegistry
 
 if TYPE_CHECKING:
@@ -62,41 +61,6 @@ def _extract_checkpoint(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | No
             if CHECKPOINT_METADATA_KEY in metadata:
                 return metadata[CHECKPOINT_METADATA_KEY]
     return None
-
-
-def _extract_relationship_term(content: str) -> str | None:
-    """Extract a relationship term from fact content.
-
-    Scans for known relationship terms (wife, boss, friend, etc.) to
-    attach to person records when a RELATIONSHIP-type fact is extracted.
-    Returns the first match found, or None.
-    """
-    from ash.store.people import RELATIONSHIP_TERMS
-
-    content_lower = content.lower()
-    # Check multi-word terms first (e.g., "best friend" before "friend")
-    for term in sorted(RELATIONSHIP_TERMS, key=lambda t: len(t), reverse=True):
-        if term in content_lower:
-            return term
-    return None
-
-
-# Invalid speaker values that indicate assistant attribution
-_INVALID_SPEAKERS = frozenset({"agent", "assistant", "bot", "system", "ash"})
-
-
-def _validate_speaker(speaker: str | None) -> str | None:
-    """Validate speaker, filtering out invalid values.
-
-    Returns None for invalid speakers (agent, assistant, etc.) or empty values.
-    Preserves original casing — callers already lowercase for comparison.
-    """
-    if not speaker:
-        return None
-    if speaker.lower() in _INVALID_SPEAKERS:
-        logger.debug("Filtering invalid speaker: %s", speaker)
-        return None
-    return speaker
 
 
 def _build_routing_env(
@@ -358,113 +322,13 @@ class Agent:
         username: str,
         display_name: str,
     ) -> str | None:
-        """Ensure a self-Person exists for the user with username as alias.
-
-        This enables proper trust determination by linking the username
-        (used as source_username) to the display name (used for display).
-
-        Lookup order: display_name first, then username. If a matching person
-        exists but lacks a "self" relationship, we claim it (this handles
-        the case where another user mentions "David Cramer" before David
-        speaks). If no match, create a new self-person.
-
-        Args:
-            user_id: The user ID (used as created_by for new records).
-            username: The user's handle/username (e.g., "notzeeg").
-            display_name: The user's display name (e.g., "David Cramer").
-
-        Returns:
-            The person_id for the self-person, or None if no people store.
-        """
+        """Ensure a self-Person exists for the user with username as alias."""
         if not self._people:
             return None
 
-        async with self._people._self_person_lock:
-            try:
-                # Try display name first, then username
-                existing = await self._people.find_person(display_name)
-                if not existing and username:
-                    existing = await self._people.find_person(username)
+        from ash.memory.processing import ensure_self_person
 
-                if existing:
-                    is_self = any(
-                        rc.relationship == "self" for rc in existing.relationships
-                    )
-                    if not is_self:
-                        await self._people.add_relationship(
-                            existing.id, "self", stated_by=username
-                        )
-                    await self._sync_person_details(
-                        existing, display_name, username, user_id
-                    )
-                    return existing.id
-
-                # No match found -- create new self-person
-                # When no username, use numeric user_id as alias to reconnect the graph
-                aliases = [username] if username else [user_id]
-                new_person = await self._people.create_person(
-                    created_by=user_id,
-                    name=display_name,
-                    relationship="self",
-                    aliases=aliases,
-                    relationship_stated_by=username or None,
-                )
-                logger.debug(
-                    "Created self-person for user",
-                    extra={
-                        "user_id": user_id,
-                        "person_name": display_name,
-                        "username": username,
-                    },
-                )
-
-                # Dedup: merge new self-person against any existing person with same name.
-                # Use exclude_self=False because the new person always has "self" relationship
-                # and would be skipped otherwise. _heuristic_match skips pairs where both are
-                # self-persons created by *different* users, but allows duplicate self-records
-                # from the same user to be detected and merged.
-                result_id = new_person.id
-                try:
-                    candidates = await self._people.find_dedup_candidates(
-                        [new_person.id], exclude_self=False
-                    )
-                    for primary_id, secondary_id in candidates:
-                        await self._people.merge_people(primary_id, secondary_id)
-                        # If our new person was merged away, track the primary
-                        if secondary_id == new_person.id:
-                            result_id = primary_id
-                except Exception:
-                    logger.warning("Self-person dedup failed", exc_info=True)
-                return result_id
-            except Exception:
-                logger.warning("Failed to ensure self-person", exc_info=True)
-                return None
-
-    async def _sync_person_details(
-        self,
-        person: PersonEntry,
-        display_name: str,
-        username: str,
-        user_id: str,
-    ) -> None:
-        """Update a person's name and ensure username alias exists.
-
-        Args:
-            person: Existing person record to sync.
-            display_name: Expected display name.
-            username: Username to ensure as alias.
-            user_id: Who is making the update (for provenance).
-        """
-        assert self._people is not None
-
-        if display_name and person.name != display_name:
-            await self._people.update_person(
-                person_id=person.id, name=display_name, updated_by=user_id
-            )
-        if username:
-            aliases_lower = [a.value.lower() for a in person.aliases]
-            if username.lower() not in aliases_lower:
-                await self._people.add_alias(person.id, username, user_id)
+        return await ensure_self_person(self._people, user_id, username, display_name)
 
     def _should_extract_memories(self, user_message: str) -> bool:
         if not self._config.extraction_enabled:
@@ -492,6 +356,7 @@ class Agent:
         from ash.llm.types import Message as LLMMessage
         from ash.llm.types import Role
         from ash.memory.extractor import SpeakerInfo
+        from ash.memory.processing import enrich_owner_names, process_extracted_facts
 
         if not self._extractor or not self._memory:
             return
@@ -512,11 +377,12 @@ class Agent:
                     "Failed to get existing memories for extraction", exc_info=True
                 )
 
-            llm_messages: list[LLMMessage] = [
+            all_messages: list[LLMMessage] = [
                 msg
                 for msg in session.messages
                 if msg.role in (Role.USER, Role.ASSISTANT) and msg.get_text().strip()
             ]
+            llm_messages = all_messages[-4:]  # Last 2 exchanges
 
             if not llm_messages:
                 return
@@ -550,6 +416,10 @@ class Agent:
                     display_name=effective_display,
                 )
 
+            # Enrich owner_names with person aliases for better owner filtering
+            if speaker_person_id and self._people:
+                await enrich_owner_names(self._people, owner_names, speaker_person_id)
+
             facts = await self._extractor.extract_from_conversation(
                 messages=llm_messages,
                 existing_memories=existing_memories,
@@ -573,140 +443,18 @@ class Agent:
                     fact.speaker,
                 )
 
-            # Build owner name matchers for filtering self-references
-            from ash.core.filters import build_owner_matchers, is_owner_name
-
-            owner_matchers = build_owner_matchers(owner_names)
-
-            # Track newly created person IDs for post-extraction dedup
-            newly_created_person_ids: list[str] = []
-
-            for fact in facts:
-                if fact.confidence < self._config.extraction_confidence_threshold:
-                    continue
-
-                try:
-                    subject_person_ids: list[str] | None = None
-                    if fact.subjects and self._people:
-                        subject_person_ids = []
-                        for subject in fact.subjects:
-                            if is_owner_name(subject, owner_matchers):
-                                logger.debug("Skipping owner as subject: %s", subject)
-                                continue
-                            try:
-                                result = await self._people.resolve_or_create_person(
-                                    created_by=user_id,
-                                    reference=subject,
-                                    content_hint=fact.content,
-                                    relationship_stated_by=speaker_username,
-                                )
-                                subject_person_ids.append(result.person_id)
-                                if result.created:
-                                    newly_created_person_ids.append(result.person_id)
-                            except Exception:
-                                logger.warning("Failed to resolve subject: %s", subject)
-
-                    # For RELATIONSHIP facts, attach the term to the person record
-                    # so it shows in the Known People section of the system prompt.
-                    if (
-                        fact.memory_type == MemoryType.RELATIONSHIP
-                        and subject_person_ids
-                        and self._people
-                    ):
-                        rel_term = _extract_relationship_term(fact.content)
-                        if rel_term:
-                            for pid in subject_person_ids:
-                                try:
-                                    await self._people.add_relationship(
-                                        pid,
-                                        rel_term,
-                                        stated_by=speaker_username,
-                                    )
-                                except Exception:
-                                    logger.debug(
-                                        "Failed to add relationship %s to %s",
-                                        rel_term,
-                                        pid,
-                                    )
-
-                    # Capture whether this is a self-fact (no subjects) before
-                    # we inject speaker_person_id for graph traversal, since hearsay
-                    # supersession needs to know the original extraction state.
-                    is_self_fact = not subject_person_ids
-
-                    # Self-facts (no subjects) should reference the speaker's person
-                    # record so they're discoverable via graph traversal.
-                    # Skip RELATIONSHIP type to avoid attaching relationship terms to
-                    # the speaker instead of the related person.
-                    if (
-                        is_self_fact
-                        and speaker_person_id
-                        and fact.memory_type != MemoryType.RELATIONSHIP
-                    ):
-                        subject_person_ids = [speaker_person_id]
-
-                    # Filter out invalid speaker values that indicate assistant attribution
-                    speaker = _validate_speaker(fact.speaker)
-
-                    # Determine source user from extracted speaker or session
-                    source_username = speaker or speaker_username or user_id
-                    source_display_name = (
-                        speaker_display_name
-                        if source_username == speaker_username
-                        else None
-                    )
-
-                    new_memory = await self._memory.add_memory(
-                        content=fact.content,
-                        source="background_extraction",
-                        memory_type=fact.memory_type,
-                        owner_user_id=user_id if not fact.shared else None,
-                        chat_id=chat_id if fact.shared else None,
-                        subject_person_ids=subject_person_ids or None,
-                        observed_at=datetime.now(UTC),
-                        source_username=source_username,
-                        source_display_name=source_display_name,
-                        extraction_confidence=fact.confidence,
-                        sensitivity=fact.sensitivity,
-                        portable=fact.portable,
-                    )
-
-                    logger.debug(
-                        "Extracted memory: %s (confidence=%.2f, speaker=%s)",
-                        fact.content[:50],
-                        fact.confidence,
-                        source_username,
-                    )
-
-                    # Check for hearsay to supersede when this is a self-fact
-                    # (user speaking about themselves). Use is_self_fact since
-                    # subject_person_ids now has the speaker's person_id injected.
-                    if is_self_fact and source_username and self._memory:
-                        from ash.store.hearsay import supersede_hearsay_for_fact
-
-                        await supersede_hearsay_for_fact(
-                            store=self._memory,
-                            new_memory=new_memory,
-                            source_username=source_username,
-                            owner_user_id=user_id,
-                        )
-                except Exception:
-                    logger.debug(
-                        "Failed to store extracted fact: %s",
-                        fact.content[:50],
-                        exc_info=True,
-                    )
-
-            # Post-extraction dedup: merge newly created people that match existing
-            if self._people and newly_created_person_ids:
-                try:
-                    candidates = await self._people.find_dedup_candidates(
-                        newly_created_person_ids, exclude_self=True
-                    )
-                    for primary_id, secondary_id in candidates:
-                        await self._people.merge_people(primary_id, secondary_id)
-                except Exception:
-                    logger.warning("Post-extraction dedup failed", exc_info=True)
+            await process_extracted_facts(
+                facts=facts,
+                store=self._memory,
+                user_id=user_id,
+                chat_id=chat_id,
+                speaker_username=speaker_username,
+                speaker_display_name=speaker_display_name,
+                speaker_person_id=speaker_person_id,
+                owner_names=owner_names,
+                source="background_extraction",
+                confidence_threshold=self._config.extraction_confidence_threshold,
+            )
 
         except Exception:
             logger.warning("Background memory extraction failed", exc_info=True)

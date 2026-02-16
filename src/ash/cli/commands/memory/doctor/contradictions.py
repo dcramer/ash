@@ -153,17 +153,17 @@ async def memory_doctor_contradictions(
 
     # Show results
     table = Table(title="Confirmed Contradictions")
-    table.add_column("Current", style="green", max_width=50)
-    table.add_column("Outdated", style="red", max_width=50)
+    table.add_column("Current", style="green", max_width=80)
+    table.add_column("Outdated", style="red", max_width=80)
 
     total_outdated = 0
     for current_id, outdated_ids in confirmed:
         current_mem = mem_by_id.get(current_id)
-        current_text = current_mem.content[:50] if current_mem else current_id[:8]
+        current_text = current_mem.content[:100] if current_mem else current_id[:8]
         outdated_texts = []
         for oid in outdated_ids:
             om = mem_by_id.get(oid)
-            outdated_texts.append(om.content[:40] if om else oid[:8])
+            outdated_texts.append(om.content[:80] if om else oid[:8])
         table.add_row(
             f"{current_id[:8]}: {current_text}",
             "\n".join(

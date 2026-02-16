@@ -141,19 +141,17 @@ class SessionHandler:
         if session_mode != "fresh":
             await self._load_persistent_session(session, session_manager, message)
 
-        # Load recent chat-level history for cross-thread context (group chats only)
-        chat_type = message.metadata.get("chat_type")
-        if chat_type in ("group", "supergroup"):
-            from ash.chats.history import read_recent_chat_history
+        # Load recent chat-level history for cross-session context
+        from ash.chats.history import read_recent_chat_history
 
-            history_limit = self._conversation_config.chat_history_limit
-            entries = read_recent_chat_history(
-                self._provider_name, message.chat_id, limit=history_limit
-            )
-            if entries:
-                session.metadata["chat_history"] = [
-                    e.model_dump(mode="json") for e in entries
-                ]
+        history_limit = self._conversation_config.chat_history_limit
+        entries = read_recent_chat_history(
+            self._provider_name, message.chat_id, limit=history_limit
+        )
+        if entries:
+            session.metadata["chat_history"] = [
+                e.model_dump(mode="json") for e in entries
+            ]
 
         async with self._database.session() as db_session:
             from sqlalchemy import text as _text

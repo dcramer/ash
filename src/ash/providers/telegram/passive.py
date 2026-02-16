@@ -408,6 +408,9 @@ class PassiveMemoryExtractor:
     ) -> int:
         """Extract memories from a passive message.
 
+        Uses the shared processing pipeline for full post-extraction
+        processing (subject resolution, hearsay supersession, etc.).
+
         Args:
             message: The current message.
             speaker_info: Information about the message sender.
@@ -415,6 +418,12 @@ class PassiveMemoryExtractor:
         Returns:
             Number of facts extracted and stored.
         """
+        from ash.memory.processing import (
+            enrich_owner_names,
+            ensure_self_person,
+            process_extracted_facts,
+        )
+
         if not message.text:
             return 0
 
@@ -423,29 +432,67 @@ class PassiveMemoryExtractor:
         messages = [Message(role=Role.USER, content=f"{label}{message.text}")]
 
         try:
+            # Build owner names for filtering
+            owner_names: list[str] = []
+            if message.username:
+                owner_names.append(message.username)
+            if message.display_name and message.display_name not in owner_names:
+                owner_names.append(message.display_name)
+
+            # Ensure self-person exists for the speaker
+            speaker_person_id: str | None = None
+            if message.username or message.display_name:
+                effective_display = message.display_name or message.username
+                assert effective_display is not None
+                speaker_person_id = await ensure_self_person(
+                    store=self._memory_manager,
+                    user_id=message.user_id,
+                    username=message.username or "",
+                    display_name=effective_display,
+                )
+
+            # Enrich owner_names with person aliases
+            if speaker_person_id:
+                await enrich_owner_names(
+                    self._memory_manager, owner_names, speaker_person_id
+                )
+
+            # Fetch existing memories to avoid duplicates
+            existing_memories: list[str] = []
+            try:
+                recent = await self._memory_manager.list_memories(
+                    owner_user_id=message.user_id,
+                    chat_id=message.chat_id,
+                    limit=20,
+                )
+                existing_memories = [m.content for m in recent]
+            except Exception:
+                logger.debug(
+                    "Failed to get existing memories for passive extraction",
+                    exc_info=True,
+                )
+
             facts = await self._extractor.extract_from_conversation(
                 messages=messages,
+                existing_memories=existing_memories,
+                owner_names=owner_names if owner_names else None,
                 speaker_info=speaker_info,
             )
 
-            stored = 0
-            for fact in facts:
-                await self._memory_manager.add_memory(
-                    content=fact.content,
-                    source="passive",
-                    memory_type=fact.memory_type,
-                    owner_user_id=message.user_id,
-                    chat_id=message.chat_id,
-                    source_username=message.username,
-                    source_display_name=message.display_name,
-                    extraction_confidence=fact.confidence,
-                    metadata={
-                        "subjects": fact.subjects,
-                        "shared": fact.shared,
-                        "speaker": fact.speaker,
-                    },
-                )
-                stored += 1
+            if not facts:
+                return 0
+
+            stored = await process_extracted_facts(
+                facts=facts,
+                store=self._memory_manager,
+                user_id=message.user_id,
+                chat_id=message.chat_id,
+                speaker_username=message.username,
+                speaker_display_name=message.display_name,
+                speaker_person_id=speaker_person_id,
+                owner_names=owner_names,
+                source="passive",
+            )
 
             if stored:
                 logger.info(
