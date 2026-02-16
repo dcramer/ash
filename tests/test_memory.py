@@ -83,12 +83,12 @@ class TestMemorySupersession:
 
         assert len(result) == 1
         # get_memory excludes archived/superseded; use graph directly to verify
-        mem = graph_store._graph.memories[old_memory.id]
+        mem = graph_store.graph.memories[old_memory.id]
         assert mem.superseded_at is not None
         # Verify via SUPERSEDES edge
         from ash.graph.edges import get_superseded_by
 
-        assert get_superseded_by(graph_store._graph, old_memory.id) == new_memory.id
+        assert get_superseded_by(graph_store.graph, old_memory.id) == new_memory.id
 
     async def test_list_memories_excludes_superseded_by_default(
         self, graph_store: Store
@@ -139,12 +139,12 @@ class TestStoreSupersession:
         )
 
         # Check that old memory is now superseded via graph
-        mem = graph_store._graph.memories[old_memory.id]
+        mem = graph_store.graph.memories[old_memory.id]
         assert mem.superseded_at is not None
         # Verify via SUPERSEDES edge
         from ash.graph.edges import get_superseded_by
 
-        assert get_superseded_by(graph_store._graph, old_memory.id) == new_memory.id
+        assert get_superseded_by(graph_store.graph, old_memory.id) == new_memory.id
 
     async def test_no_supersession_below_threshold(
         self, graph_store: Store, mock_index
@@ -168,7 +168,7 @@ class TestStoreSupersession:
         )
 
         # Old memory should NOT be superseded
-        mem = graph_store._graph.memories[old_memory.id]
+        mem = graph_store.graph.memories[old_memory.id]
         assert mem.superseded_at is None
 
 
@@ -221,7 +221,7 @@ class TestEnforceMaxEntries:
         for i in range(5):
             m = await graph_store.add_memory(content=f"Fact {i}")
             # Adjust created_at via in-memory graph to stagger them
-            graph_store._graph.memories[m.id].created_at = old_time + timedelta(hours=i)
+            graph_store.graph.memories[m.id].created_at = old_time + timedelta(hours=i)
             memories.append(m)
 
         evicted = await graph_store.enforce_max_entries(3)
@@ -298,7 +298,7 @@ class TestEphemeralDecay:
             memory_type=MemoryType.OBSERVATION,
         )
         # Adjust created_at via in-memory graph
-        graph_store._graph.memories[observation.id].created_at = old_time
+        graph_store.graph.memories[observation.id].created_at = old_time
 
         result = await graph_store.gc()
 
@@ -313,7 +313,7 @@ class TestEphemeralDecay:
             memory_type=MemoryType.PREFERENCE,
         )
         # Adjust created_at via in-memory graph
-        graph_store._graph.memories[preference.id].created_at = old_time
+        graph_store.graph.memories[preference.id].created_at = old_time
 
         result = await graph_store.gc()
 
@@ -895,9 +895,9 @@ class TestHearsaySupersession:
         assert count == 1
 
         # Verify hearsay is now superseded via graph
-        mem = graph_store._graph.memories[hearsay.id]
+        mem = graph_store.graph.memories[hearsay.id]
         assert mem.superseded_at is not None
         # Verify via SUPERSEDES edge
         from ash.graph.edges import get_superseded_by
 
-        assert get_superseded_by(graph_store._graph, hearsay.id) == self_fact.id
+        assert get_superseded_by(graph_store.graph, hearsay.id) == self_fact.id

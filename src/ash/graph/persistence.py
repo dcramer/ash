@@ -1,7 +1,7 @@
 """JSONL load/save for KnowledgeGraph.
 
 Each node type is stored in a separate JSONL file.
-Atomic writes use tempfile + os.replace().
+Atomic writes use tempfile + fsync + os.replace().
 """
 
 from __future__ import annotations
@@ -48,121 +48,146 @@ class GraphPersistence:
 
     async def flush(self, graph: KnowledgeGraph) -> None:
         """Write all dirty collections to disk, then clear dirty set."""
+        import asyncio
+
         if not self._dirty:
             return
-        self._dir.mkdir(parents=True, exist_ok=True)
-        if "memories" in self._dirty:
-            _write_jsonl_atomic(
-                self._dir / "memories.jsonl",
-                [m.to_dict() for m in graph.memories.values()],
-            )
-        if "people" in self._dirty:
-            _write_jsonl_atomic(
-                self._dir / "people.jsonl",
-                [p.to_dict() for p in graph.people.values()],
-            )
-        if "users" in self._dirty:
-            _write_jsonl_atomic(
-                self._dir / "users.jsonl",
-                [u.to_dict() for u in graph.users.values()],
-            )
-        if "chats" in self._dirty:
-            _write_jsonl_atomic(
-                self._dir / "chats.jsonl",
-                [c.to_dict() for c in graph.chats.values()],
-            )
-        if "edges" in self._dirty:
-            _write_jsonl_atomic(
-                self._dir / "edges.jsonl",
-                [e.to_dict() for e in graph.edges.values()],
-            )
+        dirty = self._dirty.copy()
         self._dirty.clear()
+        await asyncio.to_thread(_flush_to_disk, self._dir, graph, dirty)
 
     async def load(self) -> KnowledgeGraph:
         """Load all JSONL files into a KnowledgeGraph."""
-        from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
+        import asyncio
 
-        graph = KnowledgeGraph()
-
-        # Load raw JSONL dicts for backfill (FK fields may exist in old data)
-        raw_memories: list[dict] = []
-        raw_people: list[dict] = []
-        raw_users: list[dict] = []
-
-        # Load memories
-        memories_path = self._dir / "memories.jsonl"
-        if memories_path.exists():
-            raw_memories = _read_jsonl(memories_path)
-            for d in raw_memories:
-                entry = MemoryEntry.from_dict(d)
-                graph.add_memory(entry)
-
-        # Load people
-        people_path = self._dir / "people.jsonl"
-        if people_path.exists():
-            raw_people = _read_jsonl(people_path)
-            for d in raw_people:
-                entry = PersonEntry.from_dict(d)
-                graph.add_person(entry)
-
-        # Load users
-        users_path = self._dir / "users.jsonl"
-        if users_path.exists():
-            raw_users = _read_jsonl(users_path)
-            for d in raw_users:
-                entry = UserEntry.from_dict(d)
-                graph.add_user(entry)
-
-        # Load chats
-        chats_path = self._dir / "chats.jsonl"
-        if chats_path.exists():
-            for d in _read_jsonl(chats_path):
-                entry = ChatEntry.from_dict(d)
-                graph.add_chat(entry)
-
-        # Load edges
-        edges_path = self._dir / "edges.jsonl"
-        if edges_path.exists():
-            for d in _read_jsonl(edges_path):
-                edge = Edge.from_dict(d)
-                graph.add_edge(edge)
+        graph_dir = self._dir
+        raw_data = await asyncio.to_thread(_load_raw_jsonl, graph_dir)
+        graph = _hydrate_graph(raw_data)
 
         # Backfill edges from legacy FK fields in raw JSONL if edges.jsonl is empty
         if not graph.edges and (graph.memories or graph.people or graph.users):
             backfilled = _backfill_edges_from_raw(
-                graph, raw_memories, raw_people, raw_users
+                graph,
+                raw_data["raw_memories"],
+                raw_data["raw_people"],
+                raw_data["raw_users"],
             )
             if backfilled > 0:
                 logger.info("Backfilled %d edges from existing data", backfilled)
-                await self.save_edges(graph.edges)
+                self.mark_dirty("edges")
+                await self.flush(graph)
 
         return graph
 
     async def save_memories(self, memories: dict[str, MemoryEntry]) -> None:
         """Rewrite memories.jsonl atomically."""
-        self._dir.mkdir(parents=True, exist_ok=True)
-        path = self._dir / "memories.jsonl"
-        _write_jsonl_atomic(path, [m.to_dict() for m in memories.values()])
+        import asyncio
+
+        records = [m.to_dict() for m in memories.values()]
+        await asyncio.to_thread(_save_collection, self._dir, "memories.jsonl", records)
 
     async def save_people(self, people: dict[str, PersonEntry]) -> None:
-        self._dir.mkdir(parents=True, exist_ok=True)
-        path = self._dir / "people.jsonl"
-        _write_jsonl_atomic(path, [p.to_dict() for p in people.values()])
+        import asyncio
+
+        records = [p.to_dict() for p in people.values()]
+        await asyncio.to_thread(_save_collection, self._dir, "people.jsonl", records)
 
     async def save_users(self, users: dict[str, UserEntry]) -> None:
-        self._dir.mkdir(parents=True, exist_ok=True)
-        path = self._dir / "users.jsonl"
-        _write_jsonl_atomic(path, [u.to_dict() for u in users.values()])
+        import asyncio
+
+        records = [u.to_dict() for u in users.values()]
+        await asyncio.to_thread(_save_collection, self._dir, "users.jsonl", records)
 
     async def save_chats(self, chats: dict[str, ChatEntry]) -> None:
-        self._dir.mkdir(parents=True, exist_ok=True)
-        path = self._dir / "chats.jsonl"
-        _write_jsonl_atomic(path, [c.to_dict() for c in chats.values()])
+        import asyncio
+
+        records = [c.to_dict() for c in chats.values()]
+        await asyncio.to_thread(_save_collection, self._dir, "chats.jsonl", records)
 
     async def save_edges(self, edges: dict[str, Edge]) -> None:
-        self._dir.mkdir(parents=True, exist_ok=True)
-        path = self._dir / "edges.jsonl"
-        _write_jsonl_atomic(path, [e.to_dict() for e in edges.values()])
+        import asyncio
+
+        records = [e.to_dict() for e in edges.values()]
+        await asyncio.to_thread(_save_collection, self._dir, "edges.jsonl", records)
+
+
+def _save_collection(graph_dir: Path, filename: str, records: list[dict]) -> None:
+    """Write a single collection to disk (runs in thread)."""
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    _write_jsonl_atomic(graph_dir / filename, records)
+
+
+def _flush_to_disk(graph_dir: Path, graph: KnowledgeGraph, dirty: set[str]) -> None:
+    """Write all dirty collections to disk synchronously (runs in thread)."""
+
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    if "memories" in dirty:
+        _write_jsonl_atomic(
+            graph_dir / "memories.jsonl",
+            [m.to_dict() for m in graph.memories.values()],
+        )
+    if "people" in dirty:
+        _write_jsonl_atomic(
+            graph_dir / "people.jsonl",
+            [p.to_dict() for p in graph.people.values()],
+        )
+    if "users" in dirty:
+        _write_jsonl_atomic(
+            graph_dir / "users.jsonl",
+            [u.to_dict() for u in graph.users.values()],
+        )
+    if "chats" in dirty:
+        _write_jsonl_atomic(
+            graph_dir / "chats.jsonl",
+            [c.to_dict() for c in graph.chats.values()],
+        )
+    if "edges" in dirty:
+        _write_jsonl_atomic(
+            graph_dir / "edges.jsonl",
+            [e.to_dict() for e in graph.edges.values()],
+        )
+
+
+def _load_raw_jsonl(graph_dir: Path) -> dict:
+    """Read all JSONL files from disk synchronously (runs in thread)."""
+    raw: dict[str, list[dict]] = {
+        "raw_memories": [],
+        "raw_people": [],
+        "raw_users": [],
+        "raw_chats": [],
+        "raw_edges": [],
+    }
+    for key, filename in [
+        ("raw_memories", "memories.jsonl"),
+        ("raw_people", "people.jsonl"),
+        ("raw_users", "users.jsonl"),
+        ("raw_chats", "chats.jsonl"),
+        ("raw_edges", "edges.jsonl"),
+    ]:
+        path = graph_dir / filename
+        if path.exists():
+            raw[key] = _read_jsonl(path)
+    return raw
+
+
+def _hydrate_graph(raw_data: dict) -> KnowledgeGraph:
+    """Build a KnowledgeGraph from raw JSONL dicts."""
+    from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
+
+    graph = KnowledgeGraph()
+
+    for d in raw_data["raw_memories"]:
+        graph.add_memory(MemoryEntry.from_dict(d))
+    for d in raw_data["raw_people"]:
+        graph.add_person(PersonEntry.from_dict(d))
+    for d in raw_data["raw_users"]:
+        graph.add_user(UserEntry.from_dict(d))
+    for d in raw_data["raw_chats"]:
+        graph.add_chat(ChatEntry.from_dict(d))
+    for d in raw_data["raw_edges"]:
+        graph.add_edge(Edge.from_dict(d))
+
+    return graph
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -181,7 +206,7 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 def _write_jsonl_atomic(path: Path, records: list[dict]) -> None:
-    """Write JSONL atomically via tempfile + os.replace()."""
+    """Write JSONL atomically via tempfile + fsync + os.replace()."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
@@ -189,6 +214,8 @@ def _write_jsonl_atomic(path: Path, records: list[dict]) -> None:
             for record in records:
                 f.write(json.dumps(record, separators=(",", ":")))
                 f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
         Path(tmp).replace(path)
     except BaseException:
         try:

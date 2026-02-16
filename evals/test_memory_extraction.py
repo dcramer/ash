@@ -64,7 +64,7 @@ async def _dump_state(agent: AgentComponents) -> None:
         for m in memories:
             from ash.graph.edges import get_subject_person_ids
 
-            subjects = get_subject_person_ids(store._graph, m.id)
+            subjects = get_subject_person_ids(store.graph, m.id)
             logger.info(
                 "  [%s] %s (type=%s, owner=%s, subjects=%s, source=%s)",
                 m.id[:8],

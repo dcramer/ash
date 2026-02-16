@@ -69,9 +69,9 @@ class TestIsProtectedBySubjectAuthority:
         """Add a memory to the graph and create ABOUT edges."""
         from ash.graph.edges import create_about_edge
 
-        graph_store._graph.add_memory(memory)
+        graph_store.graph.add_memory(memory)
         for pid in subject_person_ids:
-            graph_store._graph.add_edge(create_about_edge(memory.id, pid))
+            graph_store.graph.add_edge(create_about_edge(memory.id, pid))
 
     async def test_not_protected_when_same_source(self, graph_store: Store):
         """If both memories come from the same source, no protection."""
@@ -213,8 +213,8 @@ class TestIsProtectedBySubjectAuthority:
             memory_type=MemoryType.KNOWLEDGE,
         )
         # Add to graph with no ABOUT edges
-        graph_store._graph.add_memory(candidate)
-        graph_store._graph.add_memory(new_memory)
+        graph_store.graph.add_memory(candidate)
+        graph_store.graph.add_memory(new_memory)
 
         result = await graph_store._is_protected_by_subject_authority(
             candidate, new_memory

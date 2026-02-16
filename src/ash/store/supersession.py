@@ -199,11 +199,9 @@ class SupersessionMixin:
             return False
 
         memory.superseded_at = datetime.now(UTC)
-        await self._persistence.save_memories(self._graph.memories)
-
-        # Create SUPERSEDES edge
         self._graph.add_edge(create_supersedes_edge(new_memory_id, old_memory_id))
-        await self._persistence.save_edges(self._graph.edges)
+        self._persistence.mark_dirty("memories", "edges")
+        await self._persistence.flush(self._graph)
 
         try:
             self._index.remove(old_memory_id)
@@ -297,8 +295,8 @@ class SupersessionMixin:
                 marked.append(old_id)
 
         if marked:
-            await self._persistence.save_memories(self._graph.memories)
-            await self._persistence.save_edges(self._graph.edges)
+            self._persistence.mark_dirty("memories", "edges")
+            await self._persistence.flush(self._graph)
 
             for mid in marked:
                 try:

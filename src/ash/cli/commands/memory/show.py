@@ -60,7 +60,7 @@ async def memory_show(store: Store, memory_id: str) -> None:
 
     # Subjects (who this memory is about)
     subject_names = []
-    subject_person_ids = get_subject_person_ids(store._graph, memory.id)
+    subject_person_ids = get_subject_person_ids(store.graph, memory.id)
     if subject_person_ids:
         for person_id in subject_person_ids:
             person = people_by_id.get(person_id)
@@ -100,7 +100,7 @@ async def memory_show(store: Store, memory_id: str) -> None:
 
     if memory.superseded_at:
         table.add_row("Superseded", memory.superseded_at.isoformat())
-    superseded_by_id = get_superseded_by(store._graph, memory.id)
+    superseded_by_id = get_superseded_by(store.graph, memory.id)
     if superseded_by_id:
         table.add_row("Superseded By", superseded_by_id)
 

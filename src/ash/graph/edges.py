@@ -27,7 +27,7 @@ HAS_RELATIONSHIP = "HAS_RELATIONSHIP"  # Person → Person (relationship link)
 
 
 def _make_edge_id() -> str:
-    return f"e-{uuid.uuid4().hex[:12]}"
+    return f"e-{uuid.uuid4().hex}"
 
 
 def create_about_edge(

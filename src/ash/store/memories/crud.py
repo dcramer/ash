@@ -282,7 +282,8 @@ class MemoryCrudMixin:
 
         memory.archived_at = datetime.now(UTC)
         memory.archive_reason = "user_deleted"
-        await self._persistence.save_memories(self._graph.memories)
+        self._persistence.mark_dirty("memories")
+        await self._persistence.flush(self._graph)
 
         try:
             self._index.remove(full_id)
@@ -340,9 +341,10 @@ class MemoryCrudMixin:
                         edges_changed = True
 
         if count > 0:
-            await self._persistence.save_memories(self._graph.memories)
+            self._persistence.mark_dirty("memories")
             if edges_changed:
-                await self._persistence.save_edges(self._graph.edges)
+                self._persistence.mark_dirty("edges")
+            await self._persistence.flush(self._graph)
 
         return count
 

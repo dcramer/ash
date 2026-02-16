@@ -132,7 +132,7 @@ async def _graph_users(store: Store) -> None:
     from ash.graph.edges import get_person_for_user
 
     for user in users:
-        person_id = get_person_for_user(store._graph, user.id)
+        person_id = get_person_for_user(store.graph, user.id)
         person_link = person_id[:12] if person_id else "-"
         updated = user.updated_at.strftime("%Y-%m-%d") if user.updated_at else "-"
         table.add_row(
@@ -188,7 +188,7 @@ async def _resolve_node_id(store: Store, prefix: str) -> tuple[str, str] | None:
     Searches across all 4 node types using exact match first,
     then prefix match.
     """
-    graph = store._graph
+    graph = store.graph
     collections = [
         ("memories", graph.memories),
         ("people", graph.people),
@@ -223,7 +223,7 @@ async def _graph_edges(store: Store, node_id: str) -> None:
     from ash.graph.edges import get_subject_person_ids
 
     edges: list[tuple[str, str, str, str]] = []
-    graph = store._graph
+    graph = store.graph
 
     # Memory -> Person (about) via subject_person_ids
     for mem in graph.memories.values():
@@ -323,7 +323,7 @@ async def _graph_edges(store: Store, node_id: str) -> None:
 
 async def _graph_stats(store: Store) -> None:
     """Show graph node/edge counts and health summary."""
-    graph = store._graph
+    graph = store.graph
 
     users = await store.list_users()
     chats = await store.list_chats()

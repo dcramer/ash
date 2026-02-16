@@ -529,7 +529,7 @@ class TestPersonMerge:
 
         await graph_store.merge_people(p1.id, p2.id)
 
-        assert get_merged_into(graph_store._graph, p2.id) == p1.id
+        assert get_merged_into(graph_store.graph, p2.id) == p1.id
 
     async def test_merge_adds_secondary_name_as_alias(self, graph_store: Store):
         """Test that secondary's name becomes an alias on primary."""
@@ -630,7 +630,7 @@ class TestPersonMerge:
         assert result is None
 
         # p2 should still point to p1, not p3
-        assert get_merged_into(graph_store._graph, p2.id) == p1.id
+        assert get_merged_into(graph_store.graph, p2.id) == p1.id
 
 
 class TestCacheBehavior:
@@ -798,7 +798,7 @@ class TestPersonDelete:
         # Delete the primary — secondary's merged_into edge should be removed
         await graph_store.delete_person(p1.id)
 
-        assert get_merged_into(graph_store._graph, p2.id) is None
+        assert get_merged_into(graph_store.graph, p2.id) is None
 
     async def test_delete_removes_from_list(self, graph_store: Store):
         """Test that deleted person is gone from list_people."""
@@ -1504,7 +1504,7 @@ class TestAutoRemapOnMerge:
         await graph_store.merge_people(p1.id, p2.id)
 
         # Verify that ABOUT edges now point to the primary
-        subjects = get_subject_person_ids(graph_store._graph, mem.id)
+        subjects = get_subject_person_ids(graph_store.graph, mem.id)
         assert p2.id not in subjects
         assert p1.id in subjects
 
@@ -1532,11 +1532,11 @@ class TestAutoRemapOnMerge:
         await graph_store.merge_people(p1.id, p2.id)
 
         # STATED_BY should now point to primary
-        stated_by = get_stated_by_person(graph_store._graph, mem.id)
+        stated_by = get_stated_by_person(graph_store.graph, mem.id)
         assert stated_by == p1.id
 
         # No STATED_BY edges should point to secondary
-        secondary_edges = graph_store._graph.get_incoming(p2.id, edge_type=STATED_BY)
+        secondary_edges = graph_store.graph.get_incoming(p2.id, edge_type=STATED_BY)
         assert len(secondary_edges) == 0
 
     async def test_merge_remaps_is_person_edges(self, graph_store: Store):
@@ -1556,11 +1556,11 @@ class TestAutoRemapOnMerge:
         await graph_store.merge_people(p1.id, p2.id)
 
         # IS_PERSON should now point to primary
-        person_id = get_person_for_user(graph_store._graph, user.id)
+        person_id = get_person_for_user(graph_store.graph, user.id)
         assert person_id == p1.id
 
         # No IS_PERSON edges should point to secondary
-        secondary_edges = graph_store._graph.get_incoming(p2.id, edge_type=IS_PERSON)
+        secondary_edges = graph_store.graph.get_incoming(p2.id, edge_type=IS_PERSON)
         assert len(secondary_edges) == 0
 
     async def test_merge_remaps_has_relationship_edges(self, graph_store: Store):
@@ -1578,16 +1578,14 @@ class TestAutoRemapOnMerge:
         await graph_store.merge_people(p1.id, p2.id)
 
         # HAS_RELATIONSHIP should now be between primary and p3
-        related = get_related_people(graph_store._graph, p1.id)
+        related = get_related_people(graph_store.graph, p1.id)
         assert p3.id in related
 
         # No HAS_RELATIONSHIP edges should reference secondary
-        secondary_out = graph_store._graph.get_outgoing(
+        secondary_out = graph_store.graph.get_outgoing(
             p2.id, edge_type=HAS_RELATIONSHIP
         )
-        secondary_in = graph_store._graph.get_incoming(
-            p2.id, edge_type=HAS_RELATIONSHIP
-        )
+        secondary_in = graph_store.graph.get_incoming(p2.id, edge_type=HAS_RELATIONSHIP)
         assert len(secondary_out) == 0
         assert len(secondary_in) == 0
 

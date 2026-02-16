@@ -73,6 +73,11 @@ class Store(
         # Lock to prevent duplicate self-person creation races
         self._self_person_lock = asyncio.Lock()
 
+    @property
+    def graph(self) -> KnowledgeGraph:
+        """Public access to the in-memory knowledge graph."""
+        return self._graph
+
     def set_llm(self, llm: LLMProvider, model: str) -> None:
         """Set LLM provider for fuzzy matching and supersession verification."""
         self._llm = llm

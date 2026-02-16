@@ -179,35 +179,48 @@ class KnowledgeGraph:
     # -- Edge operations --
 
     def add_edge(self, edge: Edge) -> None:
-        """Add edge and update adjacency indexes."""
+        """Add edge and update adjacency indexes.
+
+        If an edge with the same ID already exists, the old adjacency
+        entries are removed first to prevent duplicates in the index lists.
+        """
+        old = self.edges.get(edge.id)
+        if old is not None:
+            # Remove stale adjacency entries before re-adding
+            self._remove_from_index(old)
+
         self.edges[edge.id] = edge
         self._outgoing[edge.source_id].append(edge.id)
         self._incoming[edge.target_id].append(edge.id)
         self._edges_by_type[edge.edge_type].append(edge.id)
+
+    def _remove_from_index(self, edge: Edge) -> None:
+        """Remove an edge from adjacency indexes (but not from self.edges)."""
+        out_list = self._outgoing.get(edge.source_id)
+        if out_list:
+            try:
+                out_list.remove(edge.id)
+            except ValueError:
+                pass
+        in_list = self._incoming.get(edge.target_id)
+        if in_list:
+            try:
+                in_list.remove(edge.id)
+            except ValueError:
+                pass
+        type_list = self._edges_by_type.get(edge.edge_type)
+        if type_list:
+            try:
+                type_list.remove(edge.id)
+            except ValueError:
+                pass
 
     def remove_edge(self, edge_id: str) -> None:
         """Hard-remove edge from all indexes."""
         edge = self.edges.pop(edge_id, None)
         if not edge:
             return
-        out_list = self._outgoing.get(edge.source_id)
-        if out_list:
-            try:
-                out_list.remove(edge_id)
-            except ValueError:
-                pass
-        in_list = self._incoming.get(edge.target_id)
-        if in_list:
-            try:
-                in_list.remove(edge_id)
-            except ValueError:
-                pass
-        type_list = self._edges_by_type.get(edge.edge_type)
-        if type_list:
-            try:
-                type_list.remove(edge_id)
-            except ValueError:
-                pass
+        self._remove_from_index(edge)
 
     def invalidate_edge(self, edge_id: str, when: datetime) -> None:
         """Soft-delete: set invalid_at timestamp."""

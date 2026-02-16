@@ -34,7 +34,7 @@ async def memory_doctor_self_facts(store: Store, force: bool) -> None:
         m
         for m in memories
         if m.source_username
-        and not get_subject_person_ids(store._graph, m.id)
+        and not get_subject_person_ids(store.graph, m.id)
         and m.memory_type != MemoryType.RELATIONSHIP
     ]
 

@@ -40,7 +40,8 @@ class MemoryLifecycleMixin:
                 )
 
         if archived_ids:
-            await self._persistence.save_memories(self._graph.memories)
+            self._persistence.mark_dirty("memories")
+            await self._persistence.flush(self._graph)
 
         for memory_id in archived_ids:
             try:
@@ -101,7 +102,8 @@ class MemoryLifecycleMixin:
                 memory.archived_at = now
                 memory.archive_reason = "forgotten"
 
-        await self._persistence.save_memories(self._graph.memories)
+        self._persistence.mark_dirty("memories")
+        await self._persistence.flush(self._graph)
 
         for memory_id in to_archive:
             try:
@@ -169,7 +171,8 @@ class MemoryLifecycleMixin:
                 archived.append(mid)
 
         if archived:
-            await self._persistence.save_memories(self._graph.memories)
+            self._persistence.mark_dirty("memories")
+            await self._persistence.flush(self._graph)
 
         for memory_id in archived:
             try:

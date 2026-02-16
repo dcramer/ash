@@ -33,7 +33,8 @@ class PeopleRelationshipsMixin:
             AliasEntry(value=alias, added_by=added_by, created_at=now)
         )
         person.updated_at = now
-        await self._persistence.save_people(self._graph.people)
+        self._persistence.mark_dirty("people")
+        await self._persistence.flush(self._graph)
         return person
 
     async def add_relationship(
@@ -60,7 +61,7 @@ class PeopleRelationshipsMixin:
             )
         )
         person.updated_at = now
-        await self._persistence.save_people(self._graph.people)
+        self._persistence.mark_dirty("people")
 
         # Create HAS_RELATIONSHIP edge if we know the related person
         if related_person_id:
@@ -73,6 +74,7 @@ class PeopleRelationshipsMixin:
                 stated_by=stated_by,
             )
             self._graph.add_edge(edge)
-            await self._persistence.save_edges(self._graph.edges)
+            self._persistence.mark_dirty("edges")
 
+        await self._persistence.flush(self._graph)
         return person

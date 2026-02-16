@@ -57,8 +57,8 @@ class UserChatOpsMixin:
                     changed = True
             if changed:
                 user.updated_at = now
-                await self._persistence.save_users(self._graph.users)
-                await self._persistence.save_edges(self._graph.edges)
+                self._persistence.mark_dirty("users", "edges")
+                await self._persistence.flush(self._graph)
             return user
 
         # Create new user
@@ -74,12 +74,14 @@ class UserChatOpsMixin:
             updated_at=now,
         )
         self._graph.add_user(entry)
-        await self._persistence.save_users(self._graph.users)
+        self._persistence.mark_dirty("users")
 
         # Create IS_PERSON edge for new user
         if person_id is not None:
             self._graph.add_edge(create_is_person_edge(user_id, person_id))
-            await self._persistence.save_edges(self._graph.edges)
+            self._persistence.mark_dirty("edges")
+
+        await self._persistence.flush(self._graph)
 
         logger.debug(
             "user_created",
@@ -166,7 +168,8 @@ class UserChatOpsMixin:
                 changed = True
             if changed:
                 chat.updated_at = now
-                await self._persistence.save_chats(self._graph.chats)
+                self._persistence.mark_dirty("chats")
+                await self._persistence.flush(self._graph)
             return chat
 
         # Create new chat
@@ -182,7 +185,8 @@ class UserChatOpsMixin:
             updated_at=now,
         )
         self._graph.add_chat(entry)
-        await self._persistence.save_chats(self._graph.chats)
+        self._persistence.mark_dirty("chats")
+        await self._persistence.flush(self._graph)
 
         logger.debug(
             "chat_created",

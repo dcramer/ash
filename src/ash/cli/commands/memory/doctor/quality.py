@@ -84,7 +84,7 @@ async def _resolve_subject_names(
     from ash.graph.edges import get_subject_person_ids
 
     all_person_ids = {
-        pid for m in memories for pid in get_subject_person_ids(store._graph, m.id)
+        pid for m in memories for pid in get_subject_person_ids(store.graph, m.id)
     }
     if not all_person_ids:
         return {}
@@ -99,7 +99,7 @@ async def _resolve_subject_names(
 
     result: dict[str, list[str]] = {}
     for m in memories:
-        subject_ids = get_subject_person_ids(store._graph, m.id)
+        subject_ids = get_subject_person_ids(store.graph, m.id)
         names = [person_names[pid] for pid in subject_ids if pid in person_names]
         if names:
             result[m.id] = names

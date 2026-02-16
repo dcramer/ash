@@ -89,7 +89,7 @@ async def memory_list(
 
         # Resolve subject person names
         subject_names: list[str] = []
-        subject_person_ids = get_subject_person_ids(store._graph, entry.id)
+        subject_person_ids = get_subject_person_ids(store.graph, entry.id)
         for person_id in subject_person_ids:
             person = people_by_id.get(person_id)
             subject_names.append(person.name if person else person_id[:8])

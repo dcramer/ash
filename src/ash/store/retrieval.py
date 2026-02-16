@@ -108,7 +108,7 @@ class RetrievalPipeline:
                 for memory in cross_memories:
                     from ash.graph.edges import get_subject_person_ids
 
-                    mem_subjects = get_subject_person_ids(self._store._graph, memory.id)
+                    mem_subjects = get_subject_person_ids(self._store.graph, memory.id)
                     if self._passes_privacy_filter(
                         sensitivity=memory.sensitivity,
                         subject_person_ids=mem_subjects,
@@ -139,7 +139,7 @@ class RetrievalPipeline:
         BFS follows edges up to 2 hops, discovering new memory nodes.
         Applies privacy/scope filtering at each hop.
         """
-        graph = self._store._graph
+        graph = self._store.graph
 
         # Collect seed person IDs from stage 1 and stage 2 results
         seed_person_ids: set[str] = set()
@@ -300,7 +300,7 @@ class RetrievalPipeline:
     ) -> list[MemoryEntry]:
         """Find memories about given persons using ABOUT edges."""
         now = datetime.now(UTC)
-        graph = self._store._graph
+        graph = self._store.graph
 
         # Collect candidate memory IDs via ABOUT edges
         candidate_ids: set[str] = set()
@@ -361,11 +361,11 @@ class RetrievalPipeline:
         from ash.graph.edges import get_subject_person_ids
         from ash.store.trust import classify_trust, get_trust_weight
 
-        subject_pids = get_subject_person_ids(self._store._graph, memory.id)
+        subject_pids = get_subject_person_ids(self._store.graph, memory.id)
         subject_name = await self._store._resolve_subject_name(subject_pids)
 
         # Apply trust weight to similarity score
-        trust_level = classify_trust(self._store._graph, memory.id)
+        trust_level = classify_trust(self._store.graph, memory.id)
         trust_weight = get_trust_weight(trust_level)
         weighted_similarity = similarity * trust_weight
 

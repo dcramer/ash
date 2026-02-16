@@ -384,12 +384,12 @@ class TestDualWriteEdges:
         )
 
         # Verify ABOUT edge exists
-        about_edges = graph_store._graph.get_outgoing(memory.id, edge_type=ABOUT)
+        about_edges = graph_store.graph.get_outgoing(memory.id, edge_type=ABOUT)
         assert len(about_edges) == 1
         assert about_edges[0].target_id == person.id
 
         # Verify edge query helper works
-        subjects = get_subject_person_ids(graph_store._graph, memory.id)
+        subjects = get_subject_person_ids(graph_store.graph, memory.id)
         assert person.id in subjects
 
     async def test_supersede_creates_supersedes_edge(self, graph_store: Store):
@@ -399,10 +399,10 @@ class TestDualWriteEdges:
         await graph_store._mark_superseded(old_mem.id, new_mem.id)
 
         # Verify SUPERSEDES edge
-        targets = get_supersession_targets(graph_store._graph, new_mem.id)
+        targets = get_supersession_targets(graph_store.graph, new_mem.id)
         assert old_mem.id in targets
 
-        superseder = get_superseded_by(graph_store._graph, old_mem.id)
+        superseder = get_superseded_by(graph_store.graph, old_mem.id)
         assert superseder == new_mem.id
 
     async def test_ensure_user_creates_is_person_edge(self, graph_store: Store):
@@ -417,10 +417,10 @@ class TestDualWriteEdges:
         )
 
         # Verify IS_PERSON edge
-        pid = get_person_for_user(graph_store._graph, user.id)
+        pid = get_person_for_user(graph_store.graph, user.id)
         assert pid == person.id
 
-        user_ids = get_users_for_person(graph_store._graph, person.id)
+        user_ids = get_users_for_person(graph_store.graph, person.id)
         assert user.id in user_ids
 
     async def test_merge_people_creates_merged_into_edge(self, graph_store: Store):
@@ -434,7 +434,7 @@ class TestDualWriteEdges:
         await graph_store.merge_people(primary.id, secondary.id)
 
         # Verify MERGED_INTO edge
-        target = get_merged_into(graph_store._graph, secondary.id)
+        target = get_merged_into(graph_store.graph, secondary.id)
         assert target == primary.id
 
     async def test_batch_update_syncs_about_edges(self, graph_store: Store):
@@ -455,7 +455,7 @@ class TestDualWriteEdges:
         )
 
         # Verify edges were synced
-        subjects = get_subject_person_ids(graph_store._graph, memory.id)
+        subjects = get_subject_person_ids(graph_store.graph, memory.id)
         assert person_b.id in subjects
         assert person_a.id not in subjects
 
@@ -474,7 +474,7 @@ class TestDualWriteEdges:
         await graph_store.remap_subject_person_id(old_person.id, new_person.id)
 
         # Verify ABOUT edges were remapped
-        subjects = get_subject_person_ids(graph_store._graph, memory.id)
+        subjects = get_subject_person_ids(graph_store.graph, memory.id)
         assert new_person.id in subjects
         assert old_person.id not in subjects
 
@@ -519,7 +519,7 @@ class TestEdgeBasedReads:
         assert count == 1
 
         # Verify memory was archived
-        memory = graph_store._graph.memories.get(mem.id)
+        memory = graph_store.graph.memories.get(mem.id)
         assert memory is not None
         assert memory.archived_at is not None
 
@@ -640,9 +640,7 @@ class TestStatedByEdges:
             stated_by_person_id=person.id,
         )
 
-        stated_by_edges = graph_store._graph.get_outgoing(
-            memory.id, edge_type=STATED_BY
-        )
+        stated_by_edges = graph_store.graph.get_outgoing(memory.id, edge_type=STATED_BY)
         assert len(stated_by_edges) == 1
         assert stated_by_edges[0].target_id == person.id
 
@@ -653,9 +651,7 @@ class TestStatedByEdges:
             content="Nobody said this",
         )
 
-        stated_by_edges = graph_store._graph.get_outgoing(
-            memory.id, edge_type=STATED_BY
-        )
+        stated_by_edges = graph_store.graph.get_outgoing(memory.id, edge_type=STATED_BY)
         assert len(stated_by_edges) == 0
 
 
@@ -733,7 +729,7 @@ class TestHasRelationshipEdges:
             bob.id, "friend", stated_by="alice", related_person_id=alice.id
         )
 
-        edges = graph_store._graph.get_outgoing(bob.id, edge_type=HAS_RELATIONSHIP)
+        edges = graph_store.graph.get_outgoing(bob.id, edge_type=HAS_RELATIONSHIP)
         assert len(edges) == 1
         assert edges[0].target_id == alice.id
         assert edges[0].properties is not None
@@ -750,7 +746,7 @@ class TestHasRelationshipEdges:
 
         await graph_store.add_relationship(bob.id, "friend", stated_by="alice")
 
-        edges = graph_store._graph.get_outgoing(bob.id, edge_type=HAS_RELATIONSHIP)
+        edges = graph_store.graph.get_outgoing(bob.id, edge_type=HAS_RELATIONSHIP)
         assert len(edges) == 0
 
 
@@ -853,7 +849,7 @@ class TestStoreCascadeIntegration:
         assert count == 1
 
         # Edges should be gone
-        about_edges = graph_store._graph.get_incoming(person.id, edge_type=ABOUT)
+        about_edges = graph_store.graph.get_incoming(person.id, edge_type=ABOUT)
         assert len(about_edges) == 0
 
     async def test_clear_removes_memory_edges(self, graph_store: Store):
@@ -870,14 +866,14 @@ class TestStoreCascadeIntegration:
             subject_person_ids=[person.id],
         )
 
-        about_before = graph_store._graph.get_incoming(person.id, edge_type=ABOUT)
+        about_before = graph_store.graph.get_incoming(person.id, edge_type=ABOUT)
         assert len(about_before) == 2
 
         await graph_store.clear()
 
-        about_after = graph_store._graph.get_incoming(person.id, edge_type=ABOUT)
+        about_after = graph_store.graph.get_incoming(person.id, edge_type=ABOUT)
         assert len(about_after) == 0
-        assert len(graph_store._graph.memories) == 0
+        assert len(graph_store.graph.memories) == 0
 
     async def test_delete_person_cascades_all_edges(self, graph_store: Store):
         """Deleting a person should remove all connected edges."""
@@ -904,14 +900,284 @@ class TestStoreCascadeIntegration:
         )
 
         # Verify edges exist
-        assert len(graph_store._graph.get_incoming(alice.id, edge_type=ABOUT)) > 0
-        assert len(graph_store._graph.get_outgoing(user.id, edge_type=IS_PERSON)) > 0
+        assert len(graph_store.graph.get_incoming(alice.id, edge_type=ABOUT)) > 0
+        assert len(graph_store.graph.get_outgoing(user.id, edge_type=IS_PERSON)) > 0
 
         await graph_store.delete_person(alice.id)
 
         # All edges to/from alice should be gone
-        assert graph_store._graph.get_incoming(alice.id, edge_type=ABOUT) == []
-        assert graph_store._graph.get_incoming(alice.id, edge_type=IS_PERSON) == []
+        assert graph_store.graph.get_incoming(alice.id, edge_type=ABOUT) == []
+        assert graph_store.graph.get_incoming(alice.id, edge_type=IS_PERSON) == []
         assert (
-            graph_store._graph.get_outgoing(alice.id, edge_type=HAS_RELATIONSHIP) == []
+            graph_store.graph.get_outgoing(alice.id, edge_type=HAS_RELATIONSHIP) == []
         )
+
+
+# =============================================================================
+# Adjacency Index Dedup Tests (add_edge re-add safety)
+# =============================================================================
+
+
+class TestAddEdgeDedup:
+    """Tests that re-adding an edge with the same ID doesn't corrupt indexes."""
+
+    def test_readd_same_edge_no_duplicates(self):
+        """Adding the same edge object twice should not duplicate adjacency entries."""
+        graph = KnowledgeGraph()
+        edge = create_about_edge("mem-1", "person-1")
+        graph.add_edge(edge)
+        graph.add_edge(edge)
+
+        # edges dict has exactly one entry
+        assert len(graph.edges) == 1
+        # adjacency lists have exactly one entry each
+        assert graph._outgoing["mem-1"].count(edge.id) == 1
+        assert graph._incoming["person-1"].count(edge.id) == 1
+        assert graph._edges_by_type[ABOUT].count(edge.id) == 1
+
+    def test_readd_edge_different_object_same_id(self):
+        """Re-adding an edge with the same ID but different object cleans up old indexes."""
+        graph = KnowledgeGraph()
+        edge1 = Edge(
+            id="e-fixed",
+            edge_type=ABOUT,
+            source_type="memory",
+            source_id="mem-1",
+            target_type="person",
+            target_id="person-1",
+        )
+        edge2 = Edge(
+            id="e-fixed",
+            edge_type=ABOUT,
+            source_type="memory",
+            source_id="mem-1",
+            target_type="person",
+            target_id="person-2",  # Different target
+        )
+        graph.add_edge(edge1)
+        graph.add_edge(edge2)
+
+        assert len(graph.edges) == 1
+        assert graph.edges["e-fixed"].target_id == "person-2"
+        # Old target should be cleaned up
+        assert "e-fixed" not in graph._incoming.get("person-1", [])
+        # New target should have the entry
+        assert "e-fixed" in graph._incoming["person-2"]
+        # Outgoing should have exactly one
+        assert graph._outgoing["mem-1"].count("e-fixed") == 1
+
+    def test_readd_many_times_no_accumulation(self):
+        """Re-adding the same edge N times shouldn't accumulate N adjacency entries."""
+        graph = KnowledgeGraph()
+        edge = create_about_edge("mem-1", "person-1")
+        for _ in range(100):
+            graph.add_edge(edge)
+
+        assert len(graph.edges) == 1
+        assert graph._outgoing["mem-1"].count(edge.id) == 1
+        assert graph._incoming["person-1"].count(edge.id) == 1
+        assert graph._edges_by_type[ABOUT].count(edge.id) == 1
+
+    def test_add_remove_add_cycle(self):
+        """Edge can be added, removed, and added again cleanly."""
+        graph = KnowledgeGraph()
+        edge = create_about_edge("mem-1", "person-1")
+
+        graph.add_edge(edge)
+        assert len(graph.edges) == 1
+
+        graph.remove_edge(edge.id)
+        assert len(graph.edges) == 0
+        assert edge.id not in graph._outgoing.get("mem-1", [])
+
+        graph.add_edge(edge)
+        assert len(graph.edges) == 1
+        assert graph._outgoing["mem-1"].count(edge.id) == 1
+
+    def test_get_outgoing_no_phantom_results_after_readd(self):
+        """get_outgoing returns correct results after edge re-add."""
+        graph = KnowledgeGraph()
+        edge = create_about_edge("mem-1", "person-1")
+        graph.add_edge(edge)
+        graph.add_edge(edge)
+        graph.add_edge(edge)
+
+        results = graph.get_outgoing("mem-1", edge_type=ABOUT)
+        assert len(results) == 1
+        assert results[0].id == edge.id
+
+
+# =============================================================================
+# Persistence Round-Trip Tests
+# =============================================================================
+
+
+class TestPersistenceRoundTrip:
+    """Tests for JSONL persistence correctness."""
+
+    async def test_flush_writes_dirty_collections(self, tmp_path):
+        from ash.graph.persistence import GraphPersistence
+
+        graph = KnowledgeGraph()
+        graph.add_memory(
+            MemoryEntry(id="mem-1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        )
+        graph.add_person(PersonEntry(id="person-1", name="Alice"))
+        graph.add_edge(create_about_edge("mem-1", "person-1"))
+
+        persistence = GraphPersistence(tmp_path / "graph")
+        persistence.mark_dirty("memories", "people", "edges")
+        await persistence.flush(graph)
+
+        # Verify files exist
+        assert (tmp_path / "graph" / "memories.jsonl").exists()
+        assert (tmp_path / "graph" / "people.jsonl").exists()
+        assert (tmp_path / "graph" / "edges.jsonl").exists()
+        # Users/chats not dirty, shouldn't be written
+        assert not (tmp_path / "graph" / "users.jsonl").exists()
+
+    async def test_flush_clears_dirty_set(self, tmp_path):
+        from ash.graph.persistence import GraphPersistence
+
+        graph = KnowledgeGraph()
+        persistence = GraphPersistence(tmp_path / "graph")
+        persistence.mark_dirty("memories")
+        await persistence.flush(graph)
+
+        # Second flush should be a no-op
+        assert not persistence._dirty
+
+    async def test_load_save_roundtrip(self, tmp_path):
+        from ash.graph.persistence import GraphPersistence
+
+        graph = KnowledgeGraph()
+        graph.add_memory(
+            MemoryEntry(id="mem-1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        )
+        graph.add_person(PersonEntry(id="person-1", name="Alice"))
+        graph.add_edge(create_about_edge("mem-1", "person-1"))
+
+        persistence = GraphPersistence(tmp_path / "graph")
+        persistence.mark_dirty("memories", "people", "edges")
+        await persistence.flush(graph)
+
+        # Load into fresh graph
+        persistence2 = GraphPersistence(tmp_path / "graph")
+        loaded = await persistence2.load()
+
+        assert "mem-1" in loaded.memories
+        assert "person-1" in loaded.people
+        assert len(loaded.edges) == 1
+        edge = list(loaded.edges.values())[0]
+        assert edge.edge_type == ABOUT
+        assert edge.source_id == "mem-1"
+        assert edge.target_id == "person-1"
+
+    async def test_load_rebuilds_adjacency_indexes(self, tmp_path):
+        from ash.graph.persistence import GraphPersistence
+
+        graph = KnowledgeGraph()
+        graph.add_memory(
+            MemoryEntry(id="mem-1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        )
+        graph.add_person(PersonEntry(id="person-1", name="Alice"))
+        e1 = create_about_edge("mem-1", "person-1")
+        graph.add_edge(e1)
+
+        persistence = GraphPersistence(tmp_path / "graph")
+        persistence.mark_dirty("memories", "people", "edges")
+        await persistence.flush(graph)
+
+        loaded = await GraphPersistence(tmp_path / "graph").load()
+
+        # Adjacency indexes should be rebuilt from edges
+        outgoing = loaded.get_outgoing("mem-1", edge_type=ABOUT)
+        assert len(outgoing) == 1
+        assert outgoing[0].target_id == "person-1"
+
+        incoming = loaded.get_incoming("person-1", edge_type=ABOUT)
+        assert len(incoming) == 1
+        assert incoming[0].source_id == "mem-1"
+
+
+# =============================================================================
+# KnowledgeGraph Node Operations Tests
+# =============================================================================
+
+
+class TestNodeOperations:
+    """Tests for node CRUD and get_node."""
+
+    def test_get_node_memory(self):
+        graph = KnowledgeGraph()
+        mem = MemoryEntry(id="mem-1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        graph.add_memory(mem)
+        assert graph.get_node("mem-1") is mem
+
+    def test_get_node_person(self):
+        graph = KnowledgeGraph()
+        person = PersonEntry(id="p-1", name="Alice")
+        graph.add_person(person)
+        assert graph.get_node("p-1") is person
+
+    def test_get_node_user(self):
+        graph = KnowledgeGraph()
+        user = UserEntry(id="u-1", provider="test", provider_id="123")
+        graph.add_user(user)
+        assert graph.get_node("u-1") is user
+
+    def test_get_node_nonexistent(self):
+        graph = KnowledgeGraph()
+        assert graph.get_node("nonexistent") is None
+
+    def test_remove_user_cleans_provider_index(self):
+        graph = KnowledgeGraph()
+        user = UserEntry(id="u-1", provider="test", provider_id="123")
+        graph.add_user(user)
+        assert graph.find_user_by_provider("test", "123") is not None
+        graph.remove_user("u-1")
+        assert graph.find_user_by_provider("test", "123") is None
+
+    def test_remove_chat_cleans_provider_index(self):
+        from ash.store.types import ChatEntry
+
+        graph = KnowledgeGraph()
+        chat = ChatEntry(id="c-1", provider="test", provider_id="456")
+        graph.add_chat(chat)
+        assert graph.find_chat_by_provider("test", "456") is not None
+        graph.remove_chat("c-1")
+        assert graph.find_chat_by_provider("test", "456") is None
+
+    def test_node_types_tracking(self):
+        graph = KnowledgeGraph()
+        graph.add_memory(
+            MemoryEntry(id="m1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        )
+        graph.add_person(PersonEntry(id="p1", name="Alice"))
+        graph.add_user(UserEntry(id="u1", provider="test", provider_id="1"))
+
+        assert graph.node_types["m1"] == "memory"
+        assert graph.node_types["p1"] == "person"
+        assert graph.node_types["u1"] == "user"
+
+        graph.remove_memory("m1")
+        assert "m1" not in graph.node_types
+
+
+# =============================================================================
+# Edge ID Format Tests
+# =============================================================================
+
+
+class TestEdgeIdFormat:
+    """Tests that edge IDs use full UUID hex."""
+
+    def test_edge_id_length(self):
+        edge = create_about_edge("mem-1", "person-1")
+        # "e-" prefix + 32 hex chars = 34 total
+        assert edge.id.startswith("e-")
+        assert len(edge.id) == 34
+
+    def test_edge_ids_unique(self):
+        ids = {create_about_edge("m", "p").id for _ in range(1000)}
+        assert len(ids) == 1000

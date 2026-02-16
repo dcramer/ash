@@ -61,7 +61,8 @@ class PeopleCrudMixin:
         )
 
         self._graph.add_person(entry)
-        await self._persistence.save_people(self._graph.people)
+        self._persistence.mark_dirty("people")
+        await self._persistence.flush(self._graph)
 
         logger.debug(
             "person_created", extra={"person_id": entry.id, "person_name": name}
@@ -116,9 +117,10 @@ class PeopleCrudMixin:
             # Remove MERGED_INTO edges pointing from this person
             for edge in self._graph.get_outgoing(person_id, edge_type=MERGED_INTO):
                 self._graph.remove_edge(edge.id)
-            await self._persistence.save_edges(self._graph.edges)
+            self._persistence.mark_dirty("edges")
 
-        await self._persistence.save_people(self._graph.people)
+        self._persistence.mark_dirty("people")
+        await self._persistence.flush(self._graph)
         return person
 
     async def get_person_names_batch(
@@ -141,8 +143,8 @@ class PeopleCrudMixin:
         name = person.name
 
         self._graph.remove_person(person_id)
-        await self._persistence.save_people(self._graph.people)
-        await self._persistence.save_edges(self._graph.edges)
+        self._persistence.mark_dirty("people", "edges")
+        await self._persistence.flush(self._graph)
 
         logger.debug(
             "person_deleted",

@@ -36,7 +36,7 @@ async def memory_doctor_backfill_subjects(store: Store, force: bool) -> None:
     candidates = [
         m
         for m in memories
-        if not get_subject_person_ids(store._graph, m.id)
+        if not get_subject_person_ids(store.graph, m.id)
         and m.memory_type != MemoryType.RELATIONSHIP
     ]
 

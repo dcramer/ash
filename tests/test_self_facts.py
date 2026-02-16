@@ -144,7 +144,7 @@ class TestEnsureSelfPersonReturnsId:
         # After merge, the returned id should resolve to a non-merged person
         person = await store.get_person(person_id)
         assert person is not None
-        assert get_merged_into(store._graph, person.id) is None
+        assert get_merged_into(store.graph, person.id) is None
 
     async def test_returns_none_without_people_store(self, tmp_path: Path):
         workspace = Workspace(path=tmp_path, soul="test")
@@ -199,7 +199,7 @@ class TestDoctorSelfFacts:
 
         await memory_doctor_self_facts(store, force=True)
 
-        assert get_subject_person_ids(store._graph, mem.id) == [person.id]
+        assert get_subject_person_ids(store.graph, mem.id) == [person.id]
 
     async def test_skips_relationship_type(self, store: Store):
         from ash.graph.edges import get_subject_person_ids
@@ -227,7 +227,7 @@ class TestDoctorSelfFacts:
 
         await memory_doctor_self_facts(store, force=True)
 
-        assert get_subject_person_ids(store._graph, mem.id) == []
+        assert get_subject_person_ids(store.graph, mem.id) == []
 
     async def test_skips_memories_with_existing_subjects(self, store: Store):
         from ash.graph.edges import get_subject_person_ids
@@ -263,7 +263,7 @@ class TestDoctorSelfFacts:
 
         await memory_doctor_self_facts(store, force=True)
 
-        assert get_subject_person_ids(store._graph, mem.id) == [other.id]
+        assert get_subject_person_ids(store.graph, mem.id) == [other.id]
 
     async def test_matches_by_display_name(self, store: Store):
         from ash.graph.edges import get_subject_person_ids
@@ -291,7 +291,7 @@ class TestDoctorSelfFacts:
 
         await memory_doctor_self_facts(store, force=True)
 
-        assert get_subject_person_ids(store._graph, mem.id) == [person.id]
+        assert get_subject_person_ids(store.graph, mem.id) == [person.id]
 
 
 def _make_dedup_llm() -> AsyncMock:

@@ -47,7 +47,8 @@ class MemoryEvictionMixin:
                 memory.archive_reason = "evicted"
 
         if ids_to_evict:
-            await self._persistence.save_memories(self._graph.memories)
+            self._persistence.mark_dirty("memories")
+            await self._persistence.flush(self._graph)
 
         for mid in ids_to_evict:
             try:
@@ -84,8 +85,8 @@ class MemoryEvictionMixin:
             self._graph.remove_memory(mid)
 
         if ids_to_remove:
-            await self._persistence.save_memories(self._graph.memories)
-            await self._persistence.save_edges(self._graph.edges)
+            self._persistence.mark_dirty("memories", "edges")
+            await self._persistence.flush(self._graph)
             logger.info("compact_complete", extra={"removed_count": len(ids_to_remove)})
 
         return len(ids_to_remove)
@@ -98,8 +99,8 @@ class MemoryEvictionMixin:
         if count > 0:
             for mid in memory_ids:
                 self._graph.remove_memory(mid)
-            await self._persistence.save_memories(self._graph.memories)
-            await self._persistence.save_edges(self._graph.edges)
+            self._persistence.mark_dirty("memories", "edges")
+            await self._persistence.flush(self._graph)
 
         self._index.clear()
 

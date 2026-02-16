@@ -245,7 +245,7 @@ async def _people_show(store: Store, person_id: str) -> None:
 
     from ash.graph.edges import get_merged_into
 
-    merged_into_id = get_merged_into(store._graph, person.id)
+    merged_into_id = get_merged_into(store.graph, person.id)
     if merged_into_id:
         table.add_row("Merged Into", merged_into_id)
 
@@ -475,7 +475,7 @@ async def _doctor_check_broken_merges(store: Store, force: bool) -> None:
 
     broken: list[PersonEntry] = []
     for person in all_people:
-        merged_into_id = get_merged_into(store._graph, person.id)
+        merged_into_id = get_merged_into(store.graph, person.id)
         if merged_into_id and merged_into_id not in people_by_id:
             broken.append(person)
 
@@ -494,7 +494,7 @@ async def _doctor_check_broken_merges(store: Store, force: bool) -> None:
         ],
     )
     for person in broken:
-        merged_into_id = get_merged_into(store._graph, person.id)
+        merged_into_id = get_merged_into(store.graph, person.id)
         table.add_row(person.id[:12], person.name, merged_into_id or "-")
     console.print(table)
 
