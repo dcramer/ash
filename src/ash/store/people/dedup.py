@@ -6,7 +6,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from ash.graph.edges import create_merged_into_edge
+from ash.graph.edges import create_merged_into_edge, get_merged_into
 from ash.store.people.helpers import (
     normalize_reference,
     primary_sort_key,
@@ -31,11 +31,10 @@ class PeopleDedupMixin:
         secondary = self._graph.people.get(secondary_id)
         if not primary or not secondary:
             return None
-        if secondary.merged_into:
+        if get_merged_into(self._graph, secondary_id):
             logger.debug(
-                "Skipping merge: secondary %s already merged into %s",
+                "Skipping merge: secondary %s already merged",
                 secondary_id,
-                secondary.merged_into,
             )
             return None
 
@@ -74,11 +73,9 @@ class PeopleDedupMixin:
                 primary.relationships.append(rc)
                 existing_rels.add(rc.relationship.lower())
 
-        # Mark secondary as merged (FK field — retained for backward compat)
-        secondary.merged_into = primary_id
         primary.updated_at = now
 
-        # Dual-write: create MERGED_INTO edge in the knowledge graph
+        # Create MERGED_INTO edge in the knowledge graph
         self._graph.add_edge(create_merged_into_edge(secondary_id, primary_id))
 
         await self._persistence.save_people(self._graph.people)
@@ -113,7 +110,7 @@ class PeopleDedupMixin:
         if not self._llm or not self._llm_model:
             return []
         people = await self.get_all_people()
-        active = [p for p in people if not p.merged_into]
+        active = [p for p in people if not get_merged_into(self._graph, p.id)]
         new_people = [p for p in active if p.id in set(person_ids)]
         if not new_people:
             return []
@@ -189,8 +186,6 @@ class PeopleDedupMixin:
         return results
 
     async def _follow_merge_chain(self: Store, person: PersonEntry) -> PersonEntry:
-        from ash.graph.edges import get_merged_into
-
         visited: set[str] = set()
         current = person
         while True:

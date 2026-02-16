@@ -117,6 +117,8 @@ class TestEnsureSelfPersonReturnsId:
     async def test_returns_primary_id_after_dedup_merge(
         self, store: Store, tmp_path: Path
     ):
+        from ash.graph.edges import get_merged_into
+
         workspace = Workspace(path=tmp_path, soul="test")
         # Need an LLM for dedup verification
         mock_llm = _make_dedup_llm()
@@ -142,7 +144,7 @@ class TestEnsureSelfPersonReturnsId:
         # After merge, the returned id should resolve to a non-merged person
         person = await store.get_person(person_id)
         assert person is not None
-        assert person.merged_into is None
+        assert get_merged_into(store._graph, person.id) is None
 
     async def test_returns_none_without_people_store(self, tmp_path: Path):
         workspace = Workspace(path=tmp_path, soul="test")
@@ -172,6 +174,8 @@ class TestDoctorSelfFacts:
     """Test memory doctor self_facts command."""
 
     async def test_fixes_orphaned_self_facts(self, store: Store):
+        from ash.graph.edges import get_subject_person_ids
+
         # Create a self-person
         person = await store.create_person(
             created_by="user-1",
@@ -180,8 +184,8 @@ class TestDoctorSelfFacts:
             aliases=["notzeeg"],
         )
 
-        # Create a memory with source_username but no subject_person_ids
-        await store.add_memory(
+        # Create a memory with source_username but no subject links
+        mem = await store.add_memory(
             content="I love Python",
             source="background_extraction",
             memory_type=MemoryType.IDENTITY,
@@ -195,11 +199,11 @@ class TestDoctorSelfFacts:
 
         await memory_doctor_self_facts(store, force=True)
 
-        memories = await store.list_memories(limit=None)
-        assert len(memories) == 1
-        assert memories[0].subject_person_ids == [person.id]
+        assert get_subject_person_ids(store._graph, mem.id) == [person.id]
 
     async def test_skips_relationship_type(self, store: Store):
+        from ash.graph.edges import get_subject_person_ids
+
         # Create a self-person
         await store.create_person(
             created_by="user-1",
@@ -209,7 +213,7 @@ class TestDoctorSelfFacts:
         )
 
         # Create a RELATIONSHIP memory — should NOT be fixed
-        await store.add_memory(
+        mem = await store.add_memory(
             content="Sarah is David's wife",
             source="background_extraction",
             memory_type=MemoryType.RELATIONSHIP,
@@ -223,11 +227,11 @@ class TestDoctorSelfFacts:
 
         await memory_doctor_self_facts(store, force=True)
 
-        memories = await store.list_memories(limit=None)
-        assert len(memories) == 1
-        assert memories[0].subject_person_ids == []
+        assert get_subject_person_ids(store._graph, mem.id) == []
 
     async def test_skips_memories_with_existing_subjects(self, store: Store):
+        from ash.graph.edges import get_subject_person_ids
+
         # Create a self-person
         await store.create_person(
             created_by="user-1",
@@ -243,8 +247,8 @@ class TestDoctorSelfFacts:
             relationship="wife",
         )
 
-        # Memory already has subject_person_ids — should not be touched
-        await store.add_memory(
+        # Memory already has ABOUT edge — should not be touched
+        mem = await store.add_memory(
             content="Sarah likes hiking",
             source="background_extraction",
             memory_type=MemoryType.KNOWLEDGE,
@@ -259,11 +263,11 @@ class TestDoctorSelfFacts:
 
         await memory_doctor_self_facts(store, force=True)
 
-        memories = await store.list_memories(limit=None)
-        assert len(memories) == 1
-        assert memories[0].subject_person_ids == [other.id]
+        assert get_subject_person_ids(store._graph, mem.id) == [other.id]
 
     async def test_matches_by_display_name(self, store: Store):
+        from ash.graph.edges import get_subject_person_ids
+
         # Create a self-person
         person = await store.create_person(
             created_by="user-1",
@@ -273,7 +277,7 @@ class TestDoctorSelfFacts:
         )
 
         # Memory with display name as source_username (matches name)
-        await store.add_memory(
+        mem = await store.add_memory(
             content="I work at Sentry",
             source="background_extraction",
             memory_type=MemoryType.IDENTITY,
@@ -287,9 +291,7 @@ class TestDoctorSelfFacts:
 
         await memory_doctor_self_facts(store, force=True)
 
-        memories = await store.list_memories(limit=None)
-        assert len(memories) == 1
-        assert memories[0].subject_person_ids == [person.id]
+        assert get_subject_person_ids(store._graph, mem.id) == [person.id]
 
 
 def _make_dedup_llm() -> AsyncMock:

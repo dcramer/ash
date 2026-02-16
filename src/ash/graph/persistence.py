@@ -37,24 +37,32 @@ class GraphPersistence:
 
         graph = KnowledgeGraph()
 
+        # Load raw JSONL dicts for backfill (FK fields may exist in old data)
+        raw_memories: list[dict] = []
+        raw_people: list[dict] = []
+        raw_users: list[dict] = []
+
         # Load memories
         memories_path = self._dir / "memories.jsonl"
         if memories_path.exists():
-            for d in _read_jsonl(memories_path):
+            raw_memories = _read_jsonl(memories_path)
+            for d in raw_memories:
                 entry = MemoryEntry.from_dict(d)
                 graph.add_memory(entry)
 
         # Load people
         people_path = self._dir / "people.jsonl"
         if people_path.exists():
-            for d in _read_jsonl(people_path):
+            raw_people = _read_jsonl(people_path)
+            for d in raw_people:
                 entry = PersonEntry.from_dict(d)
                 graph.add_person(entry)
 
         # Load users
         users_path = self._dir / "users.jsonl"
         if users_path.exists():
-            for d in _read_jsonl(users_path):
+            raw_users = _read_jsonl(users_path)
+            for d in raw_users:
                 entry = UserEntry(
                     id=d["id"],
                     version=d.get("version", 1),
@@ -62,7 +70,6 @@ class GraphPersistence:
                     provider_id=d.get("provider_id", ""),
                     username=d.get("username"),
                     display_name=d.get("display_name"),
-                    person_id=d.get("person_id"),
                     created_at=_parse_dt(d.get("created_at")),
                     updated_at=_parse_dt(d.get("updated_at")),
                     metadata=d.get("metadata"),
@@ -93,9 +100,11 @@ class GraphPersistence:
                 edge = Edge.from_dict(d)
                 graph.add_edge(edge)
 
-        # Backfill edges from FK fields if edges.jsonl is empty/missing
+        # Backfill edges from legacy FK fields in raw JSONL if edges.jsonl is empty
         if not graph.edges and (graph.memories or graph.people or graph.users):
-            backfilled = _backfill_edges(graph)
+            backfilled = _backfill_edges_from_raw(
+                graph, raw_memories, raw_people, raw_users
+            )
             if backfilled > 0:
                 logger.info("Backfilled %d edges from existing data", backfilled)
                 await self.save_edges(graph.edges)
@@ -173,8 +182,6 @@ def _user_to_dict(u: UserEntry) -> dict:
         d["username"] = u.username
     if u.display_name:
         d["display_name"] = u.display_name
-    if u.person_id:
-        d["person_id"] = u.person_id
     if u.created_at:
         d["created_at"] = u.created_at.isoformat()
     if u.updated_at:
@@ -210,50 +217,96 @@ def _parse_dt(s: str | None):
     return _parse_datetime(s)
 
 
-def _backfill_edges(graph: KnowledgeGraph) -> int:
-    """Backfill edges from existing FK fields on nodes.
+def _backfill_edges_from_raw(
+    graph: KnowledgeGraph,
+    raw_memories: list[dict],
+    raw_people: list[dict],
+    raw_users: list[dict],
+) -> int:
+    """Backfill edges from legacy FK fields in raw JSONL dicts.
 
     Called on first load when edges.jsonl is empty but nodes exist.
-    Creates edges from: subject_person_ids, superseded_by_id, person_id,
-    merged_into.
+    Reads FK fields (subject_person_ids, superseded_by_id, person_id,
+    merged_into) from raw JSON dicts since they've been removed from
+    the dataclasses.
     """
     from ash.graph.edges import (
         create_about_edge,
+        create_has_relationship_edge,
         create_is_person_edge,
         create_merged_into_edge,
+        create_stated_by_edge,
         create_supersedes_edge,
     )
 
     count = 0
 
     # Memory → Person (ABOUT) from subject_person_ids
-    for memory in graph.memories.values():
-        for pid in memory.subject_person_ids:
-            edge = create_about_edge(memory.id, pid, created_by="backfill")
+    for d in raw_memories:
+        for pid in d.get("subject_person_ids") or []:
+            edge = create_about_edge(d["id"], pid, created_by="backfill")
             graph.add_edge(edge)
             count += 1
 
     # Memory → Memory (SUPERSEDES) from superseded_by_id
-    for memory in graph.memories.values():
-        if memory.superseded_by_id:
-            edge = create_supersedes_edge(
-                memory.superseded_by_id, memory.id, created_by="backfill"
-            )
+    for d in raw_memories:
+        superseded_by = d.get("superseded_by_id")
+        if superseded_by:
+            edge = create_supersedes_edge(superseded_by, d["id"], created_by="backfill")
             graph.add_edge(edge)
             count += 1
 
     # User → Person (IS_PERSON) from person_id
-    for user in graph.users.values():
-        if user.person_id:
-            edge = create_is_person_edge(user.id, user.person_id)
+    for d in raw_users:
+        person_id = d.get("person_id")
+        if person_id:
+            edge = create_is_person_edge(d["id"], person_id)
             graph.add_edge(edge)
             count += 1
 
     # Person → Person (MERGED_INTO) from merged_into
-    for person in graph.people.values():
-        if person.merged_into:
-            edge = create_merged_into_edge(person.id, person.merged_into)
+    merged_ids: set[str] = set()
+    for d in raw_people:
+        merged_into = d.get("merged_into")
+        if merged_into:
+            edge = create_merged_into_edge(d["id"], merged_into)
             graph.add_edge(edge)
+            merged_ids.add(d["id"])
             count += 1
+
+    # Build a username→person_id lookup from people aliases/names
+    username_to_person: dict[str, str] = {}
+    for person in graph.people.values():
+        if person.id in merged_ids:
+            continue
+        username_to_person[person.name.lower()] = person.id
+        for alias in person.aliases:
+            username_to_person[alias.value.lower()] = person.id
+
+    # Memory → Person (STATED_BY) from source_username
+    for memory in graph.memories.values():
+        if memory.source_username:
+            pid = username_to_person.get(memory.source_username.lower())
+            if pid:
+                edge = create_stated_by_edge(memory.id, pid, created_by="backfill")
+                graph.add_edge(edge)
+                count += 1
+
+    # Person → Person (HAS_RELATIONSHIP) from RelationshipClaim.stated_by
+    for person in graph.people.values():
+        if person.id in merged_ids:
+            continue
+        for rc in person.relationships:
+            if rc.stated_by and rc.relationship.lower() != "self":
+                related_pid = username_to_person.get(rc.stated_by.lower())
+                if related_pid and related_pid != person.id:
+                    edge = create_has_relationship_edge(
+                        person.id,
+                        related_pid,
+                        relationship_type=rc.relationship,
+                        stated_by=rc.stated_by,
+                    )
+                    graph.add_edge(edge)
+                    count += 1
 
     return count

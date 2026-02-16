@@ -521,15 +521,15 @@ class TestPersonMerge:
         assert "sksembhi" in alias_values
 
     async def test_merge_sets_merged_into(self, graph_store: Store):
-        """Test that secondary gets merged_into set."""
+        """Test that secondary gets merged_into set via MERGED_INTO edge."""
+        from ash.graph.edges import get_merged_into
+
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-2", name="Sksembhi")
 
         await graph_store.merge_people(p1.id, p2.id)
 
-        secondary = await graph_store.get_person(p2.id)
-        assert secondary is not None
-        assert secondary.merged_into == p1.id
+        assert get_merged_into(graph_store._graph, p2.id) == p1.id
 
     async def test_merge_adds_secondary_name_as_alias(self, graph_store: Store):
         """Test that secondary's name becomes an alias on primary."""
@@ -616,6 +616,8 @@ class TestPersonMerge:
 
     async def test_merge_refuses_already_merged_secondary(self, graph_store: Store):
         """Merge should refuse if secondary is already merged (prevents chain corruption)."""
+        from ash.graph.edges import get_merged_into
+
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
         p3 = await graph_store.create_person(created_by="user-1", name="Charlie")
@@ -628,9 +630,7 @@ class TestPersonMerge:
         assert result is None
 
         # p2 should still point to p1, not p3
-        p2_after = await graph_store.get_person(p2.id)
-        assert p2_after is not None
-        assert p2_after.merged_into == p1.id
+        assert get_merged_into(graph_store._graph, p2.id) == p1.id
 
 
 class TestCacheBehavior:
@@ -787,18 +787,18 @@ class TestPersonDelete:
         assert result is False
 
     async def test_delete_clears_merged_into(self, graph_store: Store):
-        """Test that deleting a person clears merged_into references."""
+        """Test that deleting a person clears merged_into edge."""
+        from ash.graph.edges import get_merged_into
+
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
 
         await graph_store.merge_people(p1.id, p2.id)
 
-        # Delete the primary — secondary's merged_into should be cleared
+        # Delete the primary — secondary's merged_into edge should be removed
         await graph_store.delete_person(p1.id)
 
-        p2_after = await graph_store.get_person(p2.id)
-        assert p2_after is not None
-        assert p2_after.merged_into is None
+        assert get_merged_into(graph_store._graph, p2.id) is None
 
     async def test_delete_removes_from_list(self, graph_store: Store):
         """Test that deleted person is gone from list_people."""
@@ -1488,12 +1488,14 @@ class TestAutoRemapOnMerge:
     """Tests for automatic memory remap on merge."""
 
     async def test_merge_calls_remap(self, graph_store: Store):
-        """Merge should remap subject_person_ids in memories from secondary to primary."""
+        """Merge should remap ABOUT edges from secondary to primary."""
+        from ash.graph.edges import get_subject_person_ids
+
         p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
         p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
 
-        # Create a memory with subject_person_ids pointing to the secondary
-        await graph_store.add_memory(
+        # Create a memory with ABOUT edge pointing to the secondary
+        mem = await graph_store.add_memory(
             content="Sksembhi likes coffee",
             owner_user_id="user-1",
             subject_person_ids=[p2.id],
@@ -1501,12 +1503,10 @@ class TestAutoRemapOnMerge:
 
         await graph_store.merge_people(p1.id, p2.id)
 
-        # Verify that memories now point to the primary
-        memories = await graph_store.get_all_memories()
-        for mem in memories:
-            if mem.subject_person_ids:
-                assert p2.id not in mem.subject_person_ids
-                assert p1.id in mem.subject_person_ids
+        # Verify that ABOUT edges now point to the primary
+        subjects = get_subject_person_ids(graph_store._graph, mem.id)
+        assert p2.id not in subjects
+        assert p1.id in subjects
 
     async def test_merge_without_memories(self, graph_store: Store):
         """Merge should work fine when no memories reference the secondary."""

@@ -28,6 +28,8 @@ class UserChatOpsMixin:
         person_id: str | None = None,
     ) -> UserEntry:
         """Upsert a user node. Creates if not found, updates if changed."""
+        from ash.graph.edges import get_person_for_user
+
         now = datetime.now(UTC)
 
         # Look for existing user by provider+provider_id
@@ -40,18 +42,19 @@ class UserChatOpsMixin:
                 if display_name is not None and user.display_name != display_name:
                     user.display_name = display_name
                     changed = True
-                if person_id is not None and user.person_id != person_id:
-                    # Remove old IS_PERSON edge if replacing
-                    if user.person_id is not None:
-                        old_edges = self._graph.get_outgoing(
-                            user.id, edge_type=IS_PERSON
-                        )
-                        for edge in old_edges:
-                            self._graph.remove_edge(edge.id)
-                    user.person_id = person_id
-                    # Create new IS_PERSON edge
-                    self._graph.add_edge(create_is_person_edge(user.id, person_id))
-                    changed = True
+                if person_id is not None:
+                    current_person = get_person_for_user(self._graph, user.id)
+                    if current_person != person_id:
+                        # Remove old IS_PERSON edge if replacing
+                        if current_person is not None:
+                            old_edges = self._graph.get_outgoing(
+                                user.id, edge_type=IS_PERSON
+                            )
+                            for edge in old_edges:
+                                self._graph.remove_edge(edge.id)
+                        # Create new IS_PERSON edge
+                        self._graph.add_edge(create_is_person_edge(user.id, person_id))
+                        changed = True
                 if changed:
                     user.updated_at = now
                     await self._persistence.save_users(self._graph.users)
@@ -67,14 +70,13 @@ class UserChatOpsMixin:
             provider_id=provider_id,
             username=username,
             display_name=display_name,
-            person_id=person_id,
             created_at=now,
             updated_at=now,
         )
         self._graph.add_user(entry)
         await self._persistence.save_users(self._graph.users)
 
-        # Dual-write IS_PERSON edge for new user
+        # Create IS_PERSON edge for new user
         if person_id is not None:
             self._graph.add_edge(create_is_person_edge(user_id, person_id))
             await self._persistence.save_edges(self._graph.edges)
@@ -104,7 +106,7 @@ class UserChatOpsMixin:
         return list(self._graph.users.values())
 
     async def find_person_ids_for_username(self: Store, username: str) -> set[str]:
-        from ash.graph.edges import get_person_for_user
+        from ash.graph.edges import get_merged_into, get_person_for_user
 
         username_clean = username.lstrip("@").lower()
 
@@ -115,7 +117,7 @@ class UserChatOpsMixin:
                 pid = get_person_for_user(self._graph, user.id)
                 if pid:
                     person = self._graph.people.get(pid)
-                    if person and person.merged_into:
+                    if person and get_merged_into(self._graph, person.id):
                         primary = await self._follow_merge_chain(person)
                         person_ids.add(primary.id)
                     elif person:
@@ -126,7 +128,7 @@ class UserChatOpsMixin:
 
         # Fallback: search people by name/alias matching the username
         for person in self._graph.people.values():
-            if person.merged_into is not None:
+            if get_merged_into(self._graph, person.id) is not None:
                 continue
             if person.name and person.name.lower() == username_clean:
                 person_ids.add(person.id)
@@ -138,7 +140,7 @@ class UserChatOpsMixin:
         resolved: set[str] = set()
         for pid in person_ids:
             person = self._graph.people.get(pid)
-            if person and person.merged_into:
+            if person and get_merged_into(self._graph, person.id):
                 primary = await self._follow_merge_chain(person)
                 resolved.add(primary.id)
             elif person:

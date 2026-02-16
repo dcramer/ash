@@ -37,10 +37,12 @@ class SupersessionMixin:
         self: Store, person_ids: list[str]
     ) -> set[str]:
         """Resolve person IDs through merge chains to canonical IDs."""
+        from ash.graph.edges import get_merged_into
+
         resolved: set[str] = set()
         for pid in person_ids:
             person = await self.get_person(pid)
-            if person and person.merged_into:
+            if person and get_merged_into(self._graph, person.id):
                 primary = await self._follow_merge_chain(person)
                 resolved.add(primary.id)
             elif person:
@@ -126,11 +128,12 @@ class SupersessionMixin:
         owner_user_id: str | None = None,
         chat_id: str | None = None,
     ) -> int:
+        new_subjects = get_subject_person_ids(self._graph, new_memory.id)
         conflicts = await self.find_conflicting_memories(
             new_content=new_memory.content,
             owner_user_id=owner_user_id,
             chat_id=chat_id,
-            subject_person_ids=new_memory.subject_person_ids,
+            subject_person_ids=new_subjects or None,
         )
 
         count = 0
@@ -154,7 +157,7 @@ class SupersessionMixin:
         candidate: MemoryEntry,
         new_memory: MemoryEntry,
     ) -> bool:
-        candidate_subjects = candidate.subject_person_ids or []
+        candidate_subjects = get_subject_person_ids(self._graph, candidate.id)
         if not candidate.source_username or not candidate_subjects:
             return False
         if not new_memory.source_username:
@@ -196,10 +199,9 @@ class SupersessionMixin:
             return False
 
         memory.superseded_at = datetime.now(UTC)
-        memory.superseded_by_id = new_memory_id
         await self._persistence.save_memories(self._graph.memories)
 
-        # Dual-write: create SUPERSEDES edge alongside FK field
+        # Create SUPERSEDES edge
         self._graph.add_edge(create_supersedes_edge(new_memory_id, old_memory_id))
         await self._persistence.save_edges(self._graph.edges)
 
@@ -236,8 +238,6 @@ class SupersessionMixin:
             memory = self._graph.memories.get(old_id)
             if memory and memory.superseded_at is None:
                 memory.superseded_at = now
-                memory.superseded_by_id = new_id
-                # Dual-write: create SUPERSEDES edge alongside FK field
                 self._graph.add_edge(create_supersedes_edge(new_id, old_id))
                 marked.append(old_id)
 
@@ -282,6 +282,7 @@ class SupersessionMixin:
 
         # Find candidate hearsay memories about these persons via ABOUT edges
         from ash.graph.edges import get_memories_about_person
+        from ash.store.trust import classify_trust
 
         candidate_mids: set[str] = set()
         for pid in all_search_ids:
@@ -298,8 +299,15 @@ class SupersessionMixin:
                 continue
             if memory.expires_at and memory.expires_at <= now:
                 continue
-            # Skip facts (user speaking about themselves)
-            if (memory.source_username or "").lower() == user_lower:
+            # Use trust classification: skip facts (speaker is subject)
+            trust = classify_trust(self._graph, mid)
+            if trust == "fact":
+                continue
+            # Fallback for memories without STATED_BY edges: use source_username
+            if (
+                trust == "unknown"
+                and (memory.source_username or "").lower() == user_lower
+            ):
                 continue
             hearsay_candidates.append(memory)
 

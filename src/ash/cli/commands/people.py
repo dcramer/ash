@@ -243,8 +243,11 @@ async def _people_show(store: Store, person_id: str) -> None:
     else:
         table.add_row("Relationships", "-")
 
-    if person.merged_into:
-        table.add_row("Merged Into", person.merged_into)
+    from ash.graph.edges import get_merged_into
+
+    merged_into_id = get_merged_into(store._graph, person.id)
+    if merged_into_id:
+        table.add_row("Merged Into", merged_into_id)
 
     # Connected data via SQL
     memory_ids = await store.memories_about_person(person.id)
@@ -465,17 +468,22 @@ async def _doctor_check_duplicates(store: Store, force: bool) -> None:
 
 async def _doctor_check_broken_merges(store: Store, force: bool) -> None:
     """Check 2: Find people with broken merged_into references."""
+    from ash.graph.edges import get_merged_into
+
     all_people = await store.get_all_people()
     people_by_id = {p.id: p for p in all_people}
 
     broken: list[PersonEntry] = []
     for person in all_people:
-        if person.merged_into and person.merged_into not in people_by_id:
+        merged_into_id = get_merged_into(store._graph, person.id)
+        if merged_into_id and merged_into_id not in people_by_id:
             broken.append(person)
 
     if not broken:
         success("No broken merge chains found")
         return
+
+    from ash.graph.edges import get_merged_into
 
     table = create_table(
         f"Broken Merge References ({len(broken)})",
@@ -486,7 +494,8 @@ async def _doctor_check_broken_merges(store: Store, force: bool) -> None:
         ],
     )
     for person in broken:
-        table.add_row(person.id[:12], person.name, person.merged_into or "-")
+        merged_into_id = get_merged_into(store._graph, person.id)
+        table.add_row(person.id[:12], person.name, merged_into_id or "-")
     console.print(table)
 
     if not force and not typer.confirm("Clear broken merged_into references?"):

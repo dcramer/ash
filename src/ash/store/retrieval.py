@@ -106,9 +106,12 @@ class RetrievalPipeline:
                     limit=context.max_memories,
                 )
                 for memory in cross_memories:
+                    from ash.graph.edges import get_subject_person_ids
+
+                    mem_subjects = get_subject_person_ids(self._store._graph, memory.id)
                     if self._passes_privacy_filter(
                         sensitivity=memory.sensitivity,
-                        subject_person_ids=memory.subject_person_ids,
+                        subject_person_ids=mem_subjects,
                         chat_type=context.chat_type,
                         querying_person_ids=person_ids,
                     ):
@@ -199,9 +202,12 @@ class RetrievalPipeline:
                 continue
 
             # Privacy filter
+            from ash.graph.edges import get_subject_person_ids
+
+            mem_subjects = get_subject_person_ids(graph, memory.id)
             if not self._passes_privacy_filter(
                 sensitivity=memory.sensitivity,
-                subject_person_ids=memory.subject_person_ids,
+                subject_person_ids=mem_subjects,
                 chat_type=context.chat_type,
                 querying_person_ids=all_participant_ids,
             ):
@@ -349,13 +355,22 @@ class RetrievalPipeline:
         hops: int = 0,
     ) -> SearchResult:
         """Convert a MemoryEntry to a SearchResult."""
-        subject_name = await self._store._resolve_subject_name(
-            memory.subject_person_ids
-        )
+        from ash.graph.edges import get_subject_person_ids
+        from ash.store.trust import classify_trust, get_trust_weight
+
+        subject_pids = get_subject_person_ids(self._store._graph, memory.id)
+        subject_name = await self._store._resolve_subject_name(subject_pids)
+
+        # Apply trust weight to similarity score
+        trust_level = classify_trust(self._store._graph, memory.id)
+        trust_weight = get_trust_weight(trust_level)
+        weighted_similarity = similarity * trust_weight
+
         meta: dict[str, Any] = {
             "memory_type": memory.memory_type.value,
-            "subject_person_ids": memory.subject_person_ids,
+            "subject_person_ids": subject_pids,
             "discovery_stage": discovery_stage,
+            "trust": trust_level,
         }
         if hops > 0:
             meta["hops"] = hops
@@ -367,7 +382,7 @@ class RetrievalPipeline:
         return SearchResult(
             id=memory.id,
             content=memory.content,
-            similarity=similarity,
+            similarity=weighted_similarity,
             metadata=meta,
             source_type="memory",
         )

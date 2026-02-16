@@ -159,14 +159,7 @@ class MemoryEvictionMixin:
             if not memory:
                 continue
 
-            # Update FK field
-            pids = list(memory.subject_person_ids or [])
-            if old_id in pids:
-                pids.remove(old_id)
-                if new_id not in pids:
-                    pids.append(new_id)
-                memory.subject_person_ids = pids
-                count += 1
+            count += 1
 
             # Update ABOUT edges: remove old, add new
             old_edges = [
@@ -188,7 +181,6 @@ class MemoryEvictionMixin:
                 edges_changed = True
 
         if count > 0:
-            await self._persistence.save_memories(self._graph.memories)
             if edges_changed:
                 await self._persistence.save_edges(self._graph.edges)
             logger.debug(

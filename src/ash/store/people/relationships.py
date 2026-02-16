@@ -41,6 +41,7 @@ class PeopleRelationshipsMixin:
         person_id: str,
         relationship: str,
         stated_by: str | None = None,
+        related_person_id: str | None = None,
     ) -> PersonEntry | None:
         person = self._graph.people.get(person_id)
         if not person:
@@ -60,4 +61,18 @@ class PeopleRelationshipsMixin:
         )
         person.updated_at = now
         await self._persistence.save_people(self._graph.people)
+
+        # Create HAS_RELATIONSHIP edge if we know the related person
+        if related_person_id:
+            from ash.graph.edges import create_has_relationship_edge
+
+            edge = create_has_relationship_edge(
+                person_id,
+                related_person_id,
+                relationship_type=relationship,
+                stated_by=stated_by,
+            )
+            self._graph.add_edge(edge)
+            await self._persistence.save_edges(self._graph.edges)
+
         return person

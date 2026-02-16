@@ -27,12 +27,14 @@ async def memory_doctor_self_facts(store: Store, force: bool) -> None:
         limit=None, include_expired=True, include_superseded=True
     )
 
+    from ash.graph.edges import get_subject_person_ids
+
     # Candidates: have source_username, no subject links, not RELATIONSHIP
     candidates = [
         m
         for m in memories
         if m.source_username
-        and not m.subject_person_ids
+        and not get_subject_person_ids(store._graph, m.id)
         and m.memory_type != MemoryType.RELATIONSHIP
     ]
 
@@ -93,8 +95,10 @@ async def memory_doctor_self_facts(store: Store, force: bool) -> None:
     if not confirm_or_cancel("Fix subject attribution for these memories?", force):
         return
 
-    for memory, person_id in to_fix:
-        memory.subject_person_ids = [person_id]
-    await store.batch_update_memories([m for m, _ in to_fix])
+    # Build subject_person_ids_map for batch update
+    subject_person_ids_map = {memory.id: [person_id] for memory, person_id in to_fix}
+    await store.batch_update_memories(
+        [m for m, _ in to_fix], subject_person_ids_map=subject_person_ids_map
+    )
 
     success(f"Fixed subject attribution for {len(to_fix)} self-facts")

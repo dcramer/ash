@@ -85,7 +85,10 @@ class TestMemorySupersession:
         # get_memory excludes archived/superseded; use graph directly to verify
         mem = graph_store._graph.memories[old_memory.id]
         assert mem.superseded_at is not None
-        assert mem.superseded_by_id == new_memory.id
+        # Verify via SUPERSEDES edge
+        from ash.graph.edges import get_superseded_by
+
+        assert get_superseded_by(graph_store._graph, old_memory.id) == new_memory.id
 
     async def test_list_memories_excludes_superseded_by_default(
         self, graph_store: Store
@@ -138,7 +141,10 @@ class TestStoreSupersession:
         # Check that old memory is now superseded via graph
         mem = graph_store._graph.memories[old_memory.id]
         assert mem.superseded_at is not None
-        assert mem.superseded_by_id == new_memory.id
+        # Verify via SUPERSEDES edge
+        from ash.graph.edges import get_superseded_by
+
+        assert get_superseded_by(graph_store._graph, old_memory.id) == new_memory.id
 
     async def test_no_supersession_below_threshold(
         self, graph_store: Store, mock_index
@@ -891,4 +897,7 @@ class TestHearsaySupersession:
         # Verify hearsay is now superseded via graph
         mem = graph_store._graph.memories[hearsay.id]
         assert mem.superseded_at is not None
-        assert mem.superseded_by_id == self_fact.id
+        # Verify via SUPERSEDES edge
+        from ash.graph.edges import get_superseded_by
+
+        assert get_superseded_by(graph_store._graph, hearsay.id) == self_fact.id

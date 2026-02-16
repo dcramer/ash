@@ -84,6 +84,25 @@ def create_is_person_edge(
     )
 
 
+def create_stated_by_edge(
+    memory_id: str,
+    person_id: str,
+    *,
+    created_by: str | None = None,
+) -> Edge:
+    """Create a STATED_BY edge: Memory → Person."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=STATED_BY,
+        source_type="memory",
+        source_id=memory_id,
+        target_type="person",
+        target_id=person_id,
+        created_at=datetime.now(UTC),
+        created_by=created_by,
+    )
+
+
 def create_merged_into_edge(
     source_person_id: str,
     target_person_id: str,
@@ -96,6 +115,31 @@ def create_merged_into_edge(
         source_id=source_person_id,
         target_type="person",
         target_id=target_person_id,
+        created_at=datetime.now(UTC),
+    )
+
+
+def create_has_relationship_edge(
+    person_id: str,
+    related_person_id: str,
+    *,
+    relationship_type: str | None = None,
+    stated_by: str | None = None,
+) -> Edge:
+    """Create a HAS_RELATIONSHIP edge: Person → Person."""
+    properties: dict[str, str] = {}
+    if relationship_type:
+        properties["relationship_type"] = relationship_type
+    if stated_by:
+        properties["stated_by"] = stated_by
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=HAS_RELATIONSHIP,
+        source_type="person",
+        source_id=person_id,
+        target_type="person",
+        target_id=related_person_id,
+        properties=properties or None,
         created_at=datetime.now(UTC),
     )
 
@@ -168,3 +212,33 @@ def follow_merge_chain(
             return current
         current = merged
     return current
+
+
+def get_stated_by_person(graph: KnowledgeGraph, memory_id: str) -> str | None:
+    """Get the person who stated a memory (via STATED_BY edge)."""
+    edges = graph.get_outgoing(memory_id, edge_type=STATED_BY)
+    return edges[0].target_id if edges else None
+
+
+def get_memories_stated_by(graph: KnowledgeGraph, person_id: str) -> list[str]:
+    """Get memory IDs stated by a person (via incoming STATED_BY edges)."""
+    edges = graph.get_incoming(person_id, edge_type=STATED_BY)
+    return [e.source_id for e in edges]
+
+
+def get_relationships_for_person(graph: KnowledgeGraph, person_id: str) -> list[Edge]:
+    """Get HAS_RELATIONSHIP edges for a person (both directions)."""
+    outgoing = graph.get_outgoing(person_id, edge_type=HAS_RELATIONSHIP)
+    incoming = graph.get_incoming(person_id, edge_type=HAS_RELATIONSHIP)
+    return outgoing + incoming
+
+
+def get_related_people(graph: KnowledgeGraph, person_id: str) -> list[str]:
+    """Get person IDs related to a person (via HAS_RELATIONSHIP edges)."""
+    edges = get_relationships_for_person(graph, person_id)
+    result: list[str] = []
+    for e in edges:
+        other = e.target_id if e.source_id == person_id else e.source_id
+        if other not in result:
+            result.append(other)
+    return result

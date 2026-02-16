@@ -402,13 +402,16 @@ def register_memory_methods(
 
         result = []
         for m in memories:
-            about = await _resolve_subject_names(m.subject_person_ids, people_by_id)
+            from ash.graph.edges import get_subject_person_ids
+
+            subject_pids = get_subject_person_ids(memory_manager._graph, m.id)
+            about = await _resolve_subject_names(subject_pids, people_by_id)
             entry: dict[str, Any] = {
                 "id": m.id,
                 "content": m.content,
                 "source": _resolve_source(m.source_username, lookup) or m.source,
                 "memory_type": m.memory_type.value,
-                "subject_person_ids": m.subject_person_ids,
+                "subject_person_ids": subject_pids,
                 "about": about,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
                 "expires_at": m.expires_at.isoformat() if m.expires_at else None,

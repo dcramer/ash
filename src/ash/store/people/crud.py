@@ -72,7 +72,13 @@ class PeopleCrudMixin:
         return self._graph.people.get(person_id)
 
     async def list_people(self: Store, limit: int | None = None) -> list[PersonEntry]:
-        people = [p for p in self._graph.people.values() if p.merged_into is None]
+        from ash.graph.edges import get_merged_into
+
+        people = [
+            p
+            for p in self._graph.people.values()
+            if get_merged_into(self._graph, p.id) is None
+        ]
         people.sort(
             key=lambda p: p.updated_at or datetime.min.replace(tzinfo=UTC),
             reverse=True,
@@ -105,7 +111,12 @@ class PeopleCrudMixin:
         if name is not None:
             person.name = name
         if clear_merged:
-            person.merged_into = None
+            from ash.graph.edges import MERGED_INTO
+
+            # Remove MERGED_INTO edges pointing from this person
+            for edge in self._graph.get_outgoing(person_id, edge_type=MERGED_INTO):
+                self._graph.remove_edge(edge.id)
+            await self._persistence.save_edges(self._graph.edges)
 
         await self._persistence.save_people(self._graph.people)
         return person
@@ -129,10 +140,12 @@ class PeopleCrudMixin:
 
         name = person.name
 
-        # Clear merged_into references
-        for p in self._graph.people.values():
-            if p.merged_into == person_id:
-                p.merged_into = None
+        # Clear MERGED_INTO edges pointing to this person
+        from ash.graph.edges import MERGED_INTO
+
+        for edge in self._graph.get_incoming(person_id, edge_type=MERGED_INTO):
+            self._graph.remove_edge(edge.id)
+        await self._persistence.save_edges(self._graph.edges)
 
         self._graph.remove_person(person_id)
         await self._persistence.save_people(self._graph.people)

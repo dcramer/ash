@@ -80,6 +80,7 @@ class MemoryCrudMixin:
         sensitivity: Sensitivity | None = None,
         portable: bool = True,
         metadata: dict[str, Any] | None = None,
+        stated_by_person_id: str | None = None,
     ) -> MemoryEntry:
         """Add a memory entry."""
         if contains_secret(content):
@@ -114,7 +115,6 @@ class MemoryCrudMixin:
             observed_at=observed_at,
             owner_user_id=owner_user_id,
             chat_id=chat_id,
-            subject_person_ids=subject_pids,
             source=source,
             source_username=source_username,
             source_display_name=source_display_name,
@@ -131,11 +131,24 @@ class MemoryCrudMixin:
         self._graph.add_memory(memory)
         await self._persistence.save_memories(self._graph.memories)
 
-        # Dual-write ABOUT edges for subject_person_ids
+        # Create ABOUT edges for subject_person_ids
+        edges_changed = False
         if subject_pids:
             for pid in subject_pids:
                 edge = create_about_edge(memory_id, pid, created_by=source)
                 self._graph.add_edge(edge)
+            edges_changed = True
+
+        # Create STATED_BY edge for speaker attribution
+        if stated_by_person_id:
+            from ash.graph.edges import create_stated_by_edge
+
+            self._graph.add_edge(
+                create_stated_by_edge(memory_id, stated_by_person_id, created_by=source)
+            )
+            edges_changed = True
+
+        if edges_changed:
             await self._persistence.save_edges(self._graph.edges)
 
         if embedding_floats:
@@ -281,8 +294,18 @@ class MemoryCrudMixin:
         logger.info("memory_deleted", extra={"memory_id": full_id})
         return True
 
-    async def batch_update_memories(self: Store, entries: list[MemoryEntry]) -> int:
-        """Update multiple memories."""
+    async def batch_update_memories(
+        self: Store,
+        entries: list[MemoryEntry],
+        subject_person_ids_map: dict[str, list[str]] | None = None,
+    ) -> int:
+        """Update multiple memories.
+
+        Args:
+            entries: Memory entries to update.
+            subject_person_ids_map: Optional map of memory_id -> desired subject person IDs.
+                If provided, ABOUT edges will be synced for those memories.
+        """
         if not entries:
             return 0
 
@@ -293,22 +316,23 @@ class MemoryCrudMixin:
                 self._graph.memories[entry.id] = entry
                 count += 1
 
-                # Sync ABOUT edges with subject_person_ids
-                existing_about = self._graph.get_outgoing(entry.id, edge_type="ABOUT")
-                existing_pids = {e.target_id for e in existing_about}
-                desired_pids = set(entry.subject_person_ids or [])
+                # Sync ABOUT edges if subject_person_ids map is provided
+                if subject_person_ids_map and entry.id in subject_person_ids_map:
+                    existing_about = self._graph.get_outgoing(
+                        entry.id, edge_type="ABOUT"
+                    )
+                    existing_pids = {e.target_id for e in existing_about}
+                    desired_pids = set(subject_person_ids_map[entry.id])
 
-                # Remove edges for persons no longer in subject list
-                for edge in existing_about:
-                    if edge.target_id not in desired_pids:
-                        self._graph.remove_edge(edge.id)
+                    for edge in existing_about:
+                        if edge.target_id not in desired_pids:
+                            self._graph.remove_edge(edge.id)
+                            edges_changed = True
+
+                    for pid in desired_pids - existing_pids:
+                        edge = create_about_edge(entry.id, pid, created_by=entry.source)
+                        self._graph.add_edge(edge)
                         edges_changed = True
-
-                # Add edges for newly added persons
-                for pid in desired_pids - existing_pids:
-                    edge = create_about_edge(entry.id, pid, created_by=entry.source)
-                    self._graph.add_edge(edge)
-                    edges_changed = True
 
         if count > 0:
             await self._persistence.save_memories(self._graph.memories)

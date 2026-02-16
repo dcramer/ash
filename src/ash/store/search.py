@@ -52,17 +52,18 @@ class SearchMixin:
                 continue
             if not matches_scope(memory, owner_user_id, chat_id):
                 continue
-            if subject_person_id:
-                from ash.graph.edges import get_subject_person_ids
+            from ash.graph.edges import get_subject_person_ids
 
-                mem_subjects = get_subject_person_ids(self._graph, memory.id)
+            mem_subjects = get_subject_person_ids(self._graph, memory.id)
+
+            if subject_person_id:
                 if subject_person_id not in mem_subjects:
                     continue
 
-            subject_name = await self._resolve_subject_name(memory.subject_person_ids)
+            subject_name = await self._resolve_subject_name(mem_subjects)
             metadata: dict[str, Any] = {
                 "memory_type": memory.memory_type.value,
-                "subject_person_ids": memory.subject_person_ids,
+                "subject_person_ids": mem_subjects,
                 "source_username": memory.source_username,
                 "sensitivity": memory.sensitivity.value if memory.sensitivity else None,
                 **(memory.metadata or {}),

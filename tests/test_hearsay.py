@@ -16,7 +16,6 @@ def make_memory(
     *,
     id: str = "mem-1",
     content: str = "Test memory",
-    subject_person_ids: list[str] | None = None,
     source_username: str | None = "testuser",
 ) -> MemoryEntry:
     """Create a MemoryEntry for testing."""
@@ -27,7 +26,6 @@ def make_memory(
         memory_type=MemoryType.KNOWLEDGE,
         owner_user_id="user-1",
         source_username=source_username,
-        subject_person_ids=subject_person_ids or [],
         created_at=datetime.now(UTC),
     )
 
@@ -48,8 +46,8 @@ class TestSupersedHearsayForFact:
         mock_store.find_person_ids_for_username = AsyncMock(return_value={"person-1"})
         mock_store.supersede_confirmed_hearsay = AsyncMock(return_value=1)
 
-        # Memory with subject_person_ids (injected speaker person_id for graph traversal)
-        memory = make_memory(subject_person_ids=["person-1"])
+        # Memory (subject links are now via ABOUT edges, not FK)
+        memory = make_memory()
 
         result = await supersede_hearsay_for_fact(
             store=mock_store,
@@ -63,7 +61,7 @@ class TestSupersedHearsayForFact:
     @pytest.mark.asyncio
     async def test_skips_without_source_username(self, mock_store):
         """Facts without source_username should be skipped."""
-        memory = make_memory(subject_person_ids=[], source_username=None)
+        memory = make_memory(source_username=None)
 
         result = await supersede_hearsay_for_fact(
             store=mock_store,
@@ -78,7 +76,7 @@ class TestSupersedHearsayForFact:
     async def test_skips_if_no_person_ids_found(self, mock_store):
         """Should skip if source username doesn't resolve to person IDs."""
         mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
-        memory = make_memory(subject_person_ids=[])
+        memory = make_memory()
 
         result = await supersede_hearsay_for_fact(
             store=mock_store,
@@ -97,7 +95,7 @@ class TestSupersedHearsayForFact:
         )
         mock_store.supersede_confirmed_hearsay = AsyncMock(return_value=3)
 
-        memory = make_memory(subject_person_ids=[])
+        memory = make_memory()
 
         result = await supersede_hearsay_for_fact(
             store=mock_store,
@@ -116,7 +114,7 @@ class TestSupersedHearsayForFact:
             side_effect=Exception("DB error")
         )
 
-        memory = make_memory(subject_person_ids=[])
+        memory = make_memory()
 
         result = await supersede_hearsay_for_fact(
             store=mock_store,

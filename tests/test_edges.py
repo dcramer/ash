@@ -182,7 +182,6 @@ class TestEdgeQueryHelpers:
                 id="user-alice",
                 provider="test",
                 provider_id="alice",
-                person_id="person-alice",
             )
         )
 
@@ -450,9 +449,10 @@ class TestDualWriteEdges:
             subject_person_ids=[person_a.id],
         )
 
-        # Update to be about Bob instead
-        memory.subject_person_ids = [person_b.id]
-        await graph_store.batch_update_memories([memory])
+        # Update to be about Bob instead via subject_person_ids_map
+        await graph_store.batch_update_memories(
+            [memory], subject_person_ids_map={memory.id: [person_b.id]}
+        )
 
         # Verify edges were synced
         subjects = get_subject_person_ids(graph_store._graph, memory.id)
@@ -563,3 +563,192 @@ class TestEdgeBasedReads:
         chain = await graph_store.get_supersession_chain(mem3.id)
         chain_ids = [m.id for m in chain]
         assert mem2.id in chain_ids
+
+
+# =============================================================================
+# STATED_BY Edge Tests
+# =============================================================================
+
+
+class TestStatedByEdges:
+    """Tests for STATED_BY edge creation and query helpers."""
+
+    def test_create_stated_by_edge(self):
+        from ash.graph.edges import STATED_BY, create_stated_by_edge
+
+        edge = create_stated_by_edge("mem-1", "person-1")
+        assert edge.edge_type == STATED_BY
+        assert edge.source_type == "memory"
+        assert edge.source_id == "mem-1"
+        assert edge.target_type == "person"
+        assert edge.target_id == "person-1"
+
+    def test_create_stated_by_edge_with_created_by(self):
+        from ash.graph.edges import create_stated_by_edge
+
+        edge = create_stated_by_edge("mem-1", "person-1", created_by="extraction")
+        assert edge.created_by == "extraction"
+
+    def test_get_stated_by_person(self):
+        from ash.graph.edges import create_stated_by_edge, get_stated_by_person
+
+        graph = KnowledgeGraph()
+        graph.add_memory(
+            MemoryEntry(id="mem-1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        )
+        graph.add_person(PersonEntry(id="person-1", name="Alice"))
+        graph.add_edge(create_stated_by_edge("mem-1", "person-1"))
+
+        result = get_stated_by_person(graph, "mem-1")
+        assert result == "person-1"
+
+    def test_get_stated_by_person_none(self):
+        from ash.graph.edges import get_stated_by_person
+
+        graph = KnowledgeGraph()
+        graph.add_memory(
+            MemoryEntry(id="mem-1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        )
+        assert get_stated_by_person(graph, "mem-1") is None
+
+    def test_get_memories_stated_by(self):
+        from ash.graph.edges import create_stated_by_edge, get_memories_stated_by
+
+        graph = KnowledgeGraph()
+        for mid in ["mem-1", "mem-2", "mem-3"]:
+            graph.add_memory(
+                MemoryEntry(
+                    id=mid, content=f"test {mid}", memory_type=MemoryType.KNOWLEDGE
+                )
+            )
+        graph.add_person(PersonEntry(id="person-1", name="Alice"))
+        graph.add_edge(create_stated_by_edge("mem-1", "person-1"))
+        graph.add_edge(create_stated_by_edge("mem-2", "person-1"))
+
+        result = get_memories_stated_by(graph, "person-1")
+        assert set(result) == {"mem-1", "mem-2"}
+
+    async def test_add_memory_creates_stated_by_edge(self, graph_store: Store):
+        from ash.graph.edges import STATED_BY
+
+        person = await graph_store.create_person(
+            created_by="test", name="Alice", aliases=["alice"]
+        )
+        memory = await graph_store.add_memory(
+            content="Alice said something",
+            source_username="alice",
+            stated_by_person_id=person.id,
+        )
+
+        stated_by_edges = graph_store._graph.get_outgoing(
+            memory.id, edge_type=STATED_BY
+        )
+        assert len(stated_by_edges) == 1
+        assert stated_by_edges[0].target_id == person.id
+
+    async def test_add_memory_no_stated_by_without_person(self, graph_store: Store):
+        from ash.graph.edges import STATED_BY
+
+        memory = await graph_store.add_memory(
+            content="Nobody said this",
+        )
+
+        stated_by_edges = graph_store._graph.get_outgoing(
+            memory.id, edge_type=STATED_BY
+        )
+        assert len(stated_by_edges) == 0
+
+
+# =============================================================================
+# HAS_RELATIONSHIP Edge Tests
+# =============================================================================
+
+
+class TestHasRelationshipEdges:
+    """Tests for HAS_RELATIONSHIP edge creation and query helpers."""
+
+    def test_create_has_relationship_edge(self):
+        from ash.graph.edges import HAS_RELATIONSHIP, create_has_relationship_edge
+
+        edge = create_has_relationship_edge(
+            "person-1", "person-2", relationship_type="friend", stated_by="alice"
+        )
+        assert edge.edge_type == HAS_RELATIONSHIP
+        assert edge.source_type == "person"
+        assert edge.source_id == "person-1"
+        assert edge.target_type == "person"
+        assert edge.target_id == "person-2"
+        assert edge.properties == {"relationship_type": "friend", "stated_by": "alice"}
+
+    def test_create_has_relationship_edge_no_properties(self):
+        from ash.graph.edges import create_has_relationship_edge
+
+        edge = create_has_relationship_edge("person-1", "person-2")
+        assert edge.properties is None
+
+    def test_get_relationships_for_person(self):
+        from ash.graph.edges import (
+            create_has_relationship_edge,
+            get_relationships_for_person,
+        )
+
+        graph = KnowledgeGraph()
+        graph.add_person(PersonEntry(id="p1", name="Alice"))
+        graph.add_person(PersonEntry(id="p2", name="Bob"))
+        graph.add_person(PersonEntry(id="p3", name="Charlie"))
+        graph.add_edge(
+            create_has_relationship_edge("p1", "p2", relationship_type="friend")
+        )
+        graph.add_edge(
+            create_has_relationship_edge("p3", "p1", relationship_type="colleague")
+        )
+
+        edges = get_relationships_for_person(graph, "p1")
+        assert len(edges) == 2
+
+    def test_get_related_people(self):
+        from ash.graph.edges import create_has_relationship_edge, get_related_people
+
+        graph = KnowledgeGraph()
+        graph.add_person(PersonEntry(id="p1", name="Alice"))
+        graph.add_person(PersonEntry(id="p2", name="Bob"))
+        graph.add_person(PersonEntry(id="p3", name="Charlie"))
+        graph.add_edge(create_has_relationship_edge("p1", "p2"))
+        graph.add_edge(create_has_relationship_edge("p3", "p1"))
+
+        related = get_related_people(graph, "p1")
+        assert set(related) == {"p2", "p3"}
+
+    async def test_add_relationship_creates_edge(self, graph_store: Store):
+        from ash.graph.edges import HAS_RELATIONSHIP
+
+        alice = await graph_store.create_person(
+            created_by="test", name="Alice", aliases=["alice"]
+        )
+        bob = await graph_store.create_person(
+            created_by="test", name="Bob", aliases=["bob"]
+        )
+
+        await graph_store.add_relationship(
+            bob.id, "friend", stated_by="alice", related_person_id=alice.id
+        )
+
+        edges = graph_store._graph.get_outgoing(bob.id, edge_type=HAS_RELATIONSHIP)
+        assert len(edges) == 1
+        assert edges[0].target_id == alice.id
+        assert edges[0].properties is not None
+        assert edges[0].properties["relationship_type"] == "friend"
+
+    async def test_add_relationship_no_edge_without_related_person(
+        self, graph_store: Store
+    ):
+        from ash.graph.edges import HAS_RELATIONSHIP
+
+        bob = await graph_store.create_person(
+            created_by="test", name="Bob", aliases=["bob"]
+        )
+
+        await graph_store.add_relationship(bob.id, "friend", stated_by="alice")
+
+        edges = graph_store._graph.get_outgoing(bob.id, edge_type=HAS_RELATIONSHIP)
+        assert len(edges) == 0

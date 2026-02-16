@@ -122,9 +122,6 @@ class MemoryEntry:
     owner_user_id: str | None = None  # Personal scope
     chat_id: str | None = None  # Group scope
 
-    # Subject (optional)
-    subject_person_ids: list[str] = field(default_factory=list)
-
     # Source Attribution (required)
     source: str = "user"  # "user" | "extraction" | "cli" | "rpc"
 
@@ -146,7 +143,6 @@ class MemoryEntry:
     # Lifecycle (optional)
     expires_at: datetime | None = None
     superseded_at: datetime | None = None
-    superseded_by_id: str | None = None
 
     # Archive fields (set when memory is archived)
     archived_at: datetime | None = None
@@ -176,8 +172,6 @@ class MemoryEntry:
             d["owner_user_id"] = self.owner_user_id
         if self.chat_id:
             d["chat_id"] = self.chat_id
-        if self.subject_person_ids:
-            d["subject_person_ids"] = self.subject_person_ids
         if self.source_username:
             d["source_username"] = self.source_username
         if self.source_display_name:
@@ -196,8 +190,6 @@ class MemoryEntry:
             d["expires_at"] = self.expires_at.isoformat()
         if self.superseded_at:
             d["superseded_at"] = self.superseded_at.isoformat()
-        if self.superseded_by_id:
-            d["superseded_by_id"] = self.superseded_by_id
         if self.archived_at:
             d["archived_at"] = self.archived_at.isoformat()
         if self.archive_reason:
@@ -220,7 +212,6 @@ class MemoryEntry:
             observed_at=_parse_datetime(d.get("observed_at")),
             owner_user_id=d.get("owner_user_id"),
             chat_id=d.get("chat_id"),
-            subject_person_ids=d.get("subject_person_ids") or [],
             source=d.get("source", "user"),
             source_username=d.get("source_username"),
             source_display_name=d.get("source_display_name"),
@@ -231,7 +222,6 @@ class MemoryEntry:
             portable=d.get("portable", True),
             expires_at=_parse_datetime(d.get("expires_at")),
             superseded_at=_parse_datetime(d.get("superseded_at")),
-            superseded_by_id=d.get("superseded_by_id"),
             archived_at=_parse_datetime(d.get("archived_at")),
             archive_reason=d.get("archive_reason"),
             metadata=d.get("metadata"),
@@ -358,7 +348,6 @@ class PersonEntry:
     name: str = ""
     relationships: list[RelationshipClaim] = field(default_factory=list)
     aliases: list[AliasEntry] = field(default_factory=list)
-    merged_into: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     metadata: dict[str, Any] | None = None
@@ -396,8 +385,6 @@ class PersonEntry:
                 }
                 for a in self.aliases
             ]
-        if self.merged_into:
-            d["merged_into"] = self.merged_into
         if self.created_at:
             d["created_at"] = self.created_at.isoformat()
         if self.updated_at:
@@ -441,7 +428,6 @@ class PersonEntry:
             name=d.get("name", ""),
             relationships=relationships,
             aliases=aliases,
-            merged_into=d.get("merged_into"),
             created_at=_parse_datetime(d.get("created_at")),
             updated_at=_parse_datetime(d.get("updated_at")),
             metadata=d.get("metadata"),
@@ -483,7 +469,6 @@ class UserEntry:
     provider_id: str = ""  # Stable provider user ID (e.g., "123456789")
     username: str | None = None  # Mostly-stable handle (e.g., "notzeeg")
     display_name: str | None = None  # Unstable display name
-    person_id: str | None = None  # -> PersonEntry.id
     created_at: datetime | None = None
     updated_at: datetime | None = None
     metadata: dict[str, Any] | None = None

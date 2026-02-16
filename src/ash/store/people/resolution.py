@@ -26,17 +26,19 @@ class PeopleResolutionMixin:
     """Person lookup and resolution operations."""
 
     async def find_person(self: Store, reference: str) -> PersonEntry | None:
+        from ash.graph.edges import get_merged_into
+
         ref = normalize_reference(reference)
 
         for person in self._graph.people.values():
-            if person.merged_into is not None:
+            if get_merged_into(self._graph, person.id) is not None:
                 continue
             if person.name and person.name.lower() == ref:
                 return person
 
         # Search by alias
         for person in self._graph.people.values():
-            if person.merged_into is not None:
+            if get_merged_into(self._graph, person.id) is not None:
                 continue
             for alias in person.aliases:
                 alias_norm = normalize_reference(alias.value)
@@ -45,7 +47,7 @@ class PeopleResolutionMixin:
 
         # Search by relationship
         for person in self._graph.people.values():
-            if person.merged_into is not None:
+            if get_merged_into(self._graph, person.id) is not None:
                 continue
             for rel in person.relationships:
                 if rel.relationship.lower() == ref:
@@ -58,11 +60,13 @@ class PeopleResolutionMixin:
         reference: str,
         speaker_user_id: str,
     ) -> PersonEntry | None:
+        from ash.graph.edges import get_merged_into
+
         ref = normalize_reference(reference)
         candidate_ids: set[str] = set()
 
         for person in self._graph.people.values():
-            if person.merged_into is not None:
+            if get_merged_into(self._graph, person.id) is not None:
                 continue
             if person.name and person.name.lower() == ref:
                 candidate_ids.add(person.id)
@@ -160,7 +164,9 @@ class PeopleResolutionMixin:
         if not self._llm or not self._llm_model:
             return None
         people = await self.get_all_people()
-        candidates = [p for p in people if not p.merged_into]
+        from ash.graph.edges import get_merged_into
+
+        candidates = [p for p in people if not get_merged_into(self._graph, p.id)]
         if not candidates:
             return None
         try:
@@ -212,11 +218,13 @@ class PeopleResolutionMixin:
 
     async def _has_ambiguous_matches(self: Store, reference: str) -> bool:
         """Check if a reference matches multiple distinct (non-merged) people."""
+        from ash.graph.edges import get_merged_into
+
         ref = normalize_reference(reference)
         person_ids: set[str] = set()
 
         for person in self._graph.people.values():
-            if person.merged_into is not None:
+            if get_merged_into(self._graph, person.id) is not None:
                 continue
             if person.name and person.name.lower() == ref:
                 person_ids.add(person.id)

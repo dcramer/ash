@@ -240,6 +240,7 @@ async def process_extracted_facts(
                                 pid,
                                 rel_term,
                                 stated_by=speaker_username,
+                                related_person_id=speaker_person_id,
                             )
                         except Exception:
                             logger.debug(
@@ -289,6 +290,20 @@ async def process_extracted_facts(
                 speaker_display_name if source_username == speaker_username else None
             )
 
+            # Resolve stated_by person for STATED_BY edge
+            stated_by_pid: str | None = None
+            if speaker_person_id:
+                stated_by_pid = speaker_person_id
+            elif source_username and source_username != user_id:
+                try:
+                    pids = await store.find_person_ids_for_username(source_username)
+                    if pids:
+                        stated_by_pid = next(iter(pids))
+                except Exception:
+                    logger.debug(
+                        "Failed to resolve stated_by person for %s", source_username
+                    )
+
             new_memory = await store.add_memory(
                 content=fact.content,
                 source=source,
@@ -302,6 +317,7 @@ async def process_extracted_facts(
                 extraction_confidence=fact.confidence,
                 sensitivity=fact.sensitivity,
                 portable=fact.portable,
+                stated_by_person_id=stated_by_pid,
             )
 
             logger.debug(

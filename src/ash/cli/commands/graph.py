@@ -129,8 +129,11 @@ async def _graph_users(store: Store) -> None:
         ],
     )
 
+    from ash.graph.edges import get_person_for_user
+
     for user in users:
-        person_link = user.person_id[:12] if user.person_id else "-"
+        person_id = get_person_for_user(store._graph, user.id)
+        person_link = person_id[:12] if person_id else "-"
         updated = user.updated_at.strftime("%Y-%m-%d") if user.updated_at else "-"
         table.add_row(
             user.id[:12],
@@ -217,6 +220,8 @@ async def _graph_edges(store: Store, node_id: str) -> None:
             dim(f"Resolved prefix to: {full_id} ({table_name})")
         node_id = full_id
 
+    from ash.graph.edges import get_subject_person_ids
+
     edges: list[tuple[str, str, str, str]] = []
     graph = store._graph
 
@@ -224,10 +229,11 @@ async def _graph_edges(store: Store, node_id: str) -> None:
     for mem in graph.memories.values():
         if mem.archived_at:
             continue
+        subject_ids = get_subject_person_ids(graph, mem.id)
         if mem.id == node_id:
-            for pid in mem.subject_person_ids:
+            for pid in subject_ids:
                 edges.append(("about", "->", mem.id, pid))
-        elif node_id in mem.subject_person_ids:
+        elif node_id in subject_ids:
             edges.append(("about", "<-", mem.id, node_id))
 
     # Memory -> User (owned_by) via owner_user_id
@@ -248,32 +254,41 @@ async def _graph_edges(store: Store, node_id: str) -> None:
         elif mem.chat_id == node_id:
             edges.append(("in_chat", "<-", mem.id, mem.chat_id))
 
+    from ash.graph.edges import get_person_for_user
+
     # User -> Person (is_person) via person_id
     for user in graph.users.values():
-        if not user.person_id:
+        person_id = get_person_for_user(graph, user.id)
+        if not person_id:
             continue
         if user.id == node_id:
-            edges.append(("is_person", "->", user.id, user.person_id))
-        elif user.person_id == node_id:
-            edges.append(("is_person", "<-", user.id, user.person_id))
+            edges.append(("is_person", "->", user.id, person_id))
+        elif person_id == node_id:
+            edges.append(("is_person", "<-", user.id, person_id))
+
+    from ash.graph.edges import get_merged_into
 
     # Person -> Person (merged_into)
     for person in graph.people.values():
-        if not person.merged_into:
+        merged_into_id = get_merged_into(graph, person.id)
+        if not merged_into_id:
             continue
         if person.id == node_id:
-            edges.append(("merged_into", "->", person.id, person.merged_into))
-        elif person.merged_into == node_id:
-            edges.append(("merged_into", "<-", person.id, person.merged_into))
+            edges.append(("merged_into", "->", person.id, merged_into_id))
+        elif merged_into_id == node_id:
+            edges.append(("merged_into", "<-", person.id, merged_into_id))
+
+    from ash.graph.edges import get_superseded_by
 
     # Memory -> Memory (supersedes) via superseded_by_id
     for mem in graph.memories.values():
-        if not mem.superseded_by_id:
+        superseded_by_id = get_superseded_by(graph, mem.id)
+        if not superseded_by_id:
             continue
         if mem.id == node_id:
-            edges.append(("supersedes", "->", mem.id, mem.superseded_by_id))
-        elif mem.superseded_by_id == node_id:
-            edges.append(("supersedes", "<-", mem.id, mem.superseded_by_id))
+            edges.append(("supersedes", "->", mem.id, superseded_by_id))
+        elif superseded_by_id == node_id:
+            edges.append(("supersedes", "<-", mem.id, superseded_by_id))
 
     if not edges:
         dim(f"No edges found for node: {node_id}")
@@ -319,12 +334,16 @@ async def _graph_stats(store: Store) -> None:
         1 for m in graph.memories.values() if not m.archived_at and not m.superseded_at
     )
 
+    from ash.graph.edges import get_subject_person_ids
+
     # Count edges by type from in-memory data
     edge_counts: dict[str, int] = {}
 
     # about: memories with subject_person_ids
     about_count = sum(
-        len(m.subject_person_ids) for m in graph.memories.values() if not m.archived_at
+        len(get_subject_person_ids(graph, m.id))
+        for m in graph.memories.values()
+        if not m.archived_at
     )
     if about_count:
         edge_counts["about"] = about_count
@@ -341,19 +360,27 @@ async def _graph_stats(store: Store) -> None:
     if in_chat:
         edge_counts["in_chat"] = in_chat
 
+    from ash.graph.edges import get_person_for_user
+
     # is_person: users with person_id
-    is_person = sum(1 for u in graph.users.values() if u.person_id)
+    is_person = sum(1 for u in graph.users.values() if get_person_for_user(graph, u.id))
     if is_person:
         edge_counts["is_person"] = is_person
 
+    from ash.graph.edges import get_merged_into
+
     # merged_into: people with merged_into
-    merged = sum(1 for p in graph.people.values() if p.merged_into)
+    merged = sum(1 for p in graph.people.values() if get_merged_into(graph, p.id))
     if merged:
         edge_counts["merged_into"] = merged
 
+    from ash.graph.edges import get_superseded_by
+
     # supersedes: memories with superseded_by_id
     supersedes = sum(
-        1 for m in graph.memories.values() if m.superseded_by_id and not m.archived_at
+        1
+        for m in graph.memories.values()
+        if get_superseded_by(graph, m.id) and not m.archived_at
     )
     if supersedes:
         edge_counts["supersedes"] = supersedes
@@ -390,8 +417,10 @@ async def _graph_stats(store: Store) -> None:
     console.print()
     console.print("[bold]Health[/bold]")
 
+    from ash.graph.edges import get_person_for_user
+
     # Users without person links
-    unlinked_users = [u for u in users if not u.person_id]
+    unlinked_users = [u for u in users if not get_person_for_user(graph, u.id)]
     if unlinked_users:
         console.print(
             f"  [yellow]Users without person link: {len(unlinked_users)}[/yellow]"

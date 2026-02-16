@@ -81,7 +81,11 @@ async def _resolve_subject_names(
 
     Returns {memory_id: [person_name, ...]} for memories with known subjects.
     """
-    all_person_ids = {pid for m in memories for pid in m.subject_person_ids}
+    from ash.graph.edges import get_subject_person_ids
+
+    all_person_ids = {
+        pid for m in memories for pid in get_subject_person_ids(store._graph, m.id)
+    }
     if not all_person_ids:
         return {}
 
@@ -91,11 +95,12 @@ async def _resolve_subject_names(
         if person and person.name:
             person_names[pid] = person.name
 
+    from ash.graph.edges import get_subject_person_ids
+
     result: dict[str, list[str]] = {}
     for m in memories:
-        names = [
-            person_names[pid] for pid in m.subject_person_ids if pid in person_names
-        ]
+        subject_ids = get_subject_person_ids(store._graph, m.id)
+        names = [person_names[pid] for pid in subject_ids if pid in person_names]
         if names:
             result[m.id] = names
     return result

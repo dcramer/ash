@@ -56,10 +56,13 @@ async def memory_show(store: Store, memory_id: str) -> None:
     else:
         table.add_row("Scope", "Global")
 
+    from ash.graph.edges import get_subject_person_ids
+
     # Subjects (who this memory is about)
     subject_names = []
-    if memory.subject_person_ids:
-        for person_id in memory.subject_person_ids:
+    subject_person_ids = get_subject_person_ids(store._graph, memory.id)
+    if subject_person_ids:
+        for person_id in subject_person_ids:
             person = people_by_id.get(person_id)
             if person:
                 subject_names.append(f"{person.name} ({person_id[:8]})")
@@ -77,7 +80,7 @@ async def memory_show(store: Store, memory_id: str) -> None:
     is_self_ref = is_source_self_reference(
         memory.source_username,
         memory.owner_user_id,
-        memory.subject_person_ids,
+        subject_person_ids,
         people,
         people_by_id,
     )
@@ -93,10 +96,13 @@ async def memory_show(store: Store, memory_id: str) -> None:
         table.add_row("Observed", memory.observed_at.isoformat())
     if memory.expires_at:
         table.add_row("Expires", memory.expires_at.isoformat())
+    from ash.graph.edges import get_superseded_by
+
     if memory.superseded_at:
         table.add_row("Superseded", memory.superseded_at.isoformat())
-    if memory.superseded_by_id:
-        table.add_row("Superseded By", memory.superseded_by_id)
+    superseded_by_id = get_superseded_by(store._graph, memory.id)
+    if superseded_by_id:
+        table.add_row("Superseded By", superseded_by_id)
 
     # Source attribution
     if memory.source_session_id:
