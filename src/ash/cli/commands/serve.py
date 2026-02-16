@@ -64,7 +64,12 @@ async def _run_server(
     configure_logging(use_rich=True, log_to_file=True)
 
     from ash.config import WorkspaceLoader, load_config
-    from ash.config.paths import get_logs_path, get_pid_path, get_rpc_socket_path
+    from ash.config.paths import (
+        get_logs_path,
+        get_pid_path,
+        get_rpc_socket_path,
+        get_sessions_path,
+    )
     from ash.core import create_agent
     from ash.db import init_database
     from ash.providers.telegram import TelegramProvider
@@ -145,7 +150,11 @@ async def _run_server(
         rpc_socket_path = get_rpc_socket_path()
         rpc_server = RPCServer(rpc_socket_path)
         register_memory_methods(
-            rpc_server, components.memory_manager, components.person_manager
+            rpc_server,
+            components.memory_manager,
+            components.person_manager,
+            memory_extractor=components.memory_extractor,
+            sessions_path=get_sessions_path(),
         )
         register_config_methods(rpc_server, ash_config, components.skill_registry)
         register_log_methods(rpc_server, get_logs_path())

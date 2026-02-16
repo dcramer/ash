@@ -154,7 +154,10 @@ async def _run_chat(
         if components.memory_manager:
             rpc_server = RPCServer(get_rpc_socket_path())
             register_memory_methods(
-                rpc_server, components.memory_manager, components.person_manager
+                rpc_server,
+                components.memory_manager,
+                components.person_manager,
+                memory_extractor=components.memory_extractor,
             )
             await rpc_server.start()
 

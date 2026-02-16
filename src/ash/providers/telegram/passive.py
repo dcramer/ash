@@ -482,7 +482,7 @@ class PassiveMemoryExtractor:
             if not facts:
                 return 0
 
-            stored = await process_extracted_facts(
+            stored_ids = await process_extracted_facts(
                 facts=facts,
                 store=self._memory_manager,
                 user_id=message.user_id,
@@ -494,6 +494,7 @@ class PassiveMemoryExtractor:
                 source="passive",
             )
 
+            stored = len(stored_ids)
             if stored:
                 logger.info(
                     "Extracted %d facts from passive message in chat %s",

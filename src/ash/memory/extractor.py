@@ -220,6 +220,29 @@ Return ONLY valid JSON, no other text. Example:
 If there are no facts worth extracting, return an empty array: []"""
 
 
+CLASSIFICATION_PROMPT = """You are a memory classification system. Given a single fact, classify it.
+
+## Fact to classify:
+{content}
+
+## Output format:
+Return a JSON object with:
+- subjects: Names of people this is about (empty array if about the speaker themselves)
+- type: One of: "preference", "identity", "relationship", "knowledge", "context", "event", "task", "observation"
+- sensitivity: One of: "public", "personal", "sensitive"
+- portable: true if this is an enduring fact about a person, false if ephemeral
+- shared: true if this is group/team knowledge, false if personal
+
+## Guidelines:
+- subjects should contain people the fact is PRIMARILY ABOUT (not the speaker)
+- Default sensitivity to "public" unless clearly private/medical/financial
+- Default portable to true unless clearly ephemeral
+- Default shared to false unless clearly group knowledge
+
+Return ONLY valid JSON, no other text. Example:
+{{"subjects": ["Sarah"], "type": "relationship", "sensitivity": "public", "portable": true, "shared": false}}"""
+
+
 class MemoryExtractor:
     """Extracts memorable facts from conversations using a secondary LLM.
 
@@ -246,6 +269,52 @@ class MemoryExtractor:
         self._model = model
         self._max_tokens = max_tokens
         self._confidence_threshold = confidence_threshold
+
+    async def classify_fact(self, content: str) -> ExtractedFact | None:
+        """Classify a pre-formed fact using LLM.
+
+        Used by the enriched `memory add` RPC path to get subject linking,
+        type classification, sensitivity, and portable classification for
+        facts provided directly by the agent.
+
+        Args:
+            content: The fact content string to classify.
+
+        Returns:
+            ExtractedFact with classification fields, or None on failure.
+        """
+        prompt = CLASSIFICATION_PROMPT.format(content=content)
+
+        try:
+            response = await self._llm.complete(
+                messages=[Message(role=Role.USER, content=prompt)],
+                model=self._model,
+                max_tokens=256,
+                temperature=0.1,
+            )
+
+            text = (response.message.get_text() or "").strip()
+
+            # Strip markdown code fences if present
+            match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
+            if match:
+                text = match.group(1).strip()
+
+            data = json.loads(text)
+            if not isinstance(data, dict):
+                return None
+
+            # Build an ExtractedFact using _parse_fact_item logic for field parsing,
+            # but override content and confidence
+            data["content"] = content
+            data["confidence"] = 1.0
+            return self._parse_fact_item(data)
+
+        except Exception:
+            logger.warning(
+                "Fact classification failed for: %s", content[:80], exc_info=True
+            )
+            return None
 
     async def extract_from_conversation(
         self,

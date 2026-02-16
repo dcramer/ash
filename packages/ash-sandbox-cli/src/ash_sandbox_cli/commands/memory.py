@@ -141,6 +141,30 @@ def add_memory(
     typer.echo(f"Memory added ({scope}): {memory_id[:8]}")
 
 
+@app.command("extract")
+def extract_memories(
+    shared: Annotated[
+        bool, typer.Option("--shared", help="Create as group memories")
+    ] = False,
+) -> None:
+    """Extract memories from the current message using the full pipeline.
+
+    No arguments needed — reads the triggering message from the session
+    and runs full extraction (subject linking, type classification, etc.).
+    """
+    try:
+        params = {"shared": shared, **get_context_params()}
+        result = rpc_call("memory.extract", params)
+    except ConnectionError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except RPCError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    typer.echo(f"Extracted {result.get('stored', 0)} memory(ies)")
+
+
 @app.command("delete")
 def delete_memory(
     memory_id: Annotated[str, typer.Argument(help="Memory ID to delete")],

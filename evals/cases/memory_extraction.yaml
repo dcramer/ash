@@ -1,0 +1,52 @@
+name: Memory Extraction
+description: Tests that explicit "remember" requests store facts with proper classification via the extraction pipeline
+
+cases:
+  - id: extraction_relationship_stored
+    description: Remember X is my Y should use memory extract to store a relationship memory
+    prompt: "Remember that Sarah is my sister"
+    expected_behavior: |
+      The agent should use `ash-sb memory extract` (not memory add) to store
+      the fact that Sarah is the user's sister. The resulting memory should have
+      type=relationship and be linked to a person named Sarah.
+    criteria:
+      - The agent runs ash-sb memory extract
+      - A memory about Sarah being the user's sister is stored
+      - The memory has relationship type (not knowledge or identity)
+      - A person record for Sarah exists
+    expected_tools:
+      - bash
+    tags:
+      - memory
+      - extraction
+
+  - id: extraction_preference_stored
+    description: Remember I prefer X should use memory extract to store a preference memory
+    prompt: "Remember that I prefer dark mode in all apps"
+    expected_behavior: |
+      The agent should use `ash-sb memory extract` (not memory add) to store
+      a preference-typed memory about the user preferring dark mode.
+    criteria:
+      - The agent runs ash-sb memory extract
+      - A memory about dark mode preference is stored
+      - The memory has preference type
+    expected_tools:
+      - bash
+    tags:
+      - memory
+      - extraction
+
+  - id: extraction_recall_after_store
+    description: A fact stored via explicit remember is recallable in a new session
+    prompt: "What do you know about my sister?"
+    expected_behavior: |
+      The agent should recall that the user's sister is Sarah, based on the
+      memory stored from a previous explicit "remember" request. The response
+      should mention Sarah by name.
+    criteria:
+      - Mentions Sarah by name
+      - Identifies Sarah as the user's sister
+      - Response is conversational
+    tags:
+      - memory
+      - recall

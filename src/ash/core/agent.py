@@ -85,6 +85,7 @@ def _build_routing_env(
         "ASH_USERNAME": session.context.username or "",
         "ASH_DISPLAY_NAME": session.context.display_name or "",
         "ASH_TIMEZONE": timezone,
+        "ASH_MESSAGE_ID": session.context.current_message_id or "",
     }
 
     # Provide chat state paths for sandbox access

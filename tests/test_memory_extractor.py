@@ -13,6 +13,7 @@ import pytest
 from ash.llm.types import CompletionResponse, Message, Role, Usage
 from ash.memory import MemoryExtractor
 from ash.memory.extractor import SpeakerInfo
+from ash.store.types import MemoryType
 
 
 class TestSpeakerInfo:
@@ -521,3 +522,87 @@ class TestExtractionPromptContent:
         """Extraction prompt should reject actions without specifics."""
         assert "just arrived at a location" in prompt
         assert "fixed some issues" in prompt
+
+
+class TestClassifyFact:
+    """Tests for classify_fact() method."""
+
+    @pytest.fixture
+    def mock_llm(self):
+        """Create a mock LLM provider."""
+        return MagicMock()
+
+    @pytest.fixture
+    def extractor(self, mock_llm):
+        """Create a MemoryExtractor with mocked LLM."""
+        return MemoryExtractor(
+            llm=mock_llm,
+            model="test-model",
+            confidence_threshold=0.7,
+        )
+
+    async def test_classify_returns_extracted_fact(self, extractor, mock_llm):
+        """Test that classify_fact returns a properly parsed ExtractedFact."""
+        from ash.store.types import Sensitivity
+
+        mock_llm.complete = AsyncMock(
+            return_value=CompletionResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content='{"subjects": ["Sarah"], "type": "relationship", "sensitivity": "public", "portable": true, "shared": false}',
+                ),
+                usage=Usage(input_tokens=50, output_tokens=30),
+            )
+        )
+
+        result = await extractor.classify_fact("Sarah is my sister")
+
+        assert result is not None
+        assert result.content == "Sarah is my sister"
+        assert result.subjects == ["Sarah"]
+        assert result.memory_type == MemoryType.RELATIONSHIP
+        assert result.confidence == 1.0
+        assert result.sensitivity == Sensitivity.PUBLIC
+        assert result.portable is True
+
+    async def test_classify_preserves_original_content(self, extractor, mock_llm):
+        """Test that the original content is preserved, not the LLM output."""
+        mock_llm.complete = AsyncMock(
+            return_value=CompletionResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content='{"subjects": [], "type": "preference", "sensitivity": "public", "portable": true, "shared": false}',
+                ),
+                usage=Usage(input_tokens=50, output_tokens=30),
+            )
+        )
+
+        original = "I prefer dark mode in all apps"
+        result = await extractor.classify_fact(original)
+
+        assert result is not None
+        assert result.content == original
+
+    async def test_classify_returns_none_on_failure(self, extractor, mock_llm):
+        """Test that classify_fact returns None on LLM failure."""
+        mock_llm.complete = AsyncMock(side_effect=Exception("API Error"))
+
+        result = await extractor.classify_fact("Some fact")
+
+        assert result is None
+
+    async def test_classify_returns_none_on_invalid_json(self, extractor, mock_llm):
+        """Test that classify_fact returns None when LLM returns invalid JSON."""
+        mock_llm.complete = AsyncMock(
+            return_value=CompletionResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content="I cannot classify this fact.",
+                ),
+                usage=Usage(input_tokens=50, output_tokens=30),
+            )
+        )
+
+        result = await extractor.classify_fact("Some fact")
+
+        assert result is None

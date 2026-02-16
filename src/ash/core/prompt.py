@@ -394,8 +394,8 @@ class SystemPromptBuilder:
             "The user cannot run them - when they ask to reload config, search memory,",
             "etc., you must run these commands yourself:",
             "",
+            "- `ash-sb memory extract` - Extract and store memories from the current message",
             "- `ash-sb memory search 'query'` - Search memories",
-            "- `ash-sb memory add 'content'` - Store a memory",
             "- `ash-sb memory list` - List recent memories with IDs",
             "- `ash-sb memory delete <id>` - Delete a memory by ID",
         ]
@@ -566,8 +566,9 @@ class SystemPromptBuilder:
         guidance = (
             "## Memory\n\n"
             "Memory is automatic — facts are extracted after each exchange.\n"
-            'Only use `ash-sb memory add` when users explicitly say "remember" or "don\'t forget".\n'
-            "Use --subject for facts about specific people (e.g., --subject 'Sarah')."
+            "When users explicitly ask to remember something, run `ash-sb memory extract` "
+            "(no arguments needed — it processes the current message through the full pipeline).\n"
+            "Always use `ash-sb memory extract` — never use `ash-sb memory add`."
         )
 
         if not memory.memories:

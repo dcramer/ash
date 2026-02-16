@@ -188,7 +188,7 @@ async def process_extracted_facts(
     owner_names: list[str] | None = None,
     source: str = "background_extraction",
     confidence_threshold: float = 0.7,
-) -> int:
+) -> list[str]:
     """Process extracted facts through the full post-extraction pipeline.
 
     Handles: subject resolution, self-person injection, hearsay supersession,
@@ -197,11 +197,11 @@ async def process_extracted_facts(
     post-extraction dedup, and existing memory dedup.
 
     Returns:
-        Number of facts successfully stored.
+        List of stored memory IDs.
     """
     owner_matchers = build_owner_matchers(owner_names)
     newly_created_person_ids: list[str] = []
-    stored = 0
+    stored_ids: list[str] = []
 
     for fact in facts:
         if fact.confidence < confidence_threshold:
@@ -288,7 +288,7 @@ async def process_extracted_facts(
                 fact.confidence,
                 source_username,
             )
-            stored += 1
+            stored_ids.append(new_memory.id)
 
             # Check for hearsay to supersede when this is a self-fact
             if is_self_fact and source_username:
@@ -317,4 +317,4 @@ async def process_extracted_facts(
         except Exception:
             logger.warning("Post-extraction dedup failed", exc_info=True)
 
-    return stored
+    return stored_ids

@@ -1,9 +1,11 @@
 """Memory RPC method handlers."""
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ash.memory.extractor import MemoryExtractor
     from ash.rpc.server import RPCServer
     from ash.store.store import Store
 
@@ -14,6 +16,8 @@ def register_memory_methods(
     server: "RPCServer",
     memory_manager: "Store",
     person_manager: "Store | None" = None,
+    memory_extractor: "MemoryExtractor | None" = None,
+    sessions_path: Path | None = None,
 ) -> None:
     """Register memory-related RPC methods.
 
@@ -21,6 +25,8 @@ def register_memory_methods(
         server: RPC server to register methods on.
         memory_manager: Store instance.
         person_manager: Store instance (for subject resolution).
+        memory_extractor: Optional extractor for fact classification/extraction.
+        sessions_path: Path to sessions directory (for memory.extract).
     """
 
     async def _build_username_lookup() -> dict[str, str]:
@@ -69,6 +75,43 @@ def register_memory_methods(
                     names.append(pid[:8])
         return names
 
+    async def _ensure_speaker(
+        user_id: str | None,
+        source_username: str | None,
+        source_display_name: str | None,
+    ) -> tuple[str | None, list[str]]:
+        """Ensure self-person exists and build owner_names list.
+
+        Returns:
+            (speaker_person_id, owner_names)
+        """
+        from ash.memory.processing import enrich_owner_names, ensure_self_person
+
+        if not person_manager or not user_id:
+            return None, []
+
+        owner_names: list[str] = []
+        if source_username:
+            owner_names.append(source_username)
+        if source_display_name and source_display_name not in owner_names:
+            owner_names.append(source_display_name)
+
+        speaker_person_id: str | None = None
+        if source_username or source_display_name:
+            effective_display = source_display_name or source_username
+            assert effective_display is not None
+            speaker_person_id = await ensure_self_person(
+                person_manager,
+                user_id,
+                source_username or "",
+                effective_display,
+            )
+
+        if speaker_person_id:
+            await enrich_owner_names(person_manager, owner_names, speaker_person_id)
+
+        return speaker_person_id, owner_names
+
     async def memory_search(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Search memories using semantic search.
 
@@ -111,15 +154,17 @@ def register_memory_methods(
         return output
 
     async def memory_add(params: dict[str, Any]) -> dict[str, Any]:
-        """Add a memory entry.
+        """Add a memory entry with optional LLM classification.
 
-        Memory scoping:
-        - Personal: user_id set, chat_id not set (or shared=False)
-        - Group: chat_id set with shared=True (user_id becomes None)
+        When a memory extractor is available and subjects are not explicitly
+        provided, the fact is classified via LLM for subject linking, type
+        classification, sensitivity, and portable flags. The result is then
+        routed through the full processing pipeline (hearsay supersession,
+        relationship extraction, etc.).
 
         Params:
             content: Memory content (required)
-            source: Source label (default "rpc")
+            source: Source label (default "agent")
             expires_days: Days until expiration (optional)
             user_id: Owner user ID (for personal memories)
             chat_id: Chat ID (for group memories when shared=True)
@@ -128,59 +173,200 @@ def register_memory_methods(
             source_username: Who provided this fact (username/handle)
             source_display_name: Display name of the source user
         """
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
         content = params.get("content")
         if not content:
             raise ValueError("content is required")
 
-        source = params.get("source", "rpc")
-        expires_days = params.get("expires_days")
+        source = params.get("source", "agent")
         user_id = params.get("user_id")
         chat_id = params.get("chat_id")
         shared = params.get("shared", False)
         subjects = params.get("subjects", [])
-        # Accept both old and new param names for API backward compat
         source_username = params.get("source_username") or params.get("source_user_id")
         source_display_name = params.get("source_display_name") or params.get(
             "source_user_name"
         )
 
-        # Apply scoping rules:
-        # - Group memory: shared=True with chat_id -> owner_user_id=None, chat_id=chat_id
-        # - Personal memory: everything else -> owner_user_id=user_id, chat_id=None
-        if shared and chat_id:
-            owner_user_id = None
-            effective_chat_id = chat_id
-        else:
-            owner_user_id = user_id
-            effective_chat_id = None
+        # Ensure self-person and build owner names
+        speaker_person_id, owner_names = await _ensure_speaker(
+            user_id, source_username, source_display_name
+        )
 
-        # Resolve subject person IDs if provided
-        subject_person_ids: list[str] = []
-        if subjects and user_id and person_manager:
-            for subject in subjects:
-                try:
-                    result = await person_manager.resolve_or_create_person(
-                        created_by=user_id,
-                        reference=subject,
-                        content_hint=content,
-                        relationship_stated_by=source_username,
-                    )
-                    subject_person_ids.append(result.person_id)
-                except Exception:
-                    logger.warning("Failed to resolve person: %s", subject)
+        # Classify the fact via LLM if extractor available and no explicit subjects
+        classified = None
+        if memory_extractor and not subjects:
+            classified = await memory_extractor.classify_fact(content)
 
+        # Build ExtractedFact: explicit params > classified > defaults
+        fact = ExtractedFact(
+            content=content,
+            subjects=subjects
+            if subjects
+            else (classified.subjects if classified else []),
+            shared=shared if shared else (classified.shared if classified else False),
+            confidence=1.0,
+            memory_type=(
+                classified.memory_type if classified else MemoryType.KNOWLEDGE
+            ),
+            speaker=source_username,
+            sensitivity=(classified.sensitivity if classified else None),
+            portable=(classified.portable if classified else True),
+        )
+
+        stored_ids = await process_extracted_facts(
+            facts=[fact],
+            store=memory_manager,
+            user_id=user_id or "",
+            chat_id=chat_id,
+            speaker_username=source_username,
+            speaker_display_name=source_display_name,
+            speaker_person_id=speaker_person_id,
+            owner_names=owner_names,
+            source=source,
+            confidence_threshold=0.0,  # Always store agent-provided facts
+        )
+
+        if stored_ids:
+            return {"id": stored_ids[0]}
+
+        # Fallback: store directly if pipeline returned nothing
         memory = await memory_manager.add_memory(
             content=content,
             source=source,
-            expires_in_days=expires_days,
-            owner_user_id=owner_user_id,
-            chat_id=effective_chat_id,
-            subject_person_ids=subject_person_ids if subject_person_ids else None,
+            owner_user_id=user_id if not shared else None,
+            chat_id=chat_id if shared else None,
             source_username=source_username,
             source_display_name=source_display_name,
         )
-
         return {"id": memory.id}
+
+    async def memory_extract(params: dict[str, Any]) -> dict[str, Any]:
+        """Extract memories from the triggering message using the full pipeline.
+
+        Reads the message from the session by message_id, runs full LLM extraction,
+        and processes through the complete pipeline (subject linking, hearsay
+        supersession, relationship extraction, etc.).
+
+        Params (all implicit via env):
+            message_id: ID of the triggering message
+            provider: Provider name (e.g., "telegram")
+            user_id: Owner user ID
+            chat_id: Chat ID
+            shared: If True, create group memories (default False)
+            source_username: Speaker's username
+            source_display_name: Speaker's display name
+        """
+        from datetime import UTC, datetime
+
+        from ash.memory.extractor import SpeakerInfo
+        from ash.memory.processing import process_extracted_facts
+        from ash.sessions.reader import SessionReader
+        from ash.sessions.types import MessageEntry, session_key
+
+        if not memory_extractor:
+            raise ValueError("Memory extractor not available")
+
+        message_id = params.get("message_id")
+        provider = params.get("provider")
+        user_id = params.get("user_id")
+        chat_id = params.get("chat_id")
+        shared = params.get("shared", False)
+        source_username = params.get("source_username")
+        source_display_name = params.get("source_display_name")
+
+        if not message_id:
+            raise ValueError("message_id is required (set via ASH_MESSAGE_ID)")
+        if not provider:
+            raise ValueError("provider is required")
+
+        # Build session path and reader
+        effective_sessions_path = sessions_path
+        if not effective_sessions_path:
+            from ash.config.paths import get_sessions_path
+
+            effective_sessions_path = get_sessions_path()
+
+        key = session_key(provider, chat_id, user_id)
+        session_dir = effective_sessions_path / key
+        reader = SessionReader(session_dir)
+
+        # Get the triggering message + surrounding context
+        surrounding = await reader.get_messages_around(message_id, window=2)
+        if not surrounding:
+            return {"stored": 0, "error": "Message not found in session"}
+
+        # Extract author info from the target message
+        target_msg = next(
+            (m for m in surrounding if m.id == message_id), surrounding[-1]
+        )
+        msg_username = target_msg.username or source_username
+        msg_display_name = target_msg.display_name or source_display_name
+        msg_user_id = target_msg.user_id or user_id
+
+        # Convert MessageEntry objects to LLM Message objects
+        from ash.llm.types import Message, Role
+
+        llm_messages: list[Message] = []
+        for entry in surrounding:
+            if not isinstance(entry, MessageEntry):
+                continue
+            text = entry._extract_text_content()
+            if not text.strip():
+                continue
+            role = Role.USER if entry.role == "user" else Role.ASSISTANT
+            llm_messages.append(Message(role=role, content=text))
+
+        if not llm_messages:
+            return {"stored": 0}
+
+        # Build speaker info from message author
+        speaker_info = SpeakerInfo(
+            user_id=msg_user_id,
+            username=msg_username,
+            display_name=msg_display_name,
+        )
+
+        # Ensure self-person and build owner names
+        speaker_person_id, owner_names = await _ensure_speaker(
+            msg_user_id or user_id,
+            msg_username or source_username,
+            msg_display_name or source_display_name,
+        )
+
+        # Run full extraction
+        facts = await memory_extractor.extract_from_conversation(
+            messages=llm_messages,
+            owner_names=owner_names if owner_names else None,
+            speaker_info=speaker_info,
+            current_datetime=datetime.now(UTC),
+        )
+
+        if not facts:
+            return {"stored": 0}
+
+        # Override shared flag if requested
+        if shared:
+            for fact in facts:
+                fact.shared = True
+
+        effective_user_id = msg_user_id or user_id or ""
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=memory_manager,
+            user_id=effective_user_id,
+            chat_id=chat_id,
+            speaker_username=msg_username or source_username,
+            speaker_display_name=msg_display_name or source_display_name,
+            speaker_person_id=speaker_person_id,
+            owner_names=owner_names,
+            source="agent",
+            confidence_threshold=0.0,  # Trust extraction from explicit request
+        )
+
+        return {"stored": len(stored_ids)}
 
     async def memory_list(params: dict[str, Any]) -> list[dict[str, Any]]:
         """List memory entries.
@@ -275,6 +461,7 @@ def register_memory_methods(
     # Register handlers
     server.register("memory.search", memory_search)
     server.register("memory.add", memory_add)
+    server.register("memory.extract", memory_extract)
     server.register("memory.list", memory_list)
     server.register("memory.delete", memory_delete)
     server.register("memory.forget_person", memory_forget_person)
