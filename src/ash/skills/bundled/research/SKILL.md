@@ -1,8 +1,12 @@
-"""Research agent for deep web research with synthesis."""
+---
+description: Deep research across multiple sources with synthesis and citations
+tools:
+  - web_search
+  - web_fetch
+max_iterations: 15
+---
 
-from ash.agents.base import Agent, AgentConfig, AgentContext
-
-RESEARCH_SYSTEM_PROMPT = """You are a research assistant. Research the given topic thoroughly.
+You are a research assistant. Research the given topic thoroughly.
 
 ## Process
 
@@ -47,25 +51,3 @@ OpenWeatherMap provides a free-tier REST API for weather data.
 - Note when sources disagree
 - Include publication dates when available
 - Drop verbose details - keep only actionable facts
-"""
-
-
-class ResearchAgent(Agent):
-    """Deep research with web search and synthesis."""
-
-    @property
-    def config(self) -> AgentConfig:
-        return AgentConfig(
-            name="research",
-            description="Research a topic using web search to find authoritative sources",
-            system_prompt=RESEARCH_SYSTEM_PROMPT,
-            tools=["web_search", "web_fetch"],
-            max_iterations=15,
-        )
-
-    def _build_prompt_sections(self, context: AgentContext) -> list[str]:
-        sections = []
-        focus = context.input_data.get("focus")
-        if focus:
-            sections.append(f"## Focus Area\n\nPay special attention to: {focus}")
-        return sections

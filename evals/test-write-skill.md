@@ -23,8 +23,8 @@ uv run ash chat "Create a skill called 'greet' that greets the user by name. It 
 
 **Expected:**
 - Location: `~/.ash/workspace/skills/greet/SKILL.md`
-- Mode: `inline` (simple, no multi-step process)
-- Input schema with `name` property
+- Clear description and instructions
+- Authors and rationale fields populated
 
 ---
 
@@ -59,8 +59,8 @@ uv run ash chat "Create a skill called 'next-48' that checks when the next 48 bu
 
 **Expected:**
 - Uses SF Muni/NextBus/511.org API
-- Has `config` with API key as secret (e.g., `config: [API_KEY]`)
-- Uses `bash` tool with `curl` for API calls
+- Has `env` with API key (e.g., `env: [API_KEY]`)
+- Uses `bash` tool with `curl` or Python script for API calls
 - Hardcodes the specific stop/route (48 inbound at 24th & Diamond)
 - Clean output, no emoji or unnecessary fluff
 - Practical, actually works with real API
@@ -82,8 +82,7 @@ uv run ash chat "Create a skill called 'research-topic' that researches a topic 
 ```
 
 **Expected:**
-- Mode: `subagent` (complex multi-step workflow)
-- Has `tools` including `web_search`, `remember`
+- Has `tools` including `web_search`
 - Has structured process in instructions (headers, numbered steps)
 - Reasonable `max_iterations` (10-15)
 
@@ -99,12 +98,7 @@ After each scenario, evaluate the generated skill against these criteria (0-10 e
 - [ ] No trailing period
 - [ ] Accurately describes what skill does
 
-### 2. Execution Mode Appropriateness
-- [ ] `inline` for simple documentation-style skills
-- [ ] `subagent` for complex multi-step workflows
-- [ ] Matches the complexity of the task
-
-### 3. Instructions Quality
+### 2. Instructions Quality
 - [ ] Clear, actionable steps
 - [ ] Structured with headers or numbered lists
 - [ ] Specific about tools to use
@@ -112,29 +106,23 @@ After each scenario, evaluate the generated skill against these criteria (0-10 e
 - [ ] No vague phrases like "help the user"
 - [ ] No ALL CAPS emphasis (uses **bold** instead)
 
-### 4. Input Schema Quality
-- [ ] Appropriate parameters for the task
-- [ ] Clear descriptions for each property
-- [ ] Correct required fields
-- [ ] Not overly complex
-
-### 5. Tool Configuration
+### 4. Tool Configuration
 - [ ] Correct `tools` listed
 - [ ] Tools match what instructions reference
 - [ ] Appropriate `max_iterations` for subagent
 
-### 6. Config and Secrets
+### 5. Config and Secrets
 - [ ] Uses `config` for API keys/tokens (not hardcoded)
 - [ ] Config names are clear (e.g., `API_TOKEN`, `API_KEY`)
 - [ ] Required vs optional config is appropriate
 
-### 7. Style and Tone
+### 6. Style and Tone
 - [ ] No emoji in skill output or instructions
 - [ ] No excessive enthusiasm or filler phrases
 - [ ] Professional, concise language
 - [ ] No unnecessary comments or annotations
 
-### 8. Overall Coherence
+### 7. Overall Coherence
 - [ ] All parts work together
 - [ ] Would this skill actually work?
 - [ ] Follows the stated goal
@@ -154,18 +142,13 @@ A skill is defined in a SKILL.md file with YAML frontmatter:
 
 ---
 description: string  # One-line, no trailing period, starts with verb
-execution_mode: inline | subagent  # inline for simple, subagent for complex
-model: string  # optional model alias
-max_iterations: int  # for subagent mode, default 5
-tools: list  # tools the skill needs
-config: list  # config values needed (e.g., API_TOKEN, API_KEY=default)
-input_schema:  # JSON Schema for inputs
-  type: object
-  properties:
-    param_name:
-      type: string
-      description: Clear description
-  required: [param_name]
+authors: list        # Who created/maintains
+rationale: string    # Why this skill was created
+model: string        # optional model alias
+max_iterations: int  # iteration limit, default 10
+tools: list          # tools the skill needs
+env: list            # env vars from config (e.g., API_KEY)
+packages: list       # system packages (apt)
 ---
 
 # Instructions (markdown body)
@@ -178,37 +161,28 @@ input_schema:  # JSON Schema for inputs
    - No trailing period
    - Accurately describes what skill does
 
-2. **Execution Mode Appropriateness** (0-10)
-   - `inline` for simple documentation-style skills
-   - `subagent` for complex multi-step workflows
-
-3. **Instructions Quality** (0-10)
+2. **Instructions Quality** (0-10)
    - Clear, actionable steps
    - Structured with headers or numbered lists
    - Specific about tools to use
    - No vague phrases or ALL CAPS
 
-4. **Input Schema Quality** (0-10)
-   - Appropriate parameters
-   - Clear descriptions
-   - Correct required fields
-
-5. **Tool Configuration** (0-10)
+3. **Tool Configuration** (0-10)
    - Correct tools
    - Tools match instructions
    - Appropriate max_iterations
 
-6. **Config and Secrets** (0-10)
-   - Uses config for API keys (not hardcoded)
+4. **Config and Secrets** (0-10)
+   - Uses env for API keys (not hardcoded)
    - Clear config names
    - Appropriate required vs optional
 
-7. **Style and Tone** (0-10)
+5. **Style and Tone** (0-10)
    - No emoji
    - No filler phrases or excessive enthusiasm
    - Professional, concise
 
-8. **Overall Coherence** (0-10)
+6. **Overall Coherence** (0-10)
    - All parts work together
    - Would this skill work?
 
@@ -228,15 +202,13 @@ Evaluate this skill and respond with JSON:
 {
   "scores": {
     "description": <0-10>,
-    "execution_mode": <0-10>,
     "instructions": <0-10>,
-    "input_schema": <0-10>,
     "tool_config": <0-10>,
     "config_secrets": <0-10>,
     "style_tone": <0-10>,
     "coherence": <0-10>
   },
-  "overall_score": <0-100>,
+  "overall_score": <0-60>,
   "issues": ["issue 1", "issue 2"],
   "suggestions": ["suggestion 1", "suggestion 2"],
   "summary": "Brief assessment"

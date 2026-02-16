@@ -1,68 +1,55 @@
 """Skill writer behavior evaluation tests.
 
-End-to-end test that the skill-writer agent can research, plan, and
-implement a skill with correct phase compliance and artifact quality.
+End-to-end test that the skill-writer bundled skill can create
+a skill with correct SKILL.md format and artifact quality.
 
-Run with: uv run pytest evals/test_skill_writer.py -v -s
+Run with: uv run pytest evals/test_skill_writer.py -v -s -m eval
 Requires ANTHROPIC_API_KEY environment variable.
 """
 
-from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import pytest
 
 from ash.agents.base import AgentContext
-from ash.agents.builtin.skill_writer import SkillWriterAgent
 from ash.agents.executor import AgentExecutor
 from ash.config import AshConfig
 from ash.core.agent import AgentComponents
 from ash.llm.base import LLMProvider
+from ash.skills import SkillRegistry
+from ash.tools.builtin.skills import SkillAgent
 from evals.judge import LLMJudge
-from evals.runner import (
-    extract_phase_tool_calls,
-    run_agent_to_completion,
-)
+from evals.runner import run_agent_to_completion
 from evals.types import EvalCase
-
-CASES_DIR = Path(__file__).parent / "cases"
 
 
 @pytest.fixture
-async def skill_writer_executor(
-    eval_config: AshConfig,
-    eval_agent: AgentComponents,
-) -> AsyncGenerator[tuple[SkillWriterAgent, AgentExecutor], None]:
-    """Create skill-writer agent with executor for multi-turn testing."""
-    agent = SkillWriterAgent()
-    executor = AgentExecutor(
-        llm_provider=eval_agent.llm,
-        tool_executor=eval_agent.tool_executor,
-        config=eval_config,
-    )
-    yield agent, executor
+def skill_writer_agent(eval_agent: AgentComponents) -> SkillAgent:
+    """Get the skill-writer bundled skill as a SkillAgent."""
+    registry: SkillRegistry = eval_agent.skill_registry
+    skill = registry.get("skill-writer")
+    return SkillAgent(skill)
 
 
 @pytest.mark.eval
 class TestSkillWriterE2E:
-    """End-to-end test with phase compliance and artifact judging."""
+    """End-to-end test with artifact quality judging."""
 
     @pytest.mark.asyncio
     async def test_url_fetcher_skill(
         self,
-        skill_writer_executor: tuple[SkillWriterAgent, AgentExecutor],
+        skill_writer_agent: SkillAgent,
+        eval_agent: AgentComponents,
         judge_llm: LLMProvider,
         eval_workspace_path: Path,
+        eval_config: AshConfig,
     ) -> None:
-        """Test creating a URL fetcher skill - verifiable Python-based skill.
-
-        This is a specific task with verifiable output:
-        - Input: "Create a skill that fetches a URL and returns the page title"
-        - Expected: Python script using httpx/requests, extracts <title> tag
-
-        Tests both phase compliance AND artifact quality.
-        """
-        agent, executor = skill_writer_executor
+        """Test creating a URL fetcher skill - verifiable Python-based skill."""
+        executor = AgentExecutor(
+            llm_provider=eval_agent.llm,
+            tool_executor=eval_agent.tool_executor,
+            config=eval_config,
+        )
 
         context = AgentContext(
             session_id="test-url-fetcher",
@@ -73,21 +60,12 @@ class TestSkillWriterE2E:
         print("\n=== Creating URL fetcher skill ===")
         final_result, all_results = await run_agent_to_completion(
             executor,
-            agent,
+            skill_writer_agent,
             "Create a skill that fetches a URL and returns the page title",
             context,
         )
 
         print(f"Completed in {len(all_results)} phases")
-
-        # Check phase compliance (research/plan should be read-only)
-        phase_tools = extract_phase_tool_calls(all_results)
-        for i, phase_name in enumerate(["research", "plan"]):
-            if i < len(phase_tools):
-                tools = {tc["name"] for tc in phase_tools[i]}
-                assert "bash" not in tools, f"{phase_name} phase used bash"
-                assert "write_file" not in tools, f"{phase_name} phase wrote files"
-                print(f"{phase_name} phase tools: {tools}")
 
         # Verify skill was created
         skills_dir = eval_workspace_path / "skills"
@@ -119,7 +97,7 @@ class TestSkillWriterE2E:
                 Given "https://example.com", the skill should return "Example Domain".
 
                 The artifact must:
-                1. Have SKILL.md with frontmatter (description)
+                1. Have SKILL.md with frontmatter (description, authors, rationale)
                 2. Have a Python script with PEP 723 deps (httpx or requests)
                 3. Script should fetch URL and extract <title> tag
                 4. Instructions should have a placeholder for user input

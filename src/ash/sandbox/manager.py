@@ -97,6 +97,12 @@ class SandboxConfig:
     source_path: Path | None = None  # Host path to Ash source code
     source_access: Literal["none", "ro"] = "none"  # Never rw - always read-only
 
+    # Bundled skills directory (read-only, for bundled skills with references)
+    bundled_skills_path: Path | None = None  # Host path to bundled skills dir
+
+    # Mount prefix for sandbox paths (sessions, chats, logs, etc.)
+    mount_prefix: str = "/ash"
+
 
 class SandboxManager:
     """Manage Docker containers for sandboxed code execution."""
@@ -179,19 +185,21 @@ class SandboxManager:
                 "mode": "ro" if self._config.workspace_access == "ro" else "rw",
             }
 
+        prefix = self._config.mount_prefix
+
         if (
             self._config.sessions_path
             and self._config.sessions_access != "none"
             and self._config.sessions_path.exists()
         ):
             volumes[str(self._config.sessions_path)] = {
-                "bind": "/sessions",
+                "bind": f"{prefix}/sessions",
                 "mode": "ro",
             }
 
         if self._config.chats_path and self._config.chats_path.exists():
             volumes[str(self._config.chats_path)] = {
-                "bind": "/chats",
+                "bind": f"{prefix}/chats",
                 "mode": "ro",
             }
 
@@ -200,20 +208,22 @@ class SandboxManager:
             self._config.schedule_file.parent.mkdir(parents=True, exist_ok=True)
             self._config.schedule_file.touch(exist_ok=True)
             volumes[str(self._config.schedule_file)] = {
-                "bind": "/schedule.jsonl",
+                "bind": f"{prefix}/schedule.jsonl",
                 "mode": "rw",
             }
 
         if self._config.logs_path and self._config.logs_path.exists():
-            volumes[str(self._config.logs_path)] = {"bind": "/logs", "mode": "ro"}
+            volumes[str(self._config.logs_path)] = {
+                "bind": f"{prefix}/logs",
+                "mode": "ro",
+            }
 
         if self._config.rpc_socket_path and self._config.rpc_socket_path.exists():
-            # Mount to /opt/ash instead of /run/ash to avoid conflict with tmpfs at /run
             volumes[str(self._config.rpc_socket_path)] = {
-                "bind": "/opt/ash/rpc.sock",
+                "bind": f"{prefix}/rpc.sock",
                 "mode": "rw",
             }
-            env["ASH_RPC_SOCKET"] = "/opt/ash/rpc.sock"
+            env["ASH_RPC_SOCKET"] = f"{prefix}/rpc.sock"
 
         if self._config.uv_cache_path:
             self._config.uv_cache_path.mkdir(parents=True, exist_ok=True)
@@ -228,9 +238,20 @@ class SandboxManager:
             and self._config.source_path.exists()
         ):
             volumes[str(self._config.source_path)] = {
-                "bind": "/source",
+                "bind": f"{prefix}/source",
                 "mode": "ro",  # Always read-only
             }
+
+        if (
+            self._config.bundled_skills_path
+            and self._config.bundled_skills_path.exists()
+        ):
+            volumes[str(self._config.bundled_skills_path)] = {
+                "bind": f"{prefix}/skills",
+                "mode": "ro",
+            }
+
+        env["ASH_MOUNT_PREFIX"] = prefix
 
         container_config: dict[str, Any] = {
             "image": self._config.image,

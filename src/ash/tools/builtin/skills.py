@@ -353,6 +353,12 @@ class UseSkillTool(Tool):
             if context and not context.reply_to_message_id:
                 context.reply_to_message_id = reply_id
 
+        # Reload workspace skills after skill-writer creates new skills
+        if skill_name == "skill-writer" and not result.is_error:
+            count = self._registry.reload_workspace(self._config.workspace)
+            if count > 0:
+                logger.info(f"Reloaded {count} new skill(s) after skill-writer")
+
         if result.is_error:
             return ToolResult.error(result.content)
 

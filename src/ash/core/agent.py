@@ -67,6 +67,7 @@ def _build_routing_env(
     session: SessionState,
     effective_user_id: str | None,
     timezone: str = "UTC",
+    mount_prefix: str = "/ash",
 ) -> dict[str, str]:
     """Build environment variables for routing context in sandbox.
 
@@ -89,10 +90,12 @@ def _build_routing_env(
     # ASH_CHAT_PATH: always points to chat-level state
     # ASH_THREAD_PATH: points to thread-specific state when in a thread
     if session.provider and session.chat_id:
-        env["ASH_CHAT_PATH"] = f"/chats/{session.provider}/{session.chat_id}"
+        env["ASH_CHAT_PATH"] = (
+            f"{mount_prefix}/chats/{session.provider}/{session.chat_id}"
+        )
         if thread_id := session.metadata.get("thread_id"):
             env["ASH_THREAD_PATH"] = (
-                f"/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
+                f"{mount_prefix}/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
             )
 
     return env
@@ -114,6 +117,7 @@ class Agent:
         memory_extractor: MemoryExtractor | None = None,
         config: AgentConfig | None = None,
         graph_store: Store | None = None,
+        mount_prefix: str = "/ash",
     ):
         """Initialize agent.
 
@@ -125,6 +129,7 @@ class Agent:
             memory_extractor: Optional memory extractor for background extraction.
             config: Agent configuration.
             graph_store: Unified graph store (memory + people).
+            mount_prefix: Sandbox mount prefix for container paths.
         """
         self._llm = llm
         self._tools = tool_executor
@@ -135,6 +140,7 @@ class Agent:
         self._extractor = memory_extractor
         self._people: Store | None = graph_store
         self._config = config or AgentConfig()
+        self._mount_prefix = mount_prefix
         self._last_extraction_time: float | None = None
 
     @property
@@ -287,12 +293,12 @@ class Agent:
             chat_title=session.metadata.get("chat_title"),
             chat_type=session.metadata.get("chat_type"),
             chat_state_path=(
-                f"/chats/{session.provider}/{session.chat_id}"
+                f"{self._mount_prefix}/chats/{session.provider}/{session.chat_id}"
                 if session.provider and session.chat_id
                 else None
             ),
             thread_state_path=(
-                f"/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
+                f"{self._mount_prefix}/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
                 if session.provider
                 and session.chat_id
                 and (thread_id := session.metadata.get("thread_id"))
@@ -512,7 +518,10 @@ class Agent:
             provider=session.provider,
             metadata=dict(session.metadata),
             env=_build_routing_env(
-                session, setup.effective_user_id, timezone=self._timezone
+                session,
+                setup.effective_user_id,
+                timezone=self._timezone,
+                mount_prefix=self._mount_prefix,
             ),
             session_manager=session_manager,
             tool_overrides=tool_overrides or {},
@@ -939,7 +948,7 @@ async def create_agent(
     logger.info(f"Registered {len(tool_registry)} tools")
 
     agent_registry = AgentRegistry()
-    register_builtin_agents(agent_registry)
+    register_builtin_agents(agent_registry, mount_prefix=config.sandbox.mount_prefix)
     logger.info(f"Registered {len(agent_registry)} built-in agents")
 
     agent_executor = AgentExecutor(llm, tool_executor, config)
@@ -977,6 +986,7 @@ async def create_agent(
         runtime=runtime,
         memory_extractor=memory_extractor,
         graph_store=graph_store,
+        mount_prefix=config.sandbox.mount_prefix,
         config=AgentConfig(
             model=model_config.model,
             max_tokens=model_config.max_tokens,

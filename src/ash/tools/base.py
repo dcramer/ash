@@ -180,6 +180,7 @@ def build_sandbox_manager_config(
     workspace_path: Path | None,
     default_network_mode: Literal["none", "bridge"] = "none",
 ) -> "SandboxManagerConfig":
+    import ash.skills
     from ash.config.paths import (
         get_chats_path,
         get_logs_path,
@@ -197,6 +198,10 @@ def build_sandbox_manager_config(
     logs_path = get_logs_path()
     rpc_socket_path = get_rpc_socket_path()
     uv_cache_path = get_uv_cache_path()
+    _skills_init = ash.skills.__file__
+    bundled_skills_path = (
+        Path(_skills_init).parent / "bundled" if _skills_init else None
+    )
 
     if config is None:
         return SandboxManagerConfig(
@@ -208,6 +213,7 @@ def build_sandbox_manager_config(
             logs_path=logs_path,
             rpc_socket_path=rpc_socket_path,
             uv_cache_path=uv_cache_path,
+            bundled_skills_path=bundled_skills_path,
         )
 
     # Only resolve source path if access is enabled (avoids filesystem walks)
@@ -233,4 +239,6 @@ def build_sandbox_manager_config(
         uv_cache_path=uv_cache_path,
         source_path=source_path,
         source_access=config.source_access,
+        bundled_skills_path=bundled_skills_path,
+        mount_prefix=config.mount_prefix,
     )

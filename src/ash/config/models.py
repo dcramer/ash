@@ -148,6 +148,10 @@ class SandboxConfig(BaseModel):
     # Mounted read-only at /source in container
     source_access: Literal["none", "ro"] = "none"
 
+    # Mount prefix for sandbox paths (sessions, chats, logs, etc.)
+    # All sandbox bind mounts (except /workspace and user cache) use this prefix
+    mount_prefix: str = "/ash"
+
 
 class ServerConfig(BaseModel):
     """Configuration for HTTP server."""

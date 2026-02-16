@@ -233,7 +233,7 @@ class SkillRegistry:
 |-----------|----------|
 | Skill not found | `use_skill` returns error |
 | Skill disabled | `use_skill` returns error |
-| Missing env var in config | Skill runs without that var (warning logged) |
+| Missing env var in config | `use_skill` returns error with config instructions |
 | Max iterations exceeded | Returns partial result with error flag |
 | Tool not in tools | Subagent tool call blocked with error |
 

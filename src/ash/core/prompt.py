@@ -247,7 +247,7 @@ class SystemPromptBuilder:
                 "- If asked about a person, company, or event you're not certain about - search",
                 "- If you'd normally say 'I don't have current info' - search instead",
                 "",
-                "**For deeper research:** delegate to the `research` agent for topics needing",
+                "**For deeper research:** delegate to the `research` skill for topics needing",
                 "multiple sources, synthesis, or comprehensive coverage.",
             ]
         )
@@ -349,8 +349,11 @@ class SystemPromptBuilder:
                 "",
                 "### When to Delegate",
                 "",
-                "- **Deep research requiring multiple sources** → use `research` agent",
-                "- **Creating tools, scripts, or reusable functionality** → use `skill-writer`",
+                "- **Complex multi-step tasks** → use `task` agent",
+                "- **Tasks requiring planning with user approval** → use `plan` agent",
+                "",
+                "Skills (`use_skill`) handle focused work: research, skill creation, etc.",
+                "Agents (`use_agent`) handle autonomous multi-step work that may need all tools.",
                 "",
                 "### Handling Agent Checkpoints",
                 "",
@@ -400,6 +403,7 @@ class SystemPromptBuilder:
 
     def _build_sandbox_section(self, context: PromptContext) -> str:
         sandbox = self._config.sandbox
+        prefix = sandbox.mount_prefix
         network_status = "disabled" if sandbox.network_mode == "none" else "enabled"
 
         lines = [
@@ -411,8 +415,9 @@ class SystemPromptBuilder:
             "### Mounted Directories",
             "",
             "- `/workspace` - User's workspace (read-write)",
-            "- `/sessions` - Conversation history (read-only)",
-            "- `/chats` - Chat participant info (read-only)",
+            f"- `{prefix}/sessions` - Conversation history (read-only)",
+            f"- `{prefix}/chats` - Chat participant info (read-only)",
+            f"- `{prefix}/skills` - Bundled skill references (read-only)",
             "",
             "### ash-sb CLI (Agent Only)",
             "",
@@ -450,7 +455,7 @@ class SystemPromptBuilder:
                 "",
                 "When troubleshooting 'why didn't X happen?' questions:",
                 "- Use `ash-sb logs --since 1h 'search term'` to find relevant entries",
-                "- Logs are stored in `/logs/YYYY-MM-DD.jsonl` (JSONL format)",
+                f"- Logs are stored in `{prefix}/logs/YYYY-MM-DD.jsonl` (JSONL format)",
                 "- You can also use bash + jq for custom queries",
             ]
         )
