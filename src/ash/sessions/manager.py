@@ -13,12 +13,14 @@ from ash.llm.types import ContentBlock, Message, ToolUse
 from ash.sessions.reader import SessionReader
 from ash.sessions.types import (
     AgentSessionEntry,
+    BranchHead,
     CompactionEntry,
     MessageEntry,
     SessionHeader,
     SessionState,
     ToolResultEntry,
     ToolUseEntry,
+    generate_id,
     session_key,
 )
 from ash.sessions.utils import content_block_to_dict
@@ -115,6 +117,7 @@ class SessionManager:
         username: str | None = None,
         display_name: str | None = None,
         agent_session_id: str | None = None,
+        parent_id: str | None = None,
     ) -> str:
         await self.ensure_session()
         entry = MessageEntry.create(
@@ -126,6 +129,7 @@ class SessionManager:
             display_name=display_name,
             metadata=metadata,
             agent_session_id=agent_session_id,
+            parent_id=parent_id or self._current_message_id,
         )
         await self._writer.write_message(entry)
         self._current_message_id = entry.id
@@ -137,6 +141,7 @@ class SessionManager:
         token_count: int | None = None,
         metadata: dict[str, Any] | None = None,
         agent_session_id: str | None = None,
+        parent_id: str | None = None,
     ) -> str:
         await self.ensure_session()
         stored_content: str | list[dict[str, Any]]
@@ -155,6 +160,7 @@ class SessionManager:
             token_count=token_count,
             metadata=metadata,
             agent_session_id=agent_session_id,
+            parent_id=parent_id or self._current_message_id,
         )
         await self._writer.write_message(entry)
         self._current_message_id = entry.id
@@ -252,7 +258,17 @@ class SessionManager:
         token_budget: int | None = None,
         recency_window: int = 10,
         include_timestamps: bool = False,
+        branch_head_id: str | None = None,
+        branch_id: str | None = None,
     ) -> tuple[list[Message], list[str]]:
+        if branch_head_id is not None:
+            return await self._reader.load_messages_for_branch(
+                branch_head_id,
+                branch_id=branch_id,
+                token_budget=token_budget,
+                recency_window=recency_window,
+                include_timestamps=include_timestamps,
+            )
         return await self._reader.load_messages_for_llm(
             token_budget, recency_window, include_timestamps
         )
@@ -333,6 +349,64 @@ class SessionManager:
             user_id=header.user_id,
             sessions_path=base_path,
         )
+
+    def fork_at_message(self, message_id: str) -> str:
+        """Create a new branch forking from the given message.
+
+        If no branches exist yet, creates a "main" branch for the current tip.
+        Returns the new branch_id.
+        """
+        state = self._load_state()
+        if state is None:
+            state = SessionState(provider=self.provider)
+
+        # If no branches tracked yet, create "main" for the current linear tip
+        if not state.branches and self._current_message_id:
+            main_branch = BranchHead(
+                branch_id=generate_id(),
+                head_message_id=self._current_message_id,
+                fork_point_id=None,
+            )
+            state.branches.append(main_branch)
+
+        # Create new branch forking from message_id
+        branch_id = generate_id()
+        new_branch = BranchHead(
+            branch_id=branch_id,
+            head_message_id=message_id,
+            fork_point_id=message_id,
+        )
+        state.branches.append(new_branch)
+
+        # Set current position to fork point so next write chains from there
+        self._current_message_id = message_id
+
+        self._save_state(state)
+        return branch_id
+
+    def update_branch_head(self, branch_id: str, head_message_id: str) -> None:
+        """Update the head of a branch after writing a message."""
+        state = self._load_state()
+        if state is None:
+            return
+
+        for branch in state.branches:
+            if branch.branch_id == branch_id:
+                branch.head_message_id = head_message_id
+                self._save_state(state)
+                return
+
+    def get_branch_for_message(self, message_id: str) -> BranchHead | None:
+        """Find the branch that has message_id as its head."""
+
+        state = self._load_state()
+        if state is None:
+            return None
+
+        for branch in state.branches:
+            if branch.head_message_id == message_id:
+                return branch
+        return None
 
     def _load_state(self) -> SessionState | None:
         """Load the session state from state.json."""

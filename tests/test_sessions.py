@@ -10,6 +10,7 @@ from ash.llm.types import TextContent, ToolUse
 from ash.sessions.manager import SessionManager
 from ash.sessions.reader import SessionReader
 from ash.sessions.types import (
+    MessageEntry,
     parse_entry,
     session_key,
 )
@@ -227,3 +228,263 @@ class TestSessionManager:
     async def test_get_session_not_found(self, sessions_path):
         result = await SessionManager.get_session("nonexistent", sessions_path)
         assert result is None
+
+
+class TestSessionBranching:
+    """Tests for tree-structured conversation branching."""
+
+    @pytest.fixture
+    def sessions_path(self, tmp_path):
+        return tmp_path / "sessions"
+
+    @pytest.fixture
+    def manager(self, sessions_path):
+        return SessionManager(provider="cli", sessions_path=sessions_path)
+
+    @pytest.mark.asyncio
+    async def test_parent_id_auto_set(self, manager):
+        """Messages automatically chain via parent_id."""
+        await manager.ensure_session()
+
+        m1_id = await manager.add_user_message("Hello")
+        m2_id = await manager.add_assistant_message("Hi there!")
+        m3_id = await manager.add_user_message("How are you?")
+
+        entries = await manager._reader.load_entries()
+        msgs = [e for e in entries if isinstance(e, MessageEntry)]
+
+        assert msgs[0].id == m1_id
+        assert msgs[0].parent_id is None  # First message has no parent
+
+        assert msgs[1].id == m2_id
+        assert msgs[1].parent_id == m1_id
+
+        assert msgs[2].id == m3_id
+        assert msgs[2].parent_id == m2_id
+
+    @pytest.mark.asyncio
+    async def test_fork_at_message(self, manager):
+        """Forking creates a new branch and sets current position."""
+        await manager.ensure_session()
+
+        await manager.add_user_message("Message 1")
+        m2_id = await manager.add_assistant_message("Response 1")
+        await manager.add_user_message("Message 2")
+        await manager.add_assistant_message("Response 2")
+
+        # Fork at m2 (after first exchange)
+        branch_id = manager.fork_at_message(m2_id)
+        assert branch_id is not None
+
+        # Current message should be set to fork point
+        assert manager._current_message_id == m2_id
+
+        # State should have branches
+        state = manager._load_state()
+        assert state is not None
+        assert len(state.branches) == 2  # main + new branch
+
+        # New message should chain from fork point
+        m5_id = await manager.add_user_message("Branched message")
+        entries = await manager._reader.load_entries()
+        msgs = {e.id: e for e in entries if isinstance(e, MessageEntry)}
+        assert msgs[m5_id].parent_id == m2_id
+
+    @pytest.mark.asyncio
+    async def test_branch_aware_loading(self, manager):
+        """Branch-aware load returns only messages on the branch path."""
+        await manager.ensure_session()
+
+        # Build linear conversation: M1 -> M2 -> M3 -> M4
+        await manager.add_user_message("M1")
+        m2_id = await manager.add_assistant_message("M2")
+        await manager.add_user_message("M3")
+        await manager.add_assistant_message("M4")
+
+        # Fork at M2, add M5
+        branch_id = manager.fork_at_message(m2_id)
+        m5_id = await manager.add_user_message("M5 (branched)")
+
+        # Load branch: should see M1, M2, M5 — not M3, M4
+        messages, msg_ids = await manager.load_messages_for_llm(
+            branch_head_id=m5_id, branch_id=branch_id
+        )
+
+        contents = [
+            m.content if isinstance(m.content, str) else str(m.content)
+            for m in messages
+        ]
+        assert "M1" in contents[0]
+        assert "M2" in contents[1]
+        assert "M5 (branched)" in contents[2]
+        assert len(messages) == 3
+
+    @pytest.mark.asyncio
+    async def test_v1_compat_no_parent_id(self, sessions_path):
+        """v1 sessions (no parent_id) load linearly as before."""
+        session_dir = sessions_path / "cli"
+        session_dir.mkdir(parents=True)
+
+        # Write v1-style entries with no parent_id
+        lines = [
+            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00"}',
+            '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00"}',
+            '{"type":"message","id":"m3","role":"user","content":"More","created_at":"2026-01-11T10:00:03+00:00"}',
+        ]
+        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
+
+        reader = SessionReader(session_dir)
+
+        # Branch-aware load should follow v1 fallback (file order)
+        messages, ids = await reader.load_messages_for_branch("m3")
+        assert len(messages) == 3
+        assert ids == ["m1", "m2", "m3"]
+
+    @pytest.mark.asyncio
+    async def test_nested_fork(self, manager):
+        """Multiple forks from the same point create independent branches."""
+        await manager.ensure_session()
+
+        await manager.add_user_message("M1")
+        m2_id = await manager.add_assistant_message("M2")
+        await manager.add_user_message("M3")
+        await manager.add_assistant_message("M4")
+
+        # Fork 1 at M2
+        branch1_id = manager.fork_at_message(m2_id)
+        await manager.add_user_message("Branch1-M5")
+        m6_id = await manager.add_assistant_message("Branch1-M6")
+
+        # Fork 2 at M2 (again, different branch)
+        branch2_id = manager.fork_at_message(m2_id)
+        m7_id = await manager.add_user_message("Branch2-M7")
+
+        # Load branch 1: M1, M2, M5, M6
+        msgs1, _ = await manager.load_messages_for_llm(
+            branch_head_id=m6_id, branch_id=branch1_id
+        )
+        contents1 = [
+            m.content if isinstance(m.content, str) else str(m.content) for m in msgs1
+        ]
+        assert len(msgs1) == 4
+        assert "M1" in contents1[0]
+        assert "M2" in contents1[1]
+        assert "Branch1-M5" in contents1[2]
+        assert "Branch1-M6" in contents1[3]
+
+        # Load branch 2: M1, M2, M7
+        msgs2, _ = await manager.load_messages_for_llm(
+            branch_head_id=m7_id, branch_id=branch2_id
+        )
+        contents2 = [
+            m.content if isinstance(m.content, str) else str(m.content) for m in msgs2
+        ]
+        assert len(msgs2) == 3
+        assert "M1" in contents2[0]
+        assert "M2" in contents2[1]
+        assert "Branch2-M7" in contents2[2]
+
+    @pytest.mark.asyncio
+    async def test_branch_with_tool_pairs(self, manager):
+        """Tool use/result pairs stay with their branch."""
+        await manager.ensure_session()
+
+        await manager.add_user_message("M1")
+        await manager.add_assistant_message(
+            [
+                TextContent(text="Let me check."),
+                ToolUse(id="t1", name="bash", input={"command": "ls"}),
+            ]
+        )
+        await manager.add_tool_result(tool_use_id="t1", output="files", success=True)
+        m3_id = await manager.add_assistant_message("Found files")
+        await manager.add_user_message("M4")
+        await manager.add_assistant_message(
+            [
+                TextContent(text="Checking more."),
+                ToolUse(id="t2", name="bash", input={"command": "pwd"}),
+            ]
+        )
+        await manager.add_tool_result(tool_use_id="t2", output="/home", success=True)
+        await manager.add_assistant_message("Done")
+
+        # Fork at m3 (after first tool exchange)
+        branch_id = manager.fork_at_message(m3_id)
+        m7_id = await manager.add_user_message("Branched question")
+
+        # Load branch: should see M1, M2(with tool), tool_result, M3, M7
+        # but NOT M4, M5(with t2), t2 result, M6
+        messages, _ = await manager.load_messages_for_llm(
+            branch_head_id=m7_id, branch_id=branch_id
+        )
+
+        # Check that t1 tool result is present (on branch) but t2 is not
+        has_t1_result = False
+        has_t2_result = False
+        for msg in messages:
+            if isinstance(msg.content, list):
+                for block in msg.content:
+                    from ash.llm.types import ToolResult
+
+                    if isinstance(block, ToolResult):
+                        if block.tool_use_id == "t1":
+                            has_t1_result = True
+                        if block.tool_use_id == "t2":
+                            has_t2_result = True
+
+        assert has_t1_result, "t1 tool result should be on branch"
+        assert not has_t2_result, "t2 tool result should NOT be on branch"
+
+    @pytest.mark.asyncio
+    async def test_branch_head_tracking(self, manager):
+        """Branch head updates after writes."""
+        await manager.ensure_session()
+
+        await manager.add_user_message("M1")
+        m2_id = await manager.add_assistant_message("M2")
+        await manager.add_user_message("M3")
+
+        branch_id = manager.fork_at_message(m2_id)
+        m4_id = await manager.add_user_message("Branched")
+
+        # Update branch head
+        manager.update_branch_head(branch_id, m4_id)
+
+        branch = manager.get_branch_for_message(m4_id)
+        assert branch is not None
+        assert branch.branch_id == branch_id
+        assert branch.head_message_id == m4_id
+        assert branch.fork_point_id == m2_id
+
+    @pytest.mark.asyncio
+    async def test_linear_load_unchanged(self, manager):
+        """Linear loading (no branch) still works as before."""
+        await manager.ensure_session()
+
+        await manager.add_user_message("Hello")
+        await manager.add_assistant_message("Hi!")
+        await manager.add_user_message("More")
+
+        messages, ids = await manager.load_messages_for_llm()
+        assert len(messages) == 3
+
+    @pytest.mark.asyncio
+    async def test_parent_id_serialization(self, manager):
+        """parent_id survives serialization roundtrip."""
+        await manager.ensure_session()
+
+        m1_id = await manager.add_user_message("M1")
+        await manager.add_assistant_message("M2")
+
+        # Read raw JSONL
+        context_file = manager._session_dir / "context.jsonl"
+        lines = context_file.read_text().strip().split("\n")
+
+        # m2 should have parent_id serialized
+        m2_data = json.loads(lines[2])  # header, m1, m2
+        assert m2_data["parent_id"] == m1_id
+
+        # m1 should not have parent_id (None = omitted)
+        m1_data = json.loads(lines[1])
+        assert "parent_id" not in m1_data

@@ -200,6 +200,7 @@ class SyncHandler:
             username=message.username,
             display_name=message.display_name,
             thread_id=thread_id,
+            branch_id=session.metadata.get("branch_id"),
         )
         self._log_response(response.text)
 

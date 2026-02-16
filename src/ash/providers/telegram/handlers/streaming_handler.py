@@ -170,5 +170,6 @@ class StreamingHandler:
             username=message.username,
             display_name=message.display_name,
             thread_id=message.metadata.get("thread_id"),
+            branch_id=session.metadata.get("branch_id"),
         )
         self._log_response(response_content)

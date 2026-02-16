@@ -19,10 +19,8 @@ from ash.core import SessionState
 from ash.core.agent import CompactionInfo
 from ash.core.prompt import format_gap_duration
 from ash.core.tokens import estimate_tokens
-from ash.llm.types import Message, Role
 from ash.providers.base import IncomingMessage
-from ash.providers.telegram.handlers.utils import _extract_text_content
-from ash.sessions import MessageEntry, SessionManager
+from ash.sessions import SessionManager
 from ash.sessions.types import session_key as make_session_key
 
 if TYPE_CHECKING:
@@ -211,8 +209,48 @@ class SessionHandler:
         session_manager: SessionManager,
         message: IncomingMessage,
     ) -> None:
-        """Load messages and context for persistent session mode."""
-        messages, message_ids = await session_manager.load_messages_for_llm()
+        """Load messages and context for persistent session mode.
+
+        When reply_to_message_id targets an old message, forks the conversation
+        so the LLM only sees messages from root to the fork point (not messages
+        that came after). Otherwise falls back to linear loading with reply context.
+        """
+        branch_head_id: str | None = None
+        branch_id: str | None = None
+
+        if message.reply_to_message_id:
+            target = await session_manager.get_message_by_external_id(
+                message.reply_to_message_id
+            )
+            if target:
+                # Check if target is the head of an existing branch
+                existing_branch = session_manager.get_branch_for_message(target.id)
+                if existing_branch:
+                    # Continue existing branch
+                    branch_head_id = target.id
+                    branch_id = existing_branch.branch_id
+                    session_manager._current_message_id = target.id
+                    logger.debug(
+                        "Continuing branch %s at message %s",
+                        branch_id,
+                        target.id,
+                    )
+                else:
+                    # Fork: create new branch from this message
+                    branch_id = session_manager.fork_at_message(target.id)
+                    branch_head_id = target.id
+                    logger.debug(
+                        "Forked new branch %s at message %s",
+                        branch_id,
+                        target.id,
+                    )
+                session.metadata["branch_id"] = branch_id
+                session.metadata["branch_head_id"] = branch_head_id
+
+        messages, message_ids = await session_manager.load_messages_for_llm(
+            branch_head_id=branch_head_id,
+            branch_id=branch_id,
+        )
 
         gap_minutes: float | None = None
         if messages:
@@ -221,33 +259,11 @@ class SessionHandler:
                 gap = datetime.now(UTC) - last_message_time.replace(tzinfo=UTC)
                 gap_minutes = gap.total_seconds() / 60
 
-        reply_context: list[MessageEntry] = []
-        if message.reply_to_message_id:
-            reply_context = await self._load_reply_context(
-                session_manager, message.reply_to_message_id
-            )
-            if reply_context:
-                logger.debug(f"Loaded {len(reply_context)} messages for reply context")
-
         if gap_minutes is not None:
             session.metadata["conversation_gap_minutes"] = gap_minutes
-        if message.reply_to_message_id and reply_context:
-            session.metadata["has_reply_context"] = True
 
         session.messages.extend(messages)
         session.set_message_ids(message_ids)
-
-        if reply_context:
-            existing_ids = set(message_ids)
-            for entry in reply_context:
-                if entry.id not in existing_ids:
-                    role = Role(entry.role)
-                    content = (
-                        entry.content
-                        if isinstance(entry.content, str)
-                        else _extract_text_content(entry.content)
-                    )
-                    session.messages.append(Message(role=role, content=content))
 
         if messages:
             gap_str = (
@@ -256,21 +272,6 @@ class SessionHandler:
             logger.debug(
                 f"Restored {len(messages)} messages for session {session.session_id}{gap_str}"
             )
-
-    async def _load_reply_context(
-        self,
-        session_manager: SessionManager,
-        reply_to_id: str,
-    ) -> list[MessageEntry]:
-        """Load message context around a reply target."""
-        target = await session_manager.get_message_by_external_id(reply_to_id)
-        if not target:
-            logger.debug(
-                f"Reply target {reply_to_id} not found in session {session_manager.session_key}"
-            )
-            return []
-        window = self._conversation_config.reply_context_window
-        return await session_manager.get_messages_around(target.id, window=window)
 
     def _update_chat_state(
         self, message: IncomingMessage, thread_id: str | None
@@ -424,6 +425,7 @@ class SessionHandler:
         username: str | None = None,
         display_name: str | None = None,
         thread_id: str | None = None,
+        branch_id: str | None = None,
     ) -> None:
         """Persist messages to JSONL session files."""
         session_manager = self.get_session_manager(chat_id, user_id, thread_id)
@@ -436,7 +438,7 @@ class SessionHandler:
         if bot_response_id:
             user_metadata["bot_response_id"] = bot_response_id
 
-        await session_manager.add_user_message(
+        user_msg_id = await session_manager.add_user_message(
             content=user_message,
             token_count=estimate_tokens(user_message),
             metadata=user_metadata or None,
@@ -445,11 +447,13 @@ class SessionHandler:
             display_name=display_name,
         )
 
+        last_msg_id = user_msg_id
+
         if assistant_message:
             assistant_metadata = (
                 {"bot_response_id": bot_response_id} if bot_response_id else None
             )
-            await session_manager.add_assistant_message(
+            last_msg_id = await session_manager.add_assistant_message(
                 content=assistant_message,
                 token_count=estimate_tokens(assistant_message),
                 metadata=assistant_metadata,
@@ -468,6 +472,10 @@ class SessionHandler:
                 content=assistant_message,
                 metadata=bot_metadata or None,
             )
+
+        # Update branch head after writing messages
+        if branch_id:
+            session_manager.update_branch_head(branch_id, last_msg_id)
 
         # Register bot response in thread index so replies to bot get routed correctly
         if bot_response_id and thread_id:

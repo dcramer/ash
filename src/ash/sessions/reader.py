@@ -284,3 +284,120 @@ class SessionReader:
                 if len(results) >= limit:
                     break
         return results
+
+    async def load_messages_for_branch(
+        self,
+        head_message_id: str,
+        branch_id: str | None = None,
+        token_budget: int | None = None,
+        recency_window: int = DEFAULT_RECENCY_WINDOW,
+        include_timestamps: bool = False,
+    ) -> tuple[list[Message], list[str]]:
+        """Load messages for a specific branch, following the parent_id chain."""
+        entries = await self.load_entries()
+        branch_entries = self._resolve_branch(entries, head_message_id, branch_id)
+        messages, message_ids, token_counts = self._build_messages(
+            branch_entries, include_timestamps=include_timestamps
+        )
+        return prune_messages_to_budget(
+            messages,
+            token_counts,
+            token_budget,
+            recency_window,
+            message_ids,
+        )
+
+    def _resolve_branch(
+        self,
+        entries: list[Entry],
+        head_message_id: str,
+        branch_id: str | None = None,
+    ) -> list[Entry]:
+        """Filter entries to only those on the branch ending at head_message_id.
+
+        Walks the parent_id chain from head back to root to determine which
+        messages are on the branch. Then filters tool_use, tool_result,
+        agent_session, agent_session_complete, and compaction entries to only
+        those associated with branch messages.
+
+        For v1 compatibility: messages with parent_id=None are treated as an
+        implicit linear chain in file order.
+        """
+        from ash.sessions.types import AgentSessionCompleteEntry, AgentSessionEntry
+
+        # Index messages by id, preserving file order
+        msg_by_id: dict[str, MessageEntry] = {}
+        msg_order: list[str] = []
+        for entry in entries:
+            if isinstance(entry, MessageEntry):
+                msg_by_id[entry.id] = entry
+                msg_order.append(entry.id)
+
+        if head_message_id not in msg_by_id:
+            return list(entries)  # Fallback: return all if head not found
+
+        # Walk parent_id chain from head to root
+        branch_msg_ids: set[str] = set()
+        current_id: str | None = head_message_id
+        while current_id is not None:
+            if current_id in branch_msg_ids:
+                break  # Cycle protection
+            branch_msg_ids.add(current_id)
+            msg = msg_by_id.get(current_id)
+            if msg is None:
+                break
+            if msg.parent_id is not None:
+                current_id = msg.parent_id
+            else:
+                # v1 fallback: include all preceding messages in file order
+                idx = msg_order.index(current_id) if current_id in msg_order else 0
+                for prev_id in msg_order[:idx]:
+                    branch_msg_ids.add(prev_id)
+                break
+
+        # Collect tool_use IDs that belong to branch messages
+        branch_tool_use_ids: set[str] = set()
+        for entry in entries:
+            if isinstance(entry, ToolUseEntry) and entry.message_id in branch_msg_ids:
+                branch_tool_use_ids.add(entry.id)
+            elif isinstance(entry, MessageEntry) and entry.id in branch_msg_ids:
+                if isinstance(entry.content, list):
+                    for block in entry.content:
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            branch_tool_use_ids.add(block["id"])
+
+        # Collect agent_session IDs that belong to branch tool uses
+        branch_agent_session_ids: set[str] = set()
+        for entry in entries:
+            if (
+                isinstance(entry, AgentSessionEntry)
+                and entry.parent_tool_use_id in branch_tool_use_ids
+            ):
+                branch_agent_session_ids.add(entry.id)
+
+        # Filter entries to branch membership
+        result: list[Entry] = []
+        for entry in entries:
+            if isinstance(entry, SessionHeader):
+                result.append(entry)
+            elif isinstance(entry, MessageEntry):
+                if entry.id in branch_msg_ids:
+                    result.append(entry)
+            elif isinstance(entry, ToolUseEntry):
+                if entry.id in branch_tool_use_ids:
+                    result.append(entry)
+            elif isinstance(entry, ToolResultEntry):
+                if entry.tool_use_id in branch_tool_use_ids:
+                    result.append(entry)
+            elif isinstance(entry, AgentSessionEntry):
+                if entry.id in branch_agent_session_ids:
+                    result.append(entry)
+            elif isinstance(entry, AgentSessionCompleteEntry):
+                if entry.agent_session_id in branch_agent_session_ids:
+                    result.append(entry)
+            elif isinstance(entry, CompactionEntry):
+                # Include compaction if it's for this branch or unscoped (None)
+                if entry.branch_id is None or entry.branch_id == branch_id:
+                    result.append(entry)
+
+        return result

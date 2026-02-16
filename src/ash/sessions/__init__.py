@@ -10,6 +10,7 @@ Sessions are stored in ~/.ash/sessions/{session_key}/ directories.
 from ash.sessions.manager import SessionManager
 from ash.sessions.reader import SessionReader, format_timestamp
 from ash.sessions.types import (
+    BranchHead,
     CompactionEntry,
     Entry,
     MessageEntry,
@@ -30,6 +31,7 @@ from ash.sessions.utils import (
 from ash.sessions.writer import SessionWriter
 
 __all__ = [
+    "BranchHead",
     "CompactionEntry",
     "DEFAULT_RECENCY_WINDOW",
     "Entry",

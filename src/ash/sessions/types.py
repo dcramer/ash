@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-SESSION_VERSION = "1"
+SESSION_VERSION = "2"
 
 
 def generate_id() -> str:
@@ -163,6 +163,9 @@ class MessageEntry:
     display_name: str | None = None
     metadata: dict[str, Any] | None = None
     agent_session_id: str | None = None  # Links to AgentSessionEntry for subagent msgs
+    parent_id: str | None = (
+        None  # ID of preceding message on this branch (None = v1 legacy / first msg)
+    )
     type: Literal["message"] = "message"
 
     def to_dict(self) -> dict[str, Any]:
@@ -178,6 +181,8 @@ class MessageEntry:
             result["metadata"] = self.metadata
         if self.agent_session_id:
             result["agent_session_id"] = self.agent_session_id
+        if self.parent_id:
+            result["parent_id"] = self.parent_id
         return result
 
     def to_history_dict(self) -> dict[str, Any]:
@@ -220,6 +225,7 @@ class MessageEntry:
             display_name=data.get("display_name"),
             metadata=data.get("metadata"),
             agent_session_id=data.get("agent_session_id"),
+            parent_id=data.get("parent_id"),
         )
 
     @classmethod
@@ -233,6 +239,7 @@ class MessageEntry:
         display_name: str | None = None,
         metadata: dict[str, Any] | None = None,
         agent_session_id: str | None = None,
+        parent_id: str | None = None,
     ) -> MessageEntry:
         return cls(
             id=generate_id(),
@@ -245,6 +252,7 @@ class MessageEntry:
             display_name=display_name,
             metadata=metadata,
             agent_session_id=agent_session_id,
+            parent_id=parent_id,
         )
 
 
@@ -361,10 +369,11 @@ class CompactionEntry:
     tokens_after: int
     first_kept_entry_id: str
     created_at: datetime = field(default_factory=now_utc)
+    branch_id: str | None = None  # Scopes compaction to a specific branch
     type: Literal["compaction"] = "compaction"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "type": self.type,
             "id": self.id,
             "summary": self.summary,
@@ -373,6 +382,9 @@ class CompactionEntry:
             "first_kept_entry_id": self.first_kept_entry_id,
             "created_at": self.created_at.isoformat(),
         }
+        if self.branch_id:
+            result["branch_id"] = self.branch_id
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CompactionEntry:
@@ -383,6 +395,7 @@ class CompactionEntry:
             tokens_after=data["tokens_after"],
             first_kept_entry_id=data["first_kept_entry_id"],
             created_at=_parse_datetime(data.get("created_at")),
+            branch_id=data.get("branch_id"),
         )
 
     @classmethod
@@ -392,6 +405,7 @@ class CompactionEntry:
         tokens_before: int,
         tokens_after: int,
         first_kept_entry_id: str,
+        branch_id: str | None = None,
     ) -> CompactionEntry:
         return cls(
             id=generate_id(),
@@ -399,6 +413,7 @@ class CompactionEntry:
             tokens_before=tokens_before,
             tokens_after=tokens_after,
             first_kept_entry_id=first_kept_entry_id,
+            branch_id=branch_id,
         )
 
 
@@ -493,6 +508,15 @@ class StackFrameMeta(BaseModel):
     environment: dict[str, str] = {}
 
 
+class BranchHead(BaseModel):
+    """Tracks the tip of a conversation branch."""
+
+    branch_id: str  # UUID
+    head_message_id: str  # Tip of this branch
+    fork_point_id: str | None = None  # Message ID where this branch diverged
+    created_at: datetime = Field(default_factory=now_utc)
+
+
 class SessionState(BaseModel):
     """Session metadata stored in state.json for easy lookup."""
 
@@ -502,3 +526,4 @@ class SessionState(BaseModel):
     thread_id: str | None = None
     created_at: datetime = Field(default_factory=now_utc)
     active_stack: list[StackFrameMeta] | None = None  # Interactive subagent stack
+    branches: list[BranchHead] = []  # All known branch tips

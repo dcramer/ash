@@ -127,6 +127,7 @@ Lives at `~/.ash/sessions/{session_key}/context.jsonl`. Tagged union — each li
 | `token_count` | `int \| null` | no | Estimated tokens |
 | `metadata` | `dict \| null` | no | External IDs, etc. |
 | `agent_session_id` | `str \| null` | no | Links to AgentSessionEntry |
+| `parent_id` | `str \| null` | no | ID of preceding message on this branch (v2) |
 
 #### `type: "tool_use"` — ToolUseEntry
 
@@ -162,6 +163,7 @@ Lives at `~/.ash/sessions/{session_key}/context.jsonl`. Tagged union — each li
 | `tokens_after` | `int` | yes | Token count after |
 | `first_kept_entry_id` | `str` | yes | First non-compacted entry |
 | `created_at` | `datetime` | yes | ISO 8601 |
+| `branch_id` | `str \| null` | no | Scopes compaction to a specific branch |
 
 #### `type: "agent_session"` — AgentSessionEntry
 
@@ -196,6 +198,16 @@ Lives at `~/.ash/sessions/{session_key}/state.json`.
 | `chat_id` | `str \| null` | no | Chat ID |
 | `user_id` | `str \| null` | no | User ID |
 | `thread_id` | `str \| null` | no | Thread ID |
+| `created_at` | `datetime` | yes | ISO 8601 |
+| `branches` | `list[BranchHead]` | no | Branch tips (v2) |
+
+### BranchHead
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `branch_id` | `str` | yes | UUID |
+| `head_message_id` | `str` | yes | Tip of this branch |
+| `fork_point_id` | `str \| null` | no | Message ID where branch diverged |
 | `created_at` | `datetime` | yes | ISO 8601 |
 
 ## Write Flow
@@ -243,9 +255,12 @@ class SessionManager:
     async def add_tool_use(tool_use_id, name, input_data) -> None
     async def add_tool_result(tool_use_id, output, is_error, duration_ms) -> None
     async def add_compaction(summary, tokens_before, tokens_after, first_kept_entry_id) -> None
-    async def load_messages_for_llm(recency_window) -> list[Message]
+    async def load_messages_for_llm(recency_window, branch_head_id, branch_id) -> list[Message]
     async def get_message_by_external_id(external_id) -> MessageEntry | None
     async def get_messages_around(message_id, window) -> list[Entry]
+    def fork_at_message(message_id) -> str  # Returns branch_id
+    def update_branch_head(branch_id, head_message_id) -> None
+    def get_branch_for_message(message_id) -> BranchHead | None
 ```
 
 ## Session Key Generation
@@ -265,10 +280,52 @@ Special characters in IDs are sanitized to underscores, max 64 chars per compone
 |----------|----------|
 | New session | Create directory, write header to both files |
 | Load existing | Read header from context.jsonl |
-| Add message | Append to both context.jsonl and history.jsonl |
+| Add message | Append to both context.jsonl and history.jsonl, auto-set `parent_id` |
 | Add tool use | Append to context.jsonl only |
-| Load for LLM | Read last N messages + active tool pairs |
-| Reply context | Find message by external_id, return window around it |
+| Load for LLM (linear) | Read last N messages + active tool pairs |
+| Load for LLM (branch) | Walk `parent_id` chain from head, filter entries to branch |
+| Reply to old message | Fork conversation, load only root-to-fork-point messages |
+| Continue branch | Resume from branch head, chain new messages |
+
+## Branching (Tree-Structured Conversations)
+
+Sessions support **tree-structured conversations** via `parent_id` on `MessageEntry`. Each message points to its predecessor, creating a DAG within the single append-only `context.jsonl`.
+
+### How it works
+
+- **Linear flow**: each message's `parent_id` = previous message's `id` (set automatically by the manager)
+- **Fork**: when replying to an old message, `parent_id` = the old message ID instead of the latest
+- **v1 compat**: `parent_id = None` means "previous message in file order" (implicit linear chain)
+- **Branch heads**: tracked in `state.json` as `BranchHead` entries
+
+### Fork detection (Telegram)
+
+When `reply_to_message_id` targets an old message:
+1. Look up target via `get_message_by_external_id()`
+2. If target is head of existing branch → continue that branch
+3. Otherwise → `fork_at_message(target.id)` to create a new branch
+4. Load via `load_messages_for_llm(branch_head_id=target.id)`
+
+Normal messages (no reply) continue the main linear flow.
+
+### Branch resolution (`_resolve_branch`)
+
+1. Walk `parent_id` chain from head back to root
+2. v1 fallback: messages with `parent_id = None` include all preceding messages in file order
+3. Filter tool_use, tool_result, agent_session entries by branch membership
+4. Return entries in original file order
+
+### v1 → v2 migration
+
+- Lazy, zero-copy: v1 sessions work unchanged (no `parent_id` = linear file order)
+- First fork upgrades `state.json` to v2
+- `context.jsonl` is never rewritten
+
+### Compaction
+
+- Per-branch: `CompactionEntry.branch_id` scopes summary to one branch
+- Shared trunk messages (before earliest fork) stay intact
+- `load_messages_for_branch` only applies compactions matching the active branch
 
 ## Errors
 
@@ -290,3 +347,10 @@ uv run pytest tests/test_sessions.py -v
 - Load respects recency window
 - External ID lookup works
 - Window queries return correct messages
+- parent_id auto-set on message writes
+- Branch creation and fork_at_message
+- Branch-aware loading returns only branch path messages
+- v1 sessions (no parent_id) load linearly
+- Nested forks create independent branches
+- Tool pairs filtered correctly per branch
+- Branch head tracking updates after writes
