@@ -47,14 +47,21 @@ class GraphPersistence:
         self._dirty.update(collections)
 
     async def flush(self, graph: KnowledgeGraph) -> None:
-        """Write all dirty collections to disk, then clear dirty set."""
+        """Write all dirty collections to disk, then clear dirty set.
+
+        Snapshots data on the event-loop thread (single-threaded, safe)
+        before handing raw records to a worker thread for I/O.
+        """
         import asyncio
 
         if not self._dirty:
             return
         dirty = self._dirty.copy()
         self._dirty.clear()
-        await asyncio.to_thread(_flush_to_disk, self._dir, graph, dirty)
+
+        # Snapshot on the event-loop thread to avoid concurrent dict iteration
+        snapshot = _snapshot_dirty(graph, dirty)
+        await asyncio.to_thread(_write_snapshot, self._dir, snapshot)
 
     async def load_raw(self) -> dict[str, list[dict[str, Any]]]:
         """Load raw JSONL data from disk.
@@ -71,31 +78,31 @@ class GraphPersistence:
         """Rewrite memories.jsonl atomically."""
         import asyncio
 
-        records = [m.to_dict() for m in memories.values()]
+        records = [m.to_dict() for m in memories.values()]  # snapshot on event loop
         await asyncio.to_thread(_save_collection, self._dir, "memories.jsonl", records)
 
     async def save_people(self, people: dict[str, PersonEntry]) -> None:
         import asyncio
 
-        records = [p.to_dict() for p in people.values()]
+        records = [p.to_dict() for p in people.values()]  # snapshot on event loop
         await asyncio.to_thread(_save_collection, self._dir, "people.jsonl", records)
 
     async def save_users(self, users: dict[str, UserEntry]) -> None:
         import asyncio
 
-        records = [u.to_dict() for u in users.values()]
+        records = [u.to_dict() for u in users.values()]  # snapshot on event loop
         await asyncio.to_thread(_save_collection, self._dir, "users.jsonl", records)
 
     async def save_chats(self, chats: dict[str, ChatEntry]) -> None:
         import asyncio
 
-        records = [c.to_dict() for c in chats.values()]
+        records = [c.to_dict() for c in chats.values()]  # snapshot on event loop
         await asyncio.to_thread(_save_collection, self._dir, "chats.jsonl", records)
 
     async def save_edges(self, edges: dict[str, Edge]) -> None:
         import asyncio
 
-        records = [e.to_dict() for e in edges.values()]
+        records = [e.to_dict() for e in edges.values()]  # snapshot on event loop
         await asyncio.to_thread(_save_collection, self._dir, "edges.jsonl", records)
 
 
@@ -105,35 +112,31 @@ def _save_collection(graph_dir: Path, filename: str, records: list[dict]) -> Non
     _write_jsonl_atomic(graph_dir / filename, records)
 
 
-def _flush_to_disk(graph_dir: Path, graph: KnowledgeGraph, dirty: set[str]) -> None:
-    """Write all dirty collections to disk synchronously (runs in thread)."""
+def _snapshot_dirty(graph: KnowledgeGraph, dirty: set[str]) -> dict[str, list[dict]]:
+    """Snapshot dirty collections into raw dicts (must run on event-loop thread).
 
-    graph_dir.mkdir(parents=True, exist_ok=True)
+    This iterates the graph's in-memory dicts while no other coroutine can
+    mutate them, producing plain lists that are safe to hand to a worker thread.
+    """
+    snapshot: dict[str, list[dict]] = {}
     if "memories" in dirty:
-        _write_jsonl_atomic(
-            graph_dir / "memories.jsonl",
-            [m.to_dict() for m in graph.memories.values()],
-        )
+        snapshot["memories"] = [m.to_dict() for m in graph.memories.values()]
     if "people" in dirty:
-        _write_jsonl_atomic(
-            graph_dir / "people.jsonl",
-            [p.to_dict() for p in graph.people.values()],
-        )
+        snapshot["people"] = [p.to_dict() for p in graph.people.values()]
     if "users" in dirty:
-        _write_jsonl_atomic(
-            graph_dir / "users.jsonl",
-            [u.to_dict() for u in graph.users.values()],
-        )
+        snapshot["users"] = [u.to_dict() for u in graph.users.values()]
     if "chats" in dirty:
-        _write_jsonl_atomic(
-            graph_dir / "chats.jsonl",
-            [c.to_dict() for c in graph.chats.values()],
-        )
+        snapshot["chats"] = [c.to_dict() for c in graph.chats.values()]
     if "edges" in dirty:
-        _write_jsonl_atomic(
-            graph_dir / "edges.jsonl",
-            [e.to_dict() for e in graph.edges.values()],
-        )
+        snapshot["edges"] = [e.to_dict() for e in graph.edges.values()]
+    return snapshot
+
+
+def _write_snapshot(graph_dir: Path, snapshot: dict[str, list[dict]]) -> None:
+    """Write pre-serialized snapshot to disk (runs in worker thread)."""
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    for collection, records in snapshot.items():
+        _write_jsonl_atomic(graph_dir / f"{collection}.jsonl", records)
 
 
 def _load_raw_jsonl(graph_dir: Path) -> dict[str, list[dict[str, Any]]]:

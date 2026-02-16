@@ -6,10 +6,10 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from ash.graph.graph import Edge, KnowledgeGraph
+from ash.graph.graph import Edge, EdgeType, KnowledgeGraph
 
 # Edge types to skip by default during traversal
-DEFAULT_EXCLUDE_EDGE_TYPES = {"SUPERSEDES"}
+DEFAULT_EXCLUDE_EDGE_TYPES: set[EdgeType] = {"SUPERSEDES"}
 
 
 @dataclass
@@ -17,7 +17,7 @@ class TraversalResult:
     """Result of a graph traversal."""
 
     node_id: str
-    node_type: str
+    node_type: str  # NodeType | "unknown" for missing nodes
     hops: int  # Distance from seed
     path: list[str] = field(default_factory=list)  # Edge IDs traversed
 
@@ -26,7 +26,7 @@ def bfs_traverse(
     graph: KnowledgeGraph,
     seed_ids: set[str],
     max_hops: int = 2,
-    exclude_edge_types: set[str] | None = None,
+    exclude_edge_types: set[EdgeType] | None = None,
     filter_fn: Callable[[str, Edge], bool] | None = None,
 ) -> list[TraversalResult]:
     """BFS through adjacency lists from seed nodes.

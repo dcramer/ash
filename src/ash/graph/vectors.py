@@ -142,15 +142,41 @@ class NumpyVectorIndex:
         await asyncio.to_thread(self._save_sync, path)
 
     def _save_sync(self, path: Path) -> None:
-        """Synchronous save (runs in thread)."""
+        """Synchronous save with atomic writes (runs in thread)."""
+        import os
+        import tempfile
+
         path.parent.mkdir(parents=True, exist_ok=True)
+        ids_path = path.with_suffix(".ids.json")
+
         if len(self._ids) > 0:
-            np.save(str(path), self._vectors)
-            ids_path = path.with_suffix(".ids.json")
-            with ids_path.open("w") as f:
-                json.dump(self._ids, f)
+            # Atomic write for .npy
+            # suffix must be .npy so np.save doesn't append its own .npy extension
+            fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp.npy")
+            try:
+                os.close(fd)
+                np.save(tmp, self._vectors)
+                # fsync the written file
+                with Path(tmp).open("rb") as f:
+                    os.fsync(f.fileno())
+                Path(tmp).replace(path)
+            except BaseException:
+                Path(tmp).unlink(missing_ok=True)
+                raise
+
+            # Atomic write for .ids.json
+            fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".json.tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(self._ids, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                Path(tmp).replace(ids_path)
+            except BaseException:
+                Path(tmp).unlink(missing_ok=True)
+                raise
         else:
-            for p in [path, path.with_suffix(".ids.json")]:
+            for p in [path, ids_path]:
                 if p.exists():
                     p.unlink()
 

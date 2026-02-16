@@ -9,12 +9,17 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
+
+EdgeType = Literal[
+    "ABOUT", "STATED_BY", "SUPERSEDES", "IS_PERSON", "MERGED_INTO", "HAS_RELATIONSHIP"
+]
+NodeType = Literal["memory", "person", "user", "chat"]
 
 
 class Edge(BaseModel):
@@ -23,10 +28,10 @@ class Edge(BaseModel):
     model_config = ConfigDict(frozen=False)
 
     id: str
-    edge_type: str  # ABOUT, SUPERSEDES, HAS_RELATIONSHIP, etc.
-    source_type: str  # "memory", "person", "user", "chat"
+    edge_type: EdgeType
+    source_type: NodeType
     source_id: str
-    target_type: str
+    target_type: NodeType
     target_id: str
     weight: float = 1.0
     properties: dict[str, Any] | None = None
@@ -70,7 +75,7 @@ class KnowledgeGraph:
     )
 
     # Node type index for uniform lookup
-    node_types: dict[str, str] = field(default_factory=dict)
+    node_types: dict[str, NodeType] = field(default_factory=dict)
 
     # Secondary indexes for provider lookups: (provider, provider_id) -> node_id
     _user_by_provider: dict[tuple[str, str], str] = field(default_factory=dict)
@@ -229,7 +234,7 @@ class KnowledgeGraph:
     def get_outgoing(
         self,
         node_id: str,
-        edge_type: str | None = None,
+        edge_type: EdgeType | None = None,
     ) -> list[Edge]:
         """Get outgoing edges, optionally filtered by type."""
         edge_ids = self._outgoing.get(node_id, [])
@@ -246,7 +251,7 @@ class KnowledgeGraph:
     def get_incoming(
         self,
         node_id: str,
-        edge_type: str | None = None,
+        edge_type: EdgeType | None = None,
     ) -> list[Edge]:
         """Get incoming edges, optionally filtered by type."""
         edge_ids = self._incoming.get(node_id, [])
@@ -264,7 +269,7 @@ class KnowledgeGraph:
         self,
         source_id: str,
         target_id: str,
-        edge_type: str,
+        edge_type: EdgeType,
     ) -> Edge | None:
         """Find an existing edge by source, target, and type.
 
