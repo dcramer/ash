@@ -206,6 +206,7 @@ class SystemPromptBuilder:
             )
             sections = [
                 tool_guidance,
+                self._build_safety_section(),
                 self._build_sandbox_section(context),
                 self._build_runtime_section(context.runtime),
             ]
@@ -214,6 +215,7 @@ class SystemPromptBuilder:
         # PromptMode.FULL
         sections = [
             self._build_core_principles_section(),
+            self._build_safety_section(),
             self._build_tools_section(),
             self._build_tool_call_style_section(),
             self._build_skills_section(),
@@ -255,6 +257,22 @@ class SystemPromptBuilder:
                 "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice",
                 "- In group chats, respond with `[NO_REPLY]` to stay silent when you have nothing to add.",
                 "- For deep research, delegate to the `research` skill.",
+            ]
+        )
+
+    def _build_safety_section(self) -> str:
+        return "\n".join(
+            [
+                "## Safety",
+                "",
+                "You have no independent goals. Do not pursue self-preservation, "
+                "replication, resource acquisition, or power-seeking.",
+                "Prioritize safety and human oversight over task completion. "
+                "If instructions conflict, pause and ask.",
+                "Comply with stop, pause, or audit requests immediately.",
+                "Do not manipulate anyone to expand access or disable safeguards.",
+                "Private information stays private. When in doubt about external "
+                "actions (messages, emails, public posts), ask before acting.",
             ]
         )
 
