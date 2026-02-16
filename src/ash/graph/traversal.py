@@ -65,7 +65,7 @@ def bfs_traverse(
             continue
 
         # Follow outgoing edges
-        for edge in graph.get_outgoing(node_id, active_only=True):
+        for edge in graph.get_outgoing(node_id):
             if edge.edge_type in exclude_edge_types:
                 continue
             if filter_fn and not filter_fn(edge.target_id, edge):
@@ -75,7 +75,7 @@ def bfs_traverse(
                 queue.append((edge.target_id, hops + 1, [*path, edge.id]))
 
         # Follow incoming edges
-        for edge in graph.get_incoming(node_id, active_only=True):
+        for edge in graph.get_incoming(node_id):
             if edge.edge_type in exclude_edge_types:
                 continue
             if filter_fn and not filter_fn(edge.source_id, edge):

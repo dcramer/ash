@@ -136,7 +136,13 @@ class NumpyVectorIndex:
 
     async def save(self, path: Path) -> None:
         """Save to .npy + .ids.json"""
+        import asyncio
+
         self._flush()
+        await asyncio.to_thread(self._save_sync, path)
+
+    def _save_sync(self, path: Path) -> None:
+        """Synchronous save (runs in thread)."""
         path.parent.mkdir(parents=True, exist_ok=True)
         if len(self._ids) > 0:
             np.save(str(path), self._vectors)
@@ -144,7 +150,6 @@ class NumpyVectorIndex:
             with ids_path.open("w") as f:
                 json.dump(self._ids, f)
         else:
-            # Remove files if empty
             for p in [path, path.with_suffix(".ids.json")]:
                 if p.exists():
                     p.unlink()
@@ -152,6 +157,13 @@ class NumpyVectorIndex:
     @classmethod
     async def load(cls, path: Path) -> NumpyVectorIndex:
         """Load from .npy + .ids.json"""
+        import asyncio
+
+        return await asyncio.to_thread(cls._load_sync, path)
+
+    @classmethod
+    def _load_sync(cls, path: Path) -> NumpyVectorIndex:
+        """Synchronous load (runs in thread)."""
         index = cls()
         ids_path = path.with_suffix(".ids.json")
 
@@ -161,7 +173,6 @@ class NumpyVectorIndex:
                 index._ids = json.load(f)
             index._id_to_index = {id_: i for i, id_ in enumerate(index._ids)}
 
-            # Validate consistency
             if len(index._ids) != index._vectors.shape[0]:
                 logger.warning(
                     "Vector index size mismatch: %d ids, %d vectors. Rebuilding.",

@@ -31,9 +31,6 @@ class Edge(BaseModel):
     weight: float = 1.0
     properties: dict[str, Any] | None = None
     created_at: datetime | None = None
-    valid_from: datetime | None = None
-    invalid_at: datetime | None = None
-    episode_id: str | None = None
     created_by: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -174,6 +171,13 @@ class KnowledgeGraph:
             if eid in self.edges:
                 self.remove_edge(eid)
                 removed.append(eid)
+
+        # Clean up empty index entries to prevent unbounded accumulation
+        if node_id in self._outgoing and not self._outgoing[node_id]:
+            del self._outgoing[node_id]
+        if node_id in self._incoming and not self._incoming[node_id]:
+            del self._incoming[node_id]
+
         return removed
 
     # -- Edge operations --
@@ -222,17 +226,10 @@ class KnowledgeGraph:
             return
         self._remove_from_index(edge)
 
-    def invalidate_edge(self, edge_id: str, when: datetime) -> None:
-        """Soft-delete: set invalid_at timestamp."""
-        edge = self.edges.get(edge_id)
-        if edge:
-            edge.invalid_at = when
-
     def get_outgoing(
         self,
         node_id: str,
         edge_type: str | None = None,
-        active_only: bool = True,
     ) -> list[Edge]:
         """Get outgoing edges, optionally filtered by type."""
         edge_ids = self._outgoing.get(node_id, [])
@@ -243,8 +240,6 @@ class KnowledgeGraph:
                 continue
             if edge_type and edge.edge_type != edge_type:
                 continue
-            if active_only and edge.invalid_at is not None:
-                continue
             results.append(edge)
         return results
 
@@ -252,7 +247,6 @@ class KnowledgeGraph:
         self,
         node_id: str,
         edge_type: str | None = None,
-        active_only: bool = True,
     ) -> list[Edge]:
         """Get incoming edges, optionally filtered by type."""
         edge_ids = self._incoming.get(node_id, [])
@@ -263,7 +257,21 @@ class KnowledgeGraph:
                 continue
             if edge_type and edge.edge_type != edge_type:
                 continue
-            if active_only and edge.invalid_at is not None:
-                continue
             results.append(edge)
         return results
+
+    def find_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        edge_type: str,
+    ) -> Edge | None:
+        """Find an existing edge by source, target, and type.
+
+        Useful for checking uniqueness before creating a new edge.
+        """
+        for eid in self._outgoing.get(source_id, []):
+            edge = self.edges.get(eid)
+            if edge and edge.edge_type == edge_type and edge.target_id == target_id:
+                return edge
+        return None

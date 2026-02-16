@@ -104,15 +104,6 @@ class TestGraphEdgeOps:
         # Should not raise
         graph.remove_edge("nonexistent")
 
-    def test_invalidate_edge(self):
-        graph = KnowledgeGraph()
-        edge = create_about_edge("mem-1", "person-1")
-        graph.add_edge(edge)
-        now = datetime.now(UTC)
-        graph.invalidate_edge(edge.id, now)
-
-        assert graph.edges[edge.id].invalid_at == now
-
     def test_get_outgoing(self):
         graph = KnowledgeGraph()
         e1 = create_about_edge("mem-1", "person-1")
@@ -141,23 +132,6 @@ class TestGraphEdgeOps:
         incoming = graph.get_incoming("person-1", edge_type=ABOUT)
         assert len(incoming) == 2
         assert {e.source_id for e in incoming} == {"mem-1", "mem-2"}
-
-    def test_get_outgoing_active_only(self):
-        graph = KnowledgeGraph()
-        e1 = create_about_edge("mem-1", "person-1")
-        e2 = create_about_edge("mem-1", "person-2")
-        graph.add_edge(e1)
-        graph.add_edge(e2)
-
-        # Invalidate one
-        graph.invalidate_edge(e2.id, datetime.now(UTC))
-
-        active = graph.get_outgoing("mem-1", active_only=True)
-        assert len(active) == 1
-        assert active[0].target_id == "person-1"
-
-        all_edges = graph.get_outgoing("mem-1", active_only=False)
-        assert len(all_edges) == 2
 
 
 # =============================================================================
@@ -1049,6 +1023,7 @@ class TestPersistenceRoundTrip:
 
     async def test_load_save_roundtrip(self, tmp_path):
         from ash.graph.persistence import GraphPersistence
+        from ash.store.store import _hydrate_graph
 
         graph = KnowledgeGraph()
         graph.add_memory(
@@ -1063,7 +1038,8 @@ class TestPersistenceRoundTrip:
 
         # Load into fresh graph
         persistence2 = GraphPersistence(tmp_path / "graph")
-        loaded = await persistence2.load()
+        raw_data = await persistence2.load_raw()
+        loaded = _hydrate_graph(raw_data)
 
         assert "mem-1" in loaded.memories
         assert "person-1" in loaded.people
@@ -1075,6 +1051,7 @@ class TestPersistenceRoundTrip:
 
     async def test_load_rebuilds_adjacency_indexes(self, tmp_path):
         from ash.graph.persistence import GraphPersistence
+        from ash.store.store import _hydrate_graph
 
         graph = KnowledgeGraph()
         graph.add_memory(
@@ -1088,7 +1065,8 @@ class TestPersistenceRoundTrip:
         persistence.mark_dirty("memories", "people", "edges")
         await persistence.flush(graph)
 
-        loaded = await GraphPersistence(tmp_path / "graph").load()
+        raw_data = await GraphPersistence(tmp_path / "graph").load_raw()
+        loaded = _hydrate_graph(raw_data)
 
         # Adjacency indexes should be rebuilt from edges
         outgoing = loaded.get_outgoing("mem-1", edge_type=ABOUT)
