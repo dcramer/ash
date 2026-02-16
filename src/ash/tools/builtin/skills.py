@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ash.agents.base import Agent
-from ash.agents.types import AgentConfig, AgentContext
+from ash.agents.types import AgentConfig, AgentContext, ChildActivated, StackFrame
 from ash.skills.types import SkillDefinition
 from ash.tools.base import Tool, ToolContext, ToolResult, format_subagent_result
 
@@ -339,31 +339,60 @@ class UseSkillTool(Tool):
             context.get_session_info() if context else (None, None)
         )
 
-        result = await self._executor.execute(
-            agent,
-            message,
-            agent_context,
+        # Build child frame and raise ChildActivated for interactive stack handling.
+        # The orchestrator will run all turns (including the first).
+        agent_config = agent.config
+        overrides = self._config.agents.get(agent_config.name)
+        model_alias = (overrides.model if overrides else None) or agent_config.model
+        resolved_model: str | None = None
+        if model_alias:
+            try:
+                resolved_model = self._config.get_model(model_alias).model
+            except Exception:
+                logger.warning(
+                    "Failed to resolve model '%s' for skill '%s'",
+                    model_alias,
+                    skill_name,
+                )
+
+        # Start agent session for logging
+        agent_session_id: str | None = None
+        if session_manager and tool_use_id:
+            agent_session_id = await session_manager.start_agent_session(
+                parent_tool_use_id=tool_use_id,
+                agent_type="skill",
+                agent_name=agent_config.name,
+            )
+
+        # Build child session with initial message
+        from ash.core.session import SessionState
+        from ash.sessions.types import generate_id
+
+        child_session = SessionState(
+            session_id=f"agent-{agent_config.name}-{agent_context.session_id or 'unknown'}",
+            provider=agent_context.provider or "",
+            chat_id=agent_context.chat_id or "",
+            user_id=agent_context.user_id or "",
+        )
+        child_session.add_user_message(message)
+
+        system_prompt = agent.build_system_prompt(agent_context)
+
+        child_frame = StackFrame(
+            frame_id=generate_id(),
+            agent_name=agent_config.name,
+            agent_type="skill",
+            session=child_session,
+            system_prompt=system_prompt,
+            context=agent_context,
+            model=resolved_model,
             environment=env,
-            session_manager=session_manager,
+            max_iterations=agent_config.max_iterations,
+            effective_tools=agent_config.get_effective_tools(),
+            is_skill_agent=True,
+            voice=self._voice,
             parent_tool_use_id=tool_use_id,
+            agent_session_id=agent_session_id,
         )
 
-        # Propagate thread anchor from skill back to caller
-        if reply_id := result.metadata.get("reply_to_message_id"):
-            if context and not context.reply_to_message_id:
-                context.reply_to_message_id = reply_id
-
-        # Reload workspace skills after skill-writer creates new skills
-        if skill_name == "skill-writer" and not result.is_error:
-            count = self._registry.reload_workspace(self._config.workspace)
-            if count > 0:
-                logger.info(f"Reloaded {count} new skill(s) after skill-writer")
-
-        if result.is_error:
-            return ToolResult.error(result.content)
-
-        return ToolResult.success(
-            format_skill_result(result.content, skill_name),
-            iterations=result.iterations,
-            skill=skill_name,
-        )
+        raise ChildActivated(child_frame)

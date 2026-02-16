@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from ash.agents.types import ChildActivated
 from ash.config.models import ConversationConfig
 from ash.core import Agent
 from ash.db import Database
@@ -26,7 +27,7 @@ from ash.sessions.types import session_key as make_session_key
 if TYPE_CHECKING:
     from aiogram.types import CallbackQuery
 
-    from ash.agents import AgentRegistry
+    from ash.agents import AgentExecutor, AgentRegistry
     from ash.config import AshConfig
     from ash.llm import LLMProvider
     from ash.memory.extractor import MemoryExtractor
@@ -55,6 +56,7 @@ class TelegramMessageHandler:
         llm_provider: LLMProvider | None = None,
         memory_manager: Store | None = None,
         memory_extractor: MemoryExtractor | None = None,
+        agent_executor: AgentExecutor | None = None,
     ):
         self._provider = provider
         self._agent = agent
@@ -68,8 +70,14 @@ class TelegramMessageHandler:
         self._llm_provider = llm_provider
         self._memory_manager = memory_manager
         self._memory_extractor = memory_extractor
+        self._agent_executor = agent_executor
         max_concurrent = config.sessions.max_concurrent if config else 2
         self._concurrency_semaphore = asyncio.Semaphore(max_concurrent)
+
+        # Stack manager for interactive subagent sessions
+        from ash.agents.types import AgentStackManager
+
+        self._stack_manager = AgentStackManager()
 
         # Session handler for session lifecycle and persistence
         self._session_handler = SessionHandler(
@@ -289,6 +297,19 @@ class TelegramMessageHandler:
                 await self._provider.clear_reaction(message.chat_id, message.id)
             return
 
+        # Check if there's an active interactive subagent stack for this session
+        thread_id = message.metadata.get("thread_id")
+        session_key = make_session_key(
+            self._provider.name, message.chat_id, message.user_id, thread_id
+        )
+
+        if self._stack_manager.has_active(session_key) and self._agent_executor:
+            try:
+                await self._handle_stack_message(message, session_key)
+            finally:
+                await self._provider.clear_reaction(message.chat_id, message.id)
+            return
+
         session = await self._session_handler.get_or_create_session(message)
 
         if session.has_incomplete_tool_use():
@@ -308,6 +329,24 @@ class TelegramMessageHandler:
                 await self._streaming_handler.handle_streaming(message, session, ctx)
             else:
                 await self._sync_handler.handle_sync(message, session, ctx)
+        except ChildActivated as ca:
+            # A tool spawned an interactive child subagent (streaming or sync).
+            # ChildActivated carries both main_frame and child_frame.
+            if self._agent_executor and ca.main_frame and ca.child_frame:
+                stack = self._stack_manager.get_or_create(session_key)
+                stack.push(ca.main_frame)
+                stack.push(ca.child_frame)
+                logger.info(
+                    "Child activated: entering orchestration loop "
+                    "(stack depth=%d, child=%s)",
+                    stack.depth,
+                    ca.child_frame.agent_name,
+                )
+                await self._run_orchestration_loop(
+                    message, session_key, entry_user_message=None
+                )
+            else:
+                logger.warning("ChildActivated raised but agent_executor not available")
         finally:
             await self._provider.clear_reaction(message.chat_id, message.id)
             steered = ctx.take_steered()
@@ -317,6 +356,165 @@ class TelegramMessageHandler:
                 await self._session_handler.persist_steered_messages(steered, thread_id)
             for msg in steered:
                 await self._provider.clear_reaction(msg.chat_id, msg.id)
+
+    async def _handle_stack_message(
+        self, message: IncomingMessage, session_key: str
+    ) -> None:
+        """Route a user message to the top of the interactive subagent stack."""
+        logger.info(
+            "[dim]%s:[/dim] %s (→ stack)",
+            message.username or message.user_id,
+            _truncate(message.text),
+        )
+        await self._run_orchestration_loop(
+            message, session_key, entry_user_message=message.text
+        )
+
+    async def _run_orchestration_loop(
+        self,
+        message: IncomingMessage,
+        session_key: str,
+        entry_user_message: str | None = None,
+    ) -> None:
+        """Run the interactive subagent orchestration loop.
+
+        Processes TurnResults until we need user input (SEND_TEXT)
+        or the stack is fully unwound.
+        """
+        from ash.agents.types import TurnAction
+
+        assert self._agent_executor is not None
+        stack = self._stack_manager.get_or_create(session_key)
+
+        # Get session manager for logging subagent activity
+        thread_id = message.metadata.get("thread_id")
+        sm = self._session_handler.get_session_manager(
+            message.chat_id, message.user_id, thread_id
+        )
+
+        entry_tool_result: tuple[str, str, bool] | None = None
+
+        while True:
+            top = stack.top
+            if top is None:
+                # Stack is empty — shouldn't normally happen here
+                logger.warning("Orchestration loop: stack is empty")
+                return
+
+            result = await self._agent_executor.execute_turn(
+                top,
+                user_message=entry_user_message,
+                tool_result=entry_tool_result,
+                session_manager=sm,
+            )
+            entry_user_message = None
+            entry_tool_result = None
+
+            match result.action:
+                case TurnAction.SEND_TEXT:
+                    await self._send_stack_response(message, result.text)
+                    # If top is the main agent, pop it (main agent done)
+                    if top.agent_type == "main":
+                        main_frame = stack.pop()
+                        self._agent._maybe_spawn_memory_extraction(
+                            "",  # no user message for extraction context
+                            main_frame.context.user_id or "",
+                            main_frame.session,
+                        )
+                        self._stack_manager.clear(session_key)
+                    return  # Wait for next user message
+
+                case TurnAction.COMPLETE:
+                    completed = stack.pop()
+                    logger.info(
+                        "Stack frame completed: %s (remaining depth=%d)",
+                        completed.agent_name,
+                        stack.depth,
+                    )
+                    if stack.is_empty:
+                        # Edge case: no parent to cascade to
+                        if result.text:
+                            await self._send_stack_response(message, result.text)
+                        self._stack_manager.clear(session_key)
+                        return
+                    # Inject result into parent's pending tool_use
+                    assert completed.parent_tool_use_id is not None
+                    entry_tool_result = (
+                        completed.parent_tool_use_id,
+                        result.text,
+                        False,
+                    )
+                    continue  # Resume parent
+
+                case TurnAction.CHILD_ACTIVATED:
+                    assert result.child_frame is not None
+                    stack.push(result.child_frame)
+                    logger.info(
+                        "Nested child activated: %s (stack depth=%d)",
+                        result.child_frame.agent_name,
+                        stack.depth,
+                    )
+                    continue  # Run child's first turn
+
+                case TurnAction.INTERRUPT:
+                    # For now, treat interrupts in stack mode as text to user
+                    await self._send_stack_response(message, result.text)
+                    return
+
+                case TurnAction.MAX_ITERATIONS:
+                    failed = stack.pop()
+                    logger.warning(
+                        "Stack frame hit max iterations: %s", failed.agent_name
+                    )
+                    if stack.is_empty:
+                        await self._send_stack_response(
+                            message, "Agent reached maximum steps."
+                        )
+                        self._stack_manager.clear(session_key)
+                        return
+                    assert failed.parent_tool_use_id is not None
+                    entry_tool_result = (
+                        failed.parent_tool_use_id,
+                        "Agent reached maximum iterations.",
+                        True,  # is_error
+                    )
+                    continue  # Cascade error to parent
+
+                case TurnAction.ERROR:
+                    failed = stack.pop()
+                    logger.error(
+                        "Stack frame error: %s - %s",
+                        failed.agent_name,
+                        result.text,
+                    )
+                    if stack.is_empty:
+                        await self._send_stack_response(
+                            message,
+                            result.text or "An error occurred.",
+                        )
+                        self._stack_manager.clear(session_key)
+                        return
+                    assert failed.parent_tool_use_id is not None
+                    entry_tool_result = (
+                        failed.parent_tool_use_id,
+                        result.text or "Agent execution error.",
+                        True,
+                    )
+                    continue
+
+    async def _send_stack_response(self, message: IncomingMessage, text: str) -> None:
+        """Send a response from the interactive subagent stack."""
+        if not text.strip():
+            return
+        bot_name = self._provider.bot_username or "bot"
+        logger.info("[cyan]%s:[/cyan] %s", bot_name, _truncate(text))
+        await self._provider.send(
+            OutgoingMessage(
+                chat_id=message.chat_id,
+                text=text,
+                reply_to_message_id=message.id,
+            )
+        )
 
     async def _handle_image_message(self, message: IncomingMessage) -> None:
         """Handle a message containing images."""

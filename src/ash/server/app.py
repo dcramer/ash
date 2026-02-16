@@ -11,7 +11,7 @@ from ash.server.routes import health, webhooks
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from ash.agents import AgentRegistry
+    from ash.agents import AgentExecutor, AgentRegistry
     from ash.config import AshConfig
     from ash.core import Agent
     from ash.db import Database
@@ -43,6 +43,7 @@ class AshServer:
         llm_provider: "LLMProvider | None" = None,
         memory_manager: "Store | None" = None,
         memory_extractor: "MemoryExtractor | None" = None,
+        agent_executor: "AgentExecutor | None" = None,
     ):
         self._database = database
         self._agent = agent
@@ -54,6 +55,7 @@ class AshServer:
         self._llm_provider = llm_provider
         self._memory_manager = memory_manager
         self._memory_extractor = memory_extractor
+        self._agent_executor = agent_executor
         self._telegram_handler: TelegramMessageHandler | None = None
 
         self._app = self._create_app()
@@ -87,6 +89,7 @@ class AshServer:
                     llm_provider=self._llm_provider,
                     memory_manager=self._memory_manager,
                     memory_extractor=self._memory_extractor,
+                    agent_executor=self._agent_executor,
                 )
                 # Wire up callback handler for checkpoint inline keyboards
                 self._telegram_provider.set_callback_handler(
@@ -148,6 +151,7 @@ def create_app(
     llm_provider: "LLMProvider | None" = None,
     memory_manager: "Store | None" = None,
     memory_extractor: "MemoryExtractor | None" = None,
+    agent_executor: "AgentExecutor | None" = None,
 ) -> FastAPI:
     """Create the FastAPI application."""
     server = AshServer(
@@ -161,5 +165,6 @@ def create_app(
         llm_provider=llm_provider,
         memory_manager=memory_manager,
         memory_extractor=memory_extractor,
+        agent_executor=agent_executor,
     )
     return server.app

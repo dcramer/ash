@@ -13,7 +13,13 @@ from ash.agents.types import (
     AgentConfig,
     AgentContext,
     AgentResult,
+    AgentStack,
+    AgentStackManager,
     CheckpointState,
+    ChildActivated,
+    StackFrame,
+    TurnAction,
+    TurnResult,
 )
 
 __all__ = [
@@ -23,5 +29,11 @@ __all__ = [
     "AgentExecutor",
     "AgentRegistry",
     "AgentResult",
+    "AgentStack",
+    "AgentStackManager",
     "CheckpointState",
+    "ChildActivated",
+    "StackFrame",
+    "TurnAction",
+    "TurnResult",
 ]

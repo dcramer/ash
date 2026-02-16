@@ -9,6 +9,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from ash.agents.types import ChildActivated
 from ash.core.compaction import CompactionSettings, compact_messages, should_compact
 from ash.core.context import ContextGatherer
 from ash.core.prompt import (
@@ -209,8 +210,15 @@ class Agent:
         )
         return self._prompt_builder.build(prompt_context)
 
+    # Tools that are only for interactive subagents, not the main agent
+    _SUBAGENT_ONLY_TOOLS = {"complete"}
+
     def _get_tool_definitions(self) -> list[ToolDefinition]:
-        return self._tools.get_definitions()
+        return [
+            d
+            for d in self._tools.get_definitions()
+            if d.name not in self._SUBAGENT_ONLY_TOOLS
+        ]
 
     async def _maybe_compact(self, session: SessionState) -> CompactionInfo | None:
         if not self._config.compaction_enabled:
@@ -541,6 +549,40 @@ class Agent:
         if tool_context.reply_to_message_id:
             session.metadata["reply_to_message_id"] = tool_context.reply_to_message_id
 
+    def _build_child_activated(
+        self,
+        ca: ChildActivated,
+        session: SessionState,
+        setup: Any,
+        iterations: int,
+    ) -> ChildActivated:
+        """Build a ChildActivated with main_frame attached for provider handling.
+
+        Called from both process_message and process_message_streaming when
+        a tool spawns an interactive child subagent.
+        """
+        from ash.agents.types import AgentContext, StackFrame
+        from ash.sessions.types import generate_id
+
+        main_frame = StackFrame(
+            frame_id=generate_id(),
+            agent_name="main",
+            agent_type="main",
+            session=session,
+            system_prompt=setup.system_prompt,
+            context=AgentContext(
+                session_id=session.session_id,
+                user_id=setup.effective_user_id,
+                chat_id=session.chat_id,
+                provider=session.provider,
+                metadata=dict(session.metadata),
+            ),
+            model=self._config.model,
+            iteration=iterations,
+            max_iterations=self._config.max_tool_iterations,
+        )
+        return ChildActivated(ca.child_frame, main_frame=main_frame)
+
     async def _execute_pending_tools(
         self,
         pending_tools: list[ToolUse],
@@ -665,13 +707,22 @@ class Agent:
                 session, setup, session_manager, tool_overrides
             )
 
-            new_calls, steering = await self._execute_pending_tools(
-                pending_tools,
-                session,
-                tool_context,
-                on_tool_start,
-                get_steering_messages,
-            )
+            try:
+                new_calls, steering = await self._execute_pending_tools(
+                    pending_tools,
+                    session,
+                    tool_context,
+                    on_tool_start,
+                    get_steering_messages,
+                )
+            except ChildActivated as ca:
+                # A tool spawned an interactive child subagent.
+                # Build main_frame, attach to exception, and re-raise
+                # so the provider can enter the orchestration loop.
+                raise self._build_child_activated(
+                    ca, session, setup, iterations
+                ) from None
+
             tool_calls.extend(new_calls)
 
             self._sync_reply_anchor(tool_context, session)
@@ -781,13 +832,18 @@ class Agent:
                 session, setup, session_manager, tool_overrides
             )
 
-            _, steering = await self._execute_pending_tools(
-                pending_tools,
-                session,
-                tool_context,
-                on_tool_start,
-                get_steering_messages,
-            )
+            try:
+                _, steering = await self._execute_pending_tools(
+                    pending_tools,
+                    session,
+                    tool_context,
+                    on_tool_start,
+                    get_steering_messages,
+                )
+            except ChildActivated as ca:
+                raise self._build_child_activated(
+                    ca, session, setup, iterations
+                ) from None
 
             self._sync_reply_anchor(tool_context, session)
 
@@ -857,9 +913,11 @@ async def create_agent(
     tool_registry.register(WriteFileTool(executor=shared_executor))
 
     # Register interrupt tool for agent checkpointing
+    from ash.tools.builtin.complete import CompleteTool
     from ash.tools.builtin.interrupt import InterruptTool
 
     tool_registry.register(InterruptTool())
+    tool_registry.register(CompleteTool())
 
     if config.brave_search and config.brave_search.api_key:
         search_cache = SearchCache(maxsize=100, ttl=900)
@@ -953,7 +1011,9 @@ async def create_agent(
 
     agent_executor = AgentExecutor(llm, tool_executor, config)
     tool_registry.register(
-        UseAgentTool(agent_registry, agent_executor, voice=workspace.soul)
+        UseAgentTool(
+            agent_registry, agent_executor, config=config, voice=workspace.soul
+        )
     )
     tool_registry.register(
         UseSkillTool(skill_registry, agent_executor, config, voice=workspace.soul)
@@ -1016,4 +1076,5 @@ async def create_agent(
         memory_extractor=memory_extractor,
         sandbox_executor=shared_executor,
         agent_registry=agent_registry,
+        agent_executor=agent_executor,
     )

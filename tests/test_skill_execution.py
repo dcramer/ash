@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.agents.types import AgentContext, AgentResult
+from ash.agents.types import AgentContext
 from ash.config.models import AshConfig, SkillConfig
 from ash.skills.types import SkillDefinition
 from ash.tools.builtin.skills import SkillAgent, UseSkillTool
@@ -150,7 +150,7 @@ class TestUseSkillToolErrorHandling:
 
 
 class TestUseSkillToolExecution:
-    """Tests for UseSkillTool execution behavior."""
+    """Tests for UseSkillTool execution behavior (ChildActivated path)."""
 
     @pytest.fixture
     def skill(self):
@@ -167,34 +167,40 @@ class TestUseSkillToolExecution:
         registry.get.return_value = skill
 
         executor = MagicMock()
-        executor.execute = AsyncMock(return_value=AgentResult.success("Done!"))
 
         config = MagicMock(spec=AshConfig)
         config.skills = {}
+        config.agents = {}
 
         return UseSkillTool(registry, executor, config)
 
     @pytest.mark.asyncio
-    async def test_returns_agent_result_content(self, tool):
-        """Should return the agent's result content in structured tag format."""
-        result = await tool.execute({"skill": "test", "message": "do it"})
+    async def test_raises_child_activated_with_stack_frame(self, tool):
+        """Should raise ChildActivated with a valid StackFrame for interactive execution."""
+        from ash.agents.types import ChildActivated
 
-        assert not result.is_error
-        assert "<instruction>" in result.content
-        assert '"test" skill' in result.content
-        assert "<output>" in result.content
-        assert "Done!" in result.content
-        assert "</output>" in result.content
+        with pytest.raises(ChildActivated) as exc_info:
+            await tool.execute({"skill": "test", "message": "do it"})
+
+        frame = exc_info.value.child_frame
+        assert frame.agent_name == "skill:test"
+        assert frame.agent_type == "skill"
+        assert frame.is_skill_agent is True
+        # Session should contain the initial user message
+        messages = frame.session.get_messages_for_llm()
+        assert len(messages) >= 1
+        assert messages[0].role == "user"
 
     @pytest.mark.asyncio
-    async def test_propagates_agent_error(self, tool):
-        """Should propagate error when agent execution fails."""
-        tool._executor.execute.return_value = AgentResult.error("Something broke")
+    async def test_child_frame_has_system_prompt(self, tool):
+        """Should include skill instructions in the child frame's system prompt."""
+        from ash.agents.types import ChildActivated
 
-        result = await tool.execute({"skill": "test", "message": "do it"})
+        with pytest.raises(ChildActivated) as exc_info:
+            await tool.execute({"skill": "test", "message": "do it"})
 
-        assert result.is_error
-        assert "Something broke" in result.content
+        frame = exc_info.value.child_frame
+        assert "Do the thing" in frame.system_prompt
 
 
 class TestSkillEnvironmentBuilding:
@@ -292,7 +298,7 @@ class TestClaudeCodeSkill:
     @pytest.mark.asyncio
     async def test_claude_code_invokes_passthrough_agent(self, tool):
         """Should invoke ClaudeCodeAgent.execute_passthrough with opus default."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         from ash.agents.base import AgentResult
 
@@ -321,7 +327,7 @@ class TestClaudeCodeSkill:
     @pytest.mark.asyncio
     async def test_claude_code_passes_model_from_models_config(self, tool):
         """Should pass model from models.claude-code config."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         from ash.agents.base import AgentResult
         from ash.config.models import ModelConfig
@@ -351,7 +357,7 @@ class TestClaudeCodeSkill:
     @pytest.mark.asyncio
     async def test_claude_code_propagates_errors(self, tool):
         """Should propagate errors from ClaudeCodeAgent."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         from ash.agents.base import AgentResult
 

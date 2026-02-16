@@ -15,6 +15,7 @@ from ash.providers.base import IncomingMessage, OutgoingMessage
 
 if TYPE_CHECKING:
     from ash.core import Agent, SessionState
+    from ash.core.types import AgentResponse
     from ash.providers.telegram.handlers.session_handler import (
         SessionContext,
         SessionHandler,
@@ -51,6 +52,15 @@ class SyncHandler:
         ctx: SessionContext,
     ) -> None:
         """Handle message with synchronous response."""
+        await self.handle_sync_with_response(message, session, ctx)
+
+    async def handle_sync_with_response(
+        self,
+        message: IncomingMessage,
+        session: SessionState,
+        ctx: SessionContext,
+    ) -> AgentResponse:
+        """Handle message with synchronous response, returning the AgentResponse."""
         from ash.providers.telegram.handlers.tool_tracker import ProgressMessageTool
 
         # Store current message ID so send_message tool can reply to it
@@ -208,6 +218,8 @@ class SyncHandler:
                 success=not tool_call.get("is_error", False),
                 metadata=tool_call.get("metadata"),
             )
+
+        return response
 
     async def _typing_loop(self, chat_id: str) -> None:
         """Send typing indicators in a loop (Telegram typing lasts 5 seconds)."""

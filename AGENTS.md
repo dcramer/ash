@@ -54,6 +54,7 @@ Use `/dex-plan` to create tasks from planning docs (specs, roadmaps).
 | `specs/memory.md` | Memory system changes |
 | `specs/people.md` | People/identity system changes |
 | `specs/skills.md` | Creating or modifying skills |
+| `specs/interactive-agents.md` | Agent/subagent stack communication |
 | `specs/subsystems.md` | Public API patterns |
 
 ## Terminology

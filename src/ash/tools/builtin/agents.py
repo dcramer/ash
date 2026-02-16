@@ -10,6 +10,7 @@ from ash.tools.base import Tool, ToolContext, ToolResult, format_subagent_result
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor, AgentRegistry
+    from ash.config import AshConfig
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class UseAgentTool(Tool):
         self,
         registry: "AgentRegistry",
         executor: "AgentExecutor",
+        config: "AshConfig | None" = None,
         voice: str | None = None,
     ) -> None:
         """Initialize the tool.
@@ -46,10 +48,12 @@ class UseAgentTool(Tool):
         Args:
             registry: Agent registry to look up agents.
             executor: Agent executor to run agents.
+            config: Application configuration for model resolution.
             voice: Optional communication style for user-facing subagent messages.
         """
         self._registry = registry
         self._executor = executor
+        self._config = config
         self._voice = voice
         # In-memory checkpoint storage (keyed by checkpoint_id)
         # In production, this would be stored in the session via SessionManager
@@ -182,6 +186,51 @@ class UseAgentTool(Tool):
             context.get_session_info() if context else (None, None)
         )
 
+        agent_config = agent.config
+
+        # Checkpoint agents and passthrough agents use batch execution.
+        # Non-checkpoint agents use the interactive stack.
+        use_batch = (
+            agent_config.supports_checkpointing
+            or agent_config.is_passthrough
+            or resume_from is not None
+        )
+
+        if use_batch:
+            return await self._execute_batch(
+                agent,
+                agent_name,
+                message,
+                agent_context,
+                resume_from=resume_from,
+                checkpoint_response=checkpoint_response,
+                session_manager=session_manager,
+                tool_use_id=tool_use_id,
+            )
+
+        # Interactive path: build StackFrame and raise ChildActivated
+        return await self._execute_interactive(
+            agent,
+            agent_config,
+            message,
+            agent_context,
+            session_manager=session_manager,
+            tool_use_id=tool_use_id,
+        )
+
+    async def _execute_batch(
+        self,
+        agent: Any,
+        agent_name: str,
+        message: str,
+        agent_context: AgentContext,
+        *,
+        resume_from: CheckpointState | None = None,
+        checkpoint_response: str | None = None,
+        session_manager: Any = None,
+        tool_use_id: str | None = None,
+    ) -> ToolResult:
+        """Execute agent in batch mode (checkpoint/passthrough agents)."""
         result = await self._executor.execute(
             agent,
             message,
@@ -197,7 +246,6 @@ class UseAgentTool(Tool):
             checkpoint = result.checkpoint
             await self.store_checkpoint(checkpoint)
 
-            # Build response with checkpoint info
             options_str = ""
             if checkpoint.options:
                 options_str = (
@@ -213,3 +261,69 @@ class UseAgentTool(Tool):
             return ToolResult.error(result.content)
 
         return ToolResult.success(format_agent_result(result.content, agent_name))
+
+    async def _execute_interactive(
+        self,
+        agent: Any,
+        agent_config: Any,
+        message: str,
+        agent_context: AgentContext,
+        *,
+        session_manager: Any = None,
+        tool_use_id: str | None = None,
+    ) -> ToolResult:
+        """Build a StackFrame and raise ChildActivated for interactive execution."""
+        from ash.agents.types import ChildActivated, StackFrame
+        from ash.core.session import SessionState
+        from ash.sessions.types import generate_id
+
+        # Resolve model
+        overrides = self._config.agents.get(agent_config.name) if self._config else None
+        model_alias = (overrides.model if overrides else None) or agent_config.model
+        resolved_model: str | None = None
+        if model_alias and self._config:
+            try:
+                resolved_model = self._config.get_model(model_alias).model
+            except Exception:
+                logger.warning(
+                    "Failed to resolve model '%s' for agent '%s'",
+                    model_alias,
+                    agent_config.name,
+                )
+
+        # Start agent session for logging
+        agent_session_id: str | None = None
+        if session_manager and tool_use_id:
+            agent_session_id = await session_manager.start_agent_session(
+                parent_tool_use_id=tool_use_id,
+                agent_type="agent",
+                agent_name=agent_config.name,
+            )
+
+        # Build child session with initial message
+        child_session = SessionState(
+            session_id=f"agent-{agent_config.name}-{agent_context.session_id or 'unknown'}",
+            provider=agent_context.provider or "",
+            chat_id=agent_context.chat_id or "",
+            user_id=agent_context.user_id or "",
+        )
+        child_session.add_user_message(message)
+
+        system_prompt = agent.build_system_prompt(agent_context)
+
+        child_frame = StackFrame(
+            frame_id=generate_id(),
+            agent_name=agent_config.name,
+            agent_type="agent",
+            session=child_session,
+            system_prompt=system_prompt,
+            context=agent_context,
+            model=resolved_model,
+            max_iterations=agent_config.max_iterations,
+            effective_tools=agent_config.get_effective_tools(),
+            voice=self._voice,
+            parent_tool_use_id=tool_use_id,
+            agent_session_id=agent_session_id,
+        )
+
+        raise ChildActivated(child_frame)

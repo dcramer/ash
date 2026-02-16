@@ -226,6 +226,7 @@ async def _run_server(
         llm_provider=components.llm,
         memory_manager=components.memory_manager,
         memory_extractor=components.memory_extractor,
+        agent_executor=components.agent_executor,
     )
 
     # Start server

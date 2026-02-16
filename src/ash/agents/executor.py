@@ -6,7 +6,14 @@ import uuid
 from typing import TYPE_CHECKING
 
 from ash.agents.base import Agent
-from ash.agents.types import AgentContext, AgentResult, CheckpointState
+from ash.agents.types import (
+    AgentContext,
+    AgentResult,
+    CheckpointState,
+    StackFrame,
+    TurnAction,
+    TurnResult,
+)
 from ash.core.session import SessionState
 from ash.llm.types import ToolDefinition
 from ash.tools.base import ToolContext
@@ -63,6 +70,9 @@ class AgentExecutor:
             excluded.add("use_skill")
         if not supports_checkpointing:
             excluded.add("interrupt")
+        # complete is only used in interactive subagent mode (execute_turn),
+        # not in batch mode (execute)
+        excluded.add("complete")
 
         # Filter by tools whitelist and exclusions in a single pass
         if tools:
@@ -420,3 +430,219 @@ class AgentExecutor:
             iterations=max_iterations,
             metadata=result_metadata,
         )
+
+    # --- Interactive subagent support ---
+
+    def _get_turn_tool_definitions(
+        self,
+        frame: StackFrame,
+    ) -> list[ToolDefinition]:
+        """Get tool definitions for an interactive turn.
+
+        Like _get_tool_definitions but includes 'complete' and excludes
+        tools not appropriate for interactive subagents.
+        """
+        all_defs = self._tools.get_definitions()
+
+        excluded: set[str] = set()
+        if frame.is_skill_agent:
+            excluded.add("use_skill")
+        # Interactive subagents use complete, not interrupt
+        excluded.add("interrupt")
+
+        if frame.effective_tools:
+            tools_set = set(frame.effective_tools)
+            # Always allow complete for interactive subagents
+            tools_set.add("complete")
+            return [
+                d for d in all_defs if d.name in tools_set and d.name not in excluded
+            ]
+
+        return [d for d in all_defs if d.name not in excluded]
+
+    @staticmethod
+    def _get_unresolved_tool_uses(session: SessionState) -> list:
+        """Find tool_uses from the most recent assistant message that lack results.
+
+        Walks backward to find the last assistant message, then checks which
+        tool_uses from it have not yet received tool_results.
+        """
+        from ash.llm.types import Role, ToolUse
+        from ash.llm.types import ToolResult as LLMToolResult
+
+        for i in range(len(session.messages) - 1, -1, -1):
+            msg = session.messages[i]
+            if msg.role == Role.ASSISTANT:
+                if isinstance(msg.content, str):
+                    return []
+                tool_uses = [b for b in msg.content if isinstance(b, ToolUse)]
+                if not tool_uses:
+                    return []
+                # Collect tool_result IDs from messages after this assistant message
+                resolved: set[str] = set()
+                for j in range(i + 1, len(session.messages)):
+                    later = session.messages[j]
+                    if isinstance(later.content, list):
+                        for block in later.content:
+                            if isinstance(block, LLMToolResult):
+                                resolved.add(block.tool_use_id)
+                return [tu for tu in tool_uses if tu.id not in resolved]
+        return []
+
+    async def execute_turn(
+        self,
+        frame: StackFrame,
+        user_message: str | None = None,
+        tool_result: tuple[str, str, bool] | None = None,
+        session_manager: "SessionManager | None" = None,
+    ) -> TurnResult:
+        """Run one logical turn for a stack frame.
+
+        Entry points:
+        - user_message set: add user message, call LLM
+        - tool_result set: inject tool_result (child completed), resume
+        - Both None: first turn for a newly pushed child (session already has initial message)
+
+        Args:
+            frame: The stack frame to execute.
+            user_message: Optional user message to inject.
+            tool_result: Optional (tool_use_id, content, is_error) from completed child.
+            session_manager: Optional session manager for logging to context.jsonl.
+
+        Returns:
+            TurnResult indicating what happened.
+        """
+        from ash.agents.types import ChildActivated
+
+        session = frame.session
+        agent_session_id = frame.agent_session_id
+        tool_defs = self._get_turn_tool_definitions(frame)
+        tool_context = ToolContext.from_agent_context(
+            frame.context,
+            env=frame.environment or {},
+            session_manager=session_manager,
+        )
+
+        if user_message is not None:
+            session.add_user_message(user_message)
+            if session_manager and agent_session_id:
+                await session_manager.add_user_message(
+                    content=user_message,
+                    agent_session_id=agent_session_id,
+                )
+        elif tool_result is not None:
+            tu_id, content, is_error = tool_result
+            session.add_tool_result(tu_id, content, is_error)
+            if session_manager and agent_session_id:
+                await session_manager.add_tool_result(
+                    tool_use_id=tu_id,
+                    output=content,
+                    success=not is_error,
+                    agent_session_id=agent_session_id,
+                )
+
+        while frame.iteration < frame.max_iterations:
+            frame.iteration += 1
+
+            # Check for unresolved tool_uses from a previous assistant message
+            unresolved = self._get_unresolved_tool_uses(session)
+
+            if not unresolved:
+                # Need LLM call
+                try:
+                    response = await self._llm.complete(
+                        messages=session.get_messages_for_llm(),
+                        model=frame.model,
+                        system=frame.system_prompt,
+                        tools=tool_defs or None,
+                        max_tokens=4096,
+                    )
+                except Exception as e:
+                    logger.error("Interactive turn LLM error: %s", e)
+                    return TurnResult(TurnAction.ERROR, text=f"LLM error: {e}")
+
+                session.add_assistant_message(response.message.content)
+
+                # Log assistant message
+                if session_manager and agent_session_id:
+                    await self._log_assistant_message(
+                        session_manager,
+                        agent_session_id,
+                        response.message.content,
+                        frame.iteration,
+                    )
+
+                tool_uses = response.message.get_tool_uses()
+                if not tool_uses:
+                    # Text response — send to user, pause
+                    text = response.message.get_text() or ""
+                    return TurnResult(TurnAction.SEND_TEXT, text=text)
+
+                unresolved = tool_uses
+
+            # Execute tools
+            for tool_use in unresolved:
+                if tool_use.name == "complete":
+                    result_text = tool_use.input.get("result", "")
+                    # Add tool result so session is well-formed
+                    session.add_tool_result(tool_use.id, result_text, is_error=False)
+                    return TurnResult(TurnAction.COMPLETE, text=result_text)
+
+                if tool_use.name == "interrupt":
+                    prompt = tool_use.input.get("prompt", "Checkpoint reached")
+                    return TurnResult(TurnAction.INTERRUPT, text=prompt)
+
+                # Check tool whitelist
+                if frame.effective_tools and tool_use.name not in frame.effective_tools:
+                    session.add_tool_result(
+                        tool_use.id,
+                        f"Tool '{tool_use.name}' is not available to this agent",
+                        is_error=True,
+                    )
+                    continue
+
+                try:
+                    per_tool_context = ToolContext(
+                        session_id=tool_context.session_id,
+                        user_id=tool_context.user_id,
+                        chat_id=tool_context.chat_id,
+                        thread_id=tool_context.thread_id,
+                        provider=tool_context.provider,
+                        metadata=dict(tool_context.metadata),
+                        env=dict(tool_context.env),
+                        session_manager=session_manager,
+                        tool_use_id=tool_use.id,
+                    )
+                    result = await self._tools.execute(
+                        tool_use.name, tool_use.input, per_tool_context
+                    )
+                    session.add_tool_result(
+                        tool_use.id, result.content, is_error=result.is_error
+                    )
+                    # Log tool result
+                    if session_manager and agent_session_id:
+                        await session_manager.add_tool_result(
+                            tool_use_id=tool_use.id,
+                            output=result.content,
+                            success=not result.is_error,
+                            agent_session_id=agent_session_id,
+                        )
+                except ChildActivated as ca:
+                    # Parent paused — tool_use has no result yet
+                    return TurnResult(
+                        TurnAction.CHILD_ACTIVATED, child_frame=ca.child_frame
+                    )
+                except Exception as e:
+                    logger.error("Interactive turn tool error: %s", e)
+                    session.add_tool_result(
+                        tool_use.id, f"Tool error: {e}", is_error=True
+                    )
+                    if session_manager and agent_session_id:
+                        await session_manager.add_tool_result(
+                            tool_use_id=tool_use.id,
+                            output=f"Tool error: {e}",
+                            success=False,
+                            agent_session_id=agent_session_id,
+                        )
+
+        return TurnResult(TurnAction.MAX_ITERATIONS)

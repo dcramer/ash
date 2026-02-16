@@ -402,9 +402,56 @@ class CompactionEntry:
         )
 
 
+@dataclass
+class AgentSessionCompleteEntry:
+    """Entry marking when a subagent finishes execution.
+
+    Written to context.jsonl when a frame calls complete() or hits max iterations.
+    An AgentSessionEntry without a matching AgentSessionCompleteEntry = still active.
+    """
+
+    agent_session_id: str  # Links to AgentSessionEntry.id
+    result: str  # Final result text
+    is_error: bool = False
+    created_at: datetime = field(default_factory=now_utc)
+    type: Literal["agent_session_complete"] = "agent_session_complete"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "agent_session_id": self.agent_session_id,
+            "result": self.result,
+            "is_error": self.is_error,
+            "created_at": self.created_at.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AgentSessionCompleteEntry:
+        return cls(
+            agent_session_id=data["agent_session_id"],
+            result=data["result"],
+            is_error=data.get("is_error", False),
+            created_at=_parse_datetime(data.get("created_at")),
+        )
+
+    @classmethod
+    def create(
+        cls,
+        agent_session_id: str,
+        result: str,
+        is_error: bool = False,
+    ) -> AgentSessionCompleteEntry:
+        return cls(
+            agent_session_id=agent_session_id,
+            result=result,
+            is_error=is_error,
+        )
+
+
 Entry = (
     SessionHeader
     | AgentSessionEntry
+    | AgentSessionCompleteEntry
     | MessageEntry
     | ToolUseEntry
     | ToolResultEntry
@@ -414,6 +461,7 @@ Entry = (
 _ENTRY_PARSERS: dict[str, type[Entry]] = {
     "session": SessionHeader,
     "agent_session": AgentSessionEntry,
+    "agent_session_complete": AgentSessionCompleteEntry,
     "message": MessageEntry,
     "tool_use": ToolUseEntry,
     "tool_result": ToolResultEntry,
@@ -429,6 +477,22 @@ def parse_entry(data: dict[str, Any]) -> Entry:
     return parser.from_dict(data)
 
 
+class StackFrameMeta(BaseModel):
+    """Serializable metadata for one stack frame (stored in state.json)."""
+
+    frame_id: str
+    agent_session_id: str  # Links to AgentSessionEntry in context.jsonl
+    agent_name: str
+    agent_type: str  # "skill" | "agent"
+    model: str | None = None
+    iteration: int = 0
+    max_iterations: int = 25
+    parent_tool_use_id: str | None = None
+    effective_tools: list[str] = []
+    is_skill_agent: bool = False
+    environment: dict[str, str] = {}
+
+
 class SessionState(BaseModel):
     """Session metadata stored in state.json for easy lookup."""
 
@@ -437,3 +501,4 @@ class SessionState(BaseModel):
     user_id: str | None = None
     thread_id: str | None = None
     created_at: datetime = Field(default_factory=now_utc)
+    active_stack: list[StackFrameMeta] | None = None  # Interactive subagent stack

@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ash.core.session import SessionState
     from ash.tools.base import ToolContext
 
 # Checkpoint expiration time in seconds (1 hour)
@@ -174,3 +176,114 @@ class AgentResult:
             iterations=iterations,
             checkpoint=checkpoint,
         )
+
+
+# --- Interactive subagent stack types ---
+
+
+class TurnAction(Enum):
+    """What happened during an execute_turn call."""
+
+    SEND_TEXT = auto()  # Subagent produced text for user, waiting for reply
+    COMPLETE = auto()  # Subagent called complete(), pop stack
+    CHILD_ACTIVATED = auto()  # A child was pushed onto the stack
+    INTERRUPT = auto()  # Plan agent interrupt (existing checkpoint path)
+    MAX_ITERATIONS = auto()  # Hit iteration limit
+    ERROR = auto()  # Execution error
+
+
+@dataclass
+class StackFrame:
+    """One frame in the interactive agent stack."""
+
+    frame_id: str
+    agent_name: str  # e.g. "skill-writer", "research"
+    agent_type: str  # "skill" | "agent" | "main"
+    session: SessionState  # In-memory LLM conversation state
+    system_prompt: str  # Cached for resumption
+    context: AgentContext  # Routing context
+    model: str | None = None  # Resolved model name
+    environment: dict[str, str] | None = None  # Sandbox env vars
+    iteration: int = 0
+    max_iterations: int = 25
+    effective_tools: list[str] = field(default_factory=list)  # Tool whitelist
+    is_skill_agent: bool = False
+    voice: str | None = None
+    # The parent's tool_use that spawned this frame:
+    parent_tool_use_id: str | None = None  # tool_use_id waiting for our result
+    # Session logging:
+    agent_session_id: str | None = None  # For context.jsonl logging
+
+
+@dataclass
+class TurnResult:
+    """Result from executing one turn of an interactive subagent."""
+
+    action: TurnAction
+    text: str = ""
+    child_frame: StackFrame | None = None  # For CHILD_ACTIVATED
+
+
+@dataclass
+class AgentStack:
+    """Stack of active agent frames for one provider session."""
+
+    frames: list[StackFrame] = field(default_factory=list)
+
+    @property
+    def is_empty(self) -> bool:
+        return len(self.frames) == 0
+
+    @property
+    def depth(self) -> int:
+        return len(self.frames)
+
+    @property
+    def top(self) -> StackFrame | None:
+        return self.frames[-1] if self.frames else None
+
+    def push(self, frame: StackFrame) -> None:
+        self.frames.append(frame)
+
+    def pop(self) -> StackFrame:
+        return self.frames.pop()
+
+
+class AgentStackManager:
+    """Manages agent stacks keyed by provider session_key."""
+
+    def __init__(self) -> None:
+        self._stacks: dict[str, AgentStack] = {}
+
+    def get_or_create(self, session_key: str) -> AgentStack:
+        if session_key not in self._stacks:
+            self._stacks[session_key] = AgentStack()
+        return self._stacks[session_key]
+
+    def has_active(self, session_key: str) -> bool:
+        stack = self._stacks.get(session_key)
+        return stack is not None and not stack.is_empty
+
+    def clear(self, session_key: str) -> None:
+        self._stacks.pop(session_key, None)
+
+
+class ChildActivated(BaseException):
+    """Raised when a tool starts an interactive child subagent.
+
+    Extends BaseException so it won't be caught by ToolExecutor's
+    generic ``except Exception`` handler.
+
+    When raised from UseSkillTool/UseAgentTool, only child_frame is set.
+    When caught and re-raised by Agent.process_message/process_message_streaming,
+    main_frame is attached before propagation to the provider.
+    """
+
+    def __init__(
+        self,
+        child_frame: StackFrame,
+        main_frame: StackFrame | None = None,
+    ):
+        self.child_frame = child_frame
+        self.main_frame = main_frame
+        super().__init__("Child agent activated")

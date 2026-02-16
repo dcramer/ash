@@ -285,8 +285,6 @@ class SystemPromptBuilder:
                 "The user cannot see tool/skill/agent results - only your response.",
                 "You MUST always include text in your response - an empty response is silence to the user.",
                 "After using tools, briefly acknowledge what you did and share relevant results.",
-                "Subagent results arrive wrapped in `<instruction>` and `<output>` tags.",
-                "Read the content, interpret it, and include relevant parts in your response.",
                 "",
                 "### Handling Failures",
                 "",
@@ -311,8 +309,10 @@ class SystemPromptBuilder:
         lines = [
             "## Skills",
             "",
-            "Use the `use_skill` tool to invoke a skill with context.",
-            "Skills run as subagents with isolated execution.",
+            "Use the `use_skill` tool to invoke a skill.",
+            "Skills take over the conversation — the user interacts directly with the skill",
+            "until it completes, then control returns to you with the result.",
+            "You will not hear from the skill while it runs; just wait for its result.",
             "",
             "### Available Skills",
             "",
@@ -336,8 +336,9 @@ class SystemPromptBuilder:
         lines = [
             "## Agents",
             "",
-            "Agents handle complex multi-step tasks autonomously.",
-            "Use the `use_agent` tool to invoke them.",
+            "Use the `use_agent` tool to invoke agents for complex tasks.",
+            "Most agents take over the conversation — the user interacts directly",
+            "with the agent until it completes, then control returns to you.",
             "",
         ]
 
@@ -357,7 +358,7 @@ class SystemPromptBuilder:
                 "",
                 "### Handling Agent Checkpoints",
                 "",
-                "Some agents pause for user input using checkpoints. When `use_agent` returns",
+                "The `plan` agent pauses for user input using checkpoints. When `use_agent` returns",
                 "a response containing **Agent paused for input**:",
                 "",
                 "1. **Display the full checkpoint content** - Show the agent's prompt to the user",

@@ -16,7 +16,7 @@ from ash.llm.thinking import ThinkingConfig
 from ash.llm.types import ToolUse
 
 if TYPE_CHECKING:
-    from ash.agents import AgentRegistry
+    from ash.agents import AgentExecutor, AgentRegistry
     from ash.core.agent import Agent
     from ash.core.prompt import SystemPromptBuilder
     from ash.llm import LLMProvider
@@ -114,6 +114,7 @@ class AgentComponents:
     memory_extractor: MemoryExtractor | None = None
     sandbox_executor: SandboxExecutor | None = None
     agent_registry: AgentRegistry | None = None
+    agent_executor: AgentExecutor | None = None
 
 
 # Internal types below - not part of public API
