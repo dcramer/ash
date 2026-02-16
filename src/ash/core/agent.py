@@ -14,6 +14,7 @@ from ash.core.compaction import CompactionSettings, compact_messages, should_com
 from ash.core.context import ContextGatherer
 from ash.core.prompt import (
     PromptContext,
+    PromptMode,
     SystemPromptBuilder,
 )
 from ash.core.session import SessionState
@@ -1039,8 +1040,8 @@ async def create_agent(
         config=config,
         agent_registry=agent_registry,
     )
-    subagent_context = prompt_builder.build_subagent_context(
-        PromptContext(runtime=runtime)
+    subagent_context = prompt_builder.build(
+        PromptContext(runtime=runtime), mode=PromptMode.MINIMAL
     )
 
     agent_executor = AgentExecutor(llm, tool_executor, config)

@@ -542,3 +542,76 @@ class TestSystemPromptBuilder:
         assert "America/New_York" in prompt
         assert "os=" not in prompt
         assert "python=" not in prompt
+
+    def test_build_full_mode_includes_all_sections(self, prompt_builder):
+        from ash.core.prompt import PromptContext, PromptMode
+
+        prompt = prompt_builder.build(PromptContext(), mode=PromptMode.FULL)
+        assert "Core Principles" in prompt
+        assert "Available Tools" in prompt
+        assert "Tool Call Style" in prompt
+        assert "Sandbox" in prompt
+        assert "test assistant" in prompt.lower()
+
+    def test_build_full_mode_narration_not_in_tools_section(self, prompt_builder):
+        from ash.core.prompt import PromptMode
+
+        prompt = prompt_builder.build(mode=PromptMode.FULL)
+        # Narration rules should be in Tool Call Style, not in Available Tools
+        tools_idx = prompt.index("## Available Tools")
+        style_idx = prompt.index("## Tool Call Style")
+        tools_section = prompt[tools_idx:style_idx]
+        assert "do not narrate" not in tools_section
+
+    def test_build_minimal_mode_only_tool_sandbox_runtime(self, prompt_builder):
+        from ash.core.prompt import PromptContext, PromptMode, RuntimeInfo
+
+        runtime = RuntimeInfo(model="test", provider="test", timezone="UTC", time="now")
+        prompt = prompt_builder.build(
+            PromptContext(runtime=runtime), mode=PromptMode.MINIMAL
+        )
+        assert "## Tool Usage" in prompt
+        assert "## Sandbox" in prompt
+        assert "## Runtime" in prompt
+        # Should NOT include full-mode sections
+        assert "Core Principles" not in prompt
+        assert "Available Tools" not in prompt
+        assert "Tool Call Style" not in prompt
+        assert "Skills" not in prompt
+        assert "test assistant" not in prompt.lower()
+
+    def test_build_none_mode_only_soul(self, prompt_builder):
+        from ash.core.prompt import PromptMode
+
+        prompt = prompt_builder.build(mode=PromptMode.NONE)
+        assert "test assistant" in prompt.lower()
+        # Should NOT include enforcement line or any sections
+        assert "Embody the persona" not in prompt
+        assert "Core Principles" not in prompt
+        assert "Sandbox" not in prompt
+        assert "Tool" not in prompt
+
+    def test_build_full_mode_tool_call_style_between_tools_and_skills(
+        self, prompt_builder
+    ):
+        from ash.core.prompt import PromptMode
+
+        prompt = prompt_builder.build(mode=PromptMode.FULL)
+        tools_idx = prompt.index("## Available Tools")
+        style_idx = prompt.index("## Tool Call Style")
+        # Skills section won't appear (no skills registered), so just check ordering
+        assert tools_idx < style_idx
+
+    def test_build_full_mode_enforcement_line(self, prompt_builder):
+        from ash.core.prompt import PromptMode
+
+        prompt = prompt_builder.build(mode=PromptMode.FULL)
+        assert "Embody the persona above" in prompt
+        assert "use it consistently" in prompt
+
+    def test_build_full_mode_anti_filler_rules(self, prompt_builder):
+        from ash.core.prompt import PromptMode
+
+        prompt = prompt_builder.build(mode=PromptMode.FULL)
+        assert "Be brief" in prompt
+        assert "Skip filler" in prompt

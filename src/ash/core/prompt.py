@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Any
+
+
+class PromptMode(str, Enum):
+    FULL = "full"  # Main agent — all sections
+    MINIMAL = "minimal"  # Subagents — tool guidance + sandbox + runtime
+    NONE = "none"  # Bare identity — SOUL only (or fallback line)
+
 
 if TYPE_CHECKING:
     from ash.agents import AgentRegistry
@@ -167,19 +175,47 @@ class SystemPromptBuilder:
         self._config = config
         self._agents = agent_registry
 
-    def build(self, context: PromptContext | None = None) -> str:
+    def build(
+        self, context: PromptContext | None = None, mode: PromptMode = PromptMode.FULL
+    ) -> str:
         context = context or PromptContext()
         parts: list[str] = []
 
-        if self._workspace.soul:
+        # SOUL — included in full and none modes
+        if mode in (PromptMode.FULL, PromptMode.NONE) and self._workspace.soul:
             parts.append(self._workspace.soul)
-            parts.append(
-                "\n\nEmbody the persona above. Avoid stiff, generic assistant-speak."
-            )
+            if mode == PromptMode.FULL:
+                parts.append(
+                    "\n\nEmbody the persona above. Avoid stiff, generic replies. "
+                    "Follow its guidance unless higher-priority instructions override it. "
+                    "If it defines a tone or personality, use it consistently."
+                )
 
+        if mode == PromptMode.NONE:
+            return "".join(parts)
+
+        if mode == PromptMode.MINIMAL:
+            tool_guidance = "\n".join(
+                [
+                    "## Tool Usage",
+                    "",
+                    *self._TOOL_OPERATIONAL_RULES,
+                    "",
+                    *self._TOOL_NARRATION_RULES,
+                ]
+            )
+            sections = [
+                tool_guidance,
+                self._build_sandbox_section(context),
+                self._build_runtime_section(context.runtime),
+            ]
+            return "\n\n".join(s for s in sections if s)
+
+        # PromptMode.FULL
         sections = [
             self._build_core_principles_section(),
             self._build_tools_section(),
+            self._build_tool_call_style_section(),
             self._build_skills_section(),
             self._build_agents_section(),
             self._build_model_aliases_section(),
@@ -202,50 +238,37 @@ class SystemPromptBuilder:
 
         return "".join(parts)
 
-    def build_subagent_context(self, context: PromptContext | None = None) -> str:
-        """Build shared context for subagents (sandbox, runtime, tool guidance).
-
-        Returns a prompt fragment that subagents can append to their own
-        system prompts for consistent environment awareness.
-        """
-        context = context or PromptContext()
-        tool_guidance = "\n".join(["## Tool Usage", "", *self._TOOL_USAGE_RULES])
-        sections = [
-            tool_guidance,
-            self._build_sandbox_section(context),
-            self._build_runtime_section(context.runtime),
-        ]
-        return "\n\n".join(s for s in sections if s)
-
     def _build_core_principles_section(self) -> str:
         return "\n".join(
             [
                 "## Core Principles",
                 "",
-                "You are a knowledgeable, resourceful assistant who proactively helps.",
-                "Act like a smart friend who happens to have access to powerful tools.",
-                "Keep responses brief and value-dense.",
+                "You are a knowledgeable, resourceful assistant. Act like a smart friend with powerful tools.",
                 "",
-                "- ALWAYS use tools for lookups - never assume or guess. Search first, answer second.",
-                "- NEVER claim success without verification - check tool output before reporting",
-                "- NEVER attempt a task yourself after an agent fails - report the failure and ask the user",
-                "- Report failures with actual error messages",
-                "- End responses naturally. Never end with 'anything else?', 'let me know', or follow-up questions unless you genuinely need clarification.",
-                "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice — don't expose raw event data",
-                "- In group chats, respond with `[NO_REPLY]` to stay silent when you have nothing to add",
-                "- For deep research, delegate to the `research` skill",
+                "- Be brief. Answer the question, then stop.",
+                '- Skip filler: no "Great question!", no "I\'d be happy to help!", no "Let me know if you need anything else"',
+                "- End naturally. Never end with follow-up questions unless you genuinely need clarification.",
+                "- ALWAYS use tools for lookups — never assume or guess. Search first, answer second.",
+                "- NEVER claim success without verification — check tool output before reporting.",
+                "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
+                "- Report failures with actual error messages. If output is empty, say so.",
+                "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice",
+                "- In group chats, respond with `[NO_REPLY]` to stay silent when you have nothing to add.",
+                "- For deep research, delegate to the `research` skill.",
             ]
         )
 
-    # Shared tool usage rules referenced by both the full tools section and subagent context.
-    _TOOL_USAGE_RULES: list[str] = [
+    _TOOL_OPERATIONAL_RULES: list[str] = [
         "- Run independent operations in parallel (e.g., 3 file reads = 3 simultaneous calls)",
         "- The user cannot see tool results — present the answer directly",
+        "- On failure: include the actual error message. If output is empty, say so.",
+        "- On timeout: report it and try a simpler approach. On persistent failure: explain and ask the user.",
+    ]
+
+    _TOOL_NARRATION_RULES: list[str] = [
         "- Default: do not narrate routine, low-risk tool calls (just call the tool)",
         "- Narrate only when it helps: multi-step work, complex problems, sensitive actions (e.g., deletions), or when the user explicitly asks",
         "- Keep narration brief and value-dense; avoid repeating obvious steps",
-        "- On failure: include the actual error message. If output is empty, say so.",
-        "- On timeout: report it and try a simpler approach. On persistent failure: explain and ask the user.",
     ]
 
     def _build_tools_section(self) -> str:
@@ -263,9 +286,21 @@ class SystemPromptBuilder:
         for tool_def in tool_defs:
             lines.append(f"- **{tool_def.name}**: {tool_def.description}")
 
-        lines.extend(["", "### Usage", "", *self._TOOL_USAGE_RULES])
+        lines.extend(["", "### Usage", "", *self._TOOL_OPERATIONAL_RULES])
 
         return "\n".join(lines)
+
+    def _build_tool_call_style_section(self) -> str:
+        return "\n".join(
+            [
+                "## Tool Call Style",
+                "",
+                "Default: do not narrate routine, low-risk tool calls (just call the tool).",
+                "Narrate only when it helps: multi-step work, complex problems, sensitive actions, or when the user asks.",
+                "Keep narration brief and value-dense. Avoid repeating obvious steps.",
+                "Use plain human language. Never use corporate phrasing.",
+            ]
+        )
 
     def _build_skills_section(self) -> str:
         available_skills = list(self._skills)
