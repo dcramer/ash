@@ -19,9 +19,7 @@ _EDGE_LABELS = {
     "about": "Memory -> Person",
     "owned_by": "Memory -> User",
     "in_chat": "Memory -> Chat",
-    "stated_by": "Memory -> User",
     "supersedes": "Memory -> Memory",
-    "knows": "User -> Person",
     "is_person": "User -> Person",
     "merged_into": "Person -> Person",
 }
@@ -186,8 +184,47 @@ async def _graph_chats(store: Store) -> None:
     console.print(table)
 
 
+async def _resolve_node_id(store: Store, prefix: str) -> tuple[str, str] | None:
+    """Resolve a node ID prefix to (full_id, table_name).
+
+    Searches across all 4 node tables using exact match first,
+    then prefix match via LIKE.
+    """
+    tables = ["memories", "people", "users", "chats"]
+    async with store._db.session() as session:
+        # Try exact match first
+        for table in tables:
+            result = await session.execute(
+                text(f"SELECT id FROM {table} WHERE id = :id"),  # noqa: S608
+                {"id": prefix},
+            )
+            row = result.fetchone()
+            if row:
+                return (row[0], table)
+
+        # Try prefix match
+        for table in tables:
+            result = await session.execute(
+                text(f"SELECT id FROM {table} WHERE id LIKE :prefix"),  # noqa: S608
+                {"prefix": f"{prefix}%"},
+            )
+            rows = result.fetchall()
+            if len(rows) == 1:
+                return (rows[0][0], table)
+
+    return None
+
+
 async def _graph_edges(store: Store, node_id: str) -> None:
     """Show all edges connected to a node via SQL queries."""
+    # Resolve prefix to full ID
+    resolved = await _resolve_node_id(store, node_id)
+    if resolved:
+        full_id, table_name = resolved
+        if full_id != node_id:
+            dim(f"Resolved prefix to: {full_id} ({table_name})")
+        node_id = full_id
+
     edges: list[tuple[str, str, str, str]] = []
 
     async with store._db.session() as session:
@@ -203,6 +240,32 @@ async def _graph_edges(store: Store, node_id: str) -> None:
                 edges.append(("about", "->", row[0], row[1]))
             else:
                 edges.append(("about", "<-", row[0], row[1]))
+
+        # Memory -> User (owned_by)
+        result = await session.execute(
+            text(
+                "SELECT id, owner_user_id FROM memories WHERE (id = :id OR owner_user_id = :id) AND owner_user_id IS NOT NULL AND archived_at IS NULL"
+            ),
+            {"id": node_id},
+        )
+        for row in result.fetchall():
+            if row[0] == node_id:
+                edges.append(("owned_by", "->", row[0], row[1]))
+            else:
+                edges.append(("owned_by", "<-", row[0], row[1]))
+
+        # Memory -> Chat (in_chat)
+        result = await session.execute(
+            text(
+                "SELECT id, chat_id FROM memories WHERE (id = :id OR chat_id = :id) AND chat_id IS NOT NULL AND archived_at IS NULL"
+            ),
+            {"id": node_id},
+        )
+        for row in result.fetchall():
+            if row[0] == node_id:
+                edges.append(("in_chat", "->", row[0], row[1]))
+            else:
+                edges.append(("in_chat", "<-", row[0], row[1]))
 
         # User -> Person (is_person)
         result = await session.execute(
@@ -293,6 +356,20 @@ async def _graph_stats(store: Store) -> None:
 
         result = await session.execute(text("SELECT COUNT(*) FROM memory_subjects"))
         edge_counts["about"] = result.scalar() or 0
+
+        result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM memories WHERE owner_user_id IS NOT NULL AND archived_at IS NULL"
+            )
+        )
+        edge_counts["owned_by"] = result.scalar() or 0
+
+        result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM memories WHERE chat_id IS NOT NULL AND archived_at IS NULL"
+            )
+        )
+        edge_counts["in_chat"] = result.scalar() or 0
 
         result = await session.execute(
             text("SELECT COUNT(*) FROM users WHERE person_id IS NOT NULL")
