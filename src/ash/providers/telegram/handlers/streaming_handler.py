@@ -57,7 +57,7 @@ class StreamingHandler:
         from ash.providers.telegram.handlers.tool_tracker import ProgressMessageTool
 
         # Store current message ID so send_message tool can reply to it
-        session.metadata["current_message_id"] = message.id
+        session.context.current_message_id = message.id
         await self._provider.send_typing(message.chat_id)
 
         if tracker is None:
@@ -152,7 +152,7 @@ class StreamingHandler:
                 username=message.username,
                 display_name=message.display_name,
                 thread_id=message.metadata.get("thread_id"),
-                branch_id=session.metadata.get("branch_id"),
+                branch_id=session.context.branch_id,
             )
             self._log_response("[NO_REPLY]")
             return
@@ -215,6 +215,6 @@ class StreamingHandler:
             username=message.username,
             display_name=message.display_name,
             thread_id=message.metadata.get("thread_id"),
-            branch_id=session.metadata.get("branch_id"),
+            branch_id=session.context.branch_id,
         )
         self._log_response(response_content)

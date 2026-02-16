@@ -66,7 +66,7 @@ class SyncHandler:
         from ash.providers.telegram.handlers.tool_tracker import ProgressMessageTool
 
         # Store current message ID so send_message tool can reply to it
-        session.metadata["current_message_id"] = message.id
+        session.context.current_message_id = message.id
         if tracker is None:
             tracker = self._create_tool_tracker(message)
         progress_tool = ProgressMessageTool(tracker)
@@ -119,7 +119,7 @@ class SyncHandler:
                 username=message.username,
                 display_name=message.display_name,
                 thread_id=thread_id,
-                branch_id=session.metadata.get("branch_id"),
+                branch_id=session.context.branch_id,
             )
             self._log_response("[NO_REPLY]")
             return response
@@ -252,7 +252,7 @@ class SyncHandler:
             username=message.username,
             display_name=message.display_name,
             thread_id=thread_id,
-            branch_id=session.metadata.get("branch_id"),
+            branch_id=session.context.branch_id,
         )
         self._log_response(response.text)
 

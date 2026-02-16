@@ -122,18 +122,18 @@ class SessionHandler:
         )
 
         if message.username:
-            session.metadata["username"] = message.username
+            session.context.username = message.username
         if message.display_name:
-            session.metadata["display_name"] = message.display_name
+            session.context.display_name = message.display_name
         if chat_type := message.metadata.get("chat_type"):
-            session.metadata["chat_type"] = chat_type
+            session.context.chat_type = chat_type
         if chat_title := message.metadata.get("chat_title"):
-            session.metadata["chat_title"] = chat_title
+            session.context.chat_title = chat_title
         if message.metadata.get("passive_engagement"):
-            session.metadata["passive_engagement"] = True
+            session.context.passive_engagement = True
 
         if thread_id:
-            session.metadata["thread_id"] = thread_id
+            session.context.thread_id = thread_id
 
         session_mode = self._config.sessions.mode if self._config else "persistent"
         if session_mode != "fresh":
@@ -147,9 +147,7 @@ class SessionHandler:
             self._provider_name, message.chat_id, limit=history_limit
         )
         if entries:
-            session.metadata["chat_history"] = [
-                e.model_dump(mode="json") for e in entries
-            ]
+            session.context.chat_history = [e.model_dump(mode="json") for e in entries]
 
         async with self._database.session() as db_session:
             from sqlalchemy import text as _text
@@ -244,8 +242,8 @@ class SessionHandler:
                         branch_id,
                         target.id,
                     )
-                session.metadata["branch_id"] = branch_id
-                session.metadata["branch_head_id"] = branch_head_id
+                session.context.branch_id = branch_id
+                session.context.branch_head_id = branch_head_id
 
         messages, message_ids = await session_manager.load_messages_for_llm(
             branch_head_id=branch_head_id,
@@ -260,7 +258,7 @@ class SessionHandler:
                 gap_minutes = gap.total_seconds() / 60
 
         if gap_minutes is not None:
-            session.metadata["conversation_gap_minutes"] = gap_minutes
+            session.context.conversation_gap_minutes = gap_minutes
 
         session.messages.extend(messages)
         session.set_message_ids(message_ids)

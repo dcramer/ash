@@ -40,10 +40,10 @@ def _make_group_session(
         chat_id="eval-group-123",
         user_id=user_id,
     )
-    session.metadata["username"] = username
-    session.metadata["display_name"] = display_name
-    session.metadata["chat_type"] = "supergroup"
-    session.metadata["chat_title"] = "Eval Test Group"
+    session.context.username = username
+    session.context.display_name = display_name
+    session.context.chat_type = "supergroup"
+    session.context.chat_title = "Eval Test Group"
     return session
 
 
@@ -60,9 +60,9 @@ def _make_private_session(
         chat_id=f"eval-private-{user_id}",
         user_id=user_id,
     )
-    session.metadata["username"] = username
-    session.metadata["display_name"] = display_name
-    session.metadata["chat_type"] = "private"
+    session.context.username = username
+    session.context.display_name = display_name
+    session.context.chat_type = "private"
     return session
 
 

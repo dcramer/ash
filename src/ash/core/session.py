@@ -15,6 +15,83 @@ from ash.sessions.utils import (
 
 
 @dataclass
+class SessionContext:
+    """Typed context for session metadata.
+
+    Replaces the untyped metadata dict with typed fields for all
+    session-level context passed between providers and the agent.
+    """
+
+    username: str | None = None
+    display_name: str | None = None
+    chat_type: str | None = None
+    chat_title: str | None = None
+    chat_history: list[dict[str, Any]] | None = None
+    thread_id: str | None = None
+    branch_id: str | None = None
+    branch_head_id: str | None = None
+    conversation_gap_minutes: float | None = None
+    is_scheduled_task: bool = False
+    passive_engagement: bool = False
+    reply_to_message_id: str | None = None
+    current_message_id: str | None = None
+    has_reply_context: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict for ToolContext/AgentContext metadata propagation."""
+        d: dict[str, Any] = {}
+        if self.username is not None:
+            d["username"] = self.username
+        if self.display_name is not None:
+            d["display_name"] = self.display_name
+        if self.chat_type is not None:
+            d["chat_type"] = self.chat_type
+        if self.chat_title is not None:
+            d["chat_title"] = self.chat_title
+        if self.chat_history is not None:
+            d["chat_history"] = self.chat_history
+        if self.thread_id is not None:
+            d["thread_id"] = self.thread_id
+        if self.branch_id is not None:
+            d["branch_id"] = self.branch_id
+        if self.branch_head_id is not None:
+            d["branch_head_id"] = self.branch_head_id
+        if self.conversation_gap_minutes is not None:
+            d["conversation_gap_minutes"] = self.conversation_gap_minutes
+        if self.is_scheduled_task:
+            d["is_scheduled_task"] = True
+        if self.passive_engagement:
+            d["passive_engagement"] = True
+        if self.reply_to_message_id is not None:
+            d["reply_to_message_id"] = self.reply_to_message_id
+        if self.current_message_id is not None:
+            d["current_message_id"] = self.current_message_id
+        if self.has_reply_context:
+            d["has_reply_context"] = True
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SessionContext":
+        """Create from a metadata dict (for backward-compatible deserialization)."""
+        return cls(
+            username=data.get("username"),
+            display_name=data.get("display_name"),
+            chat_type=data.get("chat_type"),
+            chat_title=data.get("chat_title"),
+            chat_history=data.get("chat_history"),
+            thread_id=data.get("thread_id"),
+            branch_id=data.get("branch_id"),
+            branch_head_id=data.get("branch_head_id"),
+            conversation_gap_minutes=data.get("conversation_gap_minutes"),
+            is_scheduled_task=data.get("is_scheduled_task", False),
+            passive_engagement=data.get("passive_engagement", False),
+            reply_to_message_id=data.get("reply_to_message_id"),
+            current_message_id=data.get("current_message_id"),
+            has_reply_context=data.get("has_reply_context", False),
+        )
+
+
+@dataclass
 class SessionState:
     """State for a conversation session."""
 
@@ -23,7 +100,7 @@ class SessionState:
     chat_id: str
     user_id: str
     messages: list[Message] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    context: SessionContext = field(default_factory=SessionContext)
     # Token tracking for smart pruning (populated from DB)
     _token_counts: list[int] = field(default_factory=list, repr=False)
     _message_ids: list[str] = field(default_factory=list, repr=False)
@@ -240,7 +317,7 @@ class SessionState:
             "chat_id": self.chat_id,
             "user_id": self.user_id,
             "messages": [self._message_to_dict(m) for m in self.messages],
-            "metadata": self.metadata,
+            "metadata": self.context.to_dict(),
         }
 
     @classmethod
@@ -260,7 +337,7 @@ class SessionState:
             chat_id=data["chat_id"],
             user_id=data["user_id"],
             messages=messages,
-            metadata=data.get("metadata", {}),
+            context=SessionContext.from_dict(data.get("metadata", {})),
         )
 
     @staticmethod

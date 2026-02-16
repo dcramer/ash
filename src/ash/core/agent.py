@@ -80,10 +80,10 @@ def _build_routing_env(
         "ASH_SESSION_ID": session.session_id or "",
         "ASH_USER_ID": effective_user_id or "",
         "ASH_CHAT_ID": session.chat_id or "",
-        "ASH_CHAT_TITLE": session.metadata.get("chat_title", ""),
+        "ASH_CHAT_TITLE": session.context.chat_title or "",
         "ASH_PROVIDER": session.provider or "",
-        "ASH_USERNAME": session.metadata.get("username", ""),
-        "ASH_DISPLAY_NAME": session.metadata.get("display_name", ""),
+        "ASH_USERNAME": session.context.username or "",
+        "ASH_DISPLAY_NAME": session.context.display_name or "",
         "ASH_TIMEZONE": timezone,
     }
 
@@ -94,7 +94,7 @@ def _build_routing_env(
         env["ASH_CHAT_PATH"] = (
             f"{mount_prefix}/chats/{session.provider}/{session.chat_id}"
         )
-        if thread_id := session.metadata.get("thread_id"):
+        if thread_id := session.context.thread_id:
             env["ASH_THREAD_PATH"] = (
                 f"{mount_prefix}/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
             )
@@ -282,39 +282,38 @@ class Agent:
         effective_user_id = user_id or session.user_id
 
         # Use ContextGatherer to retrieve memory and people context
+        ctx = session.context
         context_gatherer = ContextGatherer(self._memory)
         gathered = await context_gatherer.gather(
             user_id=effective_user_id,
             user_message=user_message,
             chat_id=session.chat_id,
-            chat_type=session.metadata.get("chat_type"),
-            sender_username=session.metadata.get("username"),
+            chat_type=ctx.chat_type,
+            sender_username=ctx.username,
         )
 
         system_prompt = self._build_system_prompt(
             context=gathered.memory,
             known_people=gathered.known_people,
-            conversation_gap_minutes=session.metadata.get("conversation_gap_minutes"),
-            has_reply_context=session.metadata.get("has_reply_context", False),
-            sender_username=session.metadata.get("username"),
-            sender_display_name=session.metadata.get("display_name"),
-            chat_title=session.metadata.get("chat_title"),
-            chat_type=session.metadata.get("chat_type"),
+            conversation_gap_minutes=ctx.conversation_gap_minutes,
+            has_reply_context=ctx.has_reply_context,
+            sender_username=ctx.username,
+            sender_display_name=ctx.display_name,
+            chat_title=ctx.chat_title,
+            chat_type=ctx.chat_type,
             chat_state_path=(
                 f"{self._mount_prefix}/chats/{session.provider}/{session.chat_id}"
                 if session.provider and session.chat_id
                 else None
             ),
             thread_state_path=(
-                f"{self._mount_prefix}/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
-                if session.provider
-                and session.chat_id
-                and (thread_id := session.metadata.get("thread_id"))
+                f"{self._mount_prefix}/chats/{session.provider}/{session.chat_id}/threads/{ctx.thread_id}"
+                if session.provider and session.chat_id and ctx.thread_id
                 else None
             ),
-            is_scheduled_task=session.metadata.get("is_scheduled_task", False),
-            is_passive_engagement=session.metadata.get("passive_engagement", False),
-            chat_history=session.metadata.get("chat_history"),
+            is_scheduled_task=ctx.is_scheduled_task,
+            is_passive_engagement=ctx.passive_engagement,
+            chat_history=ctx.chat_history,
         )
 
         system_tokens = estimate_tokens(system_prompt)
@@ -401,9 +400,9 @@ class Agent:
             if not llm_messages:
                 return
 
-            # Build speaker info from session metadata for attribution
-            speaker_username = session.metadata.get("username")
-            speaker_display_name = session.metadata.get("display_name")
+            # Build speaker info from session context for attribution
+            speaker_username = session.context.username
+            speaker_display_name = session.context.display_name
 
             # Collect owner names to avoid treating the user's own name
             # as a third party in extraction
@@ -522,9 +521,9 @@ class Agent:
             session_id=session.session_id,
             user_id=setup.effective_user_id,
             chat_id=session.chat_id,
-            thread_id=session.metadata.get("thread_id"),
+            thread_id=session.context.thread_id,
             provider=session.provider,
-            metadata=dict(session.metadata),
+            metadata=session.context.to_dict(),
             env=_build_routing_env(
                 session,
                 setup.effective_user_id,
@@ -537,17 +536,15 @@ class Agent:
 
         # Initialize reply anchor from incoming message context
         if not tool_context.reply_to_message_id:
-            tool_context.reply_to_message_id = session.metadata.get(
-                "current_message_id"
-            )
+            tool_context.reply_to_message_id = session.context.current_message_id
 
         return tool_context
 
     @staticmethod
     def _sync_reply_anchor(tool_context: ToolContext, session: SessionState) -> None:
-        """Sync thread anchor from tool context back to session metadata."""
+        """Sync thread anchor from tool context back to session context."""
         if tool_context.reply_to_message_id:
-            session.metadata["reply_to_message_id"] = tool_context.reply_to_message_id
+            session.context.reply_to_message_id = tool_context.reply_to_message_id
 
     def _build_child_activated(
         self,
@@ -575,7 +572,7 @@ class Agent:
                 user_id=setup.effective_user_id,
                 chat_id=session.chat_id,
                 provider=session.provider,
-                metadata=dict(session.metadata),
+                metadata=session.context.to_dict(),
             ),
             model=self._config.model,
             iteration=iterations,

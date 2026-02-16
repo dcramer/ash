@@ -189,11 +189,11 @@ class ScheduledTaskHandler:
             chat_id=entry.chat_id or "",
             user_id=entry.user_id or "",
         )
-        # Populate metadata so system prompt builder includes full context
-        session.metadata["username"] = entry.username or ""
-        session.metadata["is_scheduled_task"] = True
+        # Populate context so system prompt builder includes full context
+        session.context.username = entry.username or ""
+        session.context.is_scheduled_task = True
         if entry.chat_title:
-            session.metadata["chat_title"] = entry.chat_title
+            session.context.chat_title = entry.chat_title
 
         try:
             # Process through agent
@@ -214,7 +214,7 @@ class ScheduledTaskHandler:
                         response_text = f"@{entry.username} {response_text}"
 
                     # Thread final response to the same chain as skill messages
-                    reply_to = session.metadata.get("reply_to_message_id")
+                    reply_to = session.context.reply_to_message_id
                     message_id = await sender(
                         entry.chat_id, response_text, reply_to=reply_to
                     )
