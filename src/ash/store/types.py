@@ -303,6 +303,9 @@ class ExtractedFact:
     speaker: str | None = None  # Who said this (username or identifier)
     sensitivity: Sensitivity | None = None  # Privacy classification
     portable: bool = True  # Whether this fact crosses chat boundaries
+    aliases: dict[str, list[str]] = field(
+        default_factory=dict
+    )  # subject name → alias strings
 
 
 @dataclass

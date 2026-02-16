@@ -606,3 +606,110 @@ class TestClassifyFact:
         result = await extractor.classify_fact("Some fact")
 
         assert result is None
+
+    async def test_classify_parses_aliases(self, extractor, mock_llm):
+        """Test that classify_fact populates aliases from LLM output."""
+        mock_llm.complete = AsyncMock(
+            return_value=CompletionResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content='{"subjects": ["Sukhpreet"], "type": "identity", "sensitivity": "public", "portable": true, "shared": false, "aliases": {"Sukhpreet": ["SK"]}}',
+                ),
+                usage=Usage(input_tokens=50, output_tokens=30),
+            )
+        )
+
+        result = await extractor.classify_fact("Sukhpreet goes by SK")
+
+        assert result is not None
+        assert result.aliases == {"Sukhpreet": ["SK"]}
+
+
+class TestAliasParsing:
+    """Tests for alias parsing in extraction."""
+
+    @pytest.fixture
+    def extractor(self):
+        """Create a MemoryExtractor with mocked LLM."""
+        return MemoryExtractor(
+            llm=MagicMock(),
+            model="test-model",
+            confidence_threshold=0.7,
+        )
+
+    def test_parses_aliases_field(self, extractor):
+        """Test that _parse_fact_item parses aliases dict."""
+        response = """[
+            {"content": "Sukhpreet goes by SK", "subjects": ["Sukhpreet"], "shared": false, "confidence": 0.9, "aliases": {"Sukhpreet": ["SK"]}}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].aliases == {"Sukhpreet": ["SK"]}
+
+    def test_aliases_defaults_to_empty_dict(self, extractor):
+        """Test that missing aliases field defaults to empty dict."""
+        response = """[
+            {"content": "Some fact", "subjects": [], "shared": false, "confidence": 0.9}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].aliases == {}
+
+    def test_aliases_handles_invalid_types(self, extractor):
+        """Test that non-dict aliases values produce empty dict."""
+        response = """[
+            {"content": "Some fact", "subjects": [], "shared": false, "confidence": 0.9, "aliases": "not a dict"}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].aliases == {}
+
+    def test_aliases_multiple_values(self, extractor):
+        """Test multiple aliases for one subject."""
+        response = """[
+            {"content": "Bob is also known as Bobby or Robert", "subjects": ["Bob"], "shared": false, "confidence": 0.9, "aliases": {"Bob": ["Bobby", "Robert"]}}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].aliases == {"Bob": ["Bobby", "Robert"]}
+
+    def test_aliases_strips_whitespace(self, extractor):
+        """Test that alias names and values are stripped."""
+        response = """[
+            {"content": "Bob goes by Bobby", "subjects": ["Bob"], "shared": false, "confidence": 0.9, "aliases": {" Bob ": [" Bobby "]}}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].aliases == {"Bob": ["Bobby"]}
+
+    def test_aliases_skips_empty_values(self, extractor):
+        """Test that empty alias values are filtered out."""
+        response = """[
+            {"content": "Bob goes by Bobby", "subjects": ["Bob"], "shared": false, "confidence": 0.9, "aliases": {"Bob": ["Bobby", "", "  "]}}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].aliases == {"Bob": ["Bobby"]}
+
+    def test_aliases_skips_invalid_inner_types(self, extractor):
+        """Test that non-list alias values are skipped."""
+        response = """[
+            {"content": "Bob goes by Bobby", "subjects": ["Bob"], "shared": false, "confidence": 0.9, "aliases": {"Bob": "Bobby"}}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].aliases == {}

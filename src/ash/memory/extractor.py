@@ -171,6 +171,17 @@ The subjects array should contain people the fact is PRIMARILY ABOUT:
 WRONG: "My wife got me a Grand Seiko" -> extracting that wife owns a Grand Seiko (she GAVE it, speaker owns it)
 RIGHT: "My wife got me a Grand Seiko" -> speaker owns Grand Seiko, subjects: []
 
+## Aliases
+If the user explicitly states that a person has a nickname, alias, or alternate name,
+extract that mapping. Only extract when there is a CLEAR declaration of equivalence.
+
+Patterns: "X is also known as Y", "X goes by Y", "X's nickname is Y",
+"Everyone calls X 'Y'", "Y is short for X"
+
+Do NOT infer aliases from casual usage — only from explicit statements.
+The aliases dict maps the person's name (matching a subjects entry) to alias strings.
+If no aliases stated, use an empty dict {{}}.
+
 {existing_memories_section}
 {datetime_section}
 ## Conversation to analyze:
@@ -186,6 +197,7 @@ Return a JSON array of facts. Each fact has:
 - type: One of: "preference", "identity", "relationship", "knowledge", "context", "event", "task", "observation"
 - sensitivity: One of: "public", "personal", "sensitive" (see Sensitivity Classification)
 - portable: true if this is an enduring fact about a person (crosses chat boundaries), false if chat-operational/ephemeral (default true)
+- aliases: Dict mapping subject name to list of alias strings (empty dict {{}} if none)
 
 ## Portable vs Non-Portable:
 When a fact has subjects (is about a person), decide whether it's portable:
@@ -221,9 +233,9 @@ Only include facts with confidence >= 0.7. If you cannot resolve a reference, do
 
 Return ONLY valid JSON, no other text. Example:
 [
-  {{"content": "David prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference", "sensitivity": "public", "portable": true}},
-  {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship", "sensitivity": "public", "portable": true}},
-  {{"content": "Has been dealing with anxiety", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "identity", "sensitivity": "sensitive", "portable": true}}
+  {{"content": "David prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference", "sensitivity": "public", "portable": true, "aliases": {{}}}},
+  {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship", "sensitivity": "public", "portable": true, "aliases": {{}}}},
+  {{"content": "Sukhpreet goes by SK", "speaker": "david", "subjects": ["Sukhpreet"], "shared": false, "confidence": 0.9, "type": "identity", "sensitivity": "public", "portable": true, "aliases": {{"Sukhpreet": ["SK"]}}}}
 ]
 
 If there are no facts worth extracting, return an empty array: []"""
@@ -241,6 +253,7 @@ Return a JSON object with:
 - sensitivity: One of: "public", "personal", "sensitive"
 - portable: true if this is an enduring fact about a person, false if ephemeral
 - shared: true if this is group/team knowledge, false if personal
+- aliases: Dict mapping subject name to list of alias strings (empty dict {{}} if none). Only extract when fact explicitly declares a nickname or alternate name.
 
 ## Guidelines:
 - subjects should contain people the fact is PRIMARILY ABOUT (not the speaker)
@@ -249,7 +262,7 @@ Return a JSON object with:
 - Default shared to false unless clearly group knowledge
 
 Return ONLY valid JSON, no other text. Example:
-{{"subjects": ["Sarah"], "type": "relationship", "sensitivity": "public", "portable": true, "shared": false}}"""
+{{"subjects": ["Sarah"], "type": "relationship", "sensitivity": "public", "portable": true, "shared": false, "aliases": {{}}}}"""
 
 
 class MemoryExtractor:
@@ -525,6 +538,17 @@ This ensures memories remain meaningful when recalled later.
         if not isinstance(portable, bool):
             portable = True
 
+        aliases_raw = item.get("aliases", {})
+        aliases: dict[str, list[str]] = {}
+        if isinstance(aliases_raw, dict):
+            for name, alias_list in aliases_raw.items():
+                if isinstance(name, str) and isinstance(alias_list, list):
+                    cleaned = [
+                        str(a).strip() for a in alias_list if a and str(a).strip()
+                    ]
+                    if cleaned:
+                        aliases[name.strip()] = cleaned
+
         return ExtractedFact(
             content=content,
             subjects=subjects,
@@ -534,4 +558,5 @@ This ensures memories remain meaningful when recalled later.
             speaker=speaker,
             sensitivity=sensitivity,
             portable=portable,
+            aliases=aliases,
         )

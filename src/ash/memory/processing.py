@@ -209,6 +209,7 @@ async def process_extracted_facts(
 
         try:
             subject_person_ids: list[str] | None = None
+            subject_to_pid: dict[str, str] = {}
             if fact.subjects:
                 subject_person_ids = []
                 for subject in fact.subjects:
@@ -223,6 +224,7 @@ async def process_extracted_facts(
                             relationship_stated_by=speaker_username,
                         )
                         subject_person_ids.append(result.person_id)
+                        subject_to_pid[subject.lower()] = result.person_id
                         if result.created:
                             newly_created_person_ids.append(result.person_id)
                     except Exception:
@@ -243,6 +245,26 @@ async def process_extracted_facts(
                             logger.debug(
                                 "Failed to add relationship %s to %s",
                                 rel_term,
+                                pid,
+                            )
+
+            # Register explicit aliases from extraction
+            if fact.aliases and subject_person_ids:
+                for alias_subject, alias_values in fact.aliases.items():
+                    pid = subject_to_pid.get(alias_subject.lower())
+                    if not pid:
+                        continue
+                    for alias_val in alias_values:
+                        try:
+                            await store.add_alias(
+                                pid,
+                                alias_val,
+                                added_by=speaker_username or user_id,
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Failed to add alias %s to person %s",
+                                alias_val,
                                 pid,
                             )
 

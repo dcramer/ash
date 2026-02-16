@@ -154,10 +154,14 @@ class PeopleResolutionMixin:
 
         existing = await self.find_person(reference)
         if existing:
-            person = await self._follow_merge_chain(existing)
-            return PersonResolutionResult(
-                person_id=person.id, created=False, person_name=person.name
-            )
+            # Check for ambiguity — if multiple people match this reference,
+            # fall through to _fuzzy_find for LLM-based disambiguation
+            if not await self._has_ambiguous_matches(reference):
+                person = await self._follow_merge_chain(existing)
+                return PersonResolutionResult(
+                    person_id=person.id, created=False, person_name=person.name
+                )
+            # else: multiple matches, let _fuzzy_find handle it
 
         # Try fuzzy match
         fuzzy_match = await self._fuzzy_find(
@@ -254,6 +258,35 @@ class PeopleResolutionMixin:
         except Exception:
             logger.warning("fuzzy_find_failed", exc_info=True)
             return None
+
+    async def _has_ambiguous_matches(self: Store, reference: str) -> bool:
+        """Check if a reference matches multiple distinct (non-merged) people."""
+        ref = normalize_reference(reference)
+        person_ids: set[str] = set()
+        async with self._db.session() as session:
+            # Check by name
+            result = await session.execute(
+                text(
+                    "SELECT id FROM people WHERE LOWER(name) = :ref AND merged_into IS NULL"
+                ),
+                {"ref": ref},
+            )
+            for row in result.fetchall():
+                person_ids.add(row[0])
+
+            # Check by alias
+            result = await session.execute(
+                text(f"""
+                    SELECT pa.person_id FROM person_aliases pa
+                    JOIN people p ON p.id = pa.person_id
+                    WHERE p.merged_into IS NULL AND {ALIAS_NORM_MATCH}
+                """),
+                {"ref": ref},
+            )
+            for row in result.fetchall():
+                person_ids.add(row[0])
+
+        return len(person_ids) > 1
 
     def _parse_person_reference(
         self: Store,

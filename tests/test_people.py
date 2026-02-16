@@ -1722,3 +1722,167 @@ class TestExtractRelationshipTerm:
 
     def test_case_insensitive(self):
         assert extract_relationship_term("Sarah is my Wife") == "wife"
+
+
+class TestProcessExtractedFactsAliases:
+    """Tests for alias registration in process_extracted_facts."""
+
+    async def test_registers_aliases(self, graph_store: Store):
+        """End-to-end: fact with aliases → alias added to person record."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
+        person = await graph_store.create_person(created_by="user-1", name="Sukhpreet")
+
+        fact = ExtractedFact(
+            content="Sukhpreet goes by SK",
+            subjects=["Sukhpreet"],
+            shared=False,
+            confidence=0.9,
+            memory_type=MemoryType.IDENTITY,
+            aliases={"Sukhpreet": ["SK"]},
+        )
+
+        await process_extracted_facts(
+            facts=[fact],
+            store=graph_store,
+            user_id="user-1",
+            speaker_username="david",
+        )
+
+        refreshed = await graph_store.get_person(person.id)
+        assert refreshed is not None
+        alias_values = [a.value for a in refreshed.aliases]
+        assert "SK" in alias_values
+
+    async def test_no_aliases_no_error(self, graph_store: Store):
+        """Backward compat: fact without aliases processes normally."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
+        fact = ExtractedFact(
+            content="Bob likes pizza",
+            subjects=["Bob"],
+            shared=False,
+            confidence=0.9,
+            memory_type=MemoryType.KNOWLEDGE,
+        )
+
+        ids = await process_extracted_facts(
+            facts=[fact],
+            store=graph_store,
+            user_id="user-1",
+        )
+
+        assert len(ids) == 1
+
+    async def test_aliases_with_multiple_values(self, graph_store: Store):
+        """Multiple aliases for one subject are all registered."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
+        person = await graph_store.create_person(created_by="user-1", name="Bob")
+
+        fact = ExtractedFact(
+            content="Bob is also known as Bobby and Robert",
+            subjects=["Bob"],
+            shared=False,
+            confidence=0.9,
+            memory_type=MemoryType.IDENTITY,
+            aliases={"Bob": ["Bobby", "Robert"]},
+        )
+
+        await process_extracted_facts(
+            facts=[fact],
+            store=graph_store,
+            user_id="user-1",
+        )
+
+        refreshed = await graph_store.get_person(person.id)
+        assert refreshed is not None
+        alias_values = [a.value for a in refreshed.aliases]
+        assert "Bobby" in alias_values
+        assert "Robert" in alias_values
+
+    async def test_aliases_key_case_insensitive(self, graph_store: Store):
+        """Alias dict key matches subject via case-insensitive lookup."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
+        person = await graph_store.create_person(created_by="user-1", name="Bob")
+
+        fact = ExtractedFact(
+            content="Bob goes by Bobby",
+            subjects=["Bob"],
+            shared=False,
+            confidence=0.9,
+            memory_type=MemoryType.IDENTITY,
+            aliases={"bob": ["Bobby"]},  # lowercase key
+        )
+
+        await process_extracted_facts(
+            facts=[fact],
+            store=graph_store,
+            user_id="user-1",
+        )
+
+        refreshed = await graph_store.get_person(person.id)
+        assert refreshed is not None
+        alias_values = [a.value for a in refreshed.aliases]
+        assert "Bobby" in alias_values
+
+
+class TestAmbiguousResolution:
+    """Tests for ambiguous alias resolution."""
+
+    async def test_unambiguous_alias_returns_directly(self, graph_store: Store):
+        """Single match returns immediately without falling through to fuzzy."""
+        person = await graph_store.create_person(
+            created_by="user-1", name="Sarah", aliases=["sks"]
+        )
+
+        result = await graph_store.resolve_or_create_person("user-1", "Sarah")
+
+        assert result.person_id == person.id
+        assert result.created is False
+
+    async def test_ambiguous_alias_uses_fuzzy_match(self, graph_store: Store):
+        """Two people with same alias: resolution falls through to LLM fuzzy match."""
+        await graph_store.create_person(
+            created_by="user-1",
+            name="Sarah A",
+            aliases=["Sarah"],
+        )
+        p2 = await graph_store.create_person(
+            created_by="user-1",
+            name="Sarah B",
+            aliases=["Sarah"],
+        )
+
+        # Mock LLM to pick p2
+        mock_llm = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.message.get_text.return_value = p2.id
+        mock_llm.complete.return_value = mock_response
+        graph_store.set_llm(mock_llm, "test-model")
+
+        result = await graph_store.resolve_or_create_person(
+            "user-1",
+            "Sarah",
+            content_hint="Sarah B is visiting next week",
+        )
+
+        assert result.person_id == p2.id
+        assert result.created is False
+        # Verify LLM was called for fuzzy match
+        mock_llm.complete.assert_called_once()
+
+    async def test_ambiguous_name_no_llm_creates_new(self, graph_store: Store):
+        """Two people with same name, no LLM configured: creates new person."""
+        await graph_store.create_person(created_by="user-1", name="Sarah")
+        await graph_store.create_person(created_by="user-2", name="Sarah")
+
+        # No LLM configured - fuzzy match will be skipped
+        result = await graph_store.resolve_or_create_person("user-3", "Sarah")
+
+        assert result.created is True
