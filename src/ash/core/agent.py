@@ -953,9 +953,7 @@ async def create_agent(
 
     agent_executor = AgentExecutor(llm, tool_executor, config)
     tool_registry.register(
-        UseAgentTool(
-            agent_registry, agent_executor, skill_registry, config, voice=workspace.soul
-        )
+        UseAgentTool(agent_registry, agent_executor, voice=workspace.soul)
     )
     tool_registry.register(
         UseSkillTool(skill_registry, agent_executor, config, voice=workspace.soul)

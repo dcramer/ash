@@ -10,8 +10,6 @@ from ash.tools.base import Tool, ToolContext, ToolResult, format_subagent_result
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor, AgentRegistry
-    from ash.config import AshConfig
-    from ash.skills import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +39,6 @@ class UseAgentTool(Tool):
         self,
         registry: "AgentRegistry",
         executor: "AgentExecutor",
-        skill_registry: "SkillRegistry | None" = None,
-        config: "AshConfig | None" = None,
         voice: str | None = None,
     ) -> None:
         """Initialize the tool.
@@ -50,14 +46,10 @@ class UseAgentTool(Tool):
         Args:
             registry: Agent registry to look up agents.
             executor: Agent executor to run agents.
-            skill_registry: Optional skill registry for reloading after skill-writer.
-            config: Optional config for workspace path.
             voice: Optional communication style for user-facing subagent messages.
         """
         self._registry = registry
         self._executor = executor
-        self._skill_registry = skill_registry
-        self._config = config
         self._voice = voice
         # In-memory checkpoint storage (keyed by checkpoint_id)
         # In production, this would be stored in the session via SessionManager
@@ -216,13 +208,6 @@ class UseAgentTool(Tool):
                 f"{checkpoint.prompt}{options_str}",
                 **{CHECKPOINT_METADATA_KEY: checkpoint.to_dict()},
             )
-
-        # Handle skill agent completion (reload skills)
-        if agent.config.is_skill_agent and not result.is_error:
-            if self._skill_registry and self._config:
-                count = self._skill_registry.reload_workspace(self._config.workspace)
-                if count > 0:
-                    logger.info(f"Reloaded {count} new skill(s) after {agent_name}")
 
         if result.is_error:
             return ToolResult.error(result.content)

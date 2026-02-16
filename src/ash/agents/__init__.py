@@ -1,8 +1,9 @@
 """Agents system for autonomous subagent execution.
 
 Agents are code-defined subagents that run in isolated LLM loops
-for complex multi-step tasks. Unlike skills (user-defined markdown
-files), agents provide built-in capabilities like research.
+for complex multi-step tasks. Built-in agents include debug-self,
+plan, and task. Skills handle focused work like research and
+skill creation.
 """
 
 from ash.agents.base import Agent

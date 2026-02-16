@@ -91,11 +91,11 @@ model = "{sonnet_model}"
 max_tokens = 8192
 
 # =============================================================================
-# Agent Overrides
+# Skill/Agent Overrides
 # =============================================================================
-# Override model or iteration limits for built-in agents
+# Override model for skills or agents
 
-[agents.skill-writer]
+[skills.skill-writer]
 model = "sonnet"  # Use more capable model for skill creation
 
 # =============================================================================
