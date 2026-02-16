@@ -122,6 +122,57 @@ class TestGraphEdgeOps:
         assert len(about_out) == 2
         assert {e.target_id for e in about_out} == {"person-1", "person-2"}
 
+    def test_remove_edge_cleans_empty_edges_by_type(self):
+        """Removing the last edge of a type should delete the _edges_by_type key."""
+        graph = KnowledgeGraph()
+        edge = create_about_edge("mem-1", "person-1")
+        graph.add_edge(edge)
+        assert ABOUT in graph._edges_by_type
+
+        graph.remove_edge(edge.id)
+        assert ABOUT not in graph._edges_by_type
+
+    def test_get_outgoing_cleans_stale_entries(self):
+        """Stale edge IDs in _outgoing are detected, warned, and removed."""
+        graph = KnowledgeGraph()
+        edge = create_about_edge("mem-1", "person-1")
+        graph.add_edge(edge)
+
+        # Simulate stale state: remove edge from dict but leave adjacency
+        del graph.edges[edge.id]
+
+        results = graph.get_outgoing("mem-1")
+        assert results == []
+        # Stale ID should have been cleaned from the adjacency list
+        assert edge.id not in graph._outgoing.get("mem-1", [])
+
+    def test_get_incoming_cleans_stale_entries(self):
+        """Stale edge IDs in _incoming are detected, warned, and removed."""
+        graph = KnowledgeGraph()
+        edge = create_about_edge("mem-1", "person-1")
+        graph.add_edge(edge)
+
+        # Simulate stale state
+        del graph.edges[edge.id]
+
+        results = graph.get_incoming("person-1")
+        assert results == []
+        assert edge.id not in graph._incoming.get("person-1", [])
+
+    def test_stale_cleanup_logs_warning(self, caplog):
+        """Stale index cleanup should emit a warning."""
+        import logging
+
+        graph = KnowledgeGraph()
+        edge = create_about_edge("mem-1", "person-1")
+        graph.add_edge(edge)
+        del graph.edges[edge.id]
+
+        with caplog.at_level(logging.WARNING, logger="ash.graph.graph"):
+            graph.get_outgoing("mem-1")
+
+        assert "stale" in caplog.text.lower()
+
     def test_get_incoming(self):
         graph = KnowledgeGraph()
         e1 = create_about_edge("mem-1", "person-1")

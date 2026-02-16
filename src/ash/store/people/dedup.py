@@ -203,15 +203,6 @@ class PeopleDedupMixin:
 
         return results
 
-    async def _remap_edges_for_merge(
-        self: Store, secondary_id: str, primary_id: str
-    ) -> int:
-        """Remap edges and persist immediately."""
-        count = self._remap_edges_for_merge_batched(secondary_id, primary_id)
-        if count > 0:
-            await self._persistence.flush(self._graph)
-        return count
-
     def _remap_edges_for_merge_batched(
         self: Store, secondary_id: str, primary_id: str
     ) -> int:

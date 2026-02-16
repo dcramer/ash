@@ -402,7 +402,7 @@ class SupersessionMixin:
                         new_content=new_memory.content,
                     ):
                         continue
-                if await self._mark_superseded(hearsay.id, new_memory.id):
+                if self._mark_superseded_batched(hearsay.id, new_memory.id):
                     count += 1
                     logger.info(
                         "Hearsay superseded by fact",
@@ -416,6 +416,19 @@ class SupersessionMixin:
                 logger.warning(
                     "Failed to check hearsay similarity",
                     extra={"hearsay_id": hearsay.id},
+                    exc_info=True,
+                )
+
+        if count > 0:
+            await self._persistence.flush(self._graph)
+            try:
+                await self._index.save(
+                    self._persistence.graph_dir / "embeddings" / "memories.npy"
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to save embeddings after hearsay supersession",
+                    extra={"count": count},
                     exc_info=True,
                 )
 

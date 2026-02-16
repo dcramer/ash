@@ -6,6 +6,7 @@ Persistence is handled separately by GraphPersistence.
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,6 +16,8 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
+
+_logger = logging.getLogger(__name__)
 
 EdgeType = Literal[
     "ABOUT", "STATED_BY", "SUPERSEDES", "IS_PERSON", "MERGED_INTO", "HAS_RELATIONSHIP"
@@ -223,6 +226,8 @@ class KnowledgeGraph:
                 type_list.remove(edge.id)
             except ValueError:
                 pass
+            if not type_list:
+                del self._edges_by_type[edge.edge_type]
 
     def remove_edge(self, edge_id: str) -> None:
         """Hard-remove edge from all indexes."""
@@ -239,13 +244,23 @@ class KnowledgeGraph:
         """Get outgoing edges, optionally filtered by type."""
         edge_ids = self._outgoing.get(node_id, [])
         results: list[Edge] = []
+        stale: list[str] = []
         for eid in edge_ids:
             edge = self.edges.get(eid)
             if not edge:
+                stale.append(eid)
                 continue
             if edge_type and edge.edge_type != edge_type:
                 continue
             results.append(edge)
+        if stale:
+            _logger.warning(
+                "Removed %d stale edge(s) from outgoing index for %s",
+                len(stale),
+                node_id,
+            )
+            for eid in stale:
+                edge_ids.remove(eid)
         return results
 
     def get_incoming(
@@ -256,27 +271,21 @@ class KnowledgeGraph:
         """Get incoming edges, optionally filtered by type."""
         edge_ids = self._incoming.get(node_id, [])
         results: list[Edge] = []
+        stale: list[str] = []
         for eid in edge_ids:
             edge = self.edges.get(eid)
             if not edge:
+                stale.append(eid)
                 continue
             if edge_type and edge.edge_type != edge_type:
                 continue
             results.append(edge)
+        if stale:
+            _logger.warning(
+                "Removed %d stale edge(s) from incoming index for %s",
+                len(stale),
+                node_id,
+            )
+            for eid in stale:
+                edge_ids.remove(eid)
         return results
-
-    def find_edge(
-        self,
-        source_id: str,
-        target_id: str,
-        edge_type: EdgeType,
-    ) -> Edge | None:
-        """Find an existing edge by source, target, and type.
-
-        Useful for checking uniqueness before creating a new edge.
-        """
-        for eid in self._outgoing.get(source_id, []):
-            edge = self.edges.get(eid)
-            if edge and edge.edge_type == edge_type and edge.target_id == target_id:
-                return edge
-        return None
