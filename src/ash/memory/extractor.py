@@ -119,6 +119,8 @@ The "content" field must be understandable on its own, without the subjects arra
 
 If the fact is about the speaker and there's no name available, prefix with "User".
 If the fact is about a third party, their name MUST appear in the content.
+- WRONG: "pregnant with David's baby, due date August 19" (who is pregnant?)
+- RIGHT: "Sarah (David's wife) is pregnant, due August 19, 2026"
 
 Examples of INCOHERENT facts to REJECT (confidence 0.0):
 - "Spent money on something" - what was bought?
@@ -143,6 +145,13 @@ Facts should be attributed to who they're ABOUT, not who performed an action:
 - "I bought Sarah a gift" -> SARAH received the gift - if relevant, fact is about Sarah (subjects: ["Sarah"])
 - "The watch my wife gave me" -> SPEAKER owns the watch, wife is the giver
 - Be precise: "gave", "got for", "bought for" means the OTHER person receives/owns it
+
+Medical conditions, pregnancy, achievements, and personal states belong to the person
+experiencing them, NOT the person reporting them:
+- "My wife is pregnant" -> The WIFE is pregnant (subjects: ["wife's name"]), not the speaker
+- "My dad has diabetes" -> The DAD has the condition (subjects: ["dad's name"])
+- "My son got into Stanford" -> The SON was admitted (subjects: ["son's name"])
+- "My brother broke his leg" -> The BROTHER is injured (subjects: ["brother's name"])
 
 ## Speaker Attribution
 Look for the @username prefix in <user> content to determine the speaker:
