@@ -73,7 +73,7 @@ env:
 packages:
   - jq
   - curl
-tools:
+allowed_tools:
   - bash
   - web_search
 model: haiku
@@ -90,10 +90,56 @@ Research and summarize topics.
         skill = registry.get("research")
         assert skill.env == ["PERPLEXITY_API_KEY"]
         assert skill.packages == ["jq", "curl"]
-        assert skill.tools == ["bash", "web_search"]
+        assert skill.allowed_tools == ["bash", "web_search"]
         assert skill.model == "haiku"
         assert skill.max_iterations == 15
         assert skill.instructions == "Research and summarize topics."
+
+    def test_discover_skill_with_tools_legacy_alias(self, tmp_path: Path):
+        """Legacy 'tools:' frontmatter should map to allowed_tools."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "legacy"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Legacy skill
+tools:
+  - bash
+---
+
+Do legacy things.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("legacy")
+        assert skill.allowed_tools == ["bash"]
+
+    def test_discover_skill_with_kebab_case_allowed_tools(self, tmp_path: Path):
+        """Kebab-case 'allowed-tools:' should map to allowed_tools."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "kebab"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Kebab skill
+allowed-tools:
+  - web_search
+---
+
+Do kebab things.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("kebab")
+        assert skill.allowed_tools == ["web_search"]
 
     def test_discover_skill_with_provenance(self, tmp_path: Path):
         """Test that authors and rationale fields are parsed."""
@@ -372,6 +418,22 @@ Do something.
         is_valid, error = registry.validate_skill_file(skill_file)
         assert is_valid is True
         assert error is None
+
+    def test_validate_rejects_unknown_fields(self, tmp_path: Path):
+        skill_file = tmp_path / "test.md"
+        skill_file.write_text(
+            """---
+description: Test skill
+bogus_field: value
+---
+
+Do something.
+"""
+        )
+        registry = SkillRegistry()
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is False
+        assert error is not None and "bogus_field" in error
 
 
 # =============================================================================

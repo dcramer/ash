@@ -21,8 +21,8 @@ description: string       # Required. One line, starts with verb, no trailing pe
 authors:                  # Required. Who created/maintains this skill
   - username
 rationale: string         # Required. Why this skill was created (user's intent)
-tools:                    # Optional. Tool whitelist (empty = all tools)
-  - bash
+allowed_tools:            # Optional. Tool whitelist (empty = all tools)
+  - bash                  # Also accepts: allowed-tools (kebab-case), tools (legacy)
   - web_search
 env:                      # Optional. Env vars injected from [skills.<name>] config
   - API_KEY

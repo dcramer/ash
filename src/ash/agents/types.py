@@ -84,7 +84,7 @@ class AgentConfig:
     name: str
     description: str
     system_prompt: str
-    tools: list[str] = field(default_factory=list)
+    allowed_tools: list[str] = field(default_factory=list)
     max_iterations: int = 10
     model: str | None = None
     is_skill_agent: bool = False
@@ -99,7 +99,7 @@ class AgentConfig:
         Automatically adds:
         - send_message if enable_progress_updates is True
         """
-        tools = list(self.tools)
+        tools = list(self.allowed_tools)
         if self.enable_progress_updates and "send_message" not in tools:
             tools.append("send_message")
         return tools

@@ -4,7 +4,7 @@ opt_in: true
 packages:
   - git
   - gh
-tools:
+allowed_tools:
   - bash
   - read_file
   - write_file

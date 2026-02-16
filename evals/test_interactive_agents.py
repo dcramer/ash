@@ -34,7 +34,7 @@ def eval_agent_with_test_skill(
             "Compute the answer and call the `complete` tool with the result.\n"
             "Do NOT use any other tools. Just compute the answer mentally and complete.\n"
         ),
-        tools=["complete", "send_message"],
+        allowed_tools=["complete", "send_message"],
         max_iterations=3,
     )
     eval_agent.skill_registry.register(skill)

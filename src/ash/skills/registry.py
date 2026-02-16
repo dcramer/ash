@@ -26,6 +26,26 @@ logger = logging.getLogger(__name__)
 
 FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
+# Known frontmatter fields for validation
+KNOWN_FRONTMATTER_FIELDS = {
+    "name",
+    "description",
+    "authors",
+    "rationale",
+    "allowed_tools",
+    "allowed-tools",
+    "tools",  # legacy alias for allowed_tools
+    "env",
+    "packages",
+    "model",
+    "max_iterations",
+    "opt_in",
+    "input_schema",
+    "license",
+    "compatibility",
+    "metadata",
+}
+
 
 class SkillRegistry:
     """Registry for skill definitions loaded from multiple sources.
@@ -183,6 +203,18 @@ class SkillRegistry:
         if count_loaded > 0:
             logger.info(f"Loaded {count_loaded} skills from {skills_dir}")
 
+    @staticmethod
+    def _resolve_allowed_tools(data: dict[str, Any]) -> list[str]:
+        """Resolve allowed_tools from frontmatter, accepting aliases.
+
+        Accepts: allowed_tools, allowed-tools, tools (legacy).
+        Priority: allowed_tools > allowed-tools > tools.
+        """
+        for key in ("allowed_tools", "allowed-tools", "tools"):
+            if key in data:
+                return data[key]
+        return []
+
     def _create_skill(
         self,
         name: str,
@@ -193,6 +225,15 @@ class SkillRegistry:
         source_repo: str | None = None,
         source_ref: str | None = None,
     ) -> SkillDefinition:
+        # Warn about unknown frontmatter fields
+        unknown = set(data.keys()) - KNOWN_FRONTMATTER_FIELDS
+        if unknown:
+            logger.warning(
+                "Skill '%s' has unknown frontmatter fields: %s",
+                name,
+                ", ".join(sorted(unknown)),
+            )
+
         return SkillDefinition(
             name=name,
             description=data["description"],
@@ -206,9 +247,12 @@ class SkillRegistry:
             source_ref=source_ref,
             env=data.get("env", []),
             packages=data.get("packages", []),
-            tools=data.get("tools", []),
+            allowed_tools=self._resolve_allowed_tools(data),
             model=data.get("model"),
             max_iterations=data.get("max_iterations", 10),
+            license=data.get("license"),
+            compatibility=data.get("compatibility"),
+            metadata=data.get("metadata", {}),
         )
 
     def _should_include_skill(self, skill: SkillDefinition) -> bool:
@@ -370,6 +414,11 @@ class SkillRegistry:
 
         if not content[match.end() :].strip():
             return False, "Missing instructions (markdown body after frontmatter)"
+
+        # Reject unknown frontmatter fields
+        unknown = set(data.keys()) - KNOWN_FRONTMATTER_FIELDS
+        if unknown:
+            return False, f"Unknown frontmatter fields: {', '.join(sorted(unknown))}"
 
         return True, None
 

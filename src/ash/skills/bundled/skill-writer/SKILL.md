@@ -1,6 +1,6 @@
 ---
 description: Create or update workspace skills with proper SKILL.md format
-tools:
+allowed_tools:
   - web_search
   - web_fetch
   - write_file
@@ -32,7 +32,7 @@ description: One-line description starting with a verb
 authors:
   - username
 rationale: Why this skill was created
-tools:
+allowed_tools:
   - bash
 env:
   - API_KEY
@@ -48,15 +48,18 @@ Read `/ash/skills/skill-writer/references/example-skill.md` for a working exampl
 
 ## Key Rules
 
-**Frontmatter fields:**
+**Frontmatter fields (only these are valid — the validator rejects unknown fields):**
 - `description` (required) - One line, starts with verb, no trailing period
 - `authors` (required) - List of usernames, starting with who requested it
 - `rationale` (required) - Why the user wanted this, what problem it solves
-- `tools` - Tool whitelist (empty = all tools)
+- `allowed_tools` - Tool whitelist (empty = all tools). `allowed-tools` (kebab-case) also accepted per agentskills.io spec
 - `env` - Environment variables injected from config (for API keys)
 - `packages` - System packages (apt)
 - `model` - Model override (e.g., "haiku")
 - `max_iterations` - Iteration limit (default: 10)
+- `license` - License identifier (e.g., "MIT")
+- `compatibility` - Compatibility info
+- `metadata` - Arbitrary key-value metadata
 
 **Instructions must be imperative:**
 - BAD: "To translate text, run: uv run translate.py"

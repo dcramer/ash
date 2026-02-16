@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 
 class SkillSourceType(Enum):
@@ -52,6 +53,13 @@ class SkillDefinition:
     # Subagent execution settings
     env: list[str] = field(default_factory=list)  # Env vars to inject from config
     packages: list[str] = field(default_factory=list)  # System packages (apt)
-    tools: list[str] = field(default_factory=list)  # Tool whitelist (empty = all)
+    allowed_tools: list[str] = field(
+        default_factory=list
+    )  # Tool whitelist (empty = all)
     model: str | None = None  # Model alias override
     max_iterations: int = 10  # Iteration limit
+
+    # agentskills.io spec fields (informational, no behavior change)
+    license: str | None = None
+    compatibility: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)

@@ -10,6 +10,7 @@ from ash.sessions.utils import (
     content_block_from_dict,
     content_block_to_dict,
     prune_messages_to_budget,
+    validate_tool_pairs,
 )
 
 
@@ -93,7 +94,8 @@ class SessionState:
             List of messages within token budget.
         """
         if token_budget is None or not self.messages:
-            return self.messages.copy()
+            validated, _ = validate_tool_pairs(self.messages)
+            return validated
 
         # Get token counts (use cached or estimate)
         token_counts = self._get_token_counts()

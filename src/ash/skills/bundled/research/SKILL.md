@@ -1,6 +1,6 @@
 ---
 description: Deep research across multiple sources with synthesis and citations
-tools:
+allowed_tools:
   - web_search
   - web_fetch
 max_iterations: 15

@@ -22,6 +22,6 @@ class TaskAgent(Agent):
             name="task",
             description="General-purpose worker for complex multi-step tasks",
             system_prompt=TASK_SYSTEM_PROMPT,
-            tools=[],  # Empty = all tools (including use_skill)
+            allowed_tools=[],  # Empty = all tools (including use_skill)
             max_iterations=25,
         )

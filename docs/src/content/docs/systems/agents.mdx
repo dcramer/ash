@@ -179,7 +179,7 @@ config = AgentConfig(
     name="research",
     description="Perform multi-step research tasks",
     system_prompt="You are a research assistant...",
-    tools=["web_search", "web_fetch", "bash"],
+    allowed_tools=["web_search", "web_fetch", "bash"],
     max_iterations=25,
 )
 ```
@@ -200,7 +200,7 @@ config = AgentConfig(
     name="skill-writer",
     description="Create new skills for the assistant",
     system_prompt="You are a skill writer...",
-    tools=["bash", "read_file", "write_file"],
+    allowed_tools=["bash", "read_file", "write_file"],
     max_iterations=15,
 )
 ```
@@ -297,7 +297,7 @@ class MyAgent(Agent):
 Your task is to...
 
 Available tools: bash, web_search""",
-            tools=["bash", "web_search"],
+            allowed_tools=["bash", "web_search"],
             max_iterations=15,
         )
 

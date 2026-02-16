@@ -93,7 +93,7 @@ class DebugAgent(Agent):
             name="debug-self",
             description="Debug yourself or other Ash sessions by analyzing logs, history, and source code",
             system_prompt=_build_debug_prompt(self._mount_prefix),
-            tools=["bash", "read_file"],
+            allowed_tools=["bash", "read_file"],
             max_iterations=50,
         )
 

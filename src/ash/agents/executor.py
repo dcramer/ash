@@ -58,7 +58,7 @@ class AgentExecutor:
 
     def _get_tool_definitions(
         self,
-        tools: list[str],
+        allowed_tools: list[str],
         is_skill_agent: bool,
         supports_checkpointing: bool,
     ) -> list[ToolDefinition]:
@@ -74,9 +74,9 @@ class AgentExecutor:
         # not in batch mode (execute)
         excluded.add("complete")
 
-        # Filter by tools whitelist and exclusions in a single pass
-        if tools:
-            tools_set = set(tools)
+        # Filter by allowed_tools whitelist and exclusions in a single pass
+        if allowed_tools:
+            tools_set = set(allowed_tools)
             return [
                 d for d in all_defs if d.name in tools_set and d.name not in excluded
             ]

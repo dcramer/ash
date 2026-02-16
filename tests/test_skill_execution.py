@@ -43,17 +43,17 @@ class TestSkillAgent:
         # Context should come after instructions
         assert prompt.index("Base instructions") < prompt.index("User wants X")
 
-    def test_passes_tools_to_config(self):
-        """Should pass tools to agent config (filtering done by executor)."""
+    def test_passes_allowed_tools_to_config(self):
+        """Should pass allowed_tools to agent config (filtering done by executor)."""
         skill = SkillDefinition(
             name="test",
             description="Test",
             instructions="Do something",
-            tools=["bash", "web_search"],
+            allowed_tools=["bash", "web_search"],
         )
         agent = SkillAgent(skill)
 
-        assert agent.config.tools == ["bash", "web_search"]
+        assert agent.config.allowed_tools == ["bash", "web_search"]
 
 
 class TestUseSkillToolValidation:

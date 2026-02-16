@@ -284,7 +284,7 @@ class MyAgent(Agent):
             system_prompt="You are a specialized agent that...",
             model="default",  # Model alias from config
             max_iterations=25,
-            tools=["bash", "web_search"],  # Restrict tools
+            allowed_tools=["bash", "web_search"],  # Restrict tools
         )
 
     async def execute(

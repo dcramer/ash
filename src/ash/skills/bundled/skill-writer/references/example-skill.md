@@ -18,7 +18,7 @@ description: Get current weather and forecast for a location
 authors:
   - alice
 rationale: User wants quick weather checks without leaving the chat
-tools:
+allowed_tools:
   - bash
 env:
   - WEATHER_API_KEY
