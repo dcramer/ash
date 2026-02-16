@@ -68,6 +68,7 @@ class SearchMixin:
                 metadata: dict[str, Any] = {
                     "memory_type": memory.memory_type.value,
                     "subject_person_ids": memory.subject_person_ids,
+                    "source_username": memory.source_username,
                     "sensitivity": memory.sensitivity.value
                     if memory.sensitivity
                     else None,

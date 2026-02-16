@@ -55,7 +55,6 @@ class TestSupersedHearsayForFact:
             store=mock_store,
             new_memory=memory,
             source_username="testuser",
-            owner_user_id="user-1",
         )
 
         assert result == 1
@@ -70,7 +69,6 @@ class TestSupersedHearsayForFact:
             store=mock_store,
             new_memory=memory,
             source_username=None,
-            owner_user_id="user-1",
         )
 
         assert result == 0
@@ -86,7 +84,6 @@ class TestSupersedHearsayForFact:
             store=mock_store,
             new_memory=memory,
             source_username="testuser",
-            owner_user_id="user-1",
         )
 
         assert result == 0
@@ -106,7 +103,6 @@ class TestSupersedHearsayForFact:
             store=mock_store,
             new_memory=memory,
             source_username="testuser",
-            owner_user_id="user-1",
         )
 
         assert result == 3
@@ -126,7 +122,6 @@ class TestSupersedHearsayForFact:
             store=mock_store,
             new_memory=memory,
             source_username="testuser",
-            owner_user_id="user-1",
         )
 
         assert result == 0

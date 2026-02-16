@@ -931,7 +931,6 @@ class TestHearsaySupersession:
             store=graph_store,
             new_memory=self_fact,
             source_username="bob",
-            owner_user_id="alice",
         )
 
         assert count == 1

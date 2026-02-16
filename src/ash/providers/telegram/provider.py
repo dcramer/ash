@@ -136,16 +136,12 @@ class TelegramProvider(Provider):
         self,
         bot_token: str,
         allowed_users: list[str] | None = None,
-        webhook_url: str | None = None,
-        webhook_path: str = "/telegram/webhook",
         allowed_groups: list[str] | None = None,
         group_mode: str = "mention",
         passive_config: PassiveListeningConfig | None = None,
     ):
         self._token = bot_token
         self._allowed_users = set(allowed_users or [])
-        self._webhook_url = webhook_url
-        self._webhook_path = webhook_path
         self._allowed_groups = set(allowed_groups or [])
         self._group_mode = group_mode
         self._passive_config = passive_config
@@ -462,21 +458,14 @@ class TelegramProvider(Provider):
 
         self._running = True
 
-        if self._webhook_url:
-            # Webhook mode - just set up the webhook
-            full_url = f"{self._webhook_url.rstrip('/')}{self._webhook_path}"
-            await self._bot.set_webhook(full_url)
-            logger.info(f"Webhook set to: {full_url}")
-        else:
-            # Polling mode
-            logger.info("Starting Telegram bot in polling mode")
-            await self._bot.delete_webhook(drop_pending_updates=False)
-            # Disable aiogram's signal handling - let the app handle SIGINT/SIGTERM
-            await self._dp.start_polling(
-                self._bot,
-                handle_signals=False,
-                close_bot_session=False,  # We close it ourselves in stop()
-            )
+        logger.info("Starting Telegram bot in polling mode")
+        await self._bot.delete_webhook(drop_pending_updates=False)
+        # Disable aiogram's signal handling - let the app handle SIGINT/SIGTERM
+        await self._dp.start_polling(
+            self._bot,
+            handle_signals=False,
+            close_bot_session=False,  # We close it ourselves in stop()
+        )
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -489,12 +478,6 @@ class TelegramProvider(Provider):
             await self._dp.stop_polling()
         except Exception as e:
             logger.debug(f"Error stopping polling: {e}")
-
-        if self._webhook_url:
-            try:
-                await self._bot.delete_webhook()
-            except Exception as e:
-                logger.debug(f"Error deleting webhook: {e}")
 
         try:
             await self._bot.session.close()
@@ -869,10 +852,3 @@ class TelegramProvider(Provider):
             )
         except Exception as e:
             logger.debug(f"Failed to clear reaction: {e}")
-
-    async def process_webhook_update(self, update_data: dict) -> None:
-        """Process a webhook update from Telegram."""
-        from aiogram.types import Update
-
-        update = Update(**update_data)
-        await self._dp.feed_update(self._bot, update)

@@ -90,7 +90,6 @@ class TelegramConfig(BaseModel):
 
     bot_token: SecretStr | None = None
     allowed_users: list[str] = []
-    webhook_url: str | None = None
     # Group chat settings
     allowed_groups: list[
         str

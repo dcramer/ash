@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
-from ash.server.routes import health, webhooks
+from ash.server.routes import health
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -99,9 +99,6 @@ class AshServer:
                 self._telegram_provider.set_passive_handler(
                     self._telegram_handler.handle_passive_message
                 )
-                # Start in polling mode if no webhook
-                # Webhook mode is handled via the routes
-
             yield
 
             # Shutdown
@@ -127,11 +124,6 @@ class AshServer:
 
         if self._telegram_provider:
             app.state.telegram_provider = self._telegram_provider
-            app.include_router(
-                webhooks.router,
-                prefix="/webhook",
-                tags=["webhooks"],
-            )
 
         return app
 

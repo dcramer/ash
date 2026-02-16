@@ -1,5 +1,5 @@
 """Server routes."""
 
-from ash.server.routes import health, webhooks
+from ash.server.routes import health
 
-__all__ = ["health", "webhooks"]
+__all__ = ["health"]

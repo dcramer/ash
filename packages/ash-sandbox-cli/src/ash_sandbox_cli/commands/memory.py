@@ -40,7 +40,16 @@ def search_memories(
     for r in results:
         similarity = r.get("similarity", 0)
         content = r.get("content", "")
-        typer.echo(f"[{similarity:.2f}] {content}")
+        source = r.get("source", "")
+        meta = r.get("metadata", {})
+        memory_type = meta.get("memory_type", "")
+        parts = [f"[{similarity:.2f}]"]
+        if memory_type:
+            parts.append(f"({memory_type})")
+        if source:
+            parts.append(f"[{source}]")
+        parts.append(content)
+        typer.echo(" ".join(parts))
 
 
 @app.command("list")
@@ -65,16 +74,21 @@ def list_memories(
         typer.echo("No memories found.")
         return
 
-    typer.echo(f"{'ID':<10} {'Source':<12} {'Content'}")
-    typer.echo("-" * 70)
+    typer.echo(f"{'ID':<10} {'Type':<12} {'Source':<14} {'About':<16} {'Content'}")
+    typer.echo("-" * 90)
 
     for m in memories:
         entry_id = m.get("id", "?")[:8]
-        source = m.get("source", "-")[:10]
+        memory_type = m.get("memory_type", "-")[:10]
+        source = m.get("source", "-")[:12]
+        about_list = m.get("about", [])
+        about = ", ".join(about_list)[:14] if about_list else "-"
         content = m.get("content", "")
-        content_preview = f"{content[:45]}..." if len(content) > 45 else content
+        content_preview = f"{content[:40]}..." if len(content) > 40 else content
 
-        typer.echo(f"{entry_id:<10} {source:<12} {content_preview}")
+        typer.echo(
+            f"{entry_id:<10} {memory_type:<12} {source:<14} {about:<16} {content_preview}"
+        )
 
     typer.echo(f"\nTotal: {len(memories)} memory(ies)")
 

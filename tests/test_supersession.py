@@ -365,7 +365,6 @@ class TestSupersedeConfirmedHearsay:
             new_memory=fact,
             person_ids={bob.id},
             source_username="bob",
-            owner_user_id="user-1",
         )
 
         assert count == 1
@@ -405,7 +404,6 @@ class TestSupersedeConfirmedHearsay:
             new_memory=new_fact,
             person_ids={bob.id},
             source_username="bob",
-            owner_user_id="user-1",
         )
 
         assert count == 0
@@ -443,7 +441,6 @@ class TestSupersedeConfirmedHearsay:
             new_memory=fact,
             person_ids={bob.id},
             source_username="bob",
-            owner_user_id="user-1",
         )
 
         assert count == 0
@@ -478,7 +475,6 @@ class TestSupersedeConfirmedHearsay:
             new_memory=fact,
             person_ids={bob.id},
             source_username="bob",
-            owner_user_id="user-1",
         )
 
         assert count == 0

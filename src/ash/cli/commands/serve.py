@@ -23,13 +23,6 @@ def register(app: typer.Typer) -> None:
                 help="Path to configuration file",
             ),
         ] = None,
-        webhook: Annotated[
-            bool,
-            typer.Option(
-                "--webhook",
-                help="Use webhook mode instead of polling",
-            ),
-        ] = False,
         host: Annotated[
             str,
             typer.Option(
@@ -49,7 +42,7 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Start the Ash assistant server."""
         try:
-            asyncio.run(_run_server(config, webhook, host, port))
+            asyncio.run(_run_server(config, host, port))
         except KeyboardInterrupt:
             # Use print here since logging may not be configured yet
             print("\nServer stopped")
@@ -57,7 +50,6 @@ def register(app: typer.Typer) -> None:
 
 async def _run_server(
     config_path: Path | None = None,
-    webhook: bool = False,
     host: str = "127.0.0.1",
     port: int = 8080,
 ) -> None:
@@ -168,11 +160,9 @@ async def _run_server(
     telegram_provider = None
     if ash_config.telegram and ash_config.telegram.bot_token:
         logger.info("Setting up Telegram provider")
-        webhook_url = ash_config.telegram.webhook_url if webhook else None
         telegram_provider = TelegramProvider(
             bot_token=ash_config.telegram.bot_token.get_secret_value(),
             allowed_users=ash_config.telegram.allowed_users,
-            webhook_url=webhook_url,
             allowed_groups=ash_config.telegram.allowed_groups,
             group_mode=ash_config.telegram.group_mode,
             passive_config=ash_config.telegram.passive,
@@ -281,7 +271,7 @@ async def _run_server(
         for sig in (signal_module.SIGTERM, signal_module.SIGINT):
             loop.add_signal_handler(sig, handle_signal)
 
-        if telegram_provider and not webhook:
+        if telegram_provider:
             # Run both uvicorn and telegram polling
             logger.info("Starting Telegram polling")
 

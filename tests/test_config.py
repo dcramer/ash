@@ -51,15 +51,12 @@ class TestTelegramConfig:
         config = TelegramConfig()
         assert config.bot_token is None
         assert config.allowed_users == []
-        assert config.webhook_url is None
 
     def test_with_values(self):
         config = TelegramConfig(
             allowed_users=["@user1", "123456"],
-            webhook_url="https://example.com/webhook",
         )
         assert config.allowed_users == ["@user1", "123456"]
-        assert config.webhook_url == "https://example.com/webhook"
 
 
 class TestSandboxConfig:

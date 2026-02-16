@@ -33,6 +33,22 @@ Answer only YES or NO."""
 class SupersessionMixin:
     """Conflict detection, supersession, and hearsay management."""
 
+    async def _resolve_person_ids_through_merges(
+        self: Store, person_ids: list[str]
+    ) -> set[str]:
+        """Resolve person IDs through merge chains to canonical IDs."""
+        resolved: set[str] = set()
+        for pid in person_ids:
+            person = await self.get_person(pid)
+            if person and person.merged_into:
+                primary = await self._follow_merge_chain(person)
+                resolved.add(primary.id)
+            elif person:
+                resolved.add(person.id)
+            else:
+                resolved.add(pid)
+        return resolved
+
     async def find_conflicting_memories(
         self: Store,
         new_content: str,
@@ -66,7 +82,14 @@ class SupersessionMixin:
                     continue
                 memory_subjects = memory.subject_person_ids or []
                 if subject_person_ids:
-                    if not set(subject_person_ids) & set(memory_subjects):
+                    # Resolve through merge chains so merged persons match
+                    resolved_new = await self._resolve_person_ids_through_merges(
+                        subject_person_ids
+                    )
+                    resolved_mem = await self._resolve_person_ids_through_merges(
+                        memory_subjects
+                    )
+                    if not resolved_new & resolved_mem:
                         continue
                 elif memory_subjects:
                     continue
@@ -244,16 +267,21 @@ class SupersessionMixin:
         new_memory: MemoryEntry,
         person_ids: set[str],
         source_username: str,
-        owner_user_id: str,
         similarity_threshold: float = 0.80,
     ) -> int:
         now = datetime.now(UTC)
         user_lower = source_username.lower()
 
+        # Resolve person IDs through merge chains for broader matching
+        resolved_person_ids = await self._resolve_person_ids_through_merges(
+            list(person_ids)
+        )
+        all_search_ids = person_ids | resolved_person_ids
+
         # Find candidate hearsay memories about these persons
         hearsay_candidates: list[MemoryEntry] = []
         async with self._db.session() as session:
-            for pid in person_ids:
+            for pid in all_search_ids:
                 r = await session.execute(
                     text("""
                         SELECT m.* FROM memories m
@@ -268,8 +296,6 @@ class SupersessionMixin:
                 for row in r.fetchall():
                     memory = _row_to_memory(row)
                     memory.subject_person_ids = await _load_subjects(session, memory.id)
-                    if owner_user_id and memory.owner_user_id != owner_user_id:
-                        continue
                     # Skip facts (user speaking about themselves)
                     if (memory.source_username or "").lower() == user_lower:
                         continue

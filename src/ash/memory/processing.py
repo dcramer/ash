@@ -298,7 +298,6 @@ async def process_extracted_facts(
                     store=store,
                     new_memory=new_memory,
                     source_username=source_username,
-                    owner_user_id=user_id,
                 )
         except Exception:
             logger.debug(

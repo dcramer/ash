@@ -21,7 +21,6 @@ async def supersede_hearsay_for_fact(
     store: Store,
     new_memory: MemoryEntry,
     source_username: str | None,
-    owner_user_id: str,
 ) -> int:
     """Convenience function to supersede hearsay for a confirmed fact.
 
@@ -33,7 +32,6 @@ async def supersede_hearsay_for_fact(
         store: Store for memory and person operations.
         new_memory: The newly created memory.
         source_username: Username of who stated the fact.
-        owner_user_id: Owner user ID for scoping.
 
     Returns:
         Number of hearsay memories superseded.
@@ -54,7 +52,6 @@ async def supersede_hearsay_for_fact(
             new_memory=new_memory,
             person_ids=source_person_ids,
             source_username=source_username,
-            owner_user_id=owner_user_id,
         )
 
         if superseded > 0:

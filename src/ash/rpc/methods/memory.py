@@ -23,6 +23,52 @@ def register_memory_methods(
         person_manager: Store instance (for subject resolution).
     """
 
+    async def _build_username_lookup() -> dict[str, str]:
+        """Build username → display name lookup from people records."""
+        if not person_manager:
+            return {}
+        try:
+            people = await person_manager.list_people()
+            lookup: dict[str, str] = {}
+            for p in people:
+                if p.name:
+                    lookup[p.name.lower()] = p.name
+                    for alias in p.aliases:
+                        lookup[alias.value.lower()] = p.name
+            return lookup
+        except Exception:
+            logger.warning("Failed to build username lookup", exc_info=True)
+            return {}
+
+    def _resolve_source(
+        source_username: str | None, lookup: dict[str, str]
+    ) -> str | None:
+        """Resolve a source_username to a display name."""
+        if not source_username:
+            return None
+        return lookup.get(source_username.lower()) or source_username
+
+    async def _resolve_subject_names(
+        person_ids: list[str] | None, people_by_id: dict[str, Any] | None = None
+    ) -> list[str]:
+        """Resolve subject person IDs to display names."""
+        if not person_ids or not person_manager:
+            return []
+        names: list[str] = []
+        for pid in person_ids:
+            if people_by_id and pid in people_by_id:
+                names.append(people_by_id[pid].name)
+            else:
+                try:
+                    person = await person_manager.get_person(pid)
+                    if person:
+                        names.append(person.name)
+                    else:
+                        names.append(pid[:8])
+                except Exception:
+                    names.append(pid[:8])
+        return names
+
     async def memory_search(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Search memories using semantic search.
 
@@ -47,15 +93,22 @@ def register_memory_methods(
             chat_id=chat_id,
         )
 
-        return [
-            {
+        lookup = await _build_username_lookup()
+
+        output = []
+        for r in results:
+            source_username = (r.metadata or {}).get("source_username")
+            entry: dict[str, Any] = {
                 "id": r.id,
                 "content": r.content,
                 "similarity": r.similarity,
                 "metadata": r.metadata,
             }
-            for r in results
-        ]
+            if source_username:
+                entry["source"] = _resolve_source(source_username, lookup)
+            output.append(entry)
+
+        return output
 
     async def memory_add(params: dict[str, Any]) -> dict[str, Any]:
         """Add a memory entry.
@@ -150,16 +203,33 @@ def register_memory_methods(
             chat_id=chat_id,
         )
 
-        return [
-            {
+        lookup = await _build_username_lookup()
+
+        # Build people_by_id for subject resolution
+        people_by_id: dict[str, Any] = {}
+        if person_manager:
+            try:
+                people = await person_manager.list_people()
+                people_by_id = {p.id: p for p in people}
+            except Exception:
+                logger.warning("Failed to load people for list", exc_info=True)
+
+        result = []
+        for m in memories:
+            about = await _resolve_subject_names(m.subject_person_ids, people_by_id)
+            entry: dict[str, Any] = {
                 "id": m.id,
                 "content": m.content,
-                "source": m.source,
+                "source": _resolve_source(m.source_username, lookup) or m.source,
+                "memory_type": m.memory_type.value,
+                "subject_person_ids": m.subject_person_ids,
+                "about": about,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
                 "expires_at": m.expires_at.isoformat() if m.expires_at else None,
             }
-            for m in memories
-        ]
+            result.append(entry)
+
+        return result
 
     async def memory_delete(params: dict[str, Any]) -> dict[str, Any]:
         """Delete a memory entry.

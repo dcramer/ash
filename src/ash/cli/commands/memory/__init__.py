@@ -297,6 +297,7 @@ async def _run_memory_action(
         elif action == "doctor":
             from ash.cli.commands.memory.doctor import (
                 memory_doctor_attribution,
+                memory_doctor_backfill_subjects,
                 memory_doctor_contradictions,
                 memory_doctor_dedup,
                 memory_doctor_embed_missing,
@@ -315,6 +316,7 @@ async def _run_memory_action(
                 await memory_doctor_embed_missing(store, force)
             elif subcommand is None:
                 await memory_doctor_self_facts(store, force)
+                await memory_doctor_backfill_subjects(store, force)
                 await memory_doctor_attribution(store, force)
                 await memory_doctor_fix_names(store, force)
                 await memory_doctor_reclassify(store, config, force)
