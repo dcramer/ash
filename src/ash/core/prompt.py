@@ -215,6 +215,7 @@ class SystemPromptBuilder:
         # PromptMode.FULL
         sections = [
             self._build_core_principles_section(),
+            self._build_silent_replies_section(),
             self._build_safety_section(),
             self._build_tools_section(),
             self._build_tool_call_style_section(),
@@ -255,8 +256,26 @@ class SystemPromptBuilder:
                 "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
                 "- Report failures with actual error messages. If output is empty, say so.",
                 "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice",
-                "- In group chats, respond with `[NO_REPLY]` to stay silent when you have nothing to add.",
+                "- In group chats, stay silent when you have nothing to add (see Silent Replies).",
                 "- For deep research, delegate to the `research` skill.",
+            ]
+        )
+
+    def _build_silent_replies_section(self) -> str:
+        return "\n".join(
+            [
+                "## Silent Replies",
+                "",
+                "When you have nothing to say, respond with ONLY: [NO_REPLY]",
+                "",
+                "Rules:",
+                "- It must be your ENTIRE message -- nothing else",
+                "- Never append it to an actual response",
+                "- Never wrap it in markdown or code blocks",
+                "",
+                'Wrong: "Here\'s the answer... [NO_REPLY]"',
+                'Wrong: "`[NO_REPLY]`"',
+                "Right: [NO_REPLY]",
             ]
         )
 
@@ -717,7 +736,7 @@ class SystemPromptBuilder:
                 "",
                 "- Only contribute if you have genuine expertise or a direct answer to offer",
                 "- Don't insert yourself into personal conversations",
-                "- If you have nothing useful to add, respond with exactly [NO_REPLY]",
+                "- If you have nothing useful to add, respond with [NO_REPLY] (see Silent Replies)",
             ]
         )
 

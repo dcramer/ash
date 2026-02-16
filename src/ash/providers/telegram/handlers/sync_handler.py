@@ -11,6 +11,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from ash.core.signals import is_no_reply
 from ash.providers.base import IncomingMessage, OutgoingMessage
 
 if TYPE_CHECKING:
@@ -100,7 +101,7 @@ class SyncHandler:
         response_text = response.text or ""
 
         # Suppress [NO_REPLY] responses (passive engagement, nothing to add)
-        if response_text.strip() == "[NO_REPLY]":
+        if is_no_reply(response_text):
             if tracker.thinking_msg_id:
                 try:
                     await self._provider.delete(

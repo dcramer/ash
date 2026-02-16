@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from ash.core.signals import is_no_reply
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.handlers.utils import (
     MIN_EDIT_INTERVAL,
@@ -129,7 +130,7 @@ class StreamingHandler:
             raise
 
         # Suppress [NO_REPLY] responses (passive engagement, nothing to add)
-        if response_content.strip() == "[NO_REPLY]":
+        if is_no_reply(response_content):
             if tracker.thinking_msg_id:
                 try:
                     await self._provider.delete(
