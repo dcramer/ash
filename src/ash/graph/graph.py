@@ -11,13 +11,16 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, ConfigDict
+
 if TYPE_CHECKING:
     from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
 
 
-@dataclass
-class Edge:
+class Edge(BaseModel):
     """Typed, temporal edge between two nodes."""
+
+    model_config = ConfigDict(frozen=False)
 
     id: str
     edge_type: str  # ABOUT, SUPERSEDES, HAS_RELATIONSHIP, etc.
@@ -34,49 +37,18 @@ class Edge:
     created_by: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {
-            "id": self.id,
-            "edge_type": self.edge_type,
-            "source_type": self.source_type,
-            "source_id": self.source_id,
-            "target_type": self.target_type,
-            "target_id": self.target_id,
-        }
-        if self.weight != 1.0:
-            d["weight"] = self.weight
-        if self.properties:
-            d["properties"] = self.properties
-        if self.created_at:
-            d["created_at"] = self.created_at.isoformat()
-        if self.valid_from:
-            d["valid_from"] = self.valid_from.isoformat()
-        if self.invalid_at:
-            d["invalid_at"] = self.invalid_at.isoformat()
-        if self.episode_id:
-            d["episode_id"] = self.episode_id
-        if self.created_by:
-            d["created_by"] = self.created_by
+        d = self.model_dump(mode="json", exclude_none=True)
+        # weight=1.0 is the default; only serialize non-default
+        if d.get("weight") == 1.0:
+            d.pop("weight")
+        # Don't serialize empty properties
+        if not d.get("properties"):
+            d.pop("properties", None)
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Edge:
-        from ash.store.types import _parse_datetime
-
-        return cls(
-            id=d["id"],
-            edge_type=d["edge_type"],
-            source_type=d["source_type"],
-            source_id=d["source_id"],
-            target_type=d["target_type"],
-            target_id=d["target_id"],
-            weight=d.get("weight", 1.0),
-            properties=d.get("properties"),
-            created_at=_parse_datetime(d.get("created_at")),
-            valid_from=_parse_datetime(d.get("valid_from")),
-            invalid_at=_parse_datetime(d.get("invalid_at")),
-            episode_id=d.get("episode_id"),
-            created_by=d.get("created_by"),
-        )
+        return cls.model_validate(d)
 
 
 @dataclass
@@ -101,11 +73,15 @@ class KnowledgeGraph:
     )
 
     # Node type index for uniform lookup
-    _node_type: dict[str, str] = field(default_factory=dict)
+    node_types: dict[str, str] = field(default_factory=dict)
+
+    # Secondary indexes for provider lookups: (provider, provider_id) -> node_id
+    _user_by_provider: dict[tuple[str, str], str] = field(default_factory=dict)
+    _chat_by_provider: dict[tuple[str, str], str] = field(default_factory=dict)
 
     def get_node(self, node_id: str) -> Any:
         """Look up any node by ID regardless of type."""
-        ntype = self._node_type.get(node_id)
+        ntype = self.node_types.get(node_id)
         if ntype == "memory":
             return self.memories.get(node_id)
         if ntype == "person":
@@ -120,45 +96,69 @@ class KnowledgeGraph:
 
     def add_memory(self, memory: MemoryEntry) -> None:
         self.memories[memory.id] = memory
-        self._node_type[memory.id] = "memory"
+        self.node_types[memory.id] = "memory"
 
     def remove_memory(self, memory_id: str) -> None:
         self.remove_edges_for_node(memory_id)
         self.memories.pop(memory_id, None)
-        self._node_type.pop(memory_id, None)
+        self.node_types.pop(memory_id, None)
 
     # -- Person operations --
 
     def add_person(self, person: PersonEntry) -> None:
         self.people[person.id] = person
-        self._node_type[person.id] = "person"
+        self.node_types[person.id] = "person"
 
     def remove_person(self, person_id: str) -> None:
         self.remove_edges_for_node(person_id)
         self.people.pop(person_id, None)
-        self._node_type.pop(person_id, None)
+        self.node_types.pop(person_id, None)
 
     # -- User operations --
 
     def add_user(self, user: UserEntry) -> None:
         self.users[user.id] = user
-        self._node_type[user.id] = "user"
+        self.node_types[user.id] = "user"
+        if user.provider and user.provider_id:
+            self._user_by_provider[(user.provider, user.provider_id)] = user.id
 
     def remove_user(self, user_id: str) -> None:
+        user = self.users.get(user_id)
+        if user and user.provider and user.provider_id:
+            self._user_by_provider.pop((user.provider, user.provider_id), None)
         self.remove_edges_for_node(user_id)
         self.users.pop(user_id, None)
-        self._node_type.pop(user_id, None)
+        self.node_types.pop(user_id, None)
+
+    def find_user_by_provider(
+        self, provider: str, provider_id: str
+    ) -> UserEntry | None:
+        """O(1) lookup of user by (provider, provider_id)."""
+        uid = self._user_by_provider.get((provider, provider_id))
+        return self.users.get(uid) if uid else None
 
     # -- Chat operations --
 
     def add_chat(self, chat: ChatEntry) -> None:
         self.chats[chat.id] = chat
-        self._node_type[chat.id] = "chat"
+        self.node_types[chat.id] = "chat"
+        if chat.provider and chat.provider_id:
+            self._chat_by_provider[(chat.provider, chat.provider_id)] = chat.id
 
     def remove_chat(self, chat_id: str) -> None:
+        chat = self.chats.get(chat_id)
+        if chat and chat.provider and chat.provider_id:
+            self._chat_by_provider.pop((chat.provider, chat.provider_id), None)
         self.remove_edges_for_node(chat_id)
         self.chats.pop(chat_id, None)
-        self._node_type.pop(chat_id, None)
+        self.node_types.pop(chat_id, None)
+
+    def find_chat_by_provider(
+        self, provider: str, provider_id: str
+    ) -> ChatEntry | None:
+        """O(1) lookup of chat by (provider, provider_id)."""
+        cid = self._chat_by_provider.get((provider, provider_id))
+        return self.chats.get(cid) if cid else None
 
     def remove_edges_for_node(self, node_id: str) -> list[str]:
         """Remove all edges connected to a node (incoming and outgoing).

@@ -148,6 +148,13 @@ class MemoryEvictionMixin:
         return generated
 
     async def remap_subject_person_id(self: Store, old_id: str, new_id: str) -> int:
+        count = self._remap_subject_person_id_batched(old_id, new_id)
+        if count > 0:
+            await self._persistence.flush(self._graph)
+        return count
+
+    def _remap_subject_person_id_batched(self: Store, old_id: str, new_id: str) -> int:
+        """Remap ABOUT edges from old_id to new_id. Marks dirty; caller must flush."""
         from ash.graph.edges import ABOUT, create_about_edge, get_memories_about_person
 
         memory_ids = get_memories_about_person(self._graph, old_id)
@@ -181,7 +188,7 @@ class MemoryEvictionMixin:
 
         if count > 0:
             if edges_changed:
-                await self._persistence.save_edges(self._graph.edges)
+                self._persistence.mark_dirty("edges")
             logger.debug(
                 "remapped_subject_person_id",
                 extra={"old_id": old_id, "new_id": new_id, "count": count},

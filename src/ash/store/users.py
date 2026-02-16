@@ -32,34 +32,34 @@ class UserChatOpsMixin:
 
         now = datetime.now(UTC)
 
-        # Look for existing user by provider+provider_id
-        for user in self._graph.users.values():
-            if user.provider == provider and user.provider_id == provider_id:
-                changed = False
-                if username is not None and user.username != username:
-                    user.username = username
+        # Look for existing user by provider+provider_id (O(1) index lookup)
+        user = self._graph.find_user_by_provider(provider, provider_id)
+        if user:
+            changed = False
+            if username is not None and user.username != username:
+                user.username = username
+                changed = True
+            if display_name is not None and user.display_name != display_name:
+                user.display_name = display_name
+                changed = True
+            if person_id is not None:
+                current_person = get_person_for_user(self._graph, user.id)
+                if current_person != person_id:
+                    # Remove old IS_PERSON edge if replacing
+                    if current_person is not None:
+                        old_edges = self._graph.get_outgoing(
+                            user.id, edge_type=IS_PERSON
+                        )
+                        for edge in old_edges:
+                            self._graph.remove_edge(edge.id)
+                    # Create new IS_PERSON edge
+                    self._graph.add_edge(create_is_person_edge(user.id, person_id))
                     changed = True
-                if display_name is not None and user.display_name != display_name:
-                    user.display_name = display_name
-                    changed = True
-                if person_id is not None:
-                    current_person = get_person_for_user(self._graph, user.id)
-                    if current_person != person_id:
-                        # Remove old IS_PERSON edge if replacing
-                        if current_person is not None:
-                            old_edges = self._graph.get_outgoing(
-                                user.id, edge_type=IS_PERSON
-                            )
-                            for edge in old_edges:
-                                self._graph.remove_edge(edge.id)
-                        # Create new IS_PERSON edge
-                        self._graph.add_edge(create_is_person_edge(user.id, person_id))
-                        changed = True
-                if changed:
-                    user.updated_at = now
-                    await self._persistence.save_users(self._graph.users)
-                    await self._persistence.save_edges(self._graph.edges)
-                return user
+            if changed:
+                user.updated_at = now
+                await self._persistence.save_users(self._graph.users)
+                await self._persistence.save_edges(self._graph.edges)
+            return user
 
         # Create new user
         user_id = str(uuid.uuid4())
@@ -97,10 +97,7 @@ class UserChatOpsMixin:
     async def find_user_by_provider(
         self: Store, provider: str, provider_id: str
     ) -> UserEntry | None:
-        for user in self._graph.users.values():
-            if user.provider == provider and user.provider_id == provider_id:
-                return user
-        return None
+        return self._graph.find_user_by_provider(provider, provider_id)
 
     async def list_users(self: Store) -> list[UserEntry]:
         return list(self._graph.users.values())
@@ -157,20 +154,20 @@ class UserChatOpsMixin:
         """Upsert a chat node. Creates if not found, updates if changed."""
         now = datetime.now(UTC)
 
-        # Look for existing chat by provider+provider_id
-        for chat in self._graph.chats.values():
-            if chat.provider == provider and chat.provider_id == provider_id:
-                changed = False
-                if chat_type is not None and chat.chat_type != chat_type:
-                    chat.chat_type = chat_type
-                    changed = True
-                if title is not None and chat.title != title:
-                    chat.title = title
-                    changed = True
-                if changed:
-                    chat.updated_at = now
-                    await self._persistence.save_chats(self._graph.chats)
-                return chat
+        # Look for existing chat by provider+provider_id (O(1) index lookup)
+        chat = self._graph.find_chat_by_provider(provider, provider_id)
+        if chat:
+            changed = False
+            if chat_type is not None and chat.chat_type != chat_type:
+                chat.chat_type = chat_type
+                changed = True
+            if title is not None and chat.title != title:
+                chat.title = title
+                changed = True
+            if changed:
+                chat.updated_at = now
+                await self._persistence.save_chats(self._graph.chats)
+            return chat
 
         # Create new chat
         chat_id = str(uuid.uuid4())
@@ -203,10 +200,7 @@ class UserChatOpsMixin:
     async def find_chat_by_provider(
         self: Store, provider: str, provider_id: str
     ) -> ChatEntry | None:
-        for chat in self._graph.chats.values():
-            if chat.provider == provider and chat.provider_id == provider_id:
-                return chat
-        return None
+        return self._graph.find_chat_by_provider(provider, provider_id)
 
     async def users_for_person(self: Store, person_id: str) -> list[UserEntry]:
         """Return users linked to a person via IS_PERSON edges."""

@@ -53,6 +53,7 @@ class SearchMixin:
             if not matches_scope(memory, owner_user_id, chat_id):
                 continue
             from ash.graph.edges import get_subject_person_ids
+            from ash.store.trust import classify_trust, get_trust_weight
 
             mem_subjects = get_subject_person_ids(self._graph, memory.id)
 
@@ -60,12 +61,17 @@ class SearchMixin:
                 if subject_person_id not in mem_subjects:
                     continue
 
+            # Apply trust weighting to similarity score
+            trust_level = classify_trust(self._graph, memory.id)
+            weighted_similarity = similarity * get_trust_weight(trust_level)
+
             subject_name = await self._resolve_subject_name(mem_subjects)
             metadata: dict[str, Any] = {
                 "memory_type": memory.memory_type.value,
                 "subject_person_ids": mem_subjects,
                 "source_username": memory.source_username,
                 "sensitivity": memory.sensitivity.value if memory.sensitivity else None,
+                "trust": trust_level,
                 **(memory.metadata or {}),
             }
             if subject_name:
@@ -75,7 +81,7 @@ class SearchMixin:
                 SearchResult(
                     id=memory.id,
                     content=memory.content,
-                    similarity=similarity,
+                    similarity=weighted_similarity,
                     metadata=metadata,
                     source_type="memory",
                 )

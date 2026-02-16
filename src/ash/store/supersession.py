@@ -218,6 +218,61 @@ class SupersessionMixin:
             )
         return True
 
+    def _mark_superseded_batched(
+        self: Store,
+        old_memory_id: str,
+        new_memory_id: str,
+    ) -> bool:
+        """Mark superseded in-memory and mark dirty. Caller must flush."""
+        memory = self._graph.memories.get(old_memory_id)
+        if not memory or memory.superseded_at is not None:
+            return False
+
+        memory.superseded_at = datetime.now(UTC)
+        self._graph.add_edge(create_supersedes_edge(new_memory_id, old_memory_id))
+        self._persistence.mark_dirty("memories", "edges")
+
+        try:
+            self._index.remove(old_memory_id)
+        except Exception:
+            logger.warning(
+                "Failed to delete superseded memory embedding",
+                extra={"memory_id": old_memory_id},
+                exc_info=True,
+            )
+        return True
+
+    async def _supersede_conflicting_batched(
+        self: Store,
+        new_memory: MemoryEntry,
+        owner_user_id: str | None = None,
+        chat_id: str | None = None,
+    ) -> int:
+        """Like supersede_conflicting_memories but marks dirty instead of saving."""
+        new_subjects = get_subject_person_ids(self._graph, new_memory.id)
+        conflicts = await self.find_conflicting_memories(
+            new_content=new_memory.content,
+            owner_user_id=owner_user_id,
+            chat_id=chat_id,
+            subject_person_ids=new_subjects or None,
+        )
+
+        count = 0
+        for memory, similarity in conflicts:
+            if memory.id == new_memory.id:
+                continue
+            if await self._is_protected_by_subject_authority(memory, new_memory):
+                continue
+            if similarity < 0.85 and self._llm:
+                if not await self._verify_conflict_with_llm(
+                    old_content=memory.content, new_content=new_memory.content
+                ):
+                    continue
+            if self._mark_superseded_batched(memory.id, new_memory.id):
+                count += 1
+
+        return count
+
     async def mark_superseded(
         self: Store, old_memory_id: str, new_memory_id: str
     ) -> bool:

@@ -22,14 +22,61 @@ logger = logging.getLogger(__name__)
 
 
 class GraphPersistence:
-    """Load/save KnowledgeGraph to JSONL files."""
+    """Load/save KnowledgeGraph to JSONL files.
+
+    Supports two persistence patterns:
+    - Immediate: ``await save_memories(graph.memories)`` writes to disk now
+    - Batched: ``mark_dirty("memories", "edges")`` + ``await flush(graph)``
+      writes all dirty collections once at the end of a logical operation
+    """
 
     def __init__(self, graph_dir: Path) -> None:
         self._dir = graph_dir
+        self._dirty: set[str] = set()
 
     @property
     def graph_dir(self) -> Path:
         return self._dir
+
+    def mark_dirty(self, *collections: str) -> None:
+        """Mark collections as needing persistence.
+
+        Valid names: "memories", "people", "users", "chats", "edges".
+        Call ``flush()`` to write all dirty collections to disk.
+        """
+        self._dirty.update(collections)
+
+    async def flush(self, graph: KnowledgeGraph) -> None:
+        """Write all dirty collections to disk, then clear dirty set."""
+        if not self._dirty:
+            return
+        self._dir.mkdir(parents=True, exist_ok=True)
+        if "memories" in self._dirty:
+            _write_jsonl_atomic(
+                self._dir / "memories.jsonl",
+                [m.to_dict() for m in graph.memories.values()],
+            )
+        if "people" in self._dirty:
+            _write_jsonl_atomic(
+                self._dir / "people.jsonl",
+                [p.to_dict() for p in graph.people.values()],
+            )
+        if "users" in self._dirty:
+            _write_jsonl_atomic(
+                self._dir / "users.jsonl",
+                [u.to_dict() for u in graph.users.values()],
+            )
+        if "chats" in self._dirty:
+            _write_jsonl_atomic(
+                self._dir / "chats.jsonl",
+                [c.to_dict() for c in graph.chats.values()],
+            )
+        if "edges" in self._dirty:
+            _write_jsonl_atomic(
+                self._dir / "edges.jsonl",
+                [e.to_dict() for e in graph.edges.values()],
+            )
+        self._dirty.clear()
 
     async def load(self) -> KnowledgeGraph:
         """Load all JSONL files into a KnowledgeGraph."""
@@ -140,7 +187,7 @@ def _write_jsonl_atomic(path: Path, records: list[dict]) -> None:
     try:
         with os.fdopen(fd, "w") as f:
             for record in records:
-                f.write(json.dumps(record, separators=(",", ":"), default=str))
+                f.write(json.dumps(record, separators=(",", ":")))
                 f.write("\n")
         Path(tmp).replace(path)
     except BaseException:
@@ -208,19 +255,36 @@ def _backfill_edges_from_raw(
             merged_ids.add(d["id"])
             count += 1
 
-    # Build a username→person_id lookup from people aliases/names
-    username_to_person: dict[str, str] = {}
+    # Build a username→person_ids lookup from people aliases/names.
+    # Multiple people can share a name/alias, so collect all matches.
+    username_to_persons: dict[str, list[str]] = {}
     for person in graph.people.values():
         if person.id in merged_ids:
             continue
-        username_to_person[person.name.lower()] = person.id
+        username_to_persons.setdefault(person.name.lower(), []).append(person.id)
         for alias in person.aliases:
-            username_to_person[alias.value.lower()] = person.id
+            username_to_persons.setdefault(alias.value.lower(), []).append(person.id)
+
+    def _resolve_unique_person(username: str) -> str | None:
+        """Resolve username to person ID, skipping ambiguous matches."""
+        pids = username_to_persons.get(username.lower())
+        if not pids:
+            return None
+        # Deduplicate (same person can appear via name + alias)
+        unique = list(dict.fromkeys(pids))
+        if len(unique) == 1:
+            return unique[0]
+        logger.warning(
+            "Ambiguous username '%s' matches %d people during backfill, skipping",
+            username,
+            len(unique),
+        )
+        return None
 
     # Memory → Person (STATED_BY) from source_username
     for memory in graph.memories.values():
         if memory.source_username:
-            pid = username_to_person.get(memory.source_username.lower())
+            pid = _resolve_unique_person(memory.source_username)
             if pid:
                 edge = create_stated_by_edge(memory.id, pid, created_by="backfill")
                 graph.add_edge(edge)
@@ -232,7 +296,7 @@ def _backfill_edges_from_raw(
             continue
         for rc in person.relationships:
             if rc.stated_by and rc.relationship.lower() != "self":
-                related_pid = username_to_person.get(rc.stated_by.lower())
+                related_pid = _resolve_unique_person(rc.stated_by)
                 if related_pid and related_pid != person.id:
                     edge = create_has_relationship_edge(
                         person.id,

@@ -6,22 +6,11 @@ Consolidates types from memory, people, and user/chat domains into a single modu
 import base64
 import struct
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
-
-def _parse_datetime(s: str | None) -> datetime | None:
-    """Parse ISO datetime string, handling Z suffix and ensuring timezone awareness."""
-    if not s:
-        return None
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    dt = datetime.fromisoformat(s)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt
-
+from pydantic import BaseModel, ConfigDict, field_validator
 
 # =============================================================================
 # Memory Types
@@ -85,8 +74,7 @@ TYPE_TTL: dict[MemoryType, int] = {
 }
 
 
-@dataclass
-class MemoryEntry:
+class MemoryEntry(BaseModel):
     """Full memory entry schema.
 
     Required fields:
@@ -101,6 +89,8 @@ class MemoryEntry:
     Optional fields populated based on context.
     """
 
+    model_config = ConfigDict(frozen=False)
+
     # Identity (required)
     id: str
     version: int = 1
@@ -114,9 +104,7 @@ class MemoryEntry:
     created_at: datetime | None = None
 
     # Timestamps (optional)
-    observed_at: datetime | None = (
-        None  # When fact was observed (for delayed extraction)
-    )
+    observed_at: datetime | None = None
 
     # Scoping (at least one required for authorization)
     owner_user_id: str | None = None  # Personal scope
@@ -126,8 +114,8 @@ class MemoryEntry:
     source: str = "user"  # "user" | "extraction" | "cli" | "rpc"
 
     # Source Attribution (optional, for multi-user scenarios)
-    source_username: str | None = None  # Who said/provided this fact (handle/username)
-    source_display_name: str | None = None  # Display name for source user
+    source_username: str | None = None
+    source_display_name: str | None = None
 
     # Source Attribution (optional, for extraction tracing)
     source_session_id: str | None = None
@@ -153,79 +141,16 @@ class MemoryEntry:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
-        d: dict[str, Any] = {
-            "id": self.id,
-            "version": self.version,
-            "content": self.content,
-            "memory_type": self.memory_type.value,
-            "source": self.source,
-        }
-
-        # Add required timestamps
-        if self.created_at:
-            d["created_at"] = self.created_at.isoformat()
-
-        # Add optional fields only if set
-        if self.observed_at:
-            d["observed_at"] = self.observed_at.isoformat()
-        if self.owner_user_id:
-            d["owner_user_id"] = self.owner_user_id
-        if self.chat_id:
-            d["chat_id"] = self.chat_id
-        if self.source_username:
-            d["source_username"] = self.source_username
-        if self.source_display_name:
-            d["source_display_name"] = self.source_display_name
-        if self.source_session_id:
-            d["source_session_id"] = self.source_session_id
-        if self.source_message_id:
-            d["source_message_id"] = self.source_message_id
-        if self.extraction_confidence is not None:
-            d["extraction_confidence"] = self.extraction_confidence
-        if self.sensitivity is not None:
-            d["sensitivity"] = self.sensitivity.value
-        if not self.portable:
-            d["portable"] = False
-        if self.expires_at:
-            d["expires_at"] = self.expires_at.isoformat()
-        if self.superseded_at:
-            d["superseded_at"] = self.superseded_at.isoformat()
-        if self.archived_at:
-            d["archived_at"] = self.archived_at.isoformat()
-        if self.archive_reason:
-            d["archive_reason"] = self.archive_reason
-        if self.metadata:
-            d["metadata"] = self.metadata
-
+        d = self.model_dump(mode="json", exclude_none=True, exclude={"embedding"})
+        # portable=True is the default; only serialize when False
+        if d.get("portable") is True:
+            d.pop("portable")
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "MemoryEntry":
         """Deserialize from JSON dict."""
-        return cls(
-            id=d["id"],
-            version=d.get("version", 1),
-            content=d.get("content", ""),
-            memory_type=MemoryType(d.get("memory_type", "knowledge")),
-            embedding=d.get("embedding", ""),
-            created_at=_parse_datetime(d.get("created_at")),
-            observed_at=_parse_datetime(d.get("observed_at")),
-            owner_user_id=d.get("owner_user_id"),
-            chat_id=d.get("chat_id"),
-            source=d.get("source", "user"),
-            source_username=d.get("source_username"),
-            source_display_name=d.get("source_display_name"),
-            source_session_id=d.get("source_session_id"),
-            source_message_id=d.get("source_message_id"),
-            extraction_confidence=d.get("extraction_confidence"),
-            sensitivity=Sensitivity(d["sensitivity"]) if d.get("sensitivity") else None,
-            portable=d.get("portable", True),
-            expires_at=_parse_datetime(d.get("expires_at")),
-            superseded_at=_parse_datetime(d.get("superseded_at")),
-            archived_at=_parse_datetime(d.get("archived_at")),
-            archive_reason=d.get("archive_reason"),
-            metadata=d.get("metadata"),
-        )
+        return cls.model_validate(d)
 
     @staticmethod
     def encode_embedding(floats: list[float]) -> str:
@@ -234,22 +159,23 @@ class MemoryEntry:
         return base64.b64encode(data).decode("ascii")
 
 
-@dataclass
-class EmbeddingRecord:
+class EmbeddingRecord(BaseModel):
     """Embedding storage record.
 
     Stores memory_id -> base64 embedding pairs separately from memories.
     """
 
+    model_config = ConfigDict(frozen=False)
+
     memory_id: str
-    embedding: str  # Base64-encoded float32 array
+    embedding: str = ""  # Base64-encoded float32 array
 
     def to_dict(self) -> dict[str, Any]:
-        return {"memory_id": self.memory_id, "embedding": self.embedding}
+        return self.model_dump(mode="json")
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "EmbeddingRecord":
-        return cls(memory_id=d["memory_id"], embedding=d.get("embedding", ""))
+        return cls.model_validate(d)
 
 
 @dataclass
@@ -284,7 +210,7 @@ class ExtractedFact:
     portable: bool = True  # Whether this fact crosses chat boundaries
     aliases: dict[str, list[str]] = field(
         default_factory=dict
-    )  # subject name → alias strings
+    )  # subject name -> alias strings
 
 
 @dataclass
@@ -320,118 +246,67 @@ def matches_scope(
 # =============================================================================
 
 
-@dataclass
-class AliasEntry:
+class AliasEntry(BaseModel):
     """An alias for a person with provenance tracking."""
+
+    model_config = ConfigDict(frozen=False)
 
     value: str
     added_by: str | None = None
     created_at: datetime | None = None
 
 
-@dataclass
-class RelationshipClaim:
+class RelationshipClaim(BaseModel):
     """A relationship assertion with provenance tracking."""
+
+    model_config = ConfigDict(frozen=False)
 
     relationship: str
     stated_by: str | None = None
     created_at: datetime | None = None
 
 
-@dataclass
-class PersonEntry:
+class PersonEntry(BaseModel):
     """Person entity."""
+
+    model_config = ConfigDict(frozen=False)
 
     id: str
     version: int = 1
     created_by: str = ""
     name: str = ""
-    relationships: list[RelationshipClaim] = field(default_factory=list)
-    aliases: list[AliasEntry] = field(default_factory=list)
+    relationships: list[RelationshipClaim] = []
+    aliases: list[AliasEntry] = []
     created_at: datetime | None = None
     updated_at: datetime | None = None
     metadata: dict[str, Any] | None = None
 
+    @field_validator("aliases", mode="before")
+    @classmethod
+    def _coerce_aliases(cls, v: list | None) -> list:
+        """Handle legacy format where aliases were plain strings."""
+        return [{"value": a} if isinstance(a, str) else a for a in (v or [])]
+
+    @field_validator("relationships", mode="before")
+    @classmethod
+    def _coerce_relationships(cls, v: list | None) -> list:
+        """Handle legacy format where relationships were plain strings."""
+        return [{"relationship": r} if isinstance(r, str) else r for r in (v or [])]
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
-        d: dict[str, Any] = {
-            "id": self.id,
-            "version": self.version,
-            "created_by": self.created_by,
-            "name": self.name,
-        }
-
-        if self.relationships:
-            d["relationships"] = [
-                {
-                    "relationship": rc.relationship,
-                    **({"stated_by": rc.stated_by} if rc.stated_by else {}),
-                    **(
-                        {"created_at": rc.created_at.isoformat()}
-                        if rc.created_at
-                        else {}
-                    ),
-                }
-                for rc in self.relationships
-            ]
-        if self.aliases:
-            d["aliases"] = [
-                {
-                    "value": a.value,
-                    **({"added_by": a.added_by} if a.added_by else {}),
-                    **(
-                        {"created_at": a.created_at.isoformat()} if a.created_at else {}
-                    ),
-                }
-                for a in self.aliases
-            ]
-        if self.created_at:
-            d["created_at"] = self.created_at.isoformat()
-        if self.updated_at:
-            d["updated_at"] = self.updated_at.isoformat()
-        if self.metadata:
-            d["metadata"] = self.metadata
-
+        d = self.model_dump(mode="json", exclude_none=True)
+        # Don't serialize empty lists
+        if not d.get("relationships"):
+            d.pop("relationships", None)
+        if not d.get("aliases"):
+            d.pop("aliases", None)
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "PersonEntry":
         """Deserialize from JSON dict."""
-        raw_aliases = d.get("aliases") or []
-        aliases = [
-            AliasEntry(
-                value=a["value"] if isinstance(a, dict) else a,
-                added_by=a.get("added_by") if isinstance(a, dict) else None,
-                created_at=_parse_datetime(a.get("created_at"))
-                if isinstance(a, dict)
-                else None,
-            )
-            for a in raw_aliases
-        ]
-
-        raw_rels = d.get("relationships") or []
-        relationships = [
-            RelationshipClaim(
-                relationship=r["relationship"] if isinstance(r, dict) else r,
-                stated_by=r.get("stated_by") if isinstance(r, dict) else None,
-                created_at=_parse_datetime(r.get("created_at"))
-                if isinstance(r, dict)
-                else None,
-            )
-            for r in raw_rels
-        ]
-
-        return cls(
-            id=d["id"],
-            version=d.get("version", 1),
-            created_by=d.get("created_by", ""),
-            name=d.get("name", ""),
-            relationships=relationships,
-            aliases=aliases,
-            created_at=_parse_datetime(d.get("created_at")),
-            updated_at=_parse_datetime(d.get("updated_at")),
-            metadata=d.get("metadata"),
-        )
+        return cls.model_validate(d)
 
     def matches_username(self, username: str) -> bool:
         """Check if this person matches a username (case-insensitive)."""
@@ -455,13 +330,14 @@ class PersonResolutionResult:
 # =============================================================================
 
 
-@dataclass
-class UserEntry:
+class UserEntry(BaseModel):
     """Provider user identity node.
 
     Bridges a provider-specific identity (Telegram user, etc.) to a Person record.
     The provider_id is the stable anchor; username and display_name can change.
     """
+
+    model_config = ConfigDict(frozen=False)
 
     id: str
     version: int = 1
@@ -474,45 +350,20 @@ class UserEntry:
     metadata: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {
-            "id": self.id,
-            "version": self.version,
-            "provider": self.provider,
-            "provider_id": self.provider_id,
-        }
-        if self.username:
-            d["username"] = self.username
-        if self.display_name:
-            d["display_name"] = self.display_name
-        if self.created_at:
-            d["created_at"] = self.created_at.isoformat()
-        if self.updated_at:
-            d["updated_at"] = self.updated_at.isoformat()
-        if self.metadata:
-            d["metadata"] = self.metadata
-        return d
+        return self.model_dump(mode="json", exclude_none=True)
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "UserEntry":
-        return cls(
-            id=d["id"],
-            version=d.get("version", 1),
-            provider=d.get("provider", ""),
-            provider_id=d.get("provider_id", ""),
-            username=d.get("username"),
-            display_name=d.get("display_name"),
-            created_at=_parse_datetime(d.get("created_at")),
-            updated_at=_parse_datetime(d.get("updated_at")),
-            metadata=d.get("metadata"),
-        )
+        return cls.model_validate(d)
 
 
-@dataclass
-class ChatEntry:
+class ChatEntry(BaseModel):
     """Chat/channel node.
 
     Represents a chat or channel from a provider.
     """
+
+    model_config = ConfigDict(frozen=False)
 
     id: str
     version: int = 1
@@ -525,34 +376,8 @@ class ChatEntry:
     metadata: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {
-            "id": self.id,
-            "version": self.version,
-            "provider": self.provider,
-            "provider_id": self.provider_id,
-        }
-        if self.chat_type:
-            d["chat_type"] = self.chat_type
-        if self.title:
-            d["title"] = self.title
-        if self.created_at:
-            d["created_at"] = self.created_at.isoformat()
-        if self.updated_at:
-            d["updated_at"] = self.updated_at.isoformat()
-        if self.metadata:
-            d["metadata"] = self.metadata
-        return d
+        return self.model_dump(mode="json", exclude_none=True)
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "ChatEntry":
-        return cls(
-            id=d["id"],
-            version=d.get("version", 1),
-            provider=d.get("provider", ""),
-            provider_id=d.get("provider_id", ""),
-            chat_type=d.get("chat_type"),
-            title=d.get("title"),
-            created_at=_parse_datetime(d.get("created_at")),
-            updated_at=_parse_datetime(d.get("updated_at")),
-            metadata=d.get("metadata"),
-        )
+        return cls.model_validate(d)

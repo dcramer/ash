@@ -80,9 +80,7 @@ class PeopleDedupMixin:
 
         # Create MERGED_INTO edge in the knowledge graph
         self._graph.add_edge(create_merged_into_edge(secondary_id, primary_id))
-
-        await self._persistence.save_people(self._graph.people)
-        await self._persistence.save_edges(self._graph.edges)
+        self._persistence.mark_dirty("people", "edges")
 
         logger.debug(
             "person_merged",
@@ -91,7 +89,7 @@ class PeopleDedupMixin:
 
         # Auto-remap memory references and other edges
         try:
-            remapped = await self.remap_subject_person_id(secondary_id, primary_id)
+            remapped = self._remap_subject_person_id_batched(secondary_id, primary_id)
             if remapped:
                 logger.debug(
                     "Remapped %d memories from %s to %s",
@@ -103,7 +101,9 @@ class PeopleDedupMixin:
             logger.warning("Failed to remap memories after merge", exc_info=True)
 
         try:
-            edge_remapped = await self._remap_edges_for_merge(secondary_id, primary_id)
+            edge_remapped = self._remap_edges_for_merge_batched(
+                secondary_id, primary_id
+            )
             if edge_remapped:
                 logger.debug(
                     "Remapped %d edges from %s to %s",
@@ -113,6 +113,9 @@ class PeopleDedupMixin:
                 )
         except Exception:
             logger.warning("Failed to remap edges after merge", exc_info=True)
+
+        # Single flush for all merge mutations
+        await self._persistence.flush(self._graph)
 
         return self._graph.people.get(primary_id)
 
@@ -203,7 +206,16 @@ class PeopleDedupMixin:
     async def _remap_edges_for_merge(
         self: Store, secondary_id: str, primary_id: str
     ) -> int:
-        """Remap STATED_BY, IS_PERSON, and HAS_RELATIONSHIP edges from secondary to primary."""
+        """Remap edges and persist immediately."""
+        count = self._remap_edges_for_merge_batched(secondary_id, primary_id)
+        if count > 0:
+            await self._persistence.flush(self._graph)
+        return count
+
+    def _remap_edges_for_merge_batched(
+        self: Store, secondary_id: str, primary_id: str
+    ) -> int:
+        """Remap STATED_BY, IS_PERSON, and HAS_RELATIONSHIP edges. Marks dirty; caller must flush."""
         from ash.graph.edges import (
             HAS_RELATIONSHIP,
             IS_PERSON,
@@ -218,7 +230,6 @@ class PeopleDedupMixin:
 
         # Remap STATED_BY edges: memory -> secondary becomes memory -> primary
         for edge in list(self._graph.get_incoming(secondary_id, edge_type=STATED_BY)):
-            # Check if primary already has a STATED_BY edge from this memory
             existing = [
                 e
                 for e in self._graph.get_outgoing(edge.source_id, edge_type=STATED_BY)
@@ -252,7 +263,6 @@ class PeopleDedupMixin:
             self._graph.get_outgoing(secondary_id, edge_type=HAS_RELATIONSHIP)
         ):
             other_id = edge.target_id
-            # Check for existing edge between primary and other
             existing = [
                 e
                 for e in self._graph.get_outgoing(
@@ -278,7 +288,6 @@ class PeopleDedupMixin:
             self._graph.get_incoming(secondary_id, edge_type=HAS_RELATIONSHIP)
         ):
             other_id = edge.source_id
-            # Check for existing edge between other and primary
             existing = [
                 e
                 for e in self._graph.get_incoming(
@@ -301,7 +310,7 @@ class PeopleDedupMixin:
             edges_changed = True
 
         if edges_changed:
-            await self._persistence.save_edges(self._graph.edges)
+            self._persistence.mark_dirty("edges")
 
         return count
 

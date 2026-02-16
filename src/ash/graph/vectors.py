@@ -76,8 +76,10 @@ class NumpyVectorIndex:
         """Add or update a vector."""
         vec = np.array(embedding, dtype=np.float32)
         norm = np.linalg.norm(vec)
-        if norm > 0:
-            vec /= norm
+        if norm == 0:
+            logger.warning("Skipping zero-norm embedding for %s", node_id)
+            return
+        vec /= norm
 
         if node_id in self._id_to_index:
             idx = self._id_to_index[node_id]

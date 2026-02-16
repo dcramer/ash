@@ -169,7 +169,7 @@ class TestBFSTraversal:
 
         # Only allow memory nodes
         def only_memories(node_id: str, edge) -> bool:
-            return graph._node_type.get(node_id) == "memory"
+            return graph.node_types.get(node_id) == "memory"
 
         results = bfs_traverse(
             graph,

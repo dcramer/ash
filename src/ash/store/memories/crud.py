@@ -127,17 +127,16 @@ class MemoryCrudMixin:
             metadata=metadata,
         )
 
-        # Add to graph and persist
+        # Add to graph (in-memory)
         self._graph.add_memory(memory)
-        await self._persistence.save_memories(self._graph.memories)
+        self._persistence.mark_dirty("memories")
 
         # Create ABOUT edges for subject_person_ids
-        edges_changed = False
         if subject_pids:
             for pid in subject_pids:
                 edge = create_about_edge(memory_id, pid, created_by=source)
                 self._graph.add_edge(edge)
-            edges_changed = True
+            self._persistence.mark_dirty("edges")
 
         # Create STATED_BY edge for speaker attribution
         if stated_by_person_id:
@@ -146,24 +145,18 @@ class MemoryCrudMixin:
             self._graph.add_edge(
                 create_stated_by_edge(memory_id, stated_by_person_id, created_by=source)
             )
-            edges_changed = True
-
-        if edges_changed:
-            await self._persistence.save_edges(self._graph.edges)
+            self._persistence.mark_dirty("edges")
 
         if embedding_floats:
             embedding_base64 = MemoryEntry.encode_embedding(embedding_floats)
             try:
                 self._index.add(memory.id, embedding_floats)
-                await self._index.save(
-                    self._persistence.graph_dir / "embeddings" / "memories.npy"
-                )
             except Exception:
                 logger.warning("Failed to index memory, continuing", exc_info=True)
             memory.embedding = embedding_base64
 
         try:
-            superseded_count = await self.supersede_conflicting_memories(
+            superseded_count = await self._supersede_conflicting_batched(
                 new_memory=memory,
                 owner_user_id=owner_user_id,
                 chat_id=chat_id,
@@ -187,6 +180,18 @@ class MemoryCrudMixin:
                     )
             except Exception:
                 logger.warning("Failed to enforce max_entries limit", exc_info=True)
+
+        # Single flush for all mutations in this operation
+        await self._persistence.flush(self._graph)
+
+        # Save vector index after flush (separate file)
+        if embedding_floats:
+            try:
+                await self._index.save(
+                    self._persistence.graph_dir / "embeddings" / "memories.npy"
+                )
+            except Exception:
+                logger.warning("Failed to save vector index", exc_info=True)
 
         logger.debug(
             "memory_added",

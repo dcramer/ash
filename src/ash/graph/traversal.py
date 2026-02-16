@@ -51,7 +51,7 @@ def bfs_traverse(
         node_id, hops, path = queue.popleft()
 
         if hops > 0:
-            node_type = graph._node_type.get(node_id, "unknown")
+            node_type = graph.node_types.get(node_id, "unknown")
             results.append(
                 TraversalResult(
                     node_id=node_id,
