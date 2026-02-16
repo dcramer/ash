@@ -315,6 +315,36 @@ class TestLogContext:
             assert _log_chat_id.get() is None
             assert _log_session_id.get() == "session456"
 
+    def test_log_context_with_new_fields(self):
+        from ash.logging import (
+            _log_agent_name,
+            _log_model,
+            _log_provider,
+            _log_user_id,
+            log_context,
+        )
+
+        assert _log_agent_name.get() is None
+        assert _log_model.get() is None
+        assert _log_provider.get() is None
+        assert _log_user_id.get() is None
+
+        with log_context(
+            agent_name="test-agent",
+            model="claude-3",
+            provider="anthropic",
+            user_id="u123",
+        ):
+            assert _log_agent_name.get() == "test-agent"
+            assert _log_model.get() == "claude-3"
+            assert _log_provider.get() == "anthropic"
+            assert _log_user_id.get() == "u123"
+
+        assert _log_agent_name.get() is None
+        assert _log_model.get() is None
+        assert _log_provider.get() is None
+        assert _log_user_id.get() is None
+
     def test_log_context_nested(self):
         from ash.logging import _log_chat_id, _log_session_id, log_context
 
@@ -460,3 +490,161 @@ class TestComponentFormatter:
             assert (
                 " s:" not in result
             )  # no redundant session display (space prefix distinguishes from "tools:")
+
+    def test_context_with_agent_name(self):
+        import logging
+
+        from ash.logging import ComponentFormatter, log_context
+
+        formatter = ComponentFormatter("%(context)s%(component)s: %(message)s")
+        record = logging.LogRecord(
+            name="ash.tools",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+
+        with log_context(agent_name="debug-self"):
+            result = formatter.format(record)
+            assert "@debug-self" in result
+
+
+class TestGetContextFields:
+    """Tests for _get_context_fields helper."""
+
+    def test_returns_empty_when_no_context(self):
+        from ash.logging import _get_context_fields
+
+        fields = _get_context_fields()
+        assert fields == {}
+
+    def test_returns_set_fields_only(self):
+        from ash.logging import _get_context_fields, log_context
+
+        with log_context(chat_id="c1", agent_name="test-agent"):
+            fields = _get_context_fields()
+            assert fields == {"chat_id": "c1", "agent_name": "test-agent"}
+
+    def test_returns_all_fields(self):
+        from ash.logging import _get_context_fields, log_context
+
+        with log_context(
+            chat_id="c1",
+            session_id="s1",
+            agent_name="agent1",
+            model="claude-3",
+            provider="anthropic",
+            user_id="u1",
+        ):
+            fields = _get_context_fields()
+            assert fields == {
+                "chat_id": "c1",
+                "session_id": "s1",
+                "agent_name": "agent1",
+                "model": "claude-3",
+                "provider": "anthropic",
+                "user_id": "u1",
+            }
+
+
+class TestJSONLHandlerContext:
+    """Tests for JSONLHandler emitting context fields."""
+
+    def test_emit_includes_context_fields(self, tmp_path):
+        import json
+        import logging
+
+        from ash.logging import JSONLHandler, log_context
+
+        handler = JSONLHandler(tmp_path)
+        record = logging.LogRecord(
+            name="ash.tools",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="tool executed",
+            args=(),
+            exc_info=None,
+        )
+
+        with log_context(chat_id="c123", agent_name="debug-self", model="claude-3"):
+            handler.emit(record)
+
+        handler.close()
+
+        # Read back the JSONL
+        log_files = list(tmp_path.glob("*.jsonl"))
+        assert len(log_files) == 1
+        line = log_files[0].read_text().strip()
+        entry = json.loads(line)
+
+        assert entry["chat_id"] == "c123"
+        assert entry["agent_name"] == "debug-self"
+        assert entry["model"] == "claude-3"
+        assert entry["message"] == "tool executed"
+
+    def test_emit_no_context_when_unset(self, tmp_path):
+        import json
+        import logging
+
+        from ash.logging import JSONLHandler
+
+        handler = JSONLHandler(tmp_path)
+        record = logging.LogRecord(
+            name="ash.core",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="no context",
+            args=(),
+            exc_info=None,
+        )
+
+        handler.emit(record)
+        handler.close()
+
+        log_files = list(tmp_path.glob("*.jsonl"))
+        assert len(log_files) == 1
+        line = log_files[0].read_text().strip()
+        entry = json.loads(line)
+
+        assert "chat_id" not in entry
+        assert "agent_name" not in entry
+        assert "model" not in entry
+
+    def test_extra_overrides_context(self, tmp_path):
+        import json
+        import logging
+
+        from ash.logging import JSONLHandler, log_context
+
+        handler = JSONLHandler(tmp_path)
+        record = logging.LogRecord(
+            name="ash.agents",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="agent_completed",
+            args=(),
+            exc_info=None,
+        )
+        # Simulate extra fields set via logger.info("msg", extra={...})
+        record.model = "gpt-4"
+
+        with log_context(model="claude-3", agent_name="test"):
+            handler.emit(record)
+
+        handler.close()
+
+        log_files = list(tmp_path.glob("*.jsonl"))
+        assert len(log_files) == 1
+        line = log_files[0].read_text().strip()
+        entry = json.loads(line)
+
+        # extra field should override the context field
+        assert entry["model"] == "gpt-4"
+        # Non-overridden context should still be present
+        assert entry["agent_name"] == "test"

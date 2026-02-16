@@ -28,6 +28,7 @@ _TOOL_SUMMARIZERS: dict[str, Any] = {
     "read_file": lambda d: d.get("file_path", "?"),
     "bash": lambda d: _truncate(d.get("command", ""), 50),
     "use_agent": lambda d: d.get("agent", "?"),
+    "use_skill": lambda d: f"{d.get('skill', '?')}: {_truncate(d.get('message', ''), 40)}",
     "web_search": lambda d: _truncate(d.get("query", "?"), 40),
     "web_fetch": lambda d: _truncate(d.get("url", "?"), 50),
 }

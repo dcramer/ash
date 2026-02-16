@@ -17,15 +17,25 @@ When asked to debug yourself or analyze your own behavior, find your session in 
 ## Available Data
 
 ### Logs (`/ash/logs/`)
-- `service.log` - Main service logs (JSONL format)
-  - Each line: `{"timestamp": "...", "level": "...", "message": "...", "logger": "...", ...}`
-  - Look for `"level": "ERROR"` or `"level": "WARNING"` entries
-  - The `logger` field indicates which component produced the log
+- Stored by date: `/ash/logs/YYYY-MM-DD.jsonl` (7-day retention)
+- Also: `service.log` for service-level startup/shutdown logs
+- Each JSONL line has these fields:
+  - `ts` - ISO timestamp
+  - `level` - DEBUG, INFO, WARNING, ERROR
+  - `component` - which subsystem (tools, agents, skills, providers, etc.)
+  - `logger` - full Python logger name (e.g., `ash.tools.executor`)
+  - `message` - log message
+  - `exception` - full traceback (present on errors with exceptions)
+- All code failures end up here: tool execution errors, skill/agent failures, LLM errors, provider exceptions
 
 ### Sessions (`/ash/sessions/`)
 - Structure: `/ash/sessions/{provider}_{chat_id}/`
-- Primary file: `history.jsonl` - Complete chat history with user messages, assistant responses, and tool calls
-- Secondary: `state.json` - Basic session metadata (rarely needed)
+- `context.jsonl` - Full LLM context (messages, tool uses, tool results, compaction events)
+- `history.jsonl` - Human-readable conversation log (messages only)
+
+### Chats (`/ash/chats/`)
+- Structure: `/ash/chats/{provider}/{chat_id}/`
+- `history.jsonl` - Chat-level history recording all user and bot messages
 
 ### Source Code (`/ash/source/`)
 - Full Ash source code (requires `sandbox.source_access = "ro"` in config)
@@ -45,7 +55,7 @@ When asked to debug yourself or analyze your own behavior, find your session in 
 
 2. **Check logs for errors** - Look for service-level issues:
    ```bash
-   grep '"level": "ERROR"' /ash/logs/service.log | tail -20
+   grep '"level": "ERROR"' /ash/logs/*.jsonl | tail -20
    ```
 
 3. **Trace to source** - If source is available, find the relevant code:
@@ -53,25 +63,42 @@ When asked to debug yourself or analyze your own behavior, find your session in 
    grep -rn "error_message_text" /ash/source/src/ash/
    ```
 
-## Common Issues
+## Finding Errors
 
-### Session Stuck
-- Look for timeout errors in service.log
-- Check history.jsonl for the last tool call before it stopped
+Start with the logs — all code failures (tool crashes, skill errors, agent failures, LLM timeouts) are logged with full tracebacks.
 
-### Tool Failures
-- Look for `"tool_error"` in history.jsonl
-- Check sandbox logs for container issues
+Logs use structured JSONL with `extra` fields merged into the top-level object. Key structured events:
 
-### Agent Loop Issues
-- Check history.jsonl for repetitive tool calls
-- Look for `max_iterations` exceeded warnings in logs
+| Event (`message`) | Component | Key fields |
+|---|---|---|
+| `llm_complete` | llm | `provider`, `model`, `tokens_in`, `tokens_out`, `stop_reason`, `duration_ms` |
+| `agent_completed` | agents | `agent`, `iterations`, `model`, `output_len`, `output_preview` |
+| `agent_max_iterations` | agents | `agent`, `max_iterations`, `model`, `mode` |
+| `skill_invoked` | tools | `skill`, `model`, `message_len`, `message_preview` |
+| `bot_response` | providers | `bot`, `output_len`, `output_preview` |
 
-## Tips
+```bash
+# All errors from today
+cat /ash/logs/$(date -u +%Y-%m-%d).jsonl | jq -c 'select(.level=="ERROR")'
 
-- Use `jq` for JSON processing if available: `cat file.jsonl | jq -c 'select(.level=="ERROR")'`
-- Filter logs by time: `grep "2024-01-15T14:" /ash/logs/service.log`
-- Search source efficiently: `grep -rn "pattern" /ash/source/src/ash/ --include="*.py"`
+# Errors with tracebacks
+cat /ash/logs/$(date -u +%Y-%m-%d).jsonl | jq -c 'select(.exception != null)'
+
+# Errors from a specific component
+cat /ash/logs/$(date -u +%Y-%m-%d).jsonl | jq -c 'select(.level=="ERROR" and .component=="tools")'
+
+# LLM calls (model, tokens, timing)
+cat /ash/logs/$(date -u +%Y-%m-%d).jsonl | jq -c 'select(.message=="llm_complete")'
+
+# Agent completions with output
+cat /ash/logs/$(date -u +%Y-%m-%d).jsonl | jq -c 'select(.message=="agent_completed")'
+
+# Slow LLM calls (> 10s)
+cat /ash/logs/$(date -u +%Y-%m-%d).jsonl | jq -c 'select(.message=="llm_complete" and .duration_ms > 10000)'
+
+# Search across multiple days
+cat /ash/logs/*.jsonl | jq -c 'select(.level=="ERROR")' | tail -20
+```
 
 ## First Step
 

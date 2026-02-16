@@ -135,6 +135,10 @@ class SkillAgent(Agent):
         if user_context:
             prompt += f"\n\n## Context\n\n{user_context}"
 
+        # Add shared environment context (sandbox, runtime, tool guidance)
+        if context.shared_prompt:
+            prompt += f"\n\n{context.shared_prompt}"
+
         # Add voice guidance for user-facing messages
         if context.voice:
             prompt += f"""
@@ -162,6 +166,7 @@ class UseSkillTool(Tool):
         executor: "AgentExecutor",
         config: "AshConfig",
         voice: str | None = None,
+        subagent_context: str | None = None,
     ) -> None:
         """Initialize the tool.
 
@@ -170,11 +175,13 @@ class UseSkillTool(Tool):
             executor: Agent executor to run skill agents.
             config: Application configuration for skill settings.
             voice: Optional communication style for user-facing skill messages.
+            subagent_context: Shared prompt context (sandbox, runtime, tool guidance) for subagents.
         """
         self._registry = registry
         self._executor = executor
         self._config = config
         self._voice = voice
+        self._subagent_context = subagent_context
 
     @property
     def name(self) -> str:
@@ -325,14 +332,17 @@ class UseSkillTool(Tool):
 
         if context:
             agent_context = AgentContext.from_tool_context(
-                context, input_data={"context": user_context}, voice=self._voice
+                context,
+                input_data={"context": user_context},
+                voice=self._voice,
+                shared_prompt=self._subagent_context,
             )
         else:
             agent_context = AgentContext(
-                input_data={"context": user_context}, voice=self._voice
+                input_data={"context": user_context},
+                voice=self._voice,
+                shared_prompt=self._subagent_context,
             )
-
-        logger.info(f"Invoking skill '{skill_name}' with message: {message[:100]}...")
 
         # Get session info from context for subagent logging
         session_manager, tool_use_id = (
@@ -354,6 +364,16 @@ class UseSkillTool(Tool):
                     model_alias,
                     skill_name,
                 )
+
+        logger.info(
+            "skill_invoked",
+            extra={
+                "skill": skill_name,
+                "model": resolved_model or model_alias or "default",
+                "message_len": len(message),
+                "message_preview": message[:200],
+            },
+        )
 
         # Start agent session for logging
         agent_session_id: str | None = None

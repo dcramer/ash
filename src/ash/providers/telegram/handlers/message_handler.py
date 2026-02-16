@@ -173,7 +173,14 @@ class TelegramMessageHandler:
 
     def _log_response(self, text: str | None) -> None:
         bot_name = self._provider.bot_username or "bot"
-        logger.info("[cyan]%s:[/cyan] %s", bot_name, _truncate(text or "(no response)"))
+        logger.info(
+            "bot_response",
+            extra={
+                "bot": bot_name,
+                "output_len": len(text) if text else 0,
+                "output_preview": (text or "")[:500],
+            },
+        )
 
     async def handle_message(self, message: IncomingMessage) -> None:
         """Handle an incoming Telegram message."""

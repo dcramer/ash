@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
@@ -203,7 +204,25 @@ class OpenAIProvider(LLMProvider):
         kwargs = self._build_request_kwargs(
             messages, model, tools, system, max_tokens, temperature
         )
+        model_name = kwargs["model"]
+
+        start_time = time.monotonic()
         response = await self._client.chat.completions.create(**kwargs)
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+
+        usage = response.usage
+        stop_reason = response.choices[0].finish_reason if response.choices else None
+        extra: dict[str, object] = {
+            "provider": "openai",
+            "model": model_name,
+            "stop_reason": stop_reason,
+            "duration_ms": duration_ms,
+        }
+        if usage:
+            extra["tokens_in"] = usage.prompt_tokens
+            extra["tokens_out"] = usage.completion_tokens
+        logger.info("llm_complete", extra=extra)
+
         return self._parse_response(response)
 
     async def stream(

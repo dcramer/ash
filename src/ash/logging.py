@@ -35,22 +35,68 @@ _log_chat_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _log_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "log_session_id", default=None
 )
+_log_agent_name: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_agent_name", default=None
+)
+_log_model: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_model", default=None
+)
+_log_provider: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_provider", default=None
+)
+_log_user_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_user_id", default=None
+)
+
+# All context vars in (field_name, var) order for iteration
+_CONTEXT_VARS: list[tuple[str, contextvars.ContextVar[str | None]]] = [
+    ("chat_id", _log_chat_id),
+    ("session_id", _log_session_id),
+    ("agent_name", _log_agent_name),
+    ("model", _log_model),
+    ("provider", _log_provider),
+    ("user_id", _log_user_id),
+]
+
+
+def _get_context_fields() -> dict[str, str]:
+    """Collect all non-None contextvar values into a dict."""
+    fields: dict[str, str] = {}
+    for name, var in _CONTEXT_VARS:
+        val = var.get()
+        if val is not None:
+            fields[name] = val
+    return fields
 
 
 @contextmanager
 def log_context(
-    chat_id: str | None = None, session_id: str | None = None
+    chat_id: str | None = None,
+    session_id: str | None = None,
+    agent_name: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+    user_id: str | None = None,
 ) -> Iterator[None]:
     """Context manager for setting log context in current async task."""
-    chat_token = _log_chat_id.set(chat_id) if chat_id is not None else None
-    session_token = _log_session_id.set(session_id) if session_id is not None else None
+    tokens: list[
+        tuple[contextvars.ContextVar[str | None], contextvars.Token[str | None]]
+    ] = []
+    for var, val in [
+        (_log_chat_id, chat_id),
+        (_log_session_id, session_id),
+        (_log_agent_name, agent_name),
+        (_log_model, model),
+        (_log_provider, provider),
+        (_log_user_id, user_id),
+    ]:
+        if val is not None:
+            tokens.append((var, var.set(val)))
     try:
         yield
     finally:
-        if chat_token is not None:
-            _log_chat_id.reset(chat_token)
-        if session_token is not None:
-            _log_session_id.reset(session_token)
+        for var, token in tokens:
+            var.reset(token)
 
 
 # Default retention period for log files
@@ -254,6 +300,9 @@ class JSONLHandler(logging.Handler):
                 exception_text = formatter.formatException(record.exc_info)
                 entry["exception"] = _redactor.redact(exception_text)
 
+            # Inject ambient context fields (extra can override these below)
+            entry.update(_get_context_fields())
+
             # Add extra fields from record (also redacted)
             # Python logging merges extra={} into record.__dict__, not record.extra
             extra = self._extract_extra(record)
@@ -371,6 +420,10 @@ class ComponentFormatter(logging.Formatter):
         session_short = _short_id(session_id, use_last_part=True) if session_id else ""
         if session_short and session_short != chat_short:
             ctx_parts.append(f"s:{session_short}")
+
+        agent_name = _log_agent_name.get()
+        if agent_name:
+            ctx_parts.append(f"@{agent_name}")
 
         record.context = f"[{' '.join(ctx_parts)}] " if ctx_parts else ""
 

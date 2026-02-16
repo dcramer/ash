@@ -202,6 +202,21 @@ class SystemPromptBuilder:
 
         return "".join(parts)
 
+    def build_subagent_context(self, context: PromptContext | None = None) -> str:
+        """Build shared context for subagents (sandbox, runtime, tool guidance).
+
+        Returns a prompt fragment that subagents can append to their own
+        system prompts for consistent environment awareness.
+        """
+        context = context or PromptContext()
+        tool_guidance = "\n".join(["## Tool Usage", "", *self._TOOL_USAGE_RULES])
+        sections = [
+            tool_guidance,
+            self._build_sandbox_section(context),
+            self._build_runtime_section(context.runtime),
+        ]
+        return "\n\n".join(s for s in sections if s)
+
     def _build_core_principles_section(self) -> str:
         return "\n".join(
             [
@@ -216,10 +231,22 @@ class SystemPromptBuilder:
                 "- NEVER attempt a task yourself after an agent fails - report the failure and ask the user",
                 "- Report failures with actual error messages",
                 "- End responses naturally. Never end with 'anything else?', 'let me know', or follow-up questions unless you genuinely need clarification.",
+                "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice — don't expose raw event data",
                 "- In group chats, respond with `[NO_REPLY]` to stay silent when you have nothing to add",
                 "- For deep research, delegate to the `research` skill",
             ]
         )
+
+    # Shared tool usage rules referenced by both the full tools section and subagent context.
+    _TOOL_USAGE_RULES: list[str] = [
+        "- Run independent operations in parallel (e.g., 3 file reads = 3 simultaneous calls)",
+        "- The user cannot see tool results — present the answer directly",
+        "- Default: do not narrate routine, low-risk tool calls (just call the tool)",
+        "- Narrate only when it helps: multi-step work, complex problems, sensitive actions (e.g., deletions), or when the user explicitly asks",
+        "- Keep narration brief and value-dense; avoid repeating obvious steps",
+        "- On failure: include the actual error message. If output is empty, say so.",
+        "- On timeout: report it and try a simpler approach. On persistent failure: explain and ask the user.",
+    ]
 
     def _build_tools_section(self) -> str:
         tool_defs = self._tools.get_definitions()
@@ -236,17 +263,7 @@ class SystemPromptBuilder:
         for tool_def in tool_defs:
             lines.append(f"- **{tool_def.name}**: {tool_def.description}")
 
-        lines.extend(
-            [
-                "",
-                "### Usage",
-                "",
-                "- Run independent operations in parallel (e.g., 3 file reads = 3 simultaneous calls)",
-                "- The user cannot see tool results — present the answer directly, don't narrate routine lookups",
-                "- On failure: include the actual error message. If output is empty, say so.",
-                "- On timeout: report it and try a simpler approach. On persistent failure: explain and ask the user.",
-            ]
-        )
+        lines.extend(["", "### Usage", "", *self._TOOL_USAGE_RULES])
 
         return "\n".join(lines)
 
@@ -258,11 +275,15 @@ class SystemPromptBuilder:
         lines = [
             "## Skills",
             "",
-            "Before replying, check if any available skill matches the user's request.",
-            "If one clearly applies, invoke it with `use_skill`. If none apply, respond directly.",
+            "**MANDATORY**: Before every reply, scan the skill list below.",
+            "If the user's request matches a skill, invoke it with `use_skill` — do not attempt the task yourself.",
+            "If no skill applies, respond directly.",
             "",
             "Skills take over the conversation — the user interacts directly with the skill",
             "until it completes, then control returns to you with the result.",
+            "",
+            "**Never read more than one skill's instructions upfront** — invoke the best match.",
+            "If uncertain between two, pick the closer match; don't load both.",
             "",
             "### Available Skills",
             "",
@@ -445,23 +466,20 @@ class SystemPromptBuilder:
         if not runtime:
             return ""
 
-        lines = ["## Runtime", ""]
-
-        info_parts = []
+        parts = []
         if runtime.model:
-            info_parts.append(f"model={runtime.model}")
+            parts.append(f"model={runtime.model}")
         if runtime.provider:
-            info_parts.append(f"provider={runtime.provider}")
-        if info_parts:
-            lines.append(f"Runtime: {' | '.join(info_parts)}")
+            parts.append(f"provider={runtime.provider}")
+        if runtime.timezone:
+            parts.append(f"tz={runtime.timezone}")
+        if runtime.time:
+            parts.append(f"time={runtime.time}")
 
-        if runtime.timezone or runtime.time:
-            tz = runtime.timezone or "UTC"
-            time = runtime.time or "unknown"
-            lines.append(f"Timezone: {tz}, Current time: {time}")
-            lines.append(
-                "All times are in the user's local timezone. Never mention UTC."
-            )
+        lines = ["## Runtime", ""]
+        if parts:
+            lines.append(" ".join(parts))
+        lines.append("All times are in the user's local timezone. Never mention UTC.")
 
         return "\n".join(lines)
 

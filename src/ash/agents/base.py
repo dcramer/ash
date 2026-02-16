@@ -75,6 +75,7 @@ class Agent(ABC):
         """Build common steering section.
 
         Includes:
+        - Shared environment context (sandbox, runtime, tool guidance) if provided
         - Progress Updates (if enable_progress_updates is True)
         - Voice/communication style (if context.voice is set)
 
@@ -85,6 +86,10 @@ class Agent(ABC):
             Common steering as a single string.
         """
         sections = []
+
+        # Add shared environment context (sandbox, runtime, tool guidance)
+        if context.shared_prompt:
+            sections.append(context.shared_prompt)
 
         # Add progress updates steering if enabled
         if self.config.enable_progress_updates:

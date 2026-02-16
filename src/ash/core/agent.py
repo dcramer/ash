@@ -658,6 +658,8 @@ class Agent:
         session_manager: Any = None,  # Type: SessionManager | None
         tool_overrides: dict[str, Any] | None = None,
     ) -> AgentResponse:
+        from ash.logging import log_context
+
         setup = await self._prepare_message_context(user_message, session, user_id)
         session.add_user_message(user_message)
         compaction_info = await self._maybe_compact(session)
@@ -665,100 +667,106 @@ class Agent:
         tool_calls: list[dict[str, Any]] = []
         iterations = 0
 
-        while iterations < self._config.max_tool_iterations:
-            iterations += 1
+        with log_context(
+            chat_id=session.chat_id,
+            session_id=session.session_id,
+            provider=session.provider,
+            user_id=setup.effective_user_id,
+        ):
+            while iterations < self._config.max_tool_iterations:
+                iterations += 1
 
-            response = await self._llm.complete(
-                messages=session.get_messages_for_llm(
-                    token_budget=setup.message_budget,
-                    recency_window=self._config.recency_window,
-                ),
-                model=self._config.model,
-                tools=self._get_tool_definitions(),
-                system=setup.system_prompt,
-                max_tokens=self._config.max_tokens,
-                temperature=self._config.temperature,
-                thinking=self._config.thinking,
+                response = await self._llm.complete(
+                    messages=session.get_messages_for_llm(
+                        token_budget=setup.message_budget,
+                        recency_window=self._config.recency_window,
+                    ),
+                    model=self._config.model,
+                    tools=self._get_tool_definitions(),
+                    system=setup.system_prompt,
+                    max_tokens=self._config.max_tokens,
+                    temperature=self._config.temperature,
+                    thinking=self._config.thinking,
+                )
+
+                session.add_assistant_message(response.message.content)
+
+                pending_tools = session.get_pending_tool_uses()
+                text_len = len(response.message.get_text() or "")
+                tool_names = [t.name for t in pending_tools]
+                logger.info(
+                    f"Main agent iteration {iterations}: text_len={text_len}, "
+                    f"tools={tool_names}"
+                )
+
+                if not pending_tools:
+                    self._maybe_spawn_memory_extraction(
+                        user_message, setup.effective_user_id, session
+                    )
+                    return AgentResponse(
+                        text=response.message.get_text() or "",
+                        tool_calls=tool_calls,
+                        iterations=iterations,
+                        compaction=compaction_info,
+                        checkpoint=_extract_checkpoint(tool_calls),
+                    )
+
+                tool_context = self._build_tool_context(
+                    session, setup, session_manager, tool_overrides
+                )
+
+                try:
+                    new_calls, steering = await self._execute_pending_tools(
+                        pending_tools,
+                        session,
+                        tool_context,
+                        on_tool_start,
+                        get_steering_messages,
+                    )
+                except ChildActivated as ca:
+                    # A tool spawned an interactive child subagent.
+                    # Build main_frame, attach to exception, and re-raise
+                    # so the provider can enter the orchestration loop.
+                    raise self._build_child_activated(
+                        ca, session, setup, iterations
+                    ) from None
+
+                tool_calls.extend(new_calls)
+
+                self._sync_reply_anchor(tool_context, session)
+
+                # Check if any tool returned a checkpoint - stop loop to wait for user input
+                checkpoint = _extract_checkpoint(tool_calls)
+                if checkpoint:
+                    self._maybe_spawn_memory_extraction(
+                        user_message, setup.effective_user_id, session
+                    )
+                    return AgentResponse(
+                        text=response.message.get_text() or "",
+                        tool_calls=tool_calls,
+                        iterations=iterations,
+                        compaction=compaction_info,
+                        checkpoint=checkpoint,
+                    )
+
+                if steering:
+                    for msg in steering:
+                        if msg.text:
+                            session.add_user_message(msg.text)
+
+            logger.warning(
+                f"Max tool iterations ({self._config.max_tool_iterations}) reached"
             )
-
-            session.add_assistant_message(response.message.content)
-
-            pending_tools = session.get_pending_tool_uses()
-            text_len = len(response.message.get_text() or "")
-            tool_names = [t.name for t in pending_tools]
-            logger.info(
-                f"Main agent iteration {iterations}: text_len={text_len}, "
-                f"tools={tool_names}"
+            self._maybe_spawn_memory_extraction(
+                user_message, setup.effective_user_id, session
             )
-
-            if not pending_tools:
-                self._maybe_spawn_memory_extraction(
-                    user_message, setup.effective_user_id, session
-                )
-                return AgentResponse(
-                    text=response.message.get_text() or "",
-                    tool_calls=tool_calls,
-                    iterations=iterations,
-                    compaction=compaction_info,
-                    checkpoint=_extract_checkpoint(tool_calls),
-                )
-
-            tool_context = self._build_tool_context(
-                session, setup, session_manager, tool_overrides
+            return AgentResponse(
+                text="I've reached the maximum number of tool calls. Please try again with a simpler request.",
+                tool_calls=tool_calls,
+                iterations=iterations,
+                compaction=compaction_info,
+                checkpoint=_extract_checkpoint(tool_calls),
             )
-
-            try:
-                new_calls, steering = await self._execute_pending_tools(
-                    pending_tools,
-                    session,
-                    tool_context,
-                    on_tool_start,
-                    get_steering_messages,
-                )
-            except ChildActivated as ca:
-                # A tool spawned an interactive child subagent.
-                # Build main_frame, attach to exception, and re-raise
-                # so the provider can enter the orchestration loop.
-                raise self._build_child_activated(
-                    ca, session, setup, iterations
-                ) from None
-
-            tool_calls.extend(new_calls)
-
-            self._sync_reply_anchor(tool_context, session)
-
-            # Check if any tool returned a checkpoint - stop loop to wait for user input
-            checkpoint = _extract_checkpoint(tool_calls)
-            if checkpoint:
-                self._maybe_spawn_memory_extraction(
-                    user_message, setup.effective_user_id, session
-                )
-                return AgentResponse(
-                    text=response.message.get_text() or "",
-                    tool_calls=tool_calls,
-                    iterations=iterations,
-                    compaction=compaction_info,
-                    checkpoint=checkpoint,
-                )
-
-            if steering:
-                for msg in steering:
-                    if msg.text:
-                        session.add_user_message(msg.text)
-
-        logger.warning(
-            f"Max tool iterations ({self._config.max_tool_iterations}) reached"
-        )
-        self._maybe_spawn_memory_extraction(
-            user_message, setup.effective_user_id, session
-        )
-        return AgentResponse(
-            text="I've reached the maximum number of tool calls. Please try again with a simpler request.",
-            tool_calls=tool_calls,
-            iterations=iterations,
-            compaction=compaction_info,
-            checkpoint=_extract_checkpoint(tool_calls),
-        )
 
     async def process_message_streaming(
         self,
@@ -770,92 +778,100 @@ class Agent:
         session_manager: Any = None,  # Type: SessionManager | None
         tool_overrides: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
+        from ash.logging import log_context
+
         setup = await self._prepare_message_context(user_message, session, user_id)
         session.add_user_message(user_message)
         await self._maybe_compact(session)
 
         iterations = 0
 
-        while iterations < self._config.max_tool_iterations:
-            iterations += 1
+        with log_context(
+            chat_id=session.chat_id,
+            session_id=session.session_id,
+            provider=session.provider,
+            user_id=setup.effective_user_id,
+        ):
+            while iterations < self._config.max_tool_iterations:
+                iterations += 1
 
-            content_blocks: list[ContentBlock] = []
-            current_text = ""
-            tool_accumulator = _StreamToolAccumulator()
+                content_blocks: list[ContentBlock] = []
+                current_text = ""
+                tool_accumulator = _StreamToolAccumulator()
 
-            async for chunk in self._llm.stream(
-                messages=session.get_messages_for_llm(
-                    token_budget=setup.message_budget,
-                    recency_window=self._config.recency_window,
-                ),
-                model=self._config.model,
-                tools=self._get_tool_definitions(),
-                system=setup.system_prompt,
-                max_tokens=self._config.max_tokens,
-                temperature=self._config.temperature,
-                thinking=self._config.thinking,
-            ):
-                if chunk.type == StreamEventType.TEXT_DELTA:
-                    text = chunk.content if isinstance(chunk.content, str) else ""
-                    current_text += text
-                    yield text
-                elif chunk.type == StreamEventType.TOOL_USE_START:
-                    if chunk.tool_use_id and chunk.tool_name:
-                        tool_accumulator.start(chunk.tool_use_id, chunk.tool_name)
-                elif chunk.type == StreamEventType.TOOL_USE_DELTA:
-                    tool_accumulator.add_delta(
-                        chunk.content if isinstance(chunk.content, str) else ""
+                async for chunk in self._llm.stream(
+                    messages=session.get_messages_for_llm(
+                        token_budget=setup.message_budget,
+                        recency_window=self._config.recency_window,
+                    ),
+                    model=self._config.model,
+                    tools=self._get_tool_definitions(),
+                    system=setup.system_prompt,
+                    max_tokens=self._config.max_tokens,
+                    temperature=self._config.temperature,
+                    thinking=self._config.thinking,
+                ):
+                    if chunk.type == StreamEventType.TEXT_DELTA:
+                        text = chunk.content if isinstance(chunk.content, str) else ""
+                        current_text += text
+                        yield text
+                    elif chunk.type == StreamEventType.TOOL_USE_START:
+                        if chunk.tool_use_id and chunk.tool_name:
+                            tool_accumulator.start(chunk.tool_use_id, chunk.tool_name)
+                    elif chunk.type == StreamEventType.TOOL_USE_DELTA:
+                        tool_accumulator.add_delta(
+                            chunk.content if isinstance(chunk.content, str) else ""
+                        )
+                    elif chunk.type == StreamEventType.TOOL_USE_END:
+                        if tool_use := tool_accumulator.finish():
+                            content_blocks.append(tool_use)
+
+                if current_text:
+                    content_blocks.insert(0, TextContent(text=current_text))
+
+                if not content_blocks:
+                    self._maybe_spawn_memory_extraction(
+                        user_message, setup.effective_user_id, session
                     )
-                elif chunk.type == StreamEventType.TOOL_USE_END:
-                    if tool_use := tool_accumulator.finish():
-                        content_blocks.append(tool_use)
+                    return
 
-            if current_text:
-                content_blocks.insert(0, TextContent(text=current_text))
+                session.add_assistant_message(content_blocks)
 
-            if not content_blocks:
-                self._maybe_spawn_memory_extraction(
-                    user_message, setup.effective_user_id, session
+                pending_tools = [b for b in content_blocks if isinstance(b, ToolUse)]
+                if not pending_tools:
+                    self._maybe_spawn_memory_extraction(
+                        user_message, setup.effective_user_id, session
+                    )
+                    return
+
+                tool_context = self._build_tool_context(
+                    session, setup, session_manager, tool_overrides
                 )
-                return
 
-            session.add_assistant_message(content_blocks)
+                try:
+                    _, steering = await self._execute_pending_tools(
+                        pending_tools,
+                        session,
+                        tool_context,
+                        on_tool_start,
+                        get_steering_messages,
+                    )
+                except ChildActivated as ca:
+                    raise self._build_child_activated(
+                        ca, session, setup, iterations
+                    ) from None
 
-            pending_tools = [b for b in content_blocks if isinstance(b, ToolUse)]
-            if not pending_tools:
-                self._maybe_spawn_memory_extraction(
-                    user_message, setup.effective_user_id, session
-                )
-                return
+                self._sync_reply_anchor(tool_context, session)
 
-            tool_context = self._build_tool_context(
-                session, setup, session_manager, tool_overrides
+                if steering:
+                    for msg in steering:
+                        if msg.text:
+                            session.add_user_message(msg.text)
+
+            self._maybe_spawn_memory_extraction(
+                user_message, setup.effective_user_id, session
             )
-
-            try:
-                _, steering = await self._execute_pending_tools(
-                    pending_tools,
-                    session,
-                    tool_context,
-                    on_tool_start,
-                    get_steering_messages,
-                )
-            except ChildActivated as ca:
-                raise self._build_child_activated(
-                    ca, session, setup, iterations
-                ) from None
-
-            self._sync_reply_anchor(tool_context, session)
-
-            if steering:
-                for msg in steering:
-                    if msg.text:
-                        session.add_user_message(msg.text)
-
-        self._maybe_spawn_memory_extraction(
-            user_message, setup.effective_user_id, session
-        )
-        yield "\n\n[Max tool iterations reached]"
+            yield "\n\n[Max tool iterations reached]"
 
 
 async def create_agent(
@@ -1009,28 +1025,44 @@ async def create_agent(
     register_builtin_agents(agent_registry)
     logger.info(f"Registered {len(agent_registry)} built-in agents")
 
-    agent_executor = AgentExecutor(llm, tool_executor, config)
-    tool_registry.register(
-        UseAgentTool(
-            agent_registry, agent_executor, config=config, voice=workspace.soul
-        )
-    )
-    tool_registry.register(
-        UseSkillTool(skill_registry, agent_executor, config, voice=workspace.soul)
-    )
-
     runtime = RuntimeInfo.from_environment(
         model=model_config.model,
         provider=model_config.provider,
         timezone=config.timezone,
     )
 
+    # Build prompt builder and subagent context before registering agent/skill tools.
+    # The tool list won't include use_agent/use_skill yet, but those aren't needed
+    # in subagent context (subagents don't see the full tool list).
     prompt_builder = SystemPromptBuilder(
         workspace=workspace,
         tool_registry=tool_registry,
         skill_registry=skill_registry,
         config=config,
         agent_registry=agent_registry,
+    )
+    subagent_context = prompt_builder.build_subagent_context(
+        PromptContext(runtime=runtime)
+    )
+
+    agent_executor = AgentExecutor(llm, tool_executor, config)
+    tool_registry.register(
+        UseAgentTool(
+            agent_registry,
+            agent_executor,
+            config=config,
+            voice=workspace.soul,
+            subagent_context=subagent_context,
+        )
+    )
+    tool_registry.register(
+        UseSkillTool(
+            skill_registry,
+            agent_executor,
+            config,
+            voice=workspace.soul,
+            subagent_context=subagent_context,
+        )
     )
 
     thinking_config = (

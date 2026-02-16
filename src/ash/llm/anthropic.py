@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
@@ -186,20 +187,30 @@ class AnthropicProvider(LLMProvider):
         semaphore = self._semaphore
         logger.debug(f"Waiting for API slot (model={model_name})")
 
+        start_time = time.monotonic()
+
         async def _make_request() -> anthropic.types.Message:
             async with semaphore:
                 logger.debug(f"Acquired API slot, calling {model_name}")
-                response = await self._client.messages.create(**kwargs)
-                logger.debug(
-                    f"API call complete: {response.usage.input_tokens}in/"
-                    f"{response.usage.output_tokens}out tokens"
-                )
-                return response
+                return await self._client.messages.create(**kwargs)
 
         response = await with_retry(
             _make_request,
             config=RetryConfig(enabled=True, max_retries=3),
             operation_name=f"Anthropic {model_name}",
+        )
+
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.info(
+            "llm_complete",
+            extra={
+                "provider": "anthropic",
+                "model": model_name,
+                "tokens_in": response.usage.input_tokens,
+                "tokens_out": response.usage.output_tokens,
+                "stop_reason": response.stop_reason,
+                "duration_ms": duration_ms,
+            },
         )
         return self._parse_response(response)
 

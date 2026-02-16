@@ -42,6 +42,7 @@ class UseAgentTool(Tool):
         executor: "AgentExecutor",
         config: "AshConfig | None" = None,
         voice: str | None = None,
+        subagent_context: str | None = None,
     ) -> None:
         """Initialize the tool.
 
@@ -50,11 +51,13 @@ class UseAgentTool(Tool):
             executor: Agent executor to run agents.
             config: Application configuration for model resolution.
             voice: Optional communication style for user-facing subagent messages.
+            subagent_context: Shared prompt context (sandbox, runtime, tool guidance) for subagents.
         """
         self._registry = registry
         self._executor = executor
         self._config = config
         self._voice = voice
+        self._subagent_context = subagent_context
         # In-memory checkpoint storage (keyed by checkpoint_id)
         # In production, this would be stored in the session via SessionManager
         self._pending_checkpoints: dict[str, CheckpointState] = {}
@@ -152,10 +155,17 @@ class UseAgentTool(Tool):
 
         if context:
             agent_context = AgentContext.from_tool_context(
-                context, input_data=extra_input, voice=self._voice
+                context,
+                input_data=extra_input,
+                voice=self._voice,
+                shared_prompt=self._subagent_context,
             )
         else:
-            agent_context = AgentContext(input_data=extra_input, voice=self._voice)
+            agent_context = AgentContext(
+                input_data=extra_input,
+                voice=self._voice,
+                shared_prompt=self._subagent_context,
+            )
 
         # Handle resume from checkpoint
         resume_from: CheckpointState | None = None

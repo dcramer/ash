@@ -117,6 +117,9 @@ class AgentContext:
     metadata: dict[str, Any] = field(default_factory=dict)
     input_data: dict[str, Any] = field(default_factory=dict)
     voice: str | None = None  # Communication style for user-facing messages
+    shared_prompt: str | None = (
+        None  # Shared environment context (sandbox, runtime, tool guidance)
+    )
 
     @classmethod
     def from_tool_context(
@@ -124,6 +127,7 @@ class AgentContext:
         ctx: ToolContext,
         input_data: dict[str, Any] | None = None,
         voice: str | None = None,
+        shared_prompt: str | None = None,
     ) -> AgentContext:
         """Create AgentContext from ToolContext, preserving all shared fields."""
         return cls(
@@ -135,6 +139,7 @@ class AgentContext:
             metadata=dict(ctx.metadata) if ctx.metadata else {},
             input_data=input_data or {},
             voice=voice,
+            shared_prompt=shared_prompt,
         )
 
 

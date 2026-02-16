@@ -149,7 +149,13 @@ class AgentExecutor:
 
         timeout = agent.config.timeout
 
-        with log_context(chat_id=context.chat_id, session_id=context.session_id):
+        with log_context(
+            chat_id=context.chat_id,
+            session_id=context.session_id,
+            agent_name=agent.config.name,
+            provider=context.provider,
+            user_id=context.user_id,
+        ):
             try:
                 return await asyncio.wait_for(
                     self._execute_inner(
@@ -285,6 +291,12 @@ class AgentExecutor:
             f"Agent '{agent_config.name}' using model: {resolved_model or 'default'}"
         )
 
+        # Update log context with the resolved model (outer context has agent_name/provider already)
+        if resolved_model:
+            from ash.logging import _log_model
+
+            _log_model.set(resolved_model)
+
         system_prompt = agent.build_system_prompt(context)
         effective_tools = agent_config.get_effective_tools()
         tool_definitions = self._get_tool_definitions(
@@ -324,8 +336,16 @@ class AgentExecutor:
             tool_uses = message.get_tool_uses()
             if not tool_uses:
                 text = message.get_text()
+                output_len = len(text) if text else 0
                 logger.info(
-                    f"Agent '{agent_config.name}' completed in {iteration} iterations"
+                    "agent_completed",
+                    extra={
+                        "agent": agent_config.name,
+                        "iterations": iteration,
+                        "model": resolved_model or "default",
+                        "output_len": output_len,
+                        "output_preview": (text or "")[:500],
+                    },
                 )
                 result_metadata = self._build_result_metadata(tool_context)
                 if not text and iteration > 1:
@@ -412,7 +432,13 @@ class AgentExecutor:
                     )
 
         logger.warning(
-            f"Agent '{agent_config.name}' hit max iterations ({max_iterations})"
+            "agent_max_iterations",
+            extra={
+                "agent": agent_config.name,
+                "max_iterations": max_iterations,
+                "model": resolved_model or "default",
+                "mode": "batch",
+            },
         )
 
         last_text = session.get_last_text_response() or ""
@@ -513,6 +539,7 @@ class AgentExecutor:
             TurnResult indicating what happened.
         """
         from ash.agents.types import ChildActivated
+        from ash.logging import log_context
 
         session = frame.session
         agent_session_id = frame.agent_session_id
@@ -523,126 +550,148 @@ class AgentExecutor:
             session_manager=session_manager,
         )
 
-        if user_message is not None:
-            session.add_user_message(user_message)
-            if session_manager and agent_session_id:
-                await session_manager.add_user_message(
-                    content=user_message,
-                    agent_session_id=agent_session_id,
-                )
-        elif tool_result is not None:
-            tu_id, content, is_error = tool_result
-            session.add_tool_result(tu_id, content, is_error)
-            if session_manager and agent_session_id:
-                await session_manager.add_tool_result(
-                    tool_use_id=tu_id,
-                    output=content,
-                    success=not is_error,
-                    agent_session_id=agent_session_id,
-                )
-
-        while frame.iteration < frame.max_iterations:
-            frame.iteration += 1
-
-            # Check for unresolved tool_uses from a previous assistant message
-            unresolved = self._get_unresolved_tool_uses(session)
-
-            if not unresolved:
-                # Need LLM call
-                try:
-                    response = await self._llm.complete(
-                        messages=session.get_messages_for_llm(),
-                        model=frame.model,
-                        system=frame.system_prompt,
-                        tools=tool_defs or None,
-                        max_tokens=4096,
-                    )
-                except Exception as e:
-                    logger.error("Interactive turn LLM error: %s", e)
-                    return TurnResult(TurnAction.ERROR, text=f"LLM error: {e}")
-
-                session.add_assistant_message(response.message.content)
-
-                # Log assistant message
+        with log_context(
+            agent_name=frame.agent_name,
+            model=frame.model,
+            chat_id=frame.context.chat_id,
+            session_id=frame.context.session_id,
+            provider=frame.context.provider,
+            user_id=frame.context.user_id,
+        ):
+            if user_message is not None:
+                session.add_user_message(user_message)
                 if session_manager and agent_session_id:
-                    await self._log_assistant_message(
-                        session_manager,
-                        agent_session_id,
-                        response.message.content,
-                        frame.iteration,
+                    await session_manager.add_user_message(
+                        content=user_message,
+                        agent_session_id=agent_session_id,
+                    )
+            elif tool_result is not None:
+                tu_id, content, is_error = tool_result
+                session.add_tool_result(tu_id, content, is_error)
+                if session_manager and agent_session_id:
+                    await session_manager.add_tool_result(
+                        tool_use_id=tu_id,
+                        output=content,
+                        success=not is_error,
+                        agent_session_id=agent_session_id,
                     )
 
-                tool_uses = response.message.get_tool_uses()
-                if not tool_uses:
-                    # Text response — send to user, pause
-                    text = response.message.get_text() or ""
-                    return TurnResult(TurnAction.SEND_TEXT, text=text)
+            while frame.iteration < frame.max_iterations:
+                frame.iteration += 1
 
-                unresolved = tool_uses
+                # Check for unresolved tool_uses from a previous assistant message
+                unresolved = self._get_unresolved_tool_uses(session)
 
-            # Execute tools
-            for tool_use in unresolved:
-                if tool_use.name == "complete":
-                    result_text = tool_use.input.get("result", "")
-                    # Add tool result so session is well-formed
-                    session.add_tool_result(tool_use.id, result_text, is_error=False)
-                    return TurnResult(TurnAction.COMPLETE, text=result_text)
-
-                if tool_use.name == "interrupt":
-                    prompt = tool_use.input.get("prompt", "Checkpoint reached")
-                    return TurnResult(TurnAction.INTERRUPT, text=prompt)
-
-                # Check tool whitelist
-                if frame.effective_tools and tool_use.name not in frame.effective_tools:
-                    session.add_tool_result(
-                        tool_use.id,
-                        f"Tool '{tool_use.name}' is not available to this agent",
-                        is_error=True,
-                    )
-                    continue
-
-                try:
-                    per_tool_context = ToolContext(
-                        session_id=tool_context.session_id,
-                        user_id=tool_context.user_id,
-                        chat_id=tool_context.chat_id,
-                        thread_id=tool_context.thread_id,
-                        provider=tool_context.provider,
-                        metadata=dict(tool_context.metadata),
-                        env=dict(tool_context.env),
-                        session_manager=session_manager,
-                        tool_use_id=tool_use.id,
-                    )
-                    result = await self._tools.execute(
-                        tool_use.name, tool_use.input, per_tool_context
-                    )
-                    session.add_tool_result(
-                        tool_use.id, result.content, is_error=result.is_error
-                    )
-                    # Log tool result
-                    if session_manager and agent_session_id:
-                        await session_manager.add_tool_result(
-                            tool_use_id=tool_use.id,
-                            output=result.content,
-                            success=not result.is_error,
-                            agent_session_id=agent_session_id,
+                if not unresolved:
+                    # Need LLM call
+                    try:
+                        response = await self._llm.complete(
+                            messages=session.get_messages_for_llm(),
+                            model=frame.model,
+                            system=frame.system_prompt,
+                            tools=tool_defs or None,
+                            max_tokens=4096,
                         )
-                except ChildActivated as ca:
-                    # Parent paused — tool_use has no result yet
-                    return TurnResult(
-                        TurnAction.CHILD_ACTIVATED, child_frame=ca.child_frame
-                    )
-                except Exception as e:
-                    logger.error("Interactive turn tool error: %s", e)
-                    session.add_tool_result(
-                        tool_use.id, f"Tool error: {e}", is_error=True
-                    )
+                    except Exception as e:
+                        logger.error("Interactive turn LLM error: %s", e)
+                        return TurnResult(TurnAction.ERROR, text=f"LLM error: {e}")
+
+                    session.add_assistant_message(response.message.content)
+
+                    # Log assistant message
                     if session_manager and agent_session_id:
-                        await session_manager.add_tool_result(
-                            tool_use_id=tool_use.id,
-                            output=f"Tool error: {e}",
-                            success=False,
-                            agent_session_id=agent_session_id,
+                        await self._log_assistant_message(
+                            session_manager,
+                            agent_session_id,
+                            response.message.content,
+                            frame.iteration,
                         )
 
-        return TurnResult(TurnAction.MAX_ITERATIONS)
+                    tool_uses = response.message.get_tool_uses()
+                    if not tool_uses:
+                        # Text response — send to user, pause
+                        text = response.message.get_text() or ""
+                        return TurnResult(TurnAction.SEND_TEXT, text=text)
+
+                    unresolved = tool_uses
+
+                # Execute tools
+                for tool_use in unresolved:
+                    if tool_use.name == "complete":
+                        result_text = tool_use.input.get("result", "")
+                        # Add tool result so session is well-formed
+                        session.add_tool_result(
+                            tool_use.id, result_text, is_error=False
+                        )
+                        return TurnResult(TurnAction.COMPLETE, text=result_text)
+
+                    if tool_use.name == "interrupt":
+                        prompt = tool_use.input.get("prompt", "Checkpoint reached")
+                        return TurnResult(TurnAction.INTERRUPT, text=prompt)
+
+                    # Check tool whitelist
+                    if (
+                        frame.effective_tools
+                        and tool_use.name not in frame.effective_tools
+                    ):
+                        session.add_tool_result(
+                            tool_use.id,
+                            f"Tool '{tool_use.name}' is not available to this agent",
+                            is_error=True,
+                        )
+                        continue
+
+                    try:
+                        per_tool_context = ToolContext(
+                            session_id=tool_context.session_id,
+                            user_id=tool_context.user_id,
+                            chat_id=tool_context.chat_id,
+                            thread_id=tool_context.thread_id,
+                            provider=tool_context.provider,
+                            metadata=dict(tool_context.metadata),
+                            env=dict(tool_context.env),
+                            session_manager=session_manager,
+                            tool_use_id=tool_use.id,
+                        )
+                        result = await self._tools.execute(
+                            tool_use.name, tool_use.input, per_tool_context
+                        )
+                        session.add_tool_result(
+                            tool_use.id, result.content, is_error=result.is_error
+                        )
+                        # Log tool result
+                        if session_manager and agent_session_id:
+                            await session_manager.add_tool_result(
+                                tool_use_id=tool_use.id,
+                                output=result.content,
+                                success=not result.is_error,
+                                agent_session_id=agent_session_id,
+                            )
+                    except ChildActivated as ca:
+                        # Parent paused — tool_use has no result yet
+                        return TurnResult(
+                            TurnAction.CHILD_ACTIVATED, child_frame=ca.child_frame
+                        )
+                    except Exception as e:
+                        logger.error("Interactive turn tool error: %s", e)
+                        session.add_tool_result(
+                            tool_use.id, f"Tool error: {e}", is_error=True
+                        )
+                        if session_manager and agent_session_id:
+                            await session_manager.add_tool_result(
+                                tool_use_id=tool_use.id,
+                                output=f"Tool error: {e}",
+                                success=False,
+                                agent_session_id=agent_session_id,
+                            )
+
+            logger.warning(
+                "agent_max_iterations",
+                extra={
+                    "agent": frame.agent_name,
+                    "max_iterations": frame.max_iterations,
+                    "model": frame.model or "default",
+                    "mode": "interactive",
+                },
+            )
+            return TurnResult(TurnAction.MAX_ITERATIONS)
