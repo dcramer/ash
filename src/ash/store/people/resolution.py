@@ -193,12 +193,7 @@ class PeopleResolutionMixin:
         )
 
     async def resolve_names(self: Store, person_ids: list[str]) -> dict[str, str]:
-        result: dict[str, str] = {}
-        for pid in person_ids:
-            person = await self.get_person(pid)
-            if person:
-                result[pid] = person.name
-        return result
+        return await self.get_person_names_batch(person_ids)
 
     async def _fuzzy_find(
         self: Store,

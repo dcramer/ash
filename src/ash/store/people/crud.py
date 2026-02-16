@@ -181,13 +181,57 @@ class PeopleCrudMixin:
 
     async def get_all_people(self: Store) -> list[PersonEntry]:
         async with self._db.session() as session:
-            result = await session.execute(text("SELECT id FROM people"))
-            people = []
-            for row in result.fetchall():
-                person = await load_person_full(session, row[0])
-                if person:
-                    people.append(person)
-            return people
+            result = await session.execute(
+                text("SELECT * FROM people ORDER BY updated_at DESC")
+            )
+            rows = result.fetchall()
+            if not rows:
+                return []
+
+            person_ids = [row.id for row in rows]
+            placeholders = ", ".join(f":id{i}" for i in range(len(person_ids)))
+            id_params = {f"id{i}": pid for i, pid in enumerate(person_ids)}
+
+            # Batch-load aliases
+            aliases_map: dict[str, list[AliasEntry]] = {pid: [] for pid in person_ids}
+            alias_result = await session.execute(
+                text(
+                    f"SELECT person_id, value, added_by, created_at FROM person_aliases WHERE person_id IN ({placeholders})"
+                ),
+                id_params,
+            )
+            for arow in alias_result.fetchall():
+                aliases_map[arow[0]].append(
+                    AliasEntry(
+                        value=arow[1],
+                        added_by=arow[2],
+                        created_at=_parse_datetime(arow[3]),
+                    )
+                )
+
+            # Batch-load relationships
+            rels_map: dict[str, list[RelationshipClaim]] = {
+                pid: [] for pid in person_ids
+            }
+            rel_result = await session.execute(
+                text(
+                    f"SELECT person_id, relationship, stated_by, created_at FROM person_relationships WHERE person_id IN ({placeholders})"
+                ),
+                id_params,
+            )
+            for rrow in rel_result.fetchall():
+                rels_map[rrow[0]].append(
+                    RelationshipClaim(
+                        relationship=rrow[1],
+                        stated_by=rrow[2],
+                        created_at=_parse_datetime(rrow[3]),
+                    )
+                )
+
+            return [
+                _row_to_person(row, aliases_map[row.id], rels_map[row.id])
+                for row in rows
+            ]
 
     async def update_person(
         self: Store,

@@ -79,8 +79,19 @@ class ReadFileTool(Tool):
         if not file_path:
             return ToolResult.error("Missing required parameter: file_path")
 
-        offset = input_data.get("offset", 1)
-        limit = input_data.get("limit", DEFAULT_LINE_LIMIT)
+        try:
+            offset = max(1, int(input_data.get("offset", 1)))
+        except (ValueError, TypeError):
+            offset = 1
+        try:
+            limit = max(
+                1,
+                min(
+                    int(input_data.get("limit", DEFAULT_LINE_LIMIT)), DEFAULT_LINE_LIMIT
+                ),
+            )
+        except (ValueError, TypeError):
+            limit = DEFAULT_LINE_LIMIT
         safe_path = shlex.quote(file_path)
 
         # Check file exists and get size

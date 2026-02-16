@@ -72,6 +72,9 @@ class Database:
             # Enable WAL mode for better concurrent read/write performance
             conn.execute("PRAGMA journal_mode = WAL")
 
+            # Enable foreign key enforcement (off by default in SQLite)
+            conn.execute("PRAGMA foreign_keys = ON")
+
             # Load sqlite-vec extension for vector search
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)

@@ -21,14 +21,17 @@ async def load_subjects_batch(session, memory_ids: list[str]) -> dict[str, list[
     """Load subject_person_ids for multiple memories."""
     if not memory_ids:
         return {}
+    placeholders = ", ".join(f":id{i}" for i in range(len(memory_ids)))
+    params = {f"id{i}": mid for i, mid in enumerate(memory_ids)}
     result = await session.execute(
-        text("SELECT memory_id, person_id FROM memory_subjects"),
+        text(
+            f"SELECT memory_id, person_id FROM memory_subjects WHERE memory_id IN ({placeholders})"
+        ),
+        params,
     )
     subjects: dict[str, list[str]] = {}
-    id_set = set(memory_ids)
     for row in result.fetchall():
-        if row[0] in id_set:
-            subjects.setdefault(row[0], []).append(row[1])
+        subjects.setdefault(row[0], []).append(row[1])
     return subjects
 
 

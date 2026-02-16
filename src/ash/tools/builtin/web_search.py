@@ -6,11 +6,11 @@ import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ash.llm.retry import RetryConfig, with_retry
 from ash.sandbox import SandboxExecutor
 from ash.tools.base import Tool, ToolContext, ToolResult, build_sandbox_manager_config
 from ash.tools.builtin.search_cache import SearchCache
 from ash.tools.builtin.search_types import SearchResponse
-from ash.tools.retry import RetryConfig, with_retry
 
 if TYPE_CHECKING:
     from ash.config.models import SandboxConfig
@@ -334,10 +334,7 @@ class WebSearchTool(Tool):
             response = await with_retry(
                 do_search,
                 config=self._retry_config,
-                on_retry=lambda attempt, err, delay: logger.warning(
-                    f"Search retry {attempt}/{self._retry_config.max_attempts}: "
-                    f"{err}, waiting {delay:.1f}s"
-                ),
+                operation_name="Brave Search",
             )
 
             if self._cache and not response.cached:

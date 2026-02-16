@@ -108,12 +108,14 @@ class SandboxExecutor:
         return await self.execute(f"bash -c '{escaped}'", timeout=timeout)
 
     async def write_file(self, path: str, content: str) -> ExecutionResult:
+        import base64
+
         normalized_path = _normalize_workspace_path(path)
         safe_path = shlex.quote(normalized_path)
-        escaped = content.replace("'", "'\\''")
+        encoded = base64.b64encode(content.encode()).decode()
         command = (
             f'mkdir -p "$(dirname {safe_path})" && '
-            f"cat > {safe_path} << 'ASHEOF'\n{escaped}\nASHEOF"
+            f"echo {shlex.quote(encoded)} | base64 -d > {safe_path}"
         )
         return await self.execute(command)
 

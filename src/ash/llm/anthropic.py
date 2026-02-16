@@ -35,17 +35,9 @@ DEFAULT_MODEL = "claude-sonnet-4-5"
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude provider."""
 
-    _semaphore: asyncio.Semaphore | None = None
-    _max_concurrent: int = 2
-
-    def __init__(self, api_key: str | None = None, max_concurrent: int | None = None):
+    def __init__(self, api_key: str | None = None, max_concurrent: int = 2):
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
-        if max_concurrent is not None:
-            AnthropicProvider._max_concurrent = max_concurrent
-        if AnthropicProvider._semaphore is None:
-            AnthropicProvider._semaphore = asyncio.Semaphore(
-                AnthropicProvider._max_concurrent
-            )
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
     @property
     def name(self) -> str:
@@ -183,14 +175,12 @@ class AnthropicProvider(LLMProvider):
         )
         model_name = kwargs["model"]
 
-        assert self._semaphore is not None
-        semaphore = self._semaphore
         logger.debug(f"Waiting for API slot (model={model_name})")
 
         start_time = time.monotonic()
 
         async def _make_request() -> anthropic.types.Message:
-            async with semaphore:
+            async with self._semaphore:
                 logger.debug(f"Acquired API slot, calling {model_name}")
                 return await self._client.messages.create(**kwargs)
 
@@ -231,7 +221,6 @@ class AnthropicProvider(LLMProvider):
         model_name = kwargs["model"]
         current_tool_id: str | None = None
 
-        assert self._semaphore is not None
         logger.debug(f"Waiting for API slot (stream, model={model_name})")
         async with self._semaphore:
             logger.debug(f"Acquired API slot, streaming {model_name}")

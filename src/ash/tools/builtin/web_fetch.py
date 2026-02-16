@@ -1,8 +1,10 @@
 """Web fetch tool for URL content extraction, executed in sandbox."""
 
+import ipaddress
 import json
 import logging
 import shlex
+import socket
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -13,6 +15,31 @@ from ash.tools.builtin.search_cache import SearchCache
 
 if TYPE_CHECKING:
     from ash.config.models import SandboxConfig
+
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _is_private_host(hostname: str) -> bool:
+    """Check if a hostname resolves to a private/internal IP address."""
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    for _, _, _, _, sockaddr in addr_infos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if any(ip in network for network in _BLOCKED_NETWORKS):
+            return True
+    return False
+
 
 logger = logging.getLogger(__name__)
 
@@ -368,8 +395,16 @@ class WebFetchTool(Tool):
         if parsed.scheme not in ("http", "https"):
             return ToolResult.error("Invalid URL: must be http or https")
 
+        if parsed.hostname and _is_private_host(parsed.hostname):
+            return ToolResult.error("Cannot fetch internal/private network addresses")
+
         extract_mode = input_data.get("extract_mode", "markdown")
-        max_length = input_data.get("max_length", self._max_length)
+        try:
+            max_length = min(
+                int(input_data.get("max_length", self._max_length)), 200000
+            )
+        except (ValueError, TypeError):
+            max_length = self._max_length
 
         if self._cache:
             cached = self._cache.get(url)
