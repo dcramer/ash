@@ -63,34 +63,14 @@ class GraphPersistence:
         if users_path.exists():
             raw_users = _read_jsonl(users_path)
             for d in raw_users:
-                entry = UserEntry(
-                    id=d["id"],
-                    version=d.get("version", 1),
-                    provider=d.get("provider", ""),
-                    provider_id=d.get("provider_id", ""),
-                    username=d.get("username"),
-                    display_name=d.get("display_name"),
-                    created_at=_parse_dt(d.get("created_at")),
-                    updated_at=_parse_dt(d.get("updated_at")),
-                    metadata=d.get("metadata"),
-                )
+                entry = UserEntry.from_dict(d)
                 graph.add_user(entry)
 
         # Load chats
         chats_path = self._dir / "chats.jsonl"
         if chats_path.exists():
             for d in _read_jsonl(chats_path):
-                entry = ChatEntry(
-                    id=d["id"],
-                    version=d.get("version", 1),
-                    provider=d.get("provider", ""),
-                    provider_id=d.get("provider_id", ""),
-                    chat_type=d.get("chat_type"),
-                    title=d.get("title"),
-                    created_at=_parse_dt(d.get("created_at")),
-                    updated_at=_parse_dt(d.get("updated_at")),
-                    metadata=d.get("metadata"),
-                )
+                entry = ChatEntry.from_dict(d)
                 graph.add_chat(entry)
 
         # Load edges
@@ -125,12 +105,12 @@ class GraphPersistence:
     async def save_users(self, users: dict[str, UserEntry]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
         path = self._dir / "users.jsonl"
-        _write_jsonl_atomic(path, [_user_to_dict(u) for u in users.values()])
+        _write_jsonl_atomic(path, [u.to_dict() for u in users.values()])
 
     async def save_chats(self, chats: dict[str, ChatEntry]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
         path = self._dir / "chats.jsonl"
-        _write_jsonl_atomic(path, [_chat_to_dict(c) for c in chats.values()])
+        _write_jsonl_atomic(path, [c.to_dict() for c in chats.values()])
 
     async def save_edges(self, edges: dict[str, Edge]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
@@ -169,52 +149,6 @@ def _write_jsonl_atomic(path: Path, records: list[dict]) -> None:
         except OSError:
             pass
         raise
-
-
-def _user_to_dict(u: UserEntry) -> dict:
-    d: dict = {
-        "id": u.id,
-        "version": u.version,
-        "provider": u.provider,
-        "provider_id": u.provider_id,
-    }
-    if u.username:
-        d["username"] = u.username
-    if u.display_name:
-        d["display_name"] = u.display_name
-    if u.created_at:
-        d["created_at"] = u.created_at.isoformat()
-    if u.updated_at:
-        d["updated_at"] = u.updated_at.isoformat()
-    if u.metadata:
-        d["metadata"] = u.metadata
-    return d
-
-
-def _chat_to_dict(c: ChatEntry) -> dict:
-    d: dict = {
-        "id": c.id,
-        "version": c.version,
-        "provider": c.provider,
-        "provider_id": c.provider_id,
-    }
-    if c.chat_type:
-        d["chat_type"] = c.chat_type
-    if c.title:
-        d["title"] = c.title
-    if c.created_at:
-        d["created_at"] = c.created_at.isoformat()
-    if c.updated_at:
-        d["updated_at"] = c.updated_at.isoformat()
-    if c.metadata:
-        d["metadata"] = c.metadata
-    return d
-
-
-def _parse_dt(s: str | None):
-    from ash.store.types import _parse_datetime
-
-    return _parse_datetime(s)
 
 
 def _backfill_edges_from_raw(

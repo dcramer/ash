@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from ash.graph.graph import Edge, KnowledgeGraph
 
 # Edge types to skip by default during traversal
-DEFAULT_EXCLUDE_EDGE_TYPES = {"SUPERSEDES", "EXTRACTED_FROM"}
+DEFAULT_EXCLUDE_EDGE_TYPES = {"SUPERSEDES"}
 
 
 @dataclass
@@ -32,7 +32,7 @@ def bfs_traverse(
     """BFS through adjacency lists from seed nodes.
 
     Follows both outgoing and incoming edges.
-    Excludes SUPERSEDES and EXTRACTED_FROM by default.
+    Excludes SUPERSEDES by default.
     filter_fn is called per-hop for privacy/scope filtering.
     """
     if exclude_edge_types is None:

@@ -324,10 +324,13 @@ class RetrievalPipeline:
                 continue
 
             result_memories.append(memory)
-            if len(result_memories) >= limit:
-                break
 
-        return result_memories
+        # Sort by recency so the limit picks the most recent memories
+        result_memories.sort(
+            key=lambda m: m.created_at or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
+        )
+        return result_memories[:limit]
 
     def _passes_privacy_filter(
         self,

@@ -306,18 +306,10 @@ class PeopleDedupMixin:
         return count
 
     async def _follow_merge_chain(self: Store, person: PersonEntry) -> PersonEntry:
-        visited: set[str] = set()
-        current = person
-        while True:
-            next_id = get_merged_into(self._graph, current.id)
-            if not next_id or next_id in visited:
-                break
-            visited.add(current.id)
-            next_person = self._graph.people.get(next_id)
-            if not next_person:
-                break
-            current = next_person
-        return current
+        from ash.graph.edges import follow_merge_chain
+
+        canonical_id = follow_merge_chain(self._graph, person.id)
+        return self._graph.people.get(canonical_id) or person
 
     @staticmethod
     def _heuristic_match(a: PersonEntry, b: PersonEntry) -> bool:

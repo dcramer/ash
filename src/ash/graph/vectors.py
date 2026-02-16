@@ -16,12 +16,29 @@ logger = logging.getLogger(__name__)
 
 
 class NumpyVectorIndex:
-    """Brute-force cosine similarity using numpy."""
+    """Brute-force cosine similarity using numpy.
+
+    New vectors are buffered in a list and flushed into the main
+    matrix lazily (before search, save, or remove) to avoid O(n)
+    array copies on every add().
+    """
 
     def __init__(self) -> None:
         self._vectors: np.ndarray = np.empty((0, 0), dtype=np.float32)
         self._ids: list[str] = []
         self._id_to_index: dict[str, int] = {}
+        self._pending: list[np.ndarray] = []
+
+    def _flush(self) -> None:
+        """Consolidate pending vectors into the main matrix."""
+        if not self._pending:
+            return
+        new_block = np.stack(self._pending)
+        if self._vectors.size == 0:
+            self._vectors = new_block
+        else:
+            self._vectors = np.vstack([self._vectors, new_block])
+        self._pending.clear()
 
     @property
     def count(self) -> int:
@@ -33,6 +50,8 @@ class NumpyVectorIndex:
         """Return (id, similarity) pairs sorted by descending similarity."""
         if len(self._ids) == 0:
             return []
+
+        self._flush()
 
         q = np.array(query_embedding, dtype=np.float32)
         norm = np.linalg.norm(q)
@@ -62,23 +81,27 @@ class NumpyVectorIndex:
 
         if node_id in self._id_to_index:
             idx = self._id_to_index[node_id]
-            self._vectors[idx] = vec
+            # If the vector is in the already-materialized matrix, update in place
+            materialized_count = self._vectors.shape[0] if self._vectors.size > 0 else 0
+            if idx < materialized_count:
+                self._vectors[idx] = vec
+            else:
+                # Update in pending buffer
+                self._pending[idx - materialized_count] = vec
             return
 
         idx = len(self._ids)
         self._ids.append(node_id)
         self._id_to_index[node_id] = idx
-
-        if self._vectors.size == 0:
-            self._vectors = vec.reshape(1, -1)
-        else:
-            self._vectors = np.vstack([self._vectors, vec.reshape(1, -1)])
+        self._pending.append(vec)
 
     def remove(self, node_id: str) -> None:
         """Remove a vector by ID."""
         idx = self._id_to_index.pop(node_id, None)
         if idx is None:
             return
+
+        self._flush()
 
         last_idx = len(self._ids) - 1
         if idx != last_idx:
@@ -98,6 +121,7 @@ class NumpyVectorIndex:
         """Remove all vectors from the index."""
         self._ids.clear()
         self._id_to_index.clear()
+        self._pending.clear()
         self._vectors = np.empty((0, 0), dtype=np.float32)
 
     def has(self, node_id: str) -> bool:
@@ -110,6 +134,7 @@ class NumpyVectorIndex:
 
     async def save(self, path: Path) -> None:
         """Save to .npy + .ids.json"""
+        self._flush()
         path.parent.mkdir(parents=True, exist_ok=True)
         if len(self._ids) > 0:
             np.save(str(path), self._vectors)

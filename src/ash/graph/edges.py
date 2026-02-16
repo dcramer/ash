@@ -204,11 +204,16 @@ def get_merged_into(graph: KnowledgeGraph, person_id: str) -> str | None:
 def follow_merge_chain(
     graph: KnowledgeGraph, person_id: str, max_depth: int = 10
 ) -> str:
-    """Follow MERGED_INTO edges to find the final person ID."""
+    """Follow MERGED_INTO edges to find the final (canonical) person ID.
+
+    Uses a visited set to detect cycles and a max_depth guard.
+    """
+    visited: set[str] = set()
     current = person_id
     for _ in range(max_depth):
+        visited.add(current)
         merged = get_merged_into(graph, current)
-        if not merged:
+        if not merged or merged in visited:
             return current
         current = merged
     return current
