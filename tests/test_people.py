@@ -15,9 +15,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ash.core.filters import build_owner_matchers, is_owner_name
-from ash.db.engine import Database
+from ash.graph.graph import KnowledgeGraph
+from ash.graph.persistence import GraphPersistence
 from ash.memory.embeddings import EmbeddingGenerator
-from ash.memory.index import VectorIndex
 from ash.memory.processing import extract_relationship_term
 from ash.store.store import Store
 from ash.store.types import AliasEntry, PersonEntry, RelationshipClaim
@@ -34,11 +34,10 @@ def _make_mock_llm(response_text: str = "YES") -> AsyncMock:
 
 @pytest.fixture
 def mock_index():
-    index = MagicMock(spec=VectorIndex)
+    index = MagicMock()
     index.search = AsyncMock(return_value=[])
-    index.add_embedding = AsyncMock()
-    index.delete_embedding = AsyncMock()
-    index.delete_embeddings = AsyncMock()
+    index.add = AsyncMock()
+    index.remove = AsyncMock()
     return index
 
 
@@ -50,14 +49,17 @@ def mock_embedding_generator():
 
 
 @pytest.fixture
-async def graph_store(
-    database: Database, mock_index, mock_embedding_generator
-) -> Store:
-    return Store(
-        db=database,
+async def graph_store(graph_dir, mock_index, mock_embedding_generator) -> Store:
+    graph = KnowledgeGraph()
+    persistence = GraphPersistence(graph_dir)
+    store = Store(
+        graph=graph,
+        persistence=persistence,
         vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
     )
+    store._llm_model = "mock-model"
+    return store
 
 
 class TestPersonCRUD:

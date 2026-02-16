@@ -6,27 +6,26 @@ Tests focus on:
 - Scoping rules (personal vs group)
 - Error handling
 
-Note: These tests use the SQLite-backed Store architecture.
+Note: These tests use the in-memory KnowledgeGraph-backed Store architecture.
 """
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import text
 
-from ash.db.engine import Database
+from ash.graph.graph import KnowledgeGraph
+from ash.graph.persistence import GraphPersistence
 from ash.memory.embeddings import EmbeddingGenerator
-from ash.memory.index import VectorIndex, VectorSearchResult
 from ash.store.store import Store
 from ash.store.types import MemoryType, Sensitivity
 
 
 def _make_search_results(
     results: list[tuple[str, float]],
-) -> list[VectorSearchResult]:
-    """Convert (memory_id, similarity) tuples to VectorSearchResult objects."""
-    return [VectorSearchResult(memory_id=mid, similarity=sim) for mid, sim in results]
+) -> list[tuple[str, float]]:
+    """Convert (memory_id, similarity) tuples — identity pass-through."""
+    return results
 
 
 @pytest.fixture
@@ -41,24 +40,27 @@ def mock_embedding_generator():
 @pytest.fixture
 def mock_index():
     """Create a mock vector index."""
-    index = MagicMock(spec=VectorIndex)
-    index.search = AsyncMock(return_value=[])
-    index.add_embedding = AsyncMock()
-    index.delete_embedding = AsyncMock()
-    index.delete_embeddings = AsyncMock()
+    index = MagicMock()
+    index.search = MagicMock(return_value=[])
+    index.add = MagicMock()
+    index.remove = MagicMock()
+    index.save = AsyncMock()
     return index
 
 
 @pytest.fixture
-async def graph_store(
-    database: Database, mock_index, mock_embedding_generator
-) -> Store:
+async def graph_store(graph_dir, mock_index, mock_embedding_generator) -> Store:
     """Create a Store with mocked components."""
-    return Store(
-        db=database,
+    graph = KnowledgeGraph()
+    persistence = GraphPersistence(graph_dir)
+    store = Store(
+        graph=graph,
+        persistence=persistence,
         vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
     )
+    store._llm_model = "mock-model"
+    return store
 
 
 class TestMemorySupersession:
@@ -80,18 +82,10 @@ class TestMemorySupersession:
         )
 
         assert len(result) == 1
-        # get_memory excludes archived; use SQL to verify supersession state
-        async with graph_store._db.session() as session:
-            r = await session.execute(
-                text(
-                    "SELECT superseded_at, superseded_by_id FROM memories WHERE id = :id"
-                ),
-                {"id": old_memory.id},
-            )
-            row = r.fetchone()
-            assert row is not None
-            assert row[0] is not None  # superseded_at is set
-            assert row[1] == new_memory.id
+        # get_memory excludes archived/superseded; use graph directly to verify
+        mem = graph_store._graph.memories[old_memory.id]
+        assert mem.superseded_at is not None
+        assert mem.superseded_by_id == new_memory.id
 
     async def test_list_memories_excludes_superseded_by_default(
         self, graph_store: Store
@@ -141,18 +135,10 @@ class TestStoreSupersession:
             owner_user_id="user-1",
         )
 
-        # Check that old memory is now superseded via SQL
-        async with graph_store._db.session() as session:
-            r = await session.execute(
-                text(
-                    "SELECT superseded_at, superseded_by_id FROM memories WHERE id = :id"
-                ),
-                {"id": old_memory.id},
-            )
-            row = r.fetchone()
-            assert row is not None
-            assert row[0] is not None  # superseded_at is set
-            assert row[1] == new_memory.id
+        # Check that old memory is now superseded via graph
+        mem = graph_store._graph.memories[old_memory.id]
+        assert mem.superseded_at is not None
+        assert mem.superseded_by_id == new_memory.id
 
     async def test_no_supersession_below_threshold(
         self, graph_store: Store, mock_index
@@ -176,14 +162,8 @@ class TestStoreSupersession:
         )
 
         # Old memory should NOT be superseded
-        async with graph_store._db.session() as session:
-            r = await session.execute(
-                text("SELECT superseded_at FROM memories WHERE id = :id"),
-                {"id": old_memory.id},
-            )
-            row = r.fetchone()
-            assert row is not None
-            assert row[0] is None
+        mem = graph_store._graph.memories[old_memory.id]
+        assert mem.superseded_at is None
 
 
 class TestGarbageCollection:
@@ -234,13 +214,8 @@ class TestEnforceMaxEntries:
         memories = []
         for i in range(5):
             m = await graph_store.add_memory(content=f"Fact {i}")
-            # Adjust created_at via SQL to stagger them
-            t = (old_time + timedelta(hours=i)).isoformat()
-            async with graph_store._db.session() as session:
-                await session.execute(
-                    text("UPDATE memories SET created_at = :t WHERE id = :id"),
-                    {"t": t, "id": m.id},
-                )
+            # Adjust created_at via in-memory graph to stagger them
+            graph_store._graph.memories[m.id].created_at = old_time + timedelta(hours=i)
             memories.append(m)
 
         evicted = await graph_store.enforce_max_entries(3)
@@ -316,12 +291,8 @@ class TestEphemeralDecay:
             content="Noticed something",
             memory_type=MemoryType.OBSERVATION,
         )
-        # Adjust created_at via SQL
-        async with graph_store._db.session() as session:
-            await session.execute(
-                text("UPDATE memories SET created_at = :t WHERE id = :id"),
-                {"t": old_time.isoformat(), "id": observation.id},
-            )
+        # Adjust created_at via in-memory graph
+        graph_store._graph.memories[observation.id].created_at = old_time
 
         result = await graph_store.gc()
 
@@ -335,12 +306,8 @@ class TestEphemeralDecay:
             content="Likes dark mode",
             memory_type=MemoryType.PREFERENCE,
         )
-        # Adjust created_at via SQL
-        async with graph_store._db.session() as session:
-            await session.execute(
-                text("UPDATE memories SET created_at = :t WHERE id = :id"),
-                {"t": old_time.isoformat(), "id": preference.id},
-            )
+        # Adjust created_at via in-memory graph
+        graph_store._graph.memories[preference.id].created_at = old_time
 
         result = await graph_store.gc()
 
@@ -670,9 +637,7 @@ class TestOwnMemoryPrivacy:
         )
 
         # Wire mock index to return this memory
-        mock_index.search = AsyncMock(
-            return_value=_make_search_results([(memory.id, 0.9)])
-        )
+        mock_index.search.return_value = [(memory.id, 0.9)]
 
         ctx = await graph_store.get_context_for_message(
             user_id="user-1",
@@ -695,9 +660,7 @@ class TestOwnMemoryPrivacy:
             subject_person_ids=["sarah-person-id"],
         )
 
-        mock_index.search = AsyncMock(
-            return_value=_make_search_results([(memory.id, 0.9)])
-        )
+        mock_index.search.return_value = [(memory.id, 0.9)]
 
         ctx = await graph_store.get_context_for_message(
             user_id="user-1",
@@ -789,7 +752,7 @@ class TestForgetPerson:
 
         await graph_store.forget_person(person_id=person_id)
 
-        mock_index.delete_embedding.assert_called_once_with(about_bob.id)
+        mock_index.remove.assert_called_once_with(about_bob.id)
 
     async def test_forget_returns_zero_when_no_memories(self, graph_store: Store):
         """Forget returns 0 when person has no memories."""
@@ -832,9 +795,7 @@ class TestSubjectNameResolution:
             subject_person_ids=["sarah-id"],
         )
 
-        mock_index.search = AsyncMock(
-            return_value=_make_search_results([(memory.id, 0.9)])
-        )
+        mock_index.search.return_value = [(memory.id, 0.9)]
 
         # Mock get_person to return a person entry with a name
         mock_person = MagicMock(spec=PersonEntry)
@@ -856,9 +817,7 @@ class TestSubjectNameResolution:
             subject_person_ids=["sarah-id"],
         )
 
-        mock_index.search = AsyncMock(
-            return_value=_make_search_results([(memory.id, 0.9)])
-        )
+        mock_index.search.return_value = [(memory.id, 0.9)]
 
         results = await graph_store.search(query="birthday", owner_user_id="user-1")
         assert len(results) == 1
@@ -875,9 +834,7 @@ class TestSubjectNameResolution:
             subject_person_ids=[],
         )
 
-        mock_index.search = AsyncMock(
-            return_value=_make_search_results([(memory.id, 0.9)])
-        )
+        mock_index.search.return_value = [(memory.id, 0.9)]
 
         results = await graph_store.search(query="dark mode", owner_user_id="user-1")
         assert len(results) == 1
@@ -894,15 +851,13 @@ class TestHearsaySupersession:
         person = await graph_store.create_person(
             created_by="alice", name="Bob", aliases=["bob"]
         )
-        # Link bob username -> person via users table
-        async with graph_store._db.session() as session:
-            await session.execute(
-                text(
-                    "INSERT INTO users (id, version, provider, provider_id, username, person_id, created_at, updated_at) "
-                    "VALUES (:id, 1, 'test', 'test', :username, :pid, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
-                ),
-                {"id": "bob-user-id", "username": "bob", "pid": person.id},
-            )
+        # Link bob username -> person via ensure_user
+        await graph_store.ensure_user(
+            provider="test",
+            provider_id="test",
+            username="bob",
+            person_id=person.id,
+        )
 
         # Alice says something about Bob (hearsay)
         hearsay = await graph_store.add_memory(
@@ -913,9 +868,7 @@ class TestHearsaySupersession:
         )
 
         # Mock index to return the hearsay as similar to Bob's self-fact
-        mock_index.search = AsyncMock(
-            return_value=_make_search_results([(hearsay.id, 0.90)])
-        )
+        mock_index.search.return_value = [(hearsay.id, 0.90)]
 
         # Bob confirms directly (self-fact)
         from ash.store.hearsay import supersede_hearsay_for_fact
@@ -935,15 +888,7 @@ class TestHearsaySupersession:
 
         assert count == 1
 
-        # Verify hearsay is now superseded
-        async with graph_store._db.session() as session:
-            r = await session.execute(
-                text(
-                    "SELECT superseded_at, superseded_by_id FROM memories WHERE id = :id"
-                ),
-                {"id": hearsay.id},
-            )
-            row = r.fetchone()
-            assert row is not None
-            assert row[0] is not None  # superseded_at set
-            assert row[1] == self_fact.id
+        # Verify hearsay is now superseded via graph
+        mem = graph_store._graph.memories[hearsay.id]
+        assert mem.superseded_at is not None
+        assert mem.superseded_by_id == self_fact.id

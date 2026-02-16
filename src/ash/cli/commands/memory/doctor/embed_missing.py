@@ -22,14 +22,7 @@ async def memory_doctor_embed_missing(store: Store, force: bool) -> None:
         return
 
     # Check which memories have embeddings in the vector index
-    from sqlalchemy import text
-
-    embedded_ids: set[str] = set()
-    async with store._db.session() as session:
-        result = await session.execute(text("SELECT memory_id FROM memory_embeddings"))
-        for row in result.fetchall():
-            embedded_ids.add(row[0])
-    missing = [m for m in memories if m.id not in embedded_ids]
+    missing = [m for m in memories if not store._index.has(m.id)]
 
     if not missing:
         success(f"All {len(memories)} memories have embeddings")
@@ -64,14 +57,18 @@ async def memory_doctor_embed_missing(store: Store, force: bool) -> None:
         for memory in missing:
             try:
                 embedding_floats = await store._embeddings.embed(memory.content)
-                await store._index.add_embedding(memory.id, embedding_floats)
+                store._index.add(memory.id, embedding_floats)
                 embedded += 1
             except Exception as e:
                 dim(f"Failed to embed {memory.id[:8]}: {e}")
                 failed += 1
             progress.advance(task, 1)
 
+    # Save updated index
     if embedded:
+        await store._index.save(
+            store._persistence.graph_dir / "embeddings" / "memories.npy"
+        )
         success(f"Generated embeddings for {embedded} memories")
     if failed:
         warning(f"Failed to embed {failed} memories")

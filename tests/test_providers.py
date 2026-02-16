@@ -88,12 +88,11 @@ class TestTelegramMessageHandler:
         return agent
 
     @pytest.fixture
-    async def handler(self, mock_provider, mock_agent, database, tmp_path):
+    async def handler(self, mock_provider, mock_agent, tmp_path):
         """Create a message handler with temp sessions path."""
         handler = TelegramMessageHandler(
             provider=mock_provider,
             agent=mock_agent,
-            database=database,
             streaming=True,
         )
         # Store tmp_path for tests to use
@@ -179,7 +178,7 @@ class TestTelegramMessageHandler:
         assert call_args[0][0].reply_to_message_id == "1"
 
     async def test_handle_message_non_streaming(
-        self, mock_provider, mock_agent, database, incoming_message, tmp_path
+        self, mock_provider, mock_agent, incoming_message, tmp_path
     ):
         """Test handling message with non-streaming response."""
         from ash.sessions import SessionManager
@@ -187,7 +186,6 @@ class TestTelegramMessageHandler:
         handler = TelegramMessageHandler(
             provider=mock_provider,
             agent=mock_agent,
-            database=database,
             streaming=False,
         )
 
@@ -466,7 +464,7 @@ class TestTelegramMessageHandler:
         mock_provider.send.assert_not_called()
 
     async def test_handle_callback_query_resumes_checkpoint(
-        self, mock_provider, mock_agent, database, tmp_path
+        self, mock_provider, mock_agent, tmp_path
     ):
         """Test that inline button click resumes from checkpoint."""
         from unittest.mock import AsyncMock, MagicMock
@@ -477,7 +475,6 @@ class TestTelegramMessageHandler:
         handler = TelegramMessageHandler(
             provider=mock_provider,
             agent=mock_agent,
-            database=database,
             streaming=False,
         )
 
@@ -547,7 +544,7 @@ class TestTelegramMessageHandler:
         mock_callback.answer.assert_called()
 
     async def test_checkpoint_recovery_from_session_log(
-        self, mock_provider, mock_agent, database, tmp_path
+        self, mock_provider, mock_agent, tmp_path
     ):
         """Test checkpoint restored after handler restart (empty in-memory cache)."""
 
@@ -590,7 +587,6 @@ class TestTelegramMessageHandler:
         handler = TelegramMessageHandler(
             provider=mock_provider,
             agent=mock_agent,
-            database=database,
             streaming=False,
         )
 
@@ -618,7 +614,7 @@ class TestTelegramMessageHandler:
         assert routing["chat_id"] == "456"
 
     async def test_handle_passive_message_throttling(
-        self, mock_provider, mock_agent, database, tmp_path
+        self, mock_provider, mock_agent, tmp_path
     ):
         """Test that throttled passive messages are dropped."""
         from unittest.mock import MagicMock
@@ -639,7 +635,6 @@ class TestTelegramMessageHandler:
         handler = TelegramMessageHandler(
             provider=mock_provider,
             agent=mock_agent,
-            database=database,
             streaming=False,
         )
 
@@ -675,7 +670,7 @@ class TestTelegramMessageHandler:
         mock_throttler.should_consider.assert_called_once_with("group_123")
 
     async def test_handle_passive_message_engages_on_name_mention(
-        self, mock_provider, mock_agent, database, tmp_path
+        self, mock_provider, mock_agent, tmp_path
     ):
         """Test that bot name mention bypasses throttle and engages."""
         from unittest.mock import MagicMock
@@ -699,7 +694,6 @@ class TestTelegramMessageHandler:
         handler = TelegramMessageHandler(
             provider=mock_provider,
             agent=mock_agent,
-            database=database,
             streaming=True,  # Use streaming
         )
 

@@ -1,8 +1,6 @@
 """Upgrade command for running migrations and setup tasks."""
 
 import asyncio
-import subprocess
-from pathlib import Path
 
 import typer
 
@@ -21,51 +19,10 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def upgrade() -> None:
-        """Upgrade Ash (run database migrations, build sandbox)."""
+        """Upgrade Ash (run data migrations, build sandbox)."""
         console.print("[bold]Upgrading Ash...[/bold]\n")
 
-        # Ensure data directory exists (for SQLite database)
-        data_dir = Path.cwd() / "data"
-        if not data_dir.exists():
-            data_dir.mkdir(parents=True, exist_ok=True)
-            dim(f"Created data directory: {data_dir}")
-
-        # Run Alembic schema migrations
-        info("Running schema migrations...")
-        try:
-            result = subprocess.run(
-                ["uv", "run", "alembic", "upgrade", "head"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                if "Running upgrade" in result.stdout or result.stdout.strip():
-                    dim(result.stdout.strip())
-                success("Schema migrations complete")
-            else:
-                # Check for common issues
-                stderr = result.stderr.strip()
-                if "Can't locate revision" in stderr:
-                    warning("No migrations to run (database is up to date)")
-                elif "unable to open database file" in stderr:
-                    error("Failed to open database file")
-                    dim("Check that data directory exists and is writable")
-                else:
-                    error("Migration failed")
-                    if stderr:
-                        # Show just the last meaningful line
-                        lines = [
-                            line
-                            for line in stderr.split("\n")
-                            if line.strip() and not line.startswith("  ")
-                        ]
-                        if lines:
-                            dim(lines[-1])
-        except FileNotFoundError:
-            warning("Alembic not available, skipping schema migrations")
-
-        # Run data migrations (filesystem layout + JSONL -> SQLite)
-        console.print()
+        # Run data migrations (filesystem layout + SQLite -> JSONL)
         info("Running data migrations...")
         asyncio.run(_run_data_migrations())
 
@@ -115,23 +72,16 @@ async def _run_data_migrations() -> None:
         logger.warning("Graph directory migration failed", exc_info=True)
         warning("Graph directory migration failed (see logs)")
 
-    # JSONL -> SQLite migration
+    # SQLite -> JSONL migration (for users upgrading from SQLite-backed storage)
     try:
-        from ash.cli.context import get_config
-        from ash.db import init_database
+        from ash.cli.context import get_graph_dir
+        from ash.store.migration_export import migrate_sqlite_to_jsonl
 
-        config = get_config()
-        db = init_database(database_path=config.memory.database_path)
-        await db.connect()
-        try:
-            from ash.store.migration_sqlite import migrate_jsonl_to_sqlite
-
-            if await migrate_jsonl_to_sqlite(db):
-                success("Migrated JSONL data to SQLite")
-            else:
-                dim("SQLite data up to date")
-        finally:
-            await db.disconnect()
+        graph_dir = get_graph_dir()
+        if await migrate_sqlite_to_jsonl(graph_dir):
+            success("Migrated SQLite data to JSONL")
+        else:
+            dim("Graph data up to date")
     except Exception:
-        logger.warning("JSONL to SQLite migration failed", exc_info=True)
-        warning("JSONL to SQLite migration failed (see logs)")
+        logger.warning("SQLite to JSONL migration failed", exc_info=True)
+        warning("SQLite to JSONL migration failed (see logs)")

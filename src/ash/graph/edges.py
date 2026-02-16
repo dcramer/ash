@@ -1,0 +1,170 @@
+"""Edge type constants and helper functions for creating typed edges.
+
+All graph relationships are represented as edges. This module provides:
+- Constants for edge type names
+- Factory functions for creating edges with proper type annotations
+- Query helpers for common edge-based lookups
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+from ash.graph.graph import Edge
+
+if TYPE_CHECKING:
+    from ash.graph.graph import KnowledgeGraph
+
+# Edge type constants
+ABOUT = "ABOUT"  # Memory → Person (memory is about this person)
+STATED_BY = "STATED_BY"  # Memory → Person (person stated this fact)
+SUPERSEDES = "SUPERSEDES"  # Memory → Memory (new supersedes old)
+IS_PERSON = "IS_PERSON"  # User → Person (user identity maps to person)
+MERGED_INTO = "MERGED_INTO"  # Person → Person (source merged into target)
+HAS_RELATIONSHIP = "HAS_RELATIONSHIP"  # Person → Person (relationship link)
+
+
+def _make_edge_id() -> str:
+    return f"e-{uuid.uuid4().hex[:12]}"
+
+
+def create_about_edge(
+    memory_id: str,
+    person_id: str,
+    *,
+    created_by: str | None = None,
+) -> Edge:
+    """Create an ABOUT edge: Memory → Person."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=ABOUT,
+        source_type="memory",
+        source_id=memory_id,
+        target_type="person",
+        target_id=person_id,
+        created_at=datetime.now(UTC),
+        created_by=created_by,
+    )
+
+
+def create_supersedes_edge(
+    new_memory_id: str,
+    old_memory_id: str,
+    *,
+    created_by: str | None = None,
+) -> Edge:
+    """Create a SUPERSEDES edge: NewMemory → OldMemory."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=SUPERSEDES,
+        source_type="memory",
+        source_id=new_memory_id,
+        target_type="memory",
+        target_id=old_memory_id,
+        created_at=datetime.now(UTC),
+        created_by=created_by,
+    )
+
+
+def create_is_person_edge(
+    user_id: str,
+    person_id: str,
+) -> Edge:
+    """Create an IS_PERSON edge: User → Person."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=IS_PERSON,
+        source_type="user",
+        source_id=user_id,
+        target_type="person",
+        target_id=person_id,
+        created_at=datetime.now(UTC),
+    )
+
+
+def create_merged_into_edge(
+    source_person_id: str,
+    target_person_id: str,
+) -> Edge:
+    """Create a MERGED_INTO edge: Person → Person."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=MERGED_INTO,
+        source_type="person",
+        source_id=source_person_id,
+        target_type="person",
+        target_id=target_person_id,
+        created_at=datetime.now(UTC),
+    )
+
+
+# -- Query helpers --
+
+
+def get_subject_person_ids(graph: KnowledgeGraph, memory_id: str) -> list[str]:
+    """Get person IDs that a memory is about (via ABOUT edges)."""
+    edges = graph.get_outgoing(memory_id, edge_type=ABOUT)
+    return [e.target_id for e in edges]
+
+
+def get_subject_person_ids_batch(
+    graph: KnowledgeGraph, memory_ids: list[str]
+) -> dict[str, list[str]]:
+    """Get subject person IDs for multiple memories."""
+    result: dict[str, list[str]] = {}
+    for mid in memory_ids:
+        subjects = get_subject_person_ids(graph, mid)
+        if subjects:
+            result[mid] = subjects
+    return result
+
+
+def get_memories_about_person(graph: KnowledgeGraph, person_id: str) -> list[str]:
+    """Get memory IDs that are about a person (via incoming ABOUT edges)."""
+    edges = graph.get_incoming(person_id, edge_type=ABOUT)
+    return [e.source_id for e in edges]
+
+
+def get_superseded_by(graph: KnowledgeGraph, memory_id: str) -> str | None:
+    """Get the memory that supersedes this one (via incoming SUPERSEDES edge)."""
+    edges = graph.get_incoming(memory_id, edge_type=SUPERSEDES)
+    return edges[0].source_id if edges else None
+
+
+def get_supersession_targets(graph: KnowledgeGraph, memory_id: str) -> list[str]:
+    """Get memories that this memory supersedes (via outgoing SUPERSEDES edges)."""
+    edges = graph.get_outgoing(memory_id, edge_type=SUPERSEDES)
+    return [e.target_id for e in edges]
+
+
+def get_person_for_user(graph: KnowledgeGraph, user_id: str) -> str | None:
+    """Get person ID linked to a user (via IS_PERSON edge)."""
+    edges = graph.get_outgoing(user_id, edge_type=IS_PERSON)
+    return edges[0].target_id if edges else None
+
+
+def get_users_for_person(graph: KnowledgeGraph, person_id: str) -> list[str]:
+    """Get user IDs linked to a person (via incoming IS_PERSON edges)."""
+    edges = graph.get_incoming(person_id, edge_type=IS_PERSON)
+    return [e.source_id for e in edges]
+
+
+def get_merged_into(graph: KnowledgeGraph, person_id: str) -> str | None:
+    """Get person this was merged into (via MERGED_INTO edge)."""
+    edges = graph.get_outgoing(person_id, edge_type=MERGED_INTO)
+    return edges[0].target_id if edges else None
+
+
+def follow_merge_chain(
+    graph: KnowledgeGraph, person_id: str, max_depth: int = 10
+) -> str:
+    """Follow MERGED_INTO edges to find the final person ID."""
+    current = person_id
+    for _ in range(max_depth):
+        merged = get_merged_into(graph, current)
+        if not merged:
+            return current
+        current = merged
+    return current

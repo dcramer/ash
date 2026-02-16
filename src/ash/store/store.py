@@ -1,7 +1,7 @@
-"""Unified store facade backed by SQLite.
+"""Unified store facade backed by in-memory KnowledgeGraph.
 
-All memory, people, user, and chat data in one SQLite database.
-Vector search uses sqlite-vec in the same database.
+All memory, people, user, and chat data in one in-memory graph.
+Persistence to JSONL files. Vector search uses numpy.
 
 Implementation is split across focused mixin modules:
 - memories: Memory CRUD, eviction, lifecycle
@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ash.db.engine import Database
+from ash.graph.graph import KnowledgeGraph
+from ash.graph.persistence import GraphPersistence
+from ash.graph.vectors import NumpyVectorIndex
 from ash.memory.embeddings import EmbeddingGenerator
-from ash.memory.index import VectorIndex
 from ash.store.memories import MemoryOpsMixin
 from ash.store.people import RELATIONSHIP_TERMS as RELATIONSHIP_TERMS
 from ash.store.people import PeopleOpsMixin
@@ -40,22 +42,23 @@ class Store(
     PeopleOpsMixin,
     UserChatOpsMixin,
 ):
-    """Unified facade replacing MemoryManager + PersonManager.
+    """Unified facade backed by in-memory KnowledgeGraph.
 
-    All data is stored in SQLite tables.  Every mutation is a single-row
-    SQL operation.  Edge queries use indexes.  SQLite WAL mode handles
-    concurrency.
+    All data is stored in-memory dicts. Every mutation updates in-memory
+    state and persists to JSONL files atomically. Vector search uses numpy.
     """
 
     def __init__(
         self,
-        db: Database,
-        vector_index: VectorIndex,
+        graph: KnowledgeGraph,
+        persistence: GraphPersistence,
+        vector_index: NumpyVectorIndex,
         embedding_generator: EmbeddingGenerator,
         llm: LLMProvider | None = None,
         max_entries: int | None = None,
     ) -> None:
-        self._db = db
+        self._graph = graph
+        self._persistence = persistence
         self._index = vector_index
         self._embeddings = embedding_generator
         self._llm = llm
@@ -77,7 +80,7 @@ class Store(
 
 
 async def create_store(
-    db: Database,
+    graph_dir: Path,
     llm_registry: LLMRegistry,
     embedding_model: str | None = None,
     embedding_provider: str = "openai",
@@ -87,7 +90,7 @@ async def create_store(
 ) -> Store:
     """Create a fully-wired Store.
 
-    Replaces both create_memory_manager() and create_person_manager().
+    Loads KnowledgeGraph from JSONL, NumpyVectorIndex from .npy files.
     """
     if auto_migrate:
         # Run old filesystem migrations (move files around)
@@ -106,14 +109,29 @@ async def create_store(
         except Exception:
             logger.warning("Graph directory migration failed", exc_info=True)
 
+        # SQLite → JSONL migration
+        try:
+            from ash.store.migration_export import migrate_sqlite_to_jsonl
+
+            if await migrate_sqlite_to_jsonl(graph_dir):
+                logger.info("Migrated SQLite data to JSONL")
+        except Exception:
+            logger.warning("SQLite to JSONL migration failed", exc_info=True)
+
+    # Load graph from JSONL
+    persistence = GraphPersistence(graph_dir)
+    graph = await persistence.load()
+
+    # Load vector index
+    embeddings_dir = graph_dir / "embeddings"
+    npy_path = embeddings_dir / "memories.npy"
+    vector_index = await NumpyVectorIndex.load(npy_path)
+
     embedding_generator = EmbeddingGenerator(
         registry=llm_registry,
         model=embedding_model,
         provider=embedding_provider,
     )
-
-    index = VectorIndex(db, embedding_generator)
-    await index.initialize()
 
     llm = None
     try:
@@ -121,23 +139,13 @@ async def create_store(
     except Exception:
         logger.debug("LLM not available for supersession verification")
 
-    if auto_migrate:
-        # Migrate JSONL data to SQLite if needed
-        try:
-            from ash.store.migration_sqlite import migrate_jsonl_to_sqlite
-
-            migrated = await migrate_jsonl_to_sqlite(db)
-            if migrated:
-                logger.info("Migrated JSONL data to SQLite")
-        except Exception:
-            logger.warning("JSONL to SQLite migration failed", exc_info=True)
-
-    graph_store = Store(
-        db=db,
-        vector_index=index,
+    store = Store(
+        graph=graph,
+        persistence=persistence,
+        vector_index=vector_index,
         embedding_generator=embedding_generator,
         llm=llm,
         max_entries=max_entries,
     )
 
-    return graph_store
+    return store

@@ -8,7 +8,7 @@ import click
 import typer
 
 from ash.cli.console import console, error
-from ash.cli.context import get_config, get_database
+from ash.cli.context import get_config
 
 
 def register(app: typer.Typer) -> None:
@@ -211,129 +211,120 @@ async def _run_memory_action(
         raise typer.Exit(1)
 
     config = get_config(config_path)
-    database = await get_database(config)
+    store = await get_store(config)
 
-    try:
-        store = await get_store(config, database)
-
-        if action == "list":
-            if not store:
-                error("Memory list requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_list(store, limit, include_expired, user_id, chat_id, scope)
-        elif action == "search":
-            search_query = query or entry_id  # entry_id holds positional target
-            if not search_query:
-                error(
-                    "Usage: ash memory search <query> or ash memory search -q <query>"
-                )
-                raise typer.Exit(1)
-            if not store:
-                error("Semantic search requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_search(store, search_query, limit, user_id, chat_id)
-        elif action == "add":
-            if not query:
-                error("--query/-q is required to specify content to add")
-                raise typer.Exit(1)
-            if not store:
-                error("Memory add requires [embeddings] configuration for indexing")
-                raise typer.Exit(1)
-            await memory_add(store, query, source, expires_days)
-        elif action == "remove":
-            if not entry_id and not all_entries:
-                error("--id or --all is required to remove entries")
-                raise typer.Exit(1)
-            if not store:
-                error("Memory remove requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_remove(
-                store, entry_id, all_entries, force, user_id, chat_id, scope
-            )
-        elif action == "clear":
-            if not store:
-                error("Memory clear requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_clear(store, force)
-        elif action == "gc":
-            if not store:
-                error("Memory gc requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_gc(store)
-        elif action == "rebuild-index":
-            if not store:
-                error("Rebuild-index requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_rebuild_index(store)
-        elif action == "show":
-            if not entry_id:
-                error("Usage: ash memory show <id>")
-                raise typer.Exit(1)
-            if not store:
-                error("Memory show requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_show(store, entry_id)
-        elif action == "history":
-            if not entry_id:
-                error("Usage: ash memory history <id>")
-                raise typer.Exit(1)
-            if not store:
-                error("Memory history requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_history(store, entry_id)
-        elif action == "forget":
-            if not entry_id:
-                error("Usage: ash memory forget <person-id>")
-                raise typer.Exit(1)
-            if not store:
-                error("Memory forget requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_forget(store, entry_id, delete_person, force)
-        elif action == "compact":
-            if not store:
-                error("Memory compact requires [embeddings] configuration")
-                raise typer.Exit(1)
-            await memory_compact(store, force)
-        elif action == "doctor":
-            from ash.cli.commands.memory.doctor import (
-                memory_doctor_attribution,
-                memory_doctor_backfill_subjects,
-                memory_doctor_contradictions,
-                memory_doctor_dedup,
-                memory_doctor_embed_missing,
-                memory_doctor_fix_names,
-                memory_doctor_quality,
-                memory_doctor_reclassify,
-                memory_doctor_self_facts,
-            )
-
-            if not store:
-                error("Memory doctor requires [embeddings] configuration")
-                raise typer.Exit(1)
-
-            subcommand = entry_id  # positional arg: ash memory doctor <sub>
-            if subcommand == "embed-missing":
-                await memory_doctor_embed_missing(store, force)
-            elif subcommand is None:
-                await memory_doctor_self_facts(store, force)
-                await memory_doctor_backfill_subjects(store, force)
-                await memory_doctor_attribution(store, force)
-                await memory_doctor_fix_names(store, force)
-                await memory_doctor_reclassify(store, config, force)
-                await memory_doctor_quality(store, config, force)
-                await memory_doctor_dedup(store, config, force)
-                await memory_doctor_contradictions(store, config, force)
-            else:
-                error(f"Unknown doctor subcommand: {subcommand}")
-                console.print(
-                    "Valid subcommands: embed-missing (or omit for full check)"
-                )
-                raise typer.Exit(1)
-        else:
-            error(f"Unknown action: {action}")
-            console.print(
-                "Valid actions: list, search, show, add, remove, clear, gc, compact, rebuild-index, history, forget, doctor"
-            )
+    if action == "list":
+        if not store:
+            error("Memory list requires [embeddings] configuration")
             raise typer.Exit(1)
-    finally:
-        await database.disconnect()
+        await memory_list(store, limit, include_expired, user_id, chat_id, scope)
+    elif action == "search":
+        search_query = query or entry_id  # entry_id holds positional target
+        if not search_query:
+            error("Usage: ash memory search <query> or ash memory search -q <query>")
+            raise typer.Exit(1)
+        if not store:
+            error("Semantic search requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_search(store, search_query, limit, user_id, chat_id)
+    elif action == "add":
+        if not query:
+            error("--query/-q is required to specify content to add")
+            raise typer.Exit(1)
+        if not store:
+            error("Memory add requires [embeddings] configuration for indexing")
+            raise typer.Exit(1)
+        await memory_add(store, query, source, expires_days)
+    elif action == "remove":
+        if not entry_id and not all_entries:
+            error("--id or --all is required to remove entries")
+            raise typer.Exit(1)
+        if not store:
+            error("Memory remove requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_remove(
+            store, entry_id, all_entries, force, user_id, chat_id, scope
+        )
+    elif action == "clear":
+        if not store:
+            error("Memory clear requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_clear(store, force)
+    elif action == "gc":
+        if not store:
+            error("Memory gc requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_gc(store)
+    elif action == "rebuild-index":
+        if not store:
+            error("Rebuild-index requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_rebuild_index(store)
+    elif action == "show":
+        if not entry_id:
+            error("Usage: ash memory show <id>")
+            raise typer.Exit(1)
+        if not store:
+            error("Memory show requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_show(store, entry_id)
+    elif action == "history":
+        if not entry_id:
+            error("Usage: ash memory history <id>")
+            raise typer.Exit(1)
+        if not store:
+            error("Memory history requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_history(store, entry_id)
+    elif action == "forget":
+        if not entry_id:
+            error("Usage: ash memory forget <person-id>")
+            raise typer.Exit(1)
+        if not store:
+            error("Memory forget requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_forget(store, entry_id, delete_person, force)
+    elif action == "compact":
+        if not store:
+            error("Memory compact requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_compact(store, force)
+    elif action == "doctor":
+        from ash.cli.commands.memory.doctor import (
+            memory_doctor_attribution,
+            memory_doctor_backfill_subjects,
+            memory_doctor_contradictions,
+            memory_doctor_dedup,
+            memory_doctor_embed_missing,
+            memory_doctor_fix_names,
+            memory_doctor_quality,
+            memory_doctor_reclassify,
+            memory_doctor_self_facts,
+        )
+
+        if not store:
+            error("Memory doctor requires [embeddings] configuration")
+            raise typer.Exit(1)
+
+        subcommand = entry_id  # positional arg: ash memory doctor <sub>
+        if subcommand == "embed-missing":
+            await memory_doctor_embed_missing(store, force)
+        elif subcommand is None:
+            await memory_doctor_self_facts(store, force)
+            await memory_doctor_backfill_subjects(store, force)
+            await memory_doctor_attribution(store, force)
+            await memory_doctor_fix_names(store, force)
+            await memory_doctor_reclassify(store, config, force)
+            await memory_doctor_quality(store, config, force)
+            await memory_doctor_dedup(store, config, force)
+            await memory_doctor_contradictions(store, config, force)
+        else:
+            error(f"Unknown doctor subcommand: {subcommand}")
+            console.print("Valid subcommands: embed-missing (or omit for full check)")
+            raise typer.Exit(1)
+    else:
+        error(f"Unknown action: {action}")
+        console.print(
+            "Valid actions: list, search, show, add, remove, clear, gc, compact, rebuild-index, history, forget, doctor"
+        )
+        raise typer.Exit(1)

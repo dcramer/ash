@@ -1,48 +1,19 @@
-"""Integration tests for VectorIndex with real sqlite-vec.
+"""Tests for NumpyVectorIndex.
 
-These tests verify the actual sqlite-vec behavior rather than
-testing through mocks.
+These tests verify the numpy-based in-memory vector index used for
+cosine similarity search.
 """
 
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
 
 import pytest
 
-from ash.db.engine import Database
-from ash.memory.embeddings import EmbeddingGenerator
-from ash.memory.index import VectorIndex
-from ash.store.types import MemoryEntry, MemoryType
-
-_SUPERSEDED_AT = datetime(2024, 1, 1, tzinfo=UTC)
-_ARCHIVED_AT = datetime(2024, 1, 1, tzinfo=UTC)
+from ash.graph.vectors import NumpyVectorIndex
 
 
 @pytest.fixture
-def mock_embedding_generator():
-    """Embedding generator with fixed 4 dimensions for tests."""
-    gen = MagicMock(spec=EmbeddingGenerator)
-    gen.dimensions = 4
-    gen.embed = AsyncMock()
-    return gen
-
-
-@pytest.fixture
-async def vec_database(tmp_path):
-    """Create a Database with sqlite-vec loaded."""
-    db_path = tmp_path / "test_vec.db"
-    db = Database(database_path=db_path)
-    await db.connect()
-    yield db
-    await db.disconnect()
-
-
-@pytest.fixture
-async def vector_index(vec_database: Database, mock_embedding_generator) -> VectorIndex:
-    """Create a VectorIndex with real sqlite-vec, 4 dimensions."""
-    index = VectorIndex(vec_database, mock_embedding_generator)
-    await index.initialize()
-    return index
+def index() -> NumpyVectorIndex:
+    return NumpyVectorIndex()
 
 
 def _make_embedding(seed: float) -> list[float]:
@@ -50,147 +21,122 @@ def _make_embedding(seed: float) -> list[float]:
     return [seed, seed + 0.1, seed + 0.2, seed + 0.3]
 
 
-class TestVectorIndexIntegration:
-    """Integration tests for VectorIndex with real sqlite-vec."""
-
-    async def test_add_and_search(self, vector_index: VectorIndex):
+class TestNumpyVectorIndex:
+    async def test_add_and_search(self, index: NumpyVectorIndex):
         """Adding embeddings and searching returns ranked results."""
         emb_a = _make_embedding(0.1)
         emb_b = _make_embedding(0.5)
         emb_c = _make_embedding(0.9)
 
-        await vector_index.add_embedding("mem-a", emb_a)
-        await vector_index.add_embedding("mem-b", emb_b)
-        await vector_index.add_embedding("mem-c", emb_c)
+        index.add("mem-a", emb_a)
+        index.add("mem-b", emb_b)
+        index.add("mem-c", emb_c)
 
         # Search with embedding close to emb_a
-        results = await vector_index.search_by_embedding(emb_a, limit=3)
+        results = index.search(emb_a, limit=3)
 
         assert len(results) == 3
         # Most similar should be mem-a itself
-        assert results[0].memory_id == "mem-a"
-        assert results[0].similarity > 0.99
+        assert results[0][0] == "mem-a"
+        assert results[0][1] > 0.99
 
-    async def test_delete_removes_from_search(self, vector_index: VectorIndex):
+    async def test_delete_removes_from_search(self, index: NumpyVectorIndex):
         """Deleted embeddings no longer appear in search results."""
         emb_a = _make_embedding(0.1)
         emb_b = _make_embedding(0.5)
 
-        await vector_index.add_embedding("mem-a", emb_a)
-        await vector_index.add_embedding("mem-b", emb_b)
+        index.add("mem-a", emb_a)
+        index.add("mem-b", emb_b)
 
-        await vector_index.delete_embedding("mem-a")
+        index.remove("mem-a")
 
-        results = await vector_index.search_by_embedding(emb_a, limit=5)
-        result_ids = {r.memory_id for r in results}
+        results = index.search(emb_a, limit=5)
+        result_ids = {r[0] for r in results}
         assert "mem-a" not in result_ids
         assert "mem-b" in result_ids
 
-    async def test_delete_embeddings_batch(self, vector_index: VectorIndex):
-        """Batch delete removes multiple embeddings."""
-        await vector_index.add_embedding("mem-a", _make_embedding(0.1))
-        await vector_index.add_embedding("mem-b", _make_embedding(0.3))
-        await vector_index.add_embedding("mem-c", _make_embedding(0.5))
-
-        await vector_index.delete_embeddings(["mem-a", "mem-b"])
-
-        count = await vector_index.get_embedding_count()
-        assert count == 1
-
-    async def test_clear_removes_all(self, vector_index: VectorIndex):
-        """Clear removes all embeddings."""
-        await vector_index.add_embedding("mem-a", _make_embedding(0.1))
-        await vector_index.add_embedding("mem-b", _make_embedding(0.5))
-
-        count_before = await vector_index.get_embedding_count()
-        assert count_before == 2
-
-        deleted = await vector_index.clear()
-        assert deleted == 2
-
-        count_after = await vector_index.get_embedding_count()
-        assert count_after == 0
-
-    async def test_add_replaces_existing(self, vector_index: VectorIndex):
+    async def test_add_replaces_existing(self, index: NumpyVectorIndex):
         """Adding with existing ID replaces the old embedding."""
         emb_v1 = _make_embedding(0.1)
         emb_v2 = _make_embedding(0.9)
 
-        await vector_index.add_embedding("mem-a", emb_v1)
-        await vector_index.add_embedding("mem-a", emb_v2)
+        index.add("mem-a", emb_v1)
+        index.add("mem-a", emb_v2)
 
-        count = await vector_index.get_embedding_count()
-        assert count == 1
+        assert index.count == 1
 
         # Search should find the new embedding, not the old one
-        results = await vector_index.search_by_embedding(emb_v2, limit=1)
-        assert results[0].memory_id == "mem-a"
-        assert results[0].similarity > 0.99
+        results = index.search(emb_v2, limit=1)
+        assert results[0][0] == "mem-a"
+        assert results[0][1] > 0.99
 
-    async def test_rebuild_only_indexes_active_memories(
-        self, vector_index: VectorIndex
-    ):
-        """rebuild_from_embeddings only indexes active (non-superseded, non-archived) memories."""
-
-        active = MemoryEntry(
-            id="mem-active",
-            content="Active memory",
-            memory_type=MemoryType.KNOWLEDGE,
-        )
-        superseded = MemoryEntry(
-            id="mem-superseded",
-            content="Superseded memory",
-            memory_type=MemoryType.KNOWLEDGE,
-            superseded_at=_SUPERSEDED_AT,
-        )
-        archived = MemoryEntry(
-            id="mem-archived",
-            content="Archived memory",
-            memory_type=MemoryType.KNOWLEDGE,
-            archived_at=_ARCHIVED_AT,
-        )
-
-        # Create base64-encoded embeddings
-        emb = _make_embedding(0.5)
-        emb_b64 = MemoryEntry.encode_embedding(emb)
-
-        embeddings = {
-            "mem-active": emb_b64,
-            "mem-superseded": emb_b64,
-            "mem-archived": emb_b64,
-        }
-
-        count = await vector_index.rebuild_from_embeddings(
-            memories=[active, superseded, archived],
-            embeddings=embeddings,
-        )
-
-        assert count == 1
-        total = await vector_index.get_embedding_count()
-        assert total == 1
-
-    async def test_search_empty_index(self, vector_index: VectorIndex):
+    async def test_search_empty_index(self, index: NumpyVectorIndex):
         """Searching an empty index returns empty results."""
-        results = await vector_index.search_by_embedding(_make_embedding(0.5), limit=5)
+        results = index.search(_make_embedding(0.5), limit=5)
         assert results == []
 
-    async def test_similarity_ordering(self, vector_index: VectorIndex):
+    async def test_similarity_ordering(self, index: NumpyVectorIndex):
         """Results are ordered by similarity descending."""
-        # Create embeddings at different distances from query
         query = [1.0, 0.0, 0.0, 0.0]
         close = [0.9, 0.1, 0.0, 0.0]
         medium = [0.5, 0.5, 0.0, 0.0]
         far = [0.0, 0.0, 1.0, 0.0]
 
-        await vector_index.add_embedding("close", close)
-        await vector_index.add_embedding("medium", medium)
-        await vector_index.add_embedding("far", far)
+        index.add("close", close)
+        index.add("medium", medium)
+        index.add("far", far)
 
-        results = await vector_index.search_by_embedding(query, limit=3)
+        results = index.search(query, limit=3)
 
         assert len(results) == 3
-        assert results[0].memory_id == "close"
-        assert results[1].memory_id == "medium"
-        assert results[2].memory_id == "far"
+        assert results[0][0] == "close"
+        assert results[1][0] == "medium"
+        assert results[2][0] == "far"
         # Similarities should be decreasing
-        assert results[0].similarity > results[1].similarity > results[2].similarity
+        assert results[0][1] > results[1][1] > results[2][1]
+
+    async def test_save_and_load_round_trip(
+        self, index: NumpyVectorIndex, tmp_path: Path
+    ):
+        """Saving and loading preserves the index contents."""
+        index.add("mem-a", _make_embedding(0.1))
+        index.add("mem-b", _make_embedding(0.5))
+        index.add("mem-c", _make_embedding(0.9))
+
+        save_path = tmp_path / "vectors.npy"
+        await index.save(save_path)
+
+        loaded = await NumpyVectorIndex.load(save_path)
+
+        assert loaded.count == 3
+
+        # Verify search still works and returns same results
+        query = _make_embedding(0.1)
+        original_results = index.search(query, limit=3)
+        loaded_results = loaded.search(query, limit=3)
+
+        assert [r[0] for r in original_results] == [r[0] for r in loaded_results]
+        for orig, load in zip(original_results, loaded_results, strict=False):
+            assert abs(orig[1] - load[1]) < 1e-6
+
+    async def test_count_after_add_and_remove(self, index: NumpyVectorIndex):
+        """Count reflects current number of stored embeddings."""
+        assert index.count == 0
+
+        index.add("mem-a", _make_embedding(0.1))
+        assert index.count == 1
+
+        index.add("mem-b", _make_embedding(0.5))
+        assert index.count == 2
+
+        index.add("mem-c", _make_embedding(0.9))
+        assert index.count == 3
+
+        index.remove("mem-b")
+        assert index.count == 2
+
+        index.remove("mem-a")
+        assert index.count == 1
+
+        index.remove("mem-c")
+        assert index.count == 0

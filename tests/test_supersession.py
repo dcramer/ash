@@ -8,26 +8,26 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.db.engine import Database
+from ash.graph.graph import KnowledgeGraph
+from ash.graph.persistence import GraphPersistence
 from ash.memory.embeddings import EmbeddingGenerator
-from ash.memory.index import VectorIndex, VectorSearchResult
 from ash.store.store import Store
 from ash.store.types import MemoryEntry, MemoryType
 
 
 def _make_search_results(
     results: list[tuple[str, float]],
-) -> list[VectorSearchResult]:
-    return [VectorSearchResult(memory_id=mid, similarity=sim) for mid, sim in results]
+) -> list[tuple[str, float]]:
+    return results
 
 
 @pytest.fixture
 def mock_index():
-    index = MagicMock(spec=VectorIndex)
-    index.search = AsyncMock(return_value=[])
-    index.add_embedding = AsyncMock()
-    index.delete_embedding = AsyncMock()
-    index.delete_embeddings = AsyncMock()
+    index = MagicMock()
+    index.search = MagicMock(return_value=[])
+    index.add = MagicMock()
+    index.remove = MagicMock()
+    index.save = AsyncMock()
     return index
 
 
@@ -39,14 +39,17 @@ def mock_embedding_generator():
 
 
 @pytest.fixture
-async def graph_store(
-    database: Database, mock_index, mock_embedding_generator
-) -> Store:
-    return Store(
-        db=database,
+async def graph_store(graph_dir, mock_index, mock_embedding_generator) -> Store:
+    graph = KnowledgeGraph()
+    persistence = GraphPersistence(graph_dir)
+    store = Store(
+        graph=graph,
+        persistence=persistence,
         vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
     )
+    store._llm_model = "mock-model"
+    return store
 
 
 class TestIsProtectedBySubjectAuthority:
@@ -257,7 +260,7 @@ class TestSupersedeConflictingMemories:
         )
 
         # Mock index to return high similarity
-        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+        graph_store._index.search = MagicMock(  # type: ignore[assignment]
             return_value=_make_search_results([(m_old.id, 0.90)])
         )
 
@@ -288,7 +291,7 @@ class TestSupersedeConflictingMemories:
             owner_user_id="user-1",
         )
 
-        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+        graph_store._index.search = MagicMock(  # type: ignore[assignment]
             return_value=_make_search_results([(m_old.id, 0.80)])
         )
 
@@ -319,7 +322,7 @@ class TestSupersedeConflictingMemories:
             owner_user_id="user-1",
         )
 
-        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+        graph_store._index.search = MagicMock(  # type: ignore[assignment]
             return_value=_make_search_results([(m_old.id, 0.80)])
         )
 
@@ -357,7 +360,7 @@ class TestSupersedeConfirmedHearsay:
         )
 
         # Mock index: searching fact content returns the hearsay as similar
-        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+        graph_store._index.search = MagicMock(  # type: ignore[assignment]
             return_value=_make_search_results([(hearsay.id, 0.88)])
         )
 
@@ -395,7 +398,7 @@ class TestSupersedeConfirmedHearsay:
             subject_person_ids=[bob.id],
         )
 
-        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+        graph_store._index.search = MagicMock(  # type: ignore[assignment]
             return_value=_make_search_results([(new_fact.id, 0.90)])
         )
 
@@ -433,7 +436,7 @@ class TestSupersedeConfirmedHearsay:
         )
 
         # Low similarity — different topics
-        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+        graph_store._index.search = MagicMock(  # type: ignore[assignment]
             return_value=_make_search_results([(fact.id, 0.40)])
         )
 
@@ -466,7 +469,7 @@ class TestSupersedeConfirmedHearsay:
         )
 
         # Simulate search failure
-        graph_store._index.search = AsyncMock(  # type: ignore[assignment]
+        graph_store._index.search = MagicMock(  # type: ignore[assignment]
             side_effect=RuntimeError("Search failed")
         )
 

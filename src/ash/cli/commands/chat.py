@@ -84,14 +84,13 @@ async def _run_chat(
     from rich.panel import Panel
 
     from ash.config import ConfigError, WorkspaceLoader, load_config
-    from ash.config.paths import get_rpc_socket_path
+    from ash.config.paths import get_graph_dir, get_rpc_socket_path
     from ash.logging import configure_logging
 
     # Configure logging - suppress to WARNING for chat TUI
     configure_logging(level="WARNING")
     from ash.core import create_agent
     from ash.core.session import SessionState
-    from ash.db import init_database
     from ash.rpc import RPCServer, register_memory_methods
     from ash.sessions import SessionManager
 
@@ -134,9 +133,8 @@ async def _run_chat(
     workspace_loader.ensure_workspace()
     workspace = workspace_loader.load()
 
-    # Initialize database for memory
-    database = init_database(database_path=ash_config.memory.database_path)
-    await database.connect()
+    # Set up graph directory for memory
+    graph_dir = get_graph_dir()
 
     components = None
     rpc_server: RPCServer | None = None
@@ -145,7 +143,7 @@ async def _run_chat(
         components = await create_agent(
             config=ash_config,
             workspace=workspace,
-            db=database,
+            graph_dir=graph_dir,
             model_alias=resolved_alias,
         )
         agent = components.agent
@@ -302,4 +300,3 @@ async def _run_chat(
                 await components.sandbox_executor.cleanup()
             except Exception as e:
                 logger.warning(f"Error cleaning up sandbox: {e}")
-        await database.disconnect()

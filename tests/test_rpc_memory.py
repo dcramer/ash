@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.db.engine import Database
+from ash.graph.graph import KnowledgeGraph
+from ash.graph.persistence import GraphPersistence
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.extractor import MemoryExtractor
-from ash.memory.index import VectorIndex
 from ash.rpc.methods.memory import register_memory_methods
 from ash.store.store import Store
 from ash.store.types import ExtractedFact, MemoryType, Sensitivity
@@ -43,24 +43,26 @@ def mock_embedding_generator():
 @pytest.fixture
 def mock_index():
     """Create a mock vector index."""
-    index = MagicMock(spec=VectorIndex)
+    index = MagicMock()
     index.search = AsyncMock(return_value=[])
-    index.add_embedding = AsyncMock()
-    index.delete_embedding = AsyncMock()
-    index.delete_embeddings = AsyncMock()
+    index.add = AsyncMock()
+    index.remove = AsyncMock()
     return index
 
 
 @pytest.fixture
-async def memory_manager(
-    database: Database, mock_index, mock_embedding_generator
-) -> Store:
+async def memory_manager(graph_dir, mock_index, mock_embedding_generator) -> Store:
     """Create a Store with mocked components."""
-    return Store(
-        db=database,
+    graph = KnowledgeGraph()
+    persistence = GraphPersistence(graph_dir)
+    store = Store(
+        graph=graph,
+        persistence=persistence,
         vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
     )
+    store._llm_model = "mock-model"
+    return store
 
 
 @pytest.fixture

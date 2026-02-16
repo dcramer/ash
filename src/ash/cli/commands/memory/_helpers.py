@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
-    from ash.db.engine import Database
     from ash.store.store import Store
     from ash.store.types import PersonEntry
 
@@ -53,11 +52,12 @@ def is_source_self_reference(
     return False
 
 
-async def get_store(config: AshConfig, db: Database) -> Store | None:
+async def get_store(config: AshConfig) -> Store | None:
     """Create a Store from CLI context.
 
     Returns None if embeddings are not configured.
     """
+    from ash.cli.context import get_graph_dir
     from ash.llm.registry import create_registry
     from ash.store import create_store
 
@@ -82,8 +82,10 @@ async def get_store(config: AshConfig, db: Database) -> Store | None:
         else None,
     )
 
+    graph_dir = get_graph_dir()
+
     return await create_store(
-        db=db,
+        graph_dir=graph_dir,
         llm_registry=llm_registry,
         embedding_model=config.embeddings.model,
         embedding_provider=config.embeddings.provider,

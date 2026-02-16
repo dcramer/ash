@@ -1,166 +1,200 @@
 # Graph Store
 
-> Unified graph architecture that combines memory and people into a single store with O(1) traversals
+> In-memory knowledge graph backed by JSONL files and numpy vectors, with explicit typed edges and multi-hop retrieval.
 
 ## Intent
 
-The graph store unifies memory and people management into a single facade (`GraphStore`) backed by an in-memory graph index (`GraphIndex`). It solves three problems:
+The graph store is the unified storage and retrieval layer for Ash. All memories, people, users, and chats are nodes in an in-memory `KnowledgeGraph`. All relationships (memory-about-person, user-is-person, supersession chains, merge chains) are explicit typed `Edge` objects with their own adjacency indexes.
 
-1. **Unified API** - One store handles memory CRUD, person resolution, user/chat management, and cross-context retrieval. Eliminates the circular dependency between MemoryManager and PersonManager.
-2. **O(1) traversals** - Graph index provides constant-time lookups for "memories about person X", "user for this provider_id", "people known by user" instead of O(n) linear scans.
-3. **First-class identity nodes** - Users and Chats are proper graph nodes (not just string IDs scattered across memory fields), enabling identity resolution and cross-provider linking.
+**Design principles:**
+- **JSONL source of truth** — Human-readable, atomic writes via tempfile + `os.replace()`
+- **In-memory graph** — All queries run against dicts and adjacency lists, no SQL
+- **Numpy vectors** — Brute-force cosine similarity, no C extension dependencies
+- **Explicit edges** — All relationships are first-class Edge objects with temporal metadata
+- **Multi-hop retrieval** — BFS traversal discovers related memories across graph hops
 
-The graph store is NOT:
-- A graph database (JSONL files are the source of truth, graph index is derived)
-- A replacement for the vector index (semantic search still uses sqlite-vec)
-- An RDF/property graph system (edges are fields on nodes, not separate entities)
+**Not:**
+- A graph database (no query language, no transactions)
+- An RDF/property graph system (simple typed edges, not triples)
 
-## Filesystem Layout
+## On-Disk Layout
 
 ```
-~/.ash/
-├── config.toml
-├── graph/                    # Source of truth — node JSONL files only
-│   ├── memories.jsonl        #   Memory nodes
-│   ├── people.jsonl          #   Person nodes
-│   ├── users.jsonl           #   User identity nodes
-│   └── chats.jsonl           #   Chat/channel nodes
-├── index/                    # Derived data (rebuildable from graph/)
-│   ├── embeddings.jsonl      #   Vector embeddings (expensive to recompute)
-│   └── vectors.db            #   sqlite-vec index (rebuildable from embeddings)
-├── sessions/                 # Conversation transcripts
-├── chats/                    # Per-chat operational state
-│   └── {provider}/{chat_id}/
-│       └── state.json        # ChatState (references graph node IDs)
-├── skills/
-│   └── state/                # Per-skill operational state
-├── skills.installed/
-├── run/
-├── logs/
-├── cache/uv/
-└── schedule.jsonl
+~/.ash/graph/
+├── memories.jsonl           # One MemoryEntry per line
+├── people.jsonl             # One PersonEntry per line
+├── users.jsonl              # One UserEntry per line
+├── chats.jsonl              # One ChatEntry per line
+├── edges.jsonl              # All typed edges
+└── embeddings/
+    ├── memories.npy         # float32 array, shape (N, 1536)
+    └── memories.ids.json    # row index → memory_id mapping
 ```
 
-**Key principle**: `graph/` contains source-of-truth JSONL files. `index/` contains derived data that can be rebuilt. Everything else is operational state.
+**Persistence strategy:**
+- Startup: Load all JSONL → build in-memory KnowledgeGraph + adjacency indexes
+- Mutation: Update in-memory → rewrite affected JSONL file atomically
+- Vectors: Numpy `.npy` files + JSON ID mapping, saved after embedding changes
+- Scale: ~1MB per 2000 entries, <10ms to rewrite a file
 
 ## Graph Model
 
 ### Nodes
 
-| Type | File | Schema | Purpose |
-|------|------|--------|---------|
+| Type | File | Dataclass | Purpose |
+|------|------|-----------|---------|
 | **Memory** | `memories.jsonl` | `MemoryEntry` | Facts, preferences, observations |
 | **Person** | `people.jsonl` | `PersonEntry` | Identity entities (people in user's life) |
 | **User** | `users.jsonl` | `UserEntry` | Provider identity (Telegram user, etc.) |
 | **Chat** | `chats.jsonl` | `ChatEntry` | Chat/channel from a provider |
 
-**UserEntry** bridges provider identity to Person:
-- `provider_id` is the stable anchor (e.g., Telegram numeric ID)
-- `username` is mostly-stable (can change)
-- `display_name` is unstable (can change anytime)
-- `person_id` links to the Person record (IS_PERSON edge)
+### Edge Types
 
-**ChatEntry** represents a chat/channel:
-- `provider_id` is the provider's chat ID
-- `title`, `chat_type` are mutable metadata
+All edges are stored in `edges.jsonl` and indexed in in-memory adjacency lists.
 
-### Edges
+| Edge Type | Direction | Purpose |
+|-----------|-----------|---------|
+| `ABOUT` | Memory → Person | Memory is about this person |
+| `STATED_BY` | Memory → Person | Person stated this fact |
+| `SUPERSEDES` | Memory → Memory | New memory replaces old |
+| `IS_PERSON` | User → Person | User identity maps to person |
+| `MERGED_INTO` | Person → Person | Duplicate person merged into primary |
+| `HAS_RELATIONSHIP` | Person → Person | Relationship link between people |
 
-Edges are stored as fields on nodes. The GraphIndex extracts them into adjacency lists at build time.
+**Edge dataclass** (`ash.graph.graph.Edge`):
+```python
+@dataclass
+class Edge:
+    id: str
+    edge_type: str          # ABOUT, SUPERSEDES, etc.
+    source_type: str        # "memory", "person", "user"
+    source_id: str
+    target_type: str
+    target_id: str
+    weight: float = 1.0
+    properties: dict | None = None
+    created_at: datetime | None = None
+    valid_from: datetime | None = None
+    invalid_at: datetime | None = None  # Soft-delete timestamp
+    created_by: str | None = None
+```
 
-| Edge | Direction | Stored As | Forward Query | Reverse Query |
-|------|-----------|-----------|---------------|---------------|
-| **ABOUT** | Memory → Person | `memory.subject_person_ids` | "who is this about?" | "memories about X?" |
-| **OWNED_BY** | Memory → User | `memory.owner_user_id` (provider_id) | "who owns this?" | "X's memories?" |
-| **IN_CHAT** | Memory → Chat | `memory.chat_id` (provider_id) | "which chat?" | "memories in chat X?" |
-| **STATED_BY** | Memory → User | `memory.source_username` (username) | "who said this?" | "what did X say?" |
-| **SUPERSEDES** | Memory → Memory | `memory.superseded_by_id` | "what replaced this?" | "what did X replace?" |
-| **KNOWS** | User → Person | `person.relationships[].stated_by` | "who does user know?" | "who knows X?" |
-| **IS_PERSON** | User → Person | `user.person_id` | "user's person record?" | "whose self-record?" |
-| **MERGED_INTO** | Person → Person | `person.merged_into` | "merged into who?" | "who merged into X?" |
+### Dual-Write Pattern
 
-**Note**: Existing fields hold provider IDs/usernames, not node UUIDs. GraphIndex resolves these via lookup tables at build time.
+During the FK → edge migration, both FK fields and edges are maintained:
+- **Writes** create/update both the FK field (e.g., `memory.subject_person_ids`) and the corresponding edge (e.g., `ABOUT`)
+- **Reads** use edge queries via adjacency lists for key paths (retrieval, lifecycle, supersession)
+- **Backfill** auto-populates edges from FK fields on first load when `edges.jsonl` is empty
 
 ### Key Traversals
 
-| Query | Traversal | Complexity |
-|-------|-----------|------------|
-| Memories about person X | `graph.memories_about(person_id)` → reverse ABOUT | O(1) |
-| Resolve username → person | `graph.resolve_user_by_username()` → IS_PERSON | O(1) |
-| Cross-context retrieval | person_ids → `memories_about()` → filter privacy/portable | O(k) per person |
-| People known by user | `graph.people_known_by_user(user_id)` → KNOWS | O(1) |
-| Hearsay candidates | person_ids → `memories_about()` → filter source_username | O(k) per person |
+| Query | Method | Via |
+|-------|--------|-----|
+| Memories about person X | `get_memories_about_person(graph, pid)` | Incoming ABOUT edges |
+| Person for user | `get_person_for_user(graph, uid)` | Outgoing IS_PERSON edge |
+| Users for person | `get_users_for_person(graph, pid)` | Incoming IS_PERSON edges |
+| Supersession chain | `get_supersession_targets(graph, mid)` | Outgoing SUPERSEDES edges |
+| Merge chain | `follow_merge_chain(graph, pid)` | Outgoing MERGED_INTO edges |
+| Multi-hop discovery | `bfs_traverse(graph, seeds, max_hops=2)` | All edges (excl. SUPERSEDES) |
 
 ## Architecture
 
-### GraphIndex (`graph/index.py`)
+### KnowledgeGraph (`graph/graph.py`)
 
-In-memory adjacency lists built from node lists. Derived data — can be rebuilt from JSONL files in milliseconds for hundreds of nodes.
-
-```
-GraphIndex
-├── _outgoing: dict[EdgeType, dict[str, set[str]]]  # source → targets
-├── _incoming: dict[EdgeType, dict[str, set[str]]]   # target → sources
-├── _provider_to_user: dict[str, str]                 # provider_id → user.id
-├── _username_to_user: dict[str, str]                 # username → user.id
-└── _chat_provider_to_id: dict[str, str]              # chat provider_id → chat.id
-```
-
-**Rebuild trigger**: Lazy invalidation via JSONL mtime checks. Any mutation sets `_graph_built = False`, and the next access triggers a full rebuild from `get_all_memories()` + cached people/users/chats.
-
-### GraphStore (`graph/store.py`)
-
-Unified facade composing existing storage layers:
+In-memory data structure holding all nodes and edges with adjacency indexes.
 
 ```
-GraphStore
-├── _store: FileMemoryStore        # Memory CRUD (JSONL)
-├── _index: VectorIndex            # Semantic search (sqlite-vec)
-├── _embeddings: EmbeddingGenerator # Embedding generation
-├── _people_jsonl: TypedJSONL[PersonEntry]
-├── _user_jsonl: TypedJSONL[UserEntry]
-├── _chat_jsonl: TypedJSONL[ChatEntry]
-├── _graph: GraphIndex             # In-memory graph
-├── _memory_by_id: dict[str, MemoryEntry]  # ID → memory cache
-└── _llm: LLMProvider | None       # For fuzzy matching, supersession
+KnowledgeGraph
+├── memories: dict[str, MemoryEntry]
+├── people: dict[str, PersonEntry]
+├── users: dict[str, UserEntry]
+├── chats: dict[str, ChatEntry]
+├── edges: dict[str, Edge]
+├── _outgoing: defaultdict[str, list[str]]   # node_id → [edge_ids]
+├── _incoming: defaultdict[str, list[str]]   # node_id → [edge_ids]
+├── _edges_by_type: defaultdict[str, list[str]]
+└── _node_type: dict[str, str]               # node_id → "memory"|"person"|...
 ```
 
-**Public API surface**:
-- Memory: `add_memory()`, `search()`, `get_context_for_message()`, `delete_memory()`, `gc()`, `forget_person()`
-- Person: `create_person()`, `find_person()`, `resolve_or_create_person()`, `merge_people()`, `find_person_ids_for_username()`
-- User/Chat: `ensure_user()`, `ensure_chat()` (upserts)
-- Graph: `get_graph()` (async, ensures built)
+Operations: `add_edge()`, `remove_edge()`, `invalidate_edge()`, `get_outgoing()`, `get_incoming()`.
 
-### Factory
+### GraphPersistence (`graph/persistence.py`)
 
-`create_graph_store()` handles all wiring:
-1. Filesystem migration (old layout → new layout)
-2. Data migration (extract User/Chat nodes from existing memories)
-3. SQLite → JSONL migration (legacy)
-4. Component creation (FileMemoryStore, VectorIndex, EmbeddingGenerator)
-5. Index rebuild if needed
+JSONL load/save with atomic writes. Each node type has its own `.jsonl` file.
 
-## Module Structure
+- `load()` — Reads all JSONL files, builds KnowledgeGraph, auto-backfills edges
+- `save_memories()`, `save_people()`, `save_users()`, `save_chats()`, `save_edges()` — Atomic rewrite
+
+### NumpyVectorIndex (`graph/vectors.py`)
+
+Brute-force cosine similarity using numpy matrix multiplication.
+
+- `search(query_embedding, limit)` → `list[tuple[str, float]]`
+- `add(node_id, embedding)`, `remove(node_id)`, `has(node_id)`
+- `save(path)` / `load(path)` — Persists as `.npy` + `.ids.json`
+
+At Ash's scale (thousands of memories, 1536-dim), search takes ~1-3ms.
+
+### Edge Helpers (`graph/edges.py`)
+
+Factory functions and query helpers for typed edges:
+- Factories: `create_about_edge()`, `create_supersedes_edge()`, `create_is_person_edge()`, `create_merged_into_edge()`
+- Queries: `get_subject_person_ids()`, `get_memories_about_person()`, `get_person_for_user()`, `get_merged_into()`, `follow_merge_chain()`
+
+### BFS Traversal (`graph/traversal.py`)
+
+Multi-hop graph traversal for discovery:
+
+```python
+def bfs_traverse(
+    graph: KnowledgeGraph,
+    seed_ids: set[str],
+    max_hops: int = 2,
+    exclude_edge_types: set[str] | None = None,  # Default: {SUPERSEDES}
+    filter_fn: Callable[[str, Edge], bool] | None = None,
+) -> list[TraversalResult]:
+```
+
+Follows both outgoing and incoming edges. Returns `TraversalResult` with `node_id`, `node_type`, `hops`, and `path` (edge IDs).
+
+### Store (`store/store.py`)
+
+Unified facade composing all mixins. Constructor:
+
+```python
+Store(
+    graph: KnowledgeGraph,
+    persistence: GraphPersistence,
+    vector_index: NumpyVectorIndex,
+    embedding_generator: EmbeddingGenerator,
+    llm: LLMProvider | None = None,
+    max_entries: int | None = None,
+)
+```
+
+Factory: `create_store(graph_dir, llm_registry, ...)` handles loading, wiring, and migration.
+
+## Retrieval Pipeline
+
+4-stage pipeline in `store/retrieval.py`:
 
 ```
-src/ash/graph/
-├── __init__.py      # Exports: GraphStore, create_graph_store, types
-├── types.py         # EdgeType, UserEntry, ChatEntry
-├── index.py         # GraphIndex (in-memory adjacency lists)
-├── store.py         # GraphStore (unified facade)
-└── migration.py     # Auto-migration (filesystem + data)
-
-src/ash/memory/      # Storage internals (used by GraphStore)
-├── file_store.py    # FileMemoryStore (JSONL CRUD)
-├── index.py         # VectorIndex (sqlite-vec)
-├── embeddings.py    # EmbeddingGenerator
-├── jsonl.py         # TypedJSONL[T] generic store
-├── types.py         # MemoryEntry, MemoryType, etc.
-└── extractor.py     # MemoryExtractor (LLM-based)
-
-src/ash/people/
-└── types.py         # PersonEntry, AliasEntry, RelationshipClaim
+Stage 1: Vector search         → Scoped to user/chat, returns ranked memories
+Stage 2: Cross-context          → ABOUT edges for participants, privacy-filtered
+Stage 3: Multi-hop BFS          → 2-hop traversal from seed persons, hop-scored
+Stage 4: RRF fusion             → Reciprocal rank fusion across stages
 ```
+
+**Stage 3 detail:**
+- Seeds = person IDs from stage 1/2 results + participants
+- BFS 2 hops via adjacency lists, skips SUPERSEDES edges
+- Memory nodes: apply privacy/scope filter, score by hop distance (0.5 for 1-hop, 0.3 for 2-hop)
+
+**Stage 4 (RRF) detail:**
+- Each stage produces a ranked list
+- RRF score = Σ 1/(k + rank) where k=60
+- Results appearing in multiple stages get boosted
+- Falls back to similarity sort when only one stage has results
 
 ## Privacy Model
 
@@ -172,4 +206,38 @@ Cross-context memory retrieval respects sensitivity levels:
 | PERSONAL | Visible if querier is subject | Visible if querier is subject |
 | SENSITIVE | Visible if querier is subject | **Hidden** |
 
-The `portable` flag controls whether a memory can appear outside its original context. Non-portable memories (e.g., "Bob is presenting next") are excluded from cross-context retrieval.
+The `portable` flag controls whether a memory can appear outside its original context. Non-portable memories are excluded from cross-context retrieval.
+
+## Module Structure
+
+```
+src/ash/graph/
+├── __init__.py          # Exports
+├── graph.py             # KnowledgeGraph, Edge dataclass
+├── edges.py             # Edge type constants, factories, query helpers
+├── persistence.py       # JSONL load/save, edge backfill
+├── vectors.py           # NumpyVectorIndex
+└── traversal.py         # BFS multi-hop traversal
+
+src/ash/store/
+├── __init__.py          # Exports: create_store
+├── store.py             # Store class (mixin composition)
+├── types.py             # MemoryEntry, PersonEntry, UserEntry, ChatEntry, etc.
+├── search.py            # SearchMixin (vector search + context retrieval)
+├── retrieval.py         # RetrievalPipeline (4-stage with BFS + RRF)
+├── supersession.py      # SupersessionMixin (conflict detection, hearsay)
+├── users.py             # UserChatOpsMixin
+├── hearsay.py           # HearsayMixin
+├── trust.py             # TrustMixin
+├── memories/
+│   ├── crud.py          # MemoryCrudMixin
+│   ├── helpers.py       # Shared memory helpers
+│   ├── lifecycle.py     # GC, expiration, archival, forget_person
+│   └── eviction.py      # Max entries, compaction, remap
+└── people/
+    ├── crud.py          # PeopleCrudMixin
+    ├── helpers.py       # Normalization, sorting
+    ├── resolution.py    # PeopleResolutionMixin (find, fuzzy match)
+    ├── relationships.py # RelationshipsMixin
+    └── dedup.py         # PeopleDedupMixin (merge, follow chain)
+```

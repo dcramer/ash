@@ -5,7 +5,6 @@ import typer
 from ash.cli.commands import (
     chat,
     config,
-    database,
     graph,
     init,
     logs,
@@ -39,7 +38,6 @@ init.register(app)
 serve.register(app)
 chat.register(app)
 config.register(app)
-database.register(app)
 graph.register(app)
 logs.register(app)
 memory.register(app)

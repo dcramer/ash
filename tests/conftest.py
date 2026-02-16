@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ash.config.models import AshConfig, LLMConfig
-from ash.db.engine import Database
-from ash.db.models import Base
+from ash.graph.graph import KnowledgeGraph
+from ash.graph.persistence import GraphPersistence
+from ash.graph.vectors import NumpyVectorIndex
 from ash.llm.base import LLMProvider
 from ash.llm.types import (
     CompletionResponse,
@@ -23,6 +23,7 @@ from ash.llm.types import (
     ToolUse,
     Usage,
 )
+from ash.store.store import Store
 from ash.tools.base import Tool, ToolContext, ToolResult
 from ash.tools.registry import ToolRegistry
 
@@ -83,31 +84,65 @@ def config_file(tmp_path: Path, config_toml_content: str) -> Path:
 
 
 # =============================================================================
-# Database Fixtures
+# Graph Store Fixtures
 # =============================================================================
 
 
 @pytest.fixture
-async def database(tmp_path: Path) -> AsyncGenerator[Database, None]:
-    """Create a temporary test database."""
-    db_path = tmp_path / "test.db"
-    db = Database(database_path=db_path)
-    await db.connect()
-
-    # Create all tables
-    async with db.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    yield db
-
-    await db.disconnect()
+def graph_dir(tmp_path: Path) -> Path:
+    """Create a temporary graph directory."""
+    gd = tmp_path / "graph"
+    gd.mkdir()
+    (gd / "embeddings").mkdir()
+    return gd
 
 
 @pytest.fixture
-async def db_session(database: Database) -> AsyncGenerator[AsyncSession, None]:
-    """Get a database session for testing."""
-    async with database.session() as session:
-        yield session
+async def graph_store(
+    graph_dir: Path, mock_llm: "MockLLMProvider"
+) -> AsyncGenerator[Store, None]:
+    """Create a Store backed by in-memory KnowledgeGraph."""
+    graph = KnowledgeGraph()
+    persistence = GraphPersistence(graph_dir)
+    vector_index = NumpyVectorIndex()
+
+    # Use a mock embedding generator
+    embedding_gen = MockEmbeddingGenerator()
+
+    store = Store(
+        graph=graph,
+        persistence=persistence,
+        vector_index=vector_index,
+        embedding_generator=embedding_gen,  # type: ignore[arg-type]
+        llm=mock_llm,
+    )
+    store._llm_model = "mock-model"
+
+    yield store
+
+
+class MockEmbeddingGenerator:
+    """Mock embedding generator for testing."""
+
+    async def embed(self, text: str) -> list[float]:
+        """Return a deterministic mock embedding."""
+        # Simple hash-based embedding for deterministic results
+        h = hash(text) % (2**32)
+        import struct
+
+        # Generate 1536 floats from the hash
+        result = []
+        for i in range(1536):
+            seed = h ^ (i * 2654435761)
+            val = struct.unpack("f", struct.pack("I", seed & 0x7F7FFFFF))[0]
+            result.append(val)
+        # Normalize
+        import math
+
+        norm = math.sqrt(sum(x * x for x in result))
+        if norm > 0:
+            result = [x / norm for x in result]
+        return result
 
 
 @pytest.fixture(autouse=True)

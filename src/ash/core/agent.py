@@ -41,9 +41,10 @@ from ash.llm.types import (
 from ash.tools import ToolContext, ToolExecutor, ToolRegistry
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
-    from ash.db.engine import Database
     from ash.memory import MemoryExtractor, RetrievedContext
     from ash.providers.base import IncomingMessage
     from ash.store.store import Store
@@ -876,7 +877,7 @@ class Agent:
 async def create_agent(
     config: AshConfig,
     workspace: Workspace,
-    db: Database | None = None,
+    graph_dir: Path | None = None,
     model_alias: str = "default",
 ) -> AgentComponents:
     from ash.agents import AgentExecutor, AgentRegistry
@@ -950,8 +951,8 @@ async def create_agent(
 
     # Create unified graph store (replaces separate memory_manager + person_manager)
     graph_store: Store | None = None
-    if not db:
-        logger.info("Memory tools disabled: no database")
+    if not graph_dir:
+        logger.info("Memory tools disabled: no graph directory")
     elif not config.embeddings:
         logger.info("Memory tools disabled: [embeddings] not configured")
     else:
@@ -980,7 +981,7 @@ async def create_agent(
                 else None,
             )
             graph_store = await create_store(
-                db=db,
+                graph_dir=graph_dir,
                 llm_registry=llm_registry,
                 embedding_model=config.embeddings.model,
                 embedding_provider=config.embeddings.provider,

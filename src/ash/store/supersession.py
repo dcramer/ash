@@ -1,4 +1,4 @@
-"""Supersession and conflict detection mixin for Store (SQLite-backed)."""
+"""Supersession and conflict detection mixin for Store (in-memory graph backed)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import text
-
-from ash.store.mappers import row_to_memory as _row_to_memory
-from ash.store.memories.helpers import load_subjects as _load_subjects
+from ash.graph.edges import (
+    create_supersedes_edge,
+    get_subject_person_ids,
+)
 from ash.store.types import MemoryEntry, matches_scope
 
 if TYPE_CHECKING:
@@ -56,44 +56,40 @@ class SupersessionMixin:
         chat_id: str | None = None,
         subject_person_ids: list[str] | None = None,
     ) -> list[tuple[MemoryEntry, float]]:
-        similar = await self._index.search(new_content, limit=10)
+        try:
+            query_embedding = await self._embeddings.embed(new_content)
+        except Exception:
+            return []
+
+        similar = self._index.search(query_embedding, limit=10)
         now = datetime.now(UTC)
 
         conflicts: list[tuple[MemoryEntry, float]] = []
-        async with self._db.session() as session:
-            for result in similar:
-                if result.similarity < CONFLICT_SIMILARITY_THRESHOLD:
-                    continue
-                r = await session.execute(
-                    text("SELECT * FROM memories WHERE id = :id"),
-                    {"id": result.memory_id},
+        for memory_id, similarity in similar:
+            if similarity < CONFLICT_SIMILARITY_THRESHOLD:
+                continue
+            memory = self._graph.memories.get(memory_id)
+            if not memory:
+                continue
+            if memory.superseded_at:
+                continue
+            if memory.expires_at and memory.expires_at <= now:
+                continue
+            if not matches_scope(memory, owner_user_id, chat_id):
+                continue
+            memory_subjects = get_subject_person_ids(self._graph, memory.id)
+            if subject_person_ids:
+                resolved_new = await self._resolve_person_ids_through_merges(
+                    subject_person_ids
                 )
-                row = r.fetchone()
-                if not row:
+                resolved_mem = await self._resolve_person_ids_through_merges(
+                    memory_subjects
+                )
+                if not resolved_new & resolved_mem:
                     continue
-                memory = _row_to_memory(row)
-                memory.subject_person_ids = await _load_subjects(session, memory.id)
-
-                if memory.superseded_at:
-                    continue
-                if memory.expires_at and memory.expires_at <= now:
-                    continue
-                if not matches_scope(memory, owner_user_id, chat_id):
-                    continue
-                memory_subjects = memory.subject_person_ids or []
-                if subject_person_ids:
-                    # Resolve through merge chains so merged persons match
-                    resolved_new = await self._resolve_person_ids_through_merges(
-                        subject_person_ids
-                    )
-                    resolved_mem = await self._resolve_person_ids_through_merges(
-                        memory_subjects
-                    )
-                    if not resolved_new & resolved_mem:
-                        continue
-                elif memory_subjects:
-                    continue
-                conflicts.append((memory, result.similarity))
+            elif memory_subjects:
+                continue
+            conflicts.append((memory, similarity))
 
         return conflicts
 
@@ -158,7 +154,8 @@ class SupersessionMixin:
         candidate: MemoryEntry,
         new_memory: MemoryEntry,
     ) -> bool:
-        if not candidate.source_username or not candidate.subject_person_ids:
+        candidate_subjects = candidate.subject_person_ids or []
+        if not candidate.source_username or not candidate_subjects:
             return False
         if not new_memory.source_username:
             return False
@@ -169,12 +166,12 @@ class SupersessionMixin:
             source_ids = await self.find_person_ids_for_username(
                 candidate.source_username
             )
-            if not (source_ids & set(candidate.subject_person_ids)):
+            if not (source_ids & set(candidate_subjects)):
                 return False
             new_source_ids = await self.find_person_ids_for_username(
                 new_memory.source_username
             )
-            if new_source_ids & set(candidate.subject_person_ids):
+            if new_source_ids & set(candidate_subjects):
                 return False
             return True
         except Exception:
@@ -194,20 +191,23 @@ class SupersessionMixin:
         old_memory_id: str,
         new_memory_id: str,
     ) -> bool:
-        now_iso = datetime.now(UTC).isoformat()
-        async with self._db.session() as session:
-            r = await session.execute(
-                text("""
-                    UPDATE memories SET superseded_at = :now, superseded_by_id = :new_id
-                    WHERE id = :old_id AND superseded_at IS NULL
-                """),
-                {"now": now_iso, "new_id": new_memory_id, "old_id": old_memory_id},
-            )
-            if r.rowcount == 0:  # type: ignore[possibly-missing-attribute]
-                return False
+        memory = self._graph.memories.get(old_memory_id)
+        if not memory or memory.superseded_at is not None:
+            return False
+
+        memory.superseded_at = datetime.now(UTC)
+        memory.superseded_by_id = new_memory_id
+        await self._persistence.save_memories(self._graph.memories)
+
+        # Dual-write: create SUPERSEDES edge alongside FK field
+        self._graph.add_edge(create_supersedes_edge(new_memory_id, old_memory_id))
+        await self._persistence.save_edges(self._graph.edges)
 
         try:
-            await self._index.delete_embedding(old_memory_id)
+            self._index.remove(old_memory_id)
+            await self._index.save(
+                self._persistence.graph_dir / "embeddings" / "memories.npy"
+            )
         except Exception:
             logger.warning(
                 "Failed to delete superseded memory embedding",
@@ -225,41 +225,43 @@ class SupersessionMixin:
     async def batch_mark_superseded(
         self: Store, pairs: list[tuple[str, str]]
     ) -> list[str]:
-        """Mark multiple memories as superseded in a single batch.
-
-        Args:
-            pairs: List of (old_memory_id, new_memory_id) tuples.
-
-        Returns:
-            List of old memory IDs that were actually marked.
-        """
+        """Mark multiple memories as superseded in a single batch."""
         if not pairs:
             return []
 
-        now_iso = datetime.now(UTC).isoformat()
+        now = datetime.now(UTC)
         marked: list[str] = []
 
-        async with self._db.session() as session:
-            for old_id, new_id in pairs:
-                r = await session.execute(
-                    text("""
-                        UPDATE memories SET superseded_at = :now, superseded_by_id = :new_id
-                        WHERE id = :old_id AND superseded_at IS NULL
-                    """),
-                    {"now": now_iso, "new_id": new_id, "old_id": old_id},
-                )
-                if r.rowcount > 0:  # type: ignore[possibly-missing-attribute]
-                    marked.append(old_id)
+        for old_id, new_id in pairs:
+            memory = self._graph.memories.get(old_id)
+            if memory and memory.superseded_at is None:
+                memory.superseded_at = now
+                memory.superseded_by_id = new_id
+                # Dual-write: create SUPERSEDES edge alongside FK field
+                self._graph.add_edge(create_supersedes_edge(new_id, old_id))
+                marked.append(old_id)
 
         if marked:
+            await self._persistence.save_memories(self._graph.memories)
+            await self._persistence.save_edges(self._graph.edges)
+
+            for mid in marked:
+                try:
+                    self._index.remove(mid)
+                except Exception:
+                    logger.debug("Failed to remove embedding for %s", mid)
+
             try:
-                await self._index.delete_embeddings(marked)
+                await self._index.save(
+                    self._persistence.graph_dir / "embeddings" / "memories.npy"
+                )
             except Exception:
                 logger.warning(
                     "Failed to delete embeddings for superseded memories",
                     extra={"count": len(marked)},
                     exc_info=True,
                 )
+
         return marked
 
     async def supersede_confirmed_hearsay(
@@ -272,39 +274,39 @@ class SupersessionMixin:
         now = datetime.now(UTC)
         user_lower = source_username.lower()
 
-        # Resolve person IDs through merge chains for broader matching
+        # Resolve person IDs through merge chains
         resolved_person_ids = await self._resolve_person_ids_through_merges(
             list(person_ids)
         )
         all_search_ids = person_ids | resolved_person_ids
 
-        # Find candidate hearsay memories about these persons
+        # Find candidate hearsay memories about these persons via ABOUT edges
+        from ash.graph.edges import get_memories_about_person
+
+        candidate_mids: set[str] = set()
+        for pid in all_search_ids:
+            candidate_mids.update(get_memories_about_person(self._graph, pid))
+
         hearsay_candidates: list[MemoryEntry] = []
-        async with self._db.session() as session:
-            for pid in all_search_ids:
-                r = await session.execute(
-                    text("""
-                        SELECT m.* FROM memories m
-                        JOIN memory_subjects ms ON ms.memory_id = m.id
-                        WHERE ms.person_id = :pid
-                            AND m.archived_at IS NULL
-                            AND m.superseded_at IS NULL
-                            AND (m.expires_at IS NULL OR m.expires_at > :now)
-                    """),
-                    {"pid": pid, "now": now.isoformat()},
-                )
-                for row in r.fetchall():
-                    memory = _row_to_memory(row)
-                    memory.subject_person_ids = await _load_subjects(session, memory.id)
-                    # Skip facts (user speaking about themselves)
-                    if (memory.source_username or "").lower() == user_lower:
-                        continue
-                    hearsay_candidates.append(memory)
+        for mid in candidate_mids:
+            memory = self._graph.memories.get(mid)
+            if not memory:
+                continue
+            if memory.archived_at is not None:
+                continue
+            if memory.superseded_at is not None:
+                continue
+            if memory.expires_at and memory.expires_at <= now:
+                continue
+            # Skip facts (user speaking about themselves)
+            if (memory.source_username or "").lower() == user_lower:
+                continue
+            hearsay_candidates.append(memory)
 
         if not hearsay_candidates:
             return 0
 
-        # Deduplicate by ID (multiple person_ids may overlap)
+        # Deduplicate by ID
         seen_ids: set[str] = set()
         unique_candidates: list[MemoryEntry] = []
         for mem in hearsay_candidates:
@@ -313,18 +315,17 @@ class SupersessionMixin:
                 unique_candidates.append(mem)
         hearsay_candidates = unique_candidates
 
-        # Single vector search instead of N per-candidate searches
+        # Single vector search
         try:
-            similar = await self._index.search(
-                new_memory.content, limit=len(hearsay_candidates) + 5
+            query_embedding = await self._embeddings.embed(new_memory.content)
+            similar = self._index.search(
+                query_embedding, limit=len(hearsay_candidates) + 5
             )
         except Exception:
             logger.warning("Failed to search for hearsay similarity", exc_info=True)
             return 0
 
-        similarity_by_id: dict[str, float] = {
-            r.memory_id: r.similarity for r in similar
-        }
+        similarity_by_id: dict[str, float] = {mid: sim for mid, sim in similar}
 
         count = 0
         for hearsay in hearsay_candidates:

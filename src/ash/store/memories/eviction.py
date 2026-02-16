@@ -6,8 +6,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import text
-
 if TYPE_CHECKING:
     from ash.store.store import Store
 
@@ -19,49 +17,51 @@ class MemoryEvictionMixin:
 
     async def enforce_max_entries(self: Store, max_entries: int) -> int:
         now = datetime.now(UTC)
-        now_iso = now.isoformat()
 
-        async with self._db.session() as session:
-            result = await session.execute(
-                text(
-                    "SELECT COUNT(*) FROM memories WHERE archived_at IS NULL AND superseded_at IS NULL AND (expires_at IS NULL OR expires_at > :now)"
-                ),
-                {"now": now_iso},
-            )
-            current_count = result.scalar() or 0
+        # Count active memories
+        active = [
+            m
+            for m in self._graph.memories.values()
+            if m.archived_at is None
+            and m.superseded_at is None
+            and (m.expires_at is None or m.expires_at > now)
+        ]
 
-            if current_count <= max_entries:
-                return 0
+        if len(active) <= max_entries:
+            return 0
 
-            excess = current_count - max_entries
-            # Get oldest memories (older than 7 days)
-            seven_days_ago = (now - timedelta(days=7)).isoformat()
-            result = await session.execute(
-                text("""
-                    SELECT id FROM memories
-                    WHERE archived_at IS NULL AND superseded_at IS NULL
-                        AND (expires_at IS NULL OR expires_at > :now)
-                        AND created_at < :cutoff
-                    ORDER BY created_at ASC
-                    LIMIT :limit
-                """),
-                {"now": now_iso, "cutoff": seven_days_ago, "limit": excess},
-            )
-            ids_to_evict = [row[0] for row in result.fetchall()]
+        excess = len(active) - max_entries
+        seven_days_ago = now - timedelta(days=7)
 
-            for mid in ids_to_evict:
-                await session.execute(
-                    text(
-                        "UPDATE memories SET archived_at = :now, archive_reason = 'evicted' WHERE id = :id"
-                    ),
-                    {"now": now_iso, "id": mid},
-                )
+        # Get oldest memories (older than 7 days)
+        candidates = sorted(
+            [m for m in active if m.created_at and m.created_at < seven_days_ago],
+            key=lambda m: m.created_at or datetime.min.replace(tzinfo=UTC),
+        )
+        ids_to_evict = [m.id for m in candidates[:excess]]
+
+        for mid in ids_to_evict:
+            memory = self._graph.memories.get(mid)
+            if memory:
+                memory.archived_at = now
+                memory.archive_reason = "evicted"
+
+        if ids_to_evict:
+            await self._persistence.save_memories(self._graph.memories)
 
         for mid in ids_to_evict:
             try:
-                await self._index.delete_embedding(mid)
+                self._index.remove(mid)
             except Exception:
                 logger.warning("Failed to delete embedding for %s during eviction", mid)
+
+        if ids_to_evict:
+            try:
+                await self._index.save(
+                    self._persistence.graph_dir / "embeddings" / "memories.npy"
+                )
+            except Exception:
+                logger.debug("Failed to save index after eviction")
 
         if len(ids_to_evict) < excess:
             logger.warning(
@@ -73,83 +73,74 @@ class MemoryEvictionMixin:
 
     async def compact(self: Store, older_than_days: int = 90) -> int:
         """Permanently remove old archived entries."""
-        cutoff = (datetime.now(UTC) - timedelta(days=older_than_days)).isoformat()
+        cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
 
-        async with self._db.session() as session:
-            # Get IDs to remove (for embedding cleanup)
-            result = await session.execute(
-                text(
-                    "SELECT id FROM memories WHERE archived_at IS NOT NULL AND archived_at < :cutoff"
-                ),
-                {"cutoff": cutoff},
-            )
-            ids_to_remove = [row[0] for row in result.fetchall()]
+        ids_to_remove: list[str] = []
+        for memory in list(self._graph.memories.values()):
+            if memory.archived_at and memory.archived_at < cutoff:
+                ids_to_remove.append(memory.id)
 
-            if ids_to_remove:
-                # Delete memory_subjects first (FK)
-                for mid in ids_to_remove:
-                    await session.execute(
-                        text("DELETE FROM memory_subjects WHERE memory_id = :id"),
-                        {"id": mid},
-                    )
-                # Delete memories
-                for mid in ids_to_remove:
-                    await session.execute(
-                        text("DELETE FROM memories WHERE id = :id"),
-                        {"id": mid},
-                    )
+        for mid in ids_to_remove:
+            self._graph.remove_memory(mid)
 
-                logger.info(
-                    "compact_complete", extra={"removed_count": len(ids_to_remove)}
-                )
+        if ids_to_remove:
+            await self._persistence.save_memories(self._graph.memories)
+            logger.info("compact_complete", extra={"removed_count": len(ids_to_remove)})
 
         return len(ids_to_remove)
 
     async def clear(self: Store) -> int:
         """Clear all memories and vector index."""
-        async with self._db.session() as session:
-            result = await session.execute(text("SELECT COUNT(*) FROM memories"))
-            count = result.scalar() or 0
+        count = len(self._graph.memories)
 
-            if count > 0:
-                await session.execute(text("DELETE FROM memory_subjects"))
-                await session.execute(text("DELETE FROM memories"))
+        if count > 0:
+            self._graph.memories.clear()
+            await self._persistence.save_memories(self._graph.memories)
+
+        # Clear vector index
+        self._index._ids.clear()
+        self._index._id_to_index.clear()
+        import numpy as np
+
+        self._index._vectors = np.empty((0, 0), dtype=np.float32)
 
         try:
-            await self._index.clear()
+            await self._index.save(
+                self._persistence.graph_dir / "embeddings" / "memories.npy"
+            )
         except Exception:
-            logger.debug("Failed to clear vector index", exc_info=True)
+            logger.debug("Failed to save cleared index", exc_info=True)
 
         return count
 
     async def rebuild_index(self: Store) -> int:
         """Rebuild vector index, generating embeddings for any memories missing them."""
-        async with self._db.session() as session:
-            result = await session.execute(
-                text(
-                    "SELECT id, content FROM memories WHERE archived_at IS NULL AND superseded_at IS NULL"
-                ),
-            )
-            active_memories = result.fetchall()
+        active_memories = [
+            m
+            for m in self._graph.memories.values()
+            if m.archived_at is None and m.superseded_at is None
+        ]
 
-        # Only generate embeddings for memories not already indexed
-        existing_ids = await self._index.get_indexed_memory_ids()
+        existing_ids = self._index.get_ids()
 
         generated = 0
-        for row in active_memories:
-            if row.id in existing_ids:
+        for memory in active_memories:
+            if memory.id in existing_ids:
                 continue
             try:
-                floats = await self._embeddings.embed(row.content)
+                floats = await self._embeddings.embed(memory.content)
                 if floats:
-                    await self._index.add_embedding(row.id, floats)
+                    self._index.add(memory.id, floats)
                     generated += 1
             except Exception:
                 logger.debug(
-                    "Failed to generate embedding for %s during rebuild", row.id
+                    "Failed to generate embedding for %s during rebuild", memory.id
                 )
 
         if generated:
+            await self._index.save(
+                self._persistence.graph_dir / "embeddings" / "memories.npy"
+            )
             logger.info(
                 "Generated embeddings during rebuild",
                 extra={"generated": generated, "already_indexed": len(existing_ids)},
@@ -158,45 +149,51 @@ class MemoryEvictionMixin:
         return generated
 
     async def remap_subject_person_id(self: Store, old_id: str, new_id: str) -> int:
-        async with self._db.session() as session:
-            result = await session.execute(
-                text("SELECT memory_id FROM memory_subjects WHERE person_id = :old_id"),
-                {"old_id": old_id},
-            )
-            affected = [row[0] for row in result.fetchall()]
+        from ash.graph.edges import ABOUT, create_about_edge, get_memories_about_person
 
-            if not affected:
-                return 0
+        memory_ids = get_memories_about_person(self._graph, old_id)
+        count = 0
+        edges_changed = False
+        for mid in memory_ids:
+            memory = self._graph.memories.get(mid)
+            if not memory:
+                continue
 
-            # For each affected memory, check if new_id already exists
-            for mid in affected:
-                result = await session.execute(
-                    text(
-                        "SELECT COUNT(*) FROM memory_subjects WHERE memory_id = :mid AND person_id = :new_id"
-                    ),
-                    {"mid": mid, "new_id": new_id},
-                )
-                exists = (result.scalar() or 0) > 0
-                if exists:
-                    # Just delete the old one
-                    await session.execute(
-                        text(
-                            "DELETE FROM memory_subjects WHERE memory_id = :mid AND person_id = :old_id"
-                        ),
-                        {"mid": mid, "old_id": old_id},
-                    )
-                else:
-                    # Update old -> new
-                    await session.execute(
-                        text(
-                            "UPDATE memory_subjects SET person_id = :new_id WHERE memory_id = :mid AND person_id = :old_id"
-                        ),
-                        {"mid": mid, "old_id": old_id, "new_id": new_id},
-                    )
+            # Update FK field
+            pids = list(memory.subject_person_ids or [])
+            if old_id in pids:
+                pids.remove(old_id)
+                if new_id not in pids:
+                    pids.append(new_id)
+                memory.subject_person_ids = pids
+                count += 1
 
+            # Update ABOUT edges: remove old, add new
+            old_edges = [
+                e
+                for e in self._graph.get_outgoing(mid, edge_type=ABOUT)
+                if e.target_id == old_id
+            ]
+            for edge in old_edges:
+                self._graph.remove_edge(edge.id)
+                edges_changed = True
+            # Add new edge if not already present
+            existing_new = [
+                e
+                for e in self._graph.get_outgoing(mid, edge_type=ABOUT)
+                if e.target_id == new_id
+            ]
+            if not existing_new:
+                self._graph.add_edge(create_about_edge(mid, new_id, created_by="remap"))
+                edges_changed = True
+
+        if count > 0:
+            await self._persistence.save_memories(self._graph.memories)
+            if edges_changed:
+                await self._persistence.save_edges(self._graph.edges)
             logger.debug(
                 "remapped_subject_person_id",
-                extra={"old_id": old_id, "new_id": new_id, "count": len(affected)},
+                extra={"old_id": old_id, "new_id": new_id, "count": count},
             )
 
-        return len(affected)
+        return count

@@ -56,24 +56,6 @@ model = "test"
         assert "Unknown action" in result.stdout
 
 
-class TestDbCommand:
-    """Tests for 'ash db' command."""
-
-    def test_db_unknown_subcommand(self, cli_runner):
-        result = cli_runner.invoke(app, ["db", "unknown"])
-        # Typer returns exit code 2 for unknown subcommands
-        assert result.exit_code == 2
-
-    def test_db_help(self, cli_runner):
-        # Test that the command shows available subcommands
-        result = cli_runner.invoke(app, ["db", "--help"])
-        assert result.exit_code == 0
-        assert "migrate" in result.stdout
-        assert "export" in result.stdout
-        assert "import" in result.stdout
-        assert "backup" in result.stdout
-
-
 class TestMemoryCommand:
     """Tests for 'ash memory' command."""
 
@@ -329,7 +311,6 @@ class TestAppHelp:
         assert "serve" in result.stdout
         assert "chat" in result.stdout
         assert "config" in result.stdout
-        assert "db" in result.stdout
         assert "memory" in result.stdout
         assert "schedule" in result.stdout
         assert "sessions" in result.stdout

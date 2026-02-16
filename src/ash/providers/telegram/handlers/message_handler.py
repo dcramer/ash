@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 from ash.agents.types import ChildActivated
 from ash.config.models import ConversationConfig
 from ash.core import Agent
-from ash.db import Database
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.handlers.checkpoint_handler import CheckpointHandler
 from ash.providers.telegram.handlers.passive_handler import PassiveHandler
@@ -46,7 +45,7 @@ class TelegramMessageHandler:
         self,
         provider: TelegramProvider,
         agent: Agent,
-        database: Database,
+        store: Store | None = None,
         streaming: bool = False,
         conversation_config: ConversationConfig | None = None,
         config: AshConfig | None = None,
@@ -60,7 +59,7 @@ class TelegramMessageHandler:
     ):
         self._provider = provider
         self._agent = agent
-        self._database = database
+        self._store = store
         self._streaming = streaming
         self._conversation_config = conversation_config or ConversationConfig()
         self._config = config
@@ -84,7 +83,7 @@ class TelegramMessageHandler:
             provider_name=provider.name,
             config=config,
             conversation_config=self._conversation_config,
-            database=database,
+            store=store,
         )
 
         # Checkpoint handler for inline keyboard callbacks

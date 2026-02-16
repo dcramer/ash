@@ -6,7 +6,6 @@ import typer
 
 from ash.cli.console import error
 from ash.config import AshConfig, load_config
-from ash.db import Database, init_database
 
 # Model options by provider (ordered by recommendation for cost/speed)
 ANTHROPIC_MODELS = [
@@ -38,18 +37,15 @@ def get_config(config_path: Path | None = None) -> AshConfig:
         raise typer.Exit(1) from None
 
 
-async def get_database(config: AshConfig) -> Database:
-    """Initialize and connect to database.
-
-    Args:
-        config: Application configuration.
+def get_graph_dir() -> Path:
+    """Get the graph directory for memory storage.
 
     Returns:
-        Connected database instance.
+        Path to graph directory.
     """
-    db = init_database(database_path=config.memory.database_path)
-    await db.connect()
-    return db
+    from ash.config.paths import get_graph_dir as _get_graph_dir
+
+    return _get_graph_dir()
 
 
 def generate_config_template() -> str:

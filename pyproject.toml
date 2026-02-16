@@ -33,11 +33,8 @@ dependencies = [
     "openai>=1.50.0",
     # Docker
     "docker>=7.0.0",
-    # Database
-    "sqlalchemy[asyncio]>=2.0.0",
-    "alembic>=1.14.0",
-    "aiosqlite>=0.20.0",
-    "sqlite-vec>=0.1.0",
+    # Graph storage
+    "numpy>=1.26.0",
     # Configuration & Validation
     "pydantic>=2.9.0",
     "pydantic-settings>=2.5.0",

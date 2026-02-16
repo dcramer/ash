@@ -6,10 +6,6 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import text
-
-from ash.store.mappers import row_to_memory as _row_to_memory
-from ash.store.memories.helpers import load_subjects
 from ash.store.types import (
     EPHEMERAL_TYPES,
     TYPE_TTL,
@@ -28,37 +24,37 @@ class MemoryLifecycleMixin:
 
     async def gc(self: Store) -> GCResult:
         now = datetime.now(UTC)
-        now_iso = now.isoformat()
 
-        async with self._db.session() as session:
-            # Find active memories that should be archived
-            result = await session.execute(
-                text("SELECT * FROM memories WHERE archived_at IS NULL"),
-            )
-            rows = result.fetchall()
+        archived_ids: list[str] = []
+        for memory in self._graph.memories.values():
+            if memory.archived_at is not None:
+                continue
+            reason = self._should_archive(memory, now)
+            if reason:
+                memory.archived_at = now
+                memory.archive_reason = reason
+                archived_ids.append(memory.id)
+                logger.info(
+                    "gc_archive_memory",
+                    extra={"memory_id": memory.id, "reason": reason},
+                )
 
-            archived_ids: list[str] = []
-            for row in rows:
-                memory = _row_to_memory(row)
-                reason = self._should_archive(memory, now)
-                if reason:
-                    await session.execute(
-                        text(
-                            "UPDATE memories SET archived_at = :now, archive_reason = :reason WHERE id = :id"
-                        ),
-                        {"now": now_iso, "reason": reason, "id": memory.id},
-                    )
-                    archived_ids.append(memory.id)
-                    logger.info(
-                        "gc_archive_memory",
-                        extra={"memory_id": memory.id, "reason": reason},
-                    )
+        if archived_ids:
+            await self._persistence.save_memories(self._graph.memories)
 
         for memory_id in archived_ids:
             try:
-                await self._index.delete_embedding(memory_id)
+                self._index.remove(memory_id)
             except Exception:
                 logger.debug("Failed to delete embedding for %s", memory_id)
+
+        if archived_ids:
+            try:
+                await self._index.save(
+                    self._persistence.graph_dir / "embeddings" / "memories.npy"
+                )
+            except Exception:
+                logger.debug("Failed to save index after gc")
 
         logger.info("gc_complete", extra={"removed_count": len(archived_ids)})
         return GCResult(removed_count=len(archived_ids), archived_ids=archived_ids)
@@ -84,38 +80,41 @@ class MemoryLifecycleMixin:
         person_id: str,
         delete_person_record: bool = False,
     ) -> int:
-        now_iso = datetime.now(UTC).isoformat()
+        from ash.graph.edges import get_memories_about_person
 
-        async with self._db.session() as session:
-            # Find memories about this person that are active
-            result = await session.execute(
-                text("""
-                    SELECT ms.memory_id FROM memory_subjects ms
-                    JOIN memories m ON m.id = ms.memory_id
-                    WHERE ms.person_id = :pid AND m.archived_at IS NULL
-                """),
-                {"pid": person_id},
-            )
-            to_archive = [row[0] for row in result.fetchall()]
+        now = datetime.now(UTC)
 
-            if not to_archive:
-                if delete_person_record:
-                    await self.delete_person(person_id)
-                return 0
+        to_archive: list[str] = []
+        for mid in get_memories_about_person(self._graph, person_id):
+            memory = self._graph.memories.get(mid)
+            if memory and memory.archived_at is None:
+                to_archive.append(mid)
 
-            for mid in to_archive:
-                await session.execute(
-                    text(
-                        "UPDATE memories SET archived_at = :now, archive_reason = 'forgotten' WHERE id = :id AND archived_at IS NULL"
-                    ),
-                    {"now": now_iso, "id": mid},
-                )
+        if not to_archive:
+            if delete_person_record:
+                await self.delete_person(person_id)
+            return 0
+
+        for mid in to_archive:
+            memory = self._graph.memories.get(mid)
+            if memory:
+                memory.archived_at = now
+                memory.archive_reason = "forgotten"
+
+        await self._persistence.save_memories(self._graph.memories)
 
         for memory_id in to_archive:
             try:
-                await self._index.delete_embedding(memory_id)
+                self._index.remove(memory_id)
             except Exception:
                 logger.debug("Failed to delete embedding for %s", memory_id)
+
+        try:
+            await self._index.save(
+                self._persistence.graph_dir / "embeddings" / "memories.npy"
+            )
+        except Exception:
+            logger.debug("Failed to save index after forget_person")
 
         if delete_person_record:
             await self.delete_person(person_id)
@@ -131,28 +130,26 @@ class MemoryLifecycleMixin:
         return len(to_archive)
 
     async def get_supersession_chain(self: Store, memory_id: str) -> list[MemoryEntry]:
-        async with self._db.session() as session:
-            # Build chain: find all memories that were superseded leading to this one
-            result: list[MemoryEntry] = []
-            current_id = memory_id
+        """Build chain: find all memories that were superseded leading to this one."""
+        from ash.graph.edges import get_supersession_targets
 
-            # Walk backwards through superseded_by_id links
-            for _ in range(100):  # Safety limit
-                r = await session.execute(
-                    text("SELECT * FROM memories WHERE superseded_by_id = :id"),
-                    {"id": current_id},
-                )
-                predecessors = r.fetchall()
-                if not predecessors:
-                    break
-                for row in predecessors:
-                    memory = _row_to_memory(row)
-                    memory.subject_person_ids = await load_subjects(session, memory.id)
-                    result.append(memory)
-                current_id = predecessors[0].id
+        result: list[MemoryEntry] = []
+        current_id = memory_id
 
-            result.reverse()
-            return result
+        for _ in range(100):  # Safety limit
+            target_ids = get_supersession_targets(self._graph, current_id)
+            predecessors = [
+                self._graph.memories[mid]
+                for mid in target_ids
+                if mid in self._graph.memories
+            ]
+            if not predecessors:
+                break
+            result.extend(predecessors)
+            current_id = predecessors[0].id
+
+        result.reverse()
+        return result
 
     async def archive_memories(
         self: Store, memory_ids: set[str], reason: str
@@ -161,37 +158,42 @@ class MemoryLifecycleMixin:
         if not memory_ids:
             return []
 
-        now_iso = datetime.now(UTC).isoformat()
+        now = datetime.now(UTC)
         archived: list[str] = []
 
-        async with self._db.session() as session:
-            for mid in memory_ids:
-                r = await session.execute(
-                    text(
-                        "UPDATE memories SET archived_at = :now, archive_reason = :reason WHERE id = :id AND archived_at IS NULL"
-                    ),
-                    {"now": now_iso, "reason": reason, "id": mid},
-                )
-                if r.rowcount > 0:  # type: ignore[possibly-missing-attribute]
-                    archived.append(mid)
+        for mid in memory_ids:
+            memory = self._graph.memories.get(mid)
+            if memory and memory.archived_at is None:
+                memory.archived_at = now
+                memory.archive_reason = reason
+                archived.append(mid)
+
+        if archived:
+            await self._persistence.save_memories(self._graph.memories)
 
         for memory_id in archived:
             try:
-                await self._index.delete_embedding(memory_id)
+                self._index.remove(memory_id)
             except Exception:
                 logger.debug("Failed to delete embedding for %s", memory_id)
+
+        if archived:
+            try:
+                await self._index.save(
+                    self._persistence.graph_dir / "embeddings" / "memories.npy"
+                )
+            except Exception:
+                logger.debug("Failed to save index after archive_memories")
 
         return archived
 
     async def memories_about_person(self: Store, person_id: str) -> set[str]:
-        """Return active memory IDs that reference a person via memory_subjects."""
-        async with self._db.session() as session:
-            result = await session.execute(
-                text("""
-                    SELECT ms.memory_id FROM memory_subjects ms
-                    JOIN memories m ON m.id = ms.memory_id
-                    WHERE ms.person_id = :pid AND m.archived_at IS NULL
-                """),
-                {"pid": person_id},
-            )
-            return {row[0] for row in result.fetchall()}
+        """Return active memory IDs that reference a person."""
+        from ash.graph.edges import get_memories_about_person
+
+        result: set[str] = set()
+        for mid in get_memories_about_person(self._graph, person_id):
+            memory = self._graph.memories.get(mid)
+            if memory and memory.archived_at is None:
+                result.add(mid)
+        return result

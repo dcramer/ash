@@ -1,6 +1,10 @@
-"""Memory retrieval pipeline with clear stages.
+"""Memory retrieval pipeline with multi-hop BFS and RRF fusion.
 
-Extracts the multi-stage retrieval logic from SearchMixin into a dedicated class.
+4-stage pipeline:
+  Stage 1: Vector search (scoped to user/chat)
+  Stage 2: Cross-context (ABOUT edges for participants)
+  Stage 3: Multi-hop BFS (2-hop graph traversal from seed persons)
+  Stage 4: RRF fusion (reciprocal rank fusion across stages)
 """
 
 from __future__ import annotations
@@ -10,10 +14,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import text
-
-from ash.store.mappers import row_to_memory as _row_to_memory
-from ash.store.memories.helpers import load_subjects as _load_subjects
+from ash.graph.edges import get_memories_about_person
+from ash.graph.traversal import bfs_traverse
 from ash.store.types import (
     MemoryEntry,
     RetrievedContext,
@@ -30,6 +32,9 @@ logger = logging.getLogger(__name__)
 CROSS_CONTEXT_SIMILARITY = 0.7
 GRAPH_TRAVERSAL_SIMILARITY = 0.6
 
+# RRF constant (standard value from the original RRF paper)
+RRF_K = 60
+
 
 @dataclass
 class RetrievalContext:
@@ -44,12 +49,12 @@ class RetrievalContext:
 
 
 class RetrievalPipeline:
-    """Clear stages for memory retrieval.
+    """Multi-stage memory retrieval with graph traversal and RRF fusion.
 
     Stage 1: Primary search - Vector search scoped to user/chat
     Stage 2: Cross-context - Facts about participants from other chats
-    Stage 3: Graph traversal - Facts about people mentioned in results
-    Stage 4: Finalize - Dedupe, rank, limit
+    Stage 3: Multi-hop BFS - 2-hop graph traversal from seed person nodes
+    Stage 4: RRF fusion - Reciprocal rank fusion across all stages
     """
 
     def __init__(self, store: Store) -> None:
@@ -58,19 +63,18 @@ class RetrievalPipeline:
     async def retrieve(self, context: RetrievalContext) -> RetrievedContext:
         """Execute the full retrieval pipeline."""
         # Stage 1: Primary vector search
-        memories = await self._primary_search(context)
+        stage1 = await self._primary_search(context)
 
         # Stage 2: Cross-context retrieval
+        stage2: list[SearchResult] = []
         if context.participant_person_ids:
-            memories.extend(await self._cross_context(context))
+            stage2 = await self._cross_context(context)
 
-        # Stage 3: Graph traversal
-        seen_ids = {m.id for m in memories}
-        if seen_ids:
-            memories.extend(await self._graph_traversal(context, memories, seen_ids))
+        # Stage 3: Multi-hop BFS traversal
+        stage3 = await self._multi_hop_traversal(context, stage1, stage2)
 
-        # Stage 4: Finalize
-        return self._finalize(memories, context.max_memories)
+        # Stage 4: RRF fusion
+        return self._rrf_finalize([stage1, stage2, stage3], context.max_memories)
 
     async def _primary_search(self, context: RetrievalContext) -> list[SearchResult]:
         """Stage 1: Vector search scoped to user/chat."""
@@ -109,8 +113,10 @@ class RetrievalPipeline:
                         querying_person_ids=person_ids,
                     ):
                         results.append(
-                            await self._make_cross_context_result(
-                                memory, CROSS_CONTEXT_SIMILARITY
+                            await self._make_result(
+                                memory,
+                                CROSS_CONTEXT_SIMILARITY,
+                                discovery_stage="cross_context",
                             )
                         )
             except Exception:
@@ -118,65 +124,153 @@ class RetrievalPipeline:
 
         return results
 
-    async def _graph_traversal(
+    async def _multi_hop_traversal(
         self,
         context: RetrievalContext,
-        memories: list[SearchResult],
-        seen_ids: set[str],
+        stage1: list[SearchResult],
+        stage2: list[SearchResult],
     ) -> list[SearchResult]:
-        """Stage 3: Find memories about people mentioned in existing results."""
-        mentioned_person_ids: set[str] = set()
-        for m in memories:
+        """Stage 3: BFS traversal from seed person nodes.
+
+        Seeds are person IDs discovered in stages 1 and 2.
+        BFS follows edges up to 2 hops, discovering new memory nodes.
+        Applies privacy/scope filtering at each hop.
+        """
+        graph = self._store._graph
+
+        # Collect seed person IDs from stage 1 and stage 2 results
+        seed_person_ids: set[str] = set()
+        for m in stage1:
             spids = (m.metadata or {}).get("subject_person_ids") or []
-            mentioned_person_ids.update(spids)
+            seed_person_ids.update(spids)
+        for m in stage2:
+            spids = (m.metadata or {}).get("subject_person_ids") or []
+            seed_person_ids.update(spids)
 
-        # Exclude participants already handled by cross-context retrieval
+        # Also include participant person IDs
         for pids in context.participant_person_ids.values():
-            mentioned_person_ids -= pids
+            seed_person_ids |= pids
 
-        if not mentioned_person_ids:
+        if not seed_person_ids:
             return []
 
-        try:
-            subject_cross = await self._find_memories_about_persons(
-                person_ids=mentioned_person_ids,
-                exclude_owner_user_id=context.user_id,
-                limit=context.max_memories,
-            )
-        except Exception:
-            logger.warning("Graph traversal cross-context failed", exc_info=True)
-            return []
+        # Collect already-seen memory IDs to avoid duplicates
+        seen_ids: set[str] = set()
+        for m in stage1:
+            seen_ids.add(m.id)
+        for m in stage2:
+            seen_ids.add(m.id)
 
+        # All participant IDs for privacy filtering
         all_participant_ids: set[str] = set()
         for pids in context.participant_person_ids.values():
             all_participant_ids |= pids
 
+        # BFS from seed persons
+        try:
+            traversal_results = bfs_traverse(
+                graph,
+                seed_ids=seed_person_ids,
+                max_hops=2,
+            )
+        except Exception:
+            logger.warning("BFS traversal failed", exc_info=True)
+            return []
+
+        now = datetime.now(UTC)
         results: list[SearchResult] = []
-        for memory in subject_cross:
-            if memory.id in seen_ids:
+
+        for tr in traversal_results:
+            if tr.node_type != "memory":
                 continue
-            if self._passes_privacy_filter(
+            if tr.node_id in seen_ids:
+                continue
+
+            memory = graph.memories.get(tr.node_id)
+            if not memory:
+                continue
+            if memory.archived_at is not None:
+                continue
+            if memory.superseded_at is not None:
+                continue
+            if memory.expires_at and memory.expires_at <= now:
+                continue
+            if not memory.portable:
+                continue
+
+            # Privacy filter
+            if not self._passes_privacy_filter(
                 sensitivity=memory.sensitivity,
                 subject_person_ids=memory.subject_person_ids,
                 chat_type=context.chat_type,
                 querying_person_ids=all_participant_ids,
             ):
-                results.append(
-                    await self._make_cross_context_result(
-                        memory,
-                        GRAPH_TRAVERSAL_SIMILARITY,
-                        graph_traversal=True,
-                    )
+                continue
+
+            # Score based on hop distance
+            hop_similarity = 0.5 if tr.hops == 1 else 0.3
+            results.append(
+                await self._make_result(
+                    memory,
+                    hop_similarity,
+                    discovery_stage="graph_traversal",
+                    hops=tr.hops,
                 )
-                seen_ids.add(memory.id)
+            )
+            seen_ids.add(tr.node_id)
 
         return results
 
-    def _finalize(
-        self, memories: list[SearchResult], max_memories: int
+    def _rrf_finalize(
+        self,
+        stage_results: list[list[SearchResult]],
+        max_memories: int,
     ) -> RetrievedContext:
-        """Stage 4: Deduplicate, rank, and limit results."""
-        # Sort by similarity descending so dedup keeps highest-relevance entries
+        """Stage 4: RRF fusion across stages, then dedupe and limit.
+
+        RRF score = sum(1 / (k + rank)) across all stages where the memory appears.
+        Falls back to similarity-based sort when only one stage has results.
+        """
+        # Count how many stages have results
+        active_stages = [s for s in stage_results if s]
+
+        if not active_stages:
+            return RetrievedContext(memories=[])
+
+        if len(active_stages) == 1:
+            # Single stage: just sort by similarity (no RRF benefit)
+            return self._simple_finalize(active_stages[0], max_memories)
+
+        # Compute RRF scores
+        rrf_scores: dict[str, float] = {}
+        result_by_id: dict[str, SearchResult] = {}
+
+        for stage in active_stages:
+            for rank, result in enumerate(stage):
+                rrf_scores[result.id] = rrf_scores.get(result.id, 0.0) + (
+                    1.0 / (RRF_K + rank + 1)
+                )
+                # Keep the highest-similarity version
+                existing = result_by_id.get(result.id)
+                if existing is None or result.similarity > existing.similarity:
+                    result_by_id[result.id] = result
+
+        # Sort by RRF score descending
+        sorted_ids = sorted(rrf_scores, key=lambda mid: rrf_scores[mid], reverse=True)
+
+        unique: list[SearchResult] = []
+        for mid in sorted_ids:
+            unique.append(result_by_id[mid])
+            if len(unique) >= max_memories:
+                break
+
+        return RetrievedContext(memories=unique)
+
+    @staticmethod
+    def _simple_finalize(
+        memories: list[SearchResult], max_memories: int
+    ) -> RetrievedContext:
+        """Simple dedupe and limit for single-stage results."""
         sorted_memories = sorted(memories, key=lambda m: m.similarity, reverse=True)
 
         unique: list[SearchResult] = []
@@ -198,37 +292,34 @@ class RetrievalPipeline:
         limit: int = 20,
         portable_only: bool = True,
     ) -> list[MemoryEntry]:
-        """Find memories about given persons using SQL JOINs."""
+        """Find memories about given persons using ABOUT edges."""
         now = datetime.now(UTC)
+        graph = self._store._graph
+
+        # Collect candidate memory IDs via ABOUT edges
+        candidate_ids: set[str] = set()
+        for pid in person_ids:
+            candidate_ids.update(get_memories_about_person(graph, pid))
 
         result_memories: list[MemoryEntry] = []
-        async with self._store._db.session() as session:
-            for pid in person_ids:
-                r = await session.execute(
-                    text("""
-                        SELECT m.* FROM memories m
-                        JOIN memory_subjects ms ON ms.memory_id = m.id
-                        WHERE ms.person_id = :pid
-                            AND m.archived_at IS NULL
-                            AND m.superseded_at IS NULL
-                            AND (m.expires_at IS NULL OR m.expires_at > :now)
-                    """),
-                    {"pid": pid, "now": now.isoformat()},
-                )
-                rows = r.fetchall()
-                for row in rows:
-                    memory = _row_to_memory(row)
-                    memory.subject_person_ids = await _load_subjects(session, memory.id)
-                    if (
-                        exclude_owner_user_id
-                        and memory.owner_user_id == exclude_owner_user_id
-                    ):
-                        continue
-                    if portable_only and not memory.portable:
-                        continue
-                    result_memories.append(memory)
-                    if len(result_memories) >= limit:
-                        return result_memories
+        for mid in candidate_ids:
+            memory = graph.memories.get(mid)
+            if not memory:
+                continue
+            if memory.archived_at is not None:
+                continue
+            if memory.superseded_at is not None:
+                continue
+            if memory.expires_at and memory.expires_at <= now:
+                continue
+            if exclude_owner_user_id and memory.owner_user_id == exclude_owner_user_id:
+                continue
+            if portable_only and not memory.portable:
+                continue
+
+            result_memories.append(memory)
+            if len(result_memories) >= limit:
+                break
 
         return result_memories
 
@@ -249,24 +340,28 @@ class RetrievalPipeline:
             return chat_type == "private" and is_subject
         return False
 
-    async def _make_cross_context_result(
+    async def _make_result(
         self,
         memory: MemoryEntry,
         similarity: float,
         *,
-        graph_traversal: bool = False,
+        discovery_stage: str = "primary",
+        hops: int = 0,
     ) -> SearchResult:
-        """Convert a MemoryEntry to a SearchResult for cross-context retrieval."""
+        """Convert a MemoryEntry to a SearchResult."""
         subject_name = await self._store._resolve_subject_name(
             memory.subject_person_ids
         )
         meta: dict[str, Any] = {
             "memory_type": memory.memory_type.value,
             "subject_person_ids": memory.subject_person_ids,
-            "cross_context": True,
+            "discovery_stage": discovery_stage,
         }
-        if graph_traversal:
+        if hops > 0:
+            meta["hops"] = hops
             meta["graph_traversal"] = True
+        if discovery_stage == "cross_context":
+            meta["cross_context"] = True
         if subject_name:
             meta["subject_name"] = subject_name
         return SearchResult(

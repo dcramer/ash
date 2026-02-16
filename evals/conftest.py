@@ -28,8 +28,6 @@ from ash.config.models import (
 )
 from ash.config.workspace import Workspace, WorkspaceLoader
 from ash.core.agent import AgentComponents, create_agent
-from ash.db.engine import Database
-from ash.db.models import Base
 from ash.llm import AnthropicProvider, LLMProvider
 
 
@@ -131,19 +129,12 @@ def eval_workspace(eval_workspace_path: Path) -> Workspace:
 
 
 @pytest.fixture
-async def eval_database(tmp_path: Path) -> AsyncGenerator[Database, None]:
-    """Create a temporary test database for evals."""
-    db_path = tmp_path / "eval.db"
-    db = Database(database_path=db_path)
-    await db.connect()
-
-    # Create all tables
-    async with db.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    yield db
-
-    await db.disconnect()
+def eval_graph_dir(tmp_path: Path) -> Path:
+    """Create a temporary graph directory for evals."""
+    graph_dir = tmp_path / "graph"
+    graph_dir.mkdir()
+    (graph_dir / "embeddings").mkdir()
+    return graph_dir
 
 
 @pytest.fixture
@@ -179,13 +170,13 @@ def eval_config(eval_workspace_path: Path, tmp_path: Path) -> AshConfig:
 async def eval_agent(
     eval_config: AshConfig,
     eval_workspace: Workspace,
-    eval_database: Database,
+    eval_graph_dir: Path,
 ) -> AsyncGenerator[AgentComponents, None]:
     """Create a fully configured agent with real tools for eval testing.
 
     This creates a complete agent with:
     - Real sandbox execution
-    - Database for scheduling/memory
+    - Graph-backed memory store
     - All built-in tools (bash, read_file, write_file, etc.)
 
     The workspace is isolated to /tmp/ash-evals-{uuid}/ to prevent
@@ -198,7 +189,7 @@ async def eval_agent(
     components = await create_agent(
         config=eval_config,
         workspace=eval_workspace,
-        db=eval_database,
+        graph_dir=eval_graph_dir,
     )
 
     yield components
@@ -235,7 +226,6 @@ def eval_memory_config(eval_workspace_path: Path, tmp_path: Path) -> AshConfig:
         ),
         embeddings=EmbeddingsConfig(),
         memory=MemoryConfig(
-            database_path=tmp_path / "eval-memory.db",
             extraction_enabled=True,
             extraction_min_message_length=10,
             extraction_debounce_seconds=0,
@@ -248,7 +238,7 @@ def eval_memory_config(eval_workspace_path: Path, tmp_path: Path) -> AshConfig:
 async def eval_memory_agent(
     eval_memory_config: AshConfig,
     eval_workspace: Workspace,
-    eval_database: Database,
+    eval_graph_dir: Path,
 ) -> AsyncGenerator[AgentComponents, None]:
     """Create agent with memory (embeddings + extraction) for memory evals.
 
@@ -262,7 +252,7 @@ async def eval_memory_agent(
     components = await create_agent(
         config=eval_memory_config,
         workspace=eval_workspace,
-        db=eval_database,
+        graph_dir=eval_graph_dir,
     )
 
     yield components

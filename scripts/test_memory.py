@@ -18,9 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
 async def main():
+    from ash.cli.context import get_graph_dir
     from ash.config import load_config
-    from ash.config.paths import get_database_path
-    from ash.db.engine import Database
     from ash.llm import create_registry
 
     print("=" * 60)
@@ -57,13 +56,9 @@ async def main():
 
     print("[OK] Embeddings API key found")
 
-    # Connect to database
-    db_path = get_database_path()
-    print(f"[OK] Database path: {db_path}")
-
-    database = Database(database_path=db_path)
-    await database.connect()
-    print("[OK] Database connected")
+    # Get graph directory
+    graph_dir = get_graph_dir()
+    print(f"[OK] Graph directory: {graph_dir}")
 
     # Create LLM registry for embeddings
     llm_registry = create_registry(
@@ -72,11 +67,11 @@ async def main():
         else None,
     )
 
-    # Create store (handles SQLite storage + vector index)
+    # Create store (handles JSONL storage + numpy vector index)
     from ash.store import create_store
 
     memory = await create_store(
-        db=database,
+        graph_dir=graph_dir,
         llm_registry=llm_registry,
         embedding_model=config.embeddings.model,
         embedding_provider=config.embeddings.provider,
@@ -136,9 +131,7 @@ async def main():
     print("Test 4: Check JSONL storage")
     print("-" * 60)
 
-    from ash.config.paths import get_memories_jsonl_path
-
-    memories_path = get_memories_jsonl_path()
+    memories_path = graph_dir / "memories.jsonl"
     if memories_path.exists():
         line_count = sum(1 for _ in memories_path.read_text().splitlines())
         print(f"JSONL file: {memories_path}")
@@ -146,7 +139,6 @@ async def main():
     else:
         print(f"JSONL file not found: {memories_path}")
 
-    await database.disconnect()
     print("-" * 60)
     print("[DONE] Memory QA test complete")
     print("=" * 60)

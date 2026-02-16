@@ -6,13 +6,9 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from sqlalchemy import text
-
 from ash.store.people.helpers import (
-    ALIAS_NORM_MATCH,
     FUZZY_MATCH_PROMPT,
     RELATIONSHIP_TERMS,
-    load_person_full,
     normalize_reference,
 )
 from ash.store.types import (
@@ -31,43 +27,29 @@ class PeopleResolutionMixin:
 
     async def find_person(self: Store, reference: str) -> PersonEntry | None:
         ref = normalize_reference(reference)
-        async with self._db.session() as session:
-            # Search by name
-            result = await session.execute(
-                text(
-                    "SELECT id FROM people WHERE LOWER(name) = :ref AND merged_into IS NULL"
-                ),
-                {"ref": ref},
-            )
-            row = result.fetchone()
-            if row:
-                return await load_person_full(session, row[0])
 
-            # Search by alias - match normalized forms (strip my/the/@ prefixes)
-            result = await session.execute(
-                text(f"""
-                    SELECT pa.person_id FROM person_aliases pa
-                    JOIN people p ON p.id = pa.person_id
-                    WHERE p.merged_into IS NULL AND {ALIAS_NORM_MATCH}
-                """),
-                {"ref": ref},
-            )
-            row = result.fetchone()
-            if row:
-                return await load_person_full(session, row[0])
+        for person in self._graph.people.values():
+            if person.merged_into is not None:
+                continue
+            if person.name and person.name.lower() == ref:
+                return person
 
-            # Search by relationship
-            result = await session.execute(
-                text("""
-                    SELECT pr.person_id FROM person_relationships pr
-                    JOIN people p ON p.id = pr.person_id
-                    WHERE LOWER(pr.relationship) = :ref AND p.merged_into IS NULL
-                """),
-                {"ref": ref},
-            )
-            row = result.fetchone()
-            if row:
-                return await load_person_full(session, row[0])
+        # Search by alias
+        for person in self._graph.people.values():
+            if person.merged_into is not None:
+                continue
+            for alias in person.aliases:
+                alias_norm = normalize_reference(alias.value)
+                if alias_norm == ref:
+                    return person
+
+        # Search by relationship
+        for person in self._graph.people.values():
+            if person.merged_into is not None:
+                continue
+            for rel in person.relationships:
+                if rel.relationship.lower() == ref:
+                    return person
 
         return None
 
@@ -77,60 +59,33 @@ class PeopleResolutionMixin:
         speaker_user_id: str,
     ) -> PersonEntry | None:
         ref = normalize_reference(reference)
-        async with self._db.session() as session:
-            # Find by name or alias, then check speaker connection
-            candidate_ids: set[str] = set()
+        candidate_ids: set[str] = set()
 
-            result = await session.execute(
-                text(
-                    "SELECT id FROM people WHERE LOWER(name) = :ref AND merged_into IS NULL"
-                ),
-                {"ref": ref},
-            )
-            for row in result.fetchall():
-                candidate_ids.add(row[0])
+        for person in self._graph.people.values():
+            if person.merged_into is not None:
+                continue
+            if person.name and person.name.lower() == ref:
+                candidate_ids.add(person.id)
+            for alias in person.aliases:
+                alias_norm = normalize_reference(alias.value)
+                if alias_norm == ref:
+                    candidate_ids.add(person.id)
+            for rel in person.relationships:
+                if rel.relationship.lower() == ref:
+                    candidate_ids.add(person.id)
 
-            result = await session.execute(
-                text(f"""
-                    SELECT pa.person_id FROM person_aliases pa
-                    JOIN people p ON p.id = pa.person_id
-                    WHERE p.merged_into IS NULL AND {ALIAS_NORM_MATCH}
-                """),
-                {"ref": ref},
-            )
-            for row in result.fetchall():
-                candidate_ids.add(row[0])
-
-            result = await session.execute(
-                text("""
-                    SELECT pr.person_id FROM person_relationships pr
-                    JOIN people p ON p.id = pr.person_id
-                    WHERE LOWER(pr.relationship) = :ref AND p.merged_into IS NULL
-                """),
-                {"ref": ref},
-            )
-            for row in result.fetchall():
-                candidate_ids.add(row[0])
-
-            for pid in candidate_ids:
-                # Check if speaker is connected
-                r = await session.execute(
-                    text(
-                        "SELECT COUNT(*) FROM person_relationships WHERE person_id = :pid AND stated_by = :speaker"
-                    ),
-                    {"pid": pid, "speaker": speaker_user_id},
-                )
-                if (r.scalar() or 0) > 0:
-                    return await load_person_full(session, pid)
-
-                r = await session.execute(
-                    text(
-                        "SELECT COUNT(*) FROM person_aliases WHERE person_id = :pid AND added_by = :speaker"
-                    ),
-                    {"pid": pid, "speaker": speaker_user_id},
-                )
-                if (r.scalar() or 0) > 0:
-                    return await load_person_full(session, pid)
+        for pid in candidate_ids:
+            person = self._graph.people.get(pid)
+            if not person:
+                continue
+            # Check if speaker is connected via relationships
+            for rel in person.relationships:
+                if rel.stated_by == speaker_user_id:
+                    return person
+            # Check if speaker is connected via aliases
+            for alias in person.aliases:
+                if alias.added_by == speaker_user_id:
+                    return person
 
         return None
 
@@ -154,14 +109,11 @@ class PeopleResolutionMixin:
 
         existing = await self.find_person(reference)
         if existing:
-            # Check for ambiguity — if multiple people match this reference,
-            # fall through to _fuzzy_find for LLM-based disambiguation
             if not await self._has_ambiguous_matches(reference):
                 person = await self._follow_merge_chain(existing)
                 return PersonResolutionResult(
                     person_id=person.id, created=False, person_name=person.name
                 )
-            # else: multiple matches, let _fuzzy_find handle it
 
         # Try fuzzy match
         fuzzy_match = await self._fuzzy_find(
@@ -250,7 +202,6 @@ class PeopleResolutionMixin:
             result = response.message.get_text().strip()
             if result == "NONE":
                 return None
-            # Find the person by ID from candidates
             for p in candidates:
                 if p.id == result:
                     return p
@@ -263,28 +214,16 @@ class PeopleResolutionMixin:
         """Check if a reference matches multiple distinct (non-merged) people."""
         ref = normalize_reference(reference)
         person_ids: set[str] = set()
-        async with self._db.session() as session:
-            # Check by name
-            result = await session.execute(
-                text(
-                    "SELECT id FROM people WHERE LOWER(name) = :ref AND merged_into IS NULL"
-                ),
-                {"ref": ref},
-            )
-            for row in result.fetchall():
-                person_ids.add(row[0])
 
-            # Check by alias
-            result = await session.execute(
-                text(f"""
-                    SELECT pa.person_id FROM person_aliases pa
-                    JOIN people p ON p.id = pa.person_id
-                    WHERE p.merged_into IS NULL AND {ALIAS_NORM_MATCH}
-                """),
-                {"ref": ref},
-            )
-            for row in result.fetchall():
-                person_ids.add(row[0])
+        for person in self._graph.people.values():
+            if person.merged_into is not None:
+                continue
+            if person.name and person.name.lower() == ref:
+                person_ids.add(person.id)
+            for alias in person.aliases:
+                alias_norm = normalize_reference(alias.value)
+                if alias_norm == ref:
+                    person_ids.add(person.id)
 
         return len(person_ids) > 1
 

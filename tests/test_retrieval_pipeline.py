@@ -247,7 +247,7 @@ class TestFinalizeRanking:
             ),
         ]
 
-        result = pipeline._finalize(memories, max_memories=10)
+        result = pipeline._simple_finalize(memories, max_memories=10)
 
         assert len(result.memories) == 2
         # mem-1 should have the higher similarity (0.9)
@@ -282,6 +282,105 @@ class TestFinalizeRanking:
             ),
         ]
 
-        result = pipeline._finalize(memories, max_memories=10)
+        result = pipeline._simple_finalize(memories, max_memories=10)
 
         assert [m.id for m in result.memories] == ["high", "mid", "low"]
+
+
+class TestRRFFusion:
+    """Tests for RRF (Reciprocal Rank Fusion) in Stage 4."""
+
+    def _make_result(self, id: str, similarity: float = 0.5) -> SearchResult:
+        return SearchResult(
+            id=id,
+            content=f"Content of {id}",
+            similarity=similarity,
+            metadata={},
+            source_type="memory",
+        )
+
+    def test_rrf_empty_stages(self, mock_store):
+        """Empty stages should return empty results."""
+        pipeline = RetrievalPipeline(mock_store)
+        result = pipeline._rrf_finalize([[], [], []], max_memories=10)
+        assert result.memories == []
+
+    def test_rrf_single_stage_falls_back_to_simple(self, mock_store):
+        """Single active stage should sort by similarity (no RRF)."""
+        pipeline = RetrievalPipeline(mock_store)
+        stage1 = [
+            self._make_result("a", 0.3),
+            self._make_result("b", 0.9),
+            self._make_result("c", 0.6),
+        ]
+        result = pipeline._rrf_finalize([stage1, [], []], max_memories=10)
+        assert [m.id for m in result.memories] == ["b", "c", "a"]
+
+    def test_rrf_boosts_multi_stage_results(self, mock_store):
+        """Results appearing in multiple stages should rank higher."""
+        pipeline = RetrievalPipeline(mock_store)
+
+        # mem-shared appears in both stages, mem-top only in stage1
+        stage1 = [
+            self._make_result("mem-top", 0.95),
+            self._make_result("mem-shared", 0.8),
+        ]
+        stage2 = [
+            self._make_result("mem-shared", 0.7),
+            self._make_result("mem-only-s2", 0.5),
+        ]
+        result = pipeline._rrf_finalize([stage1, stage2], max_memories=10)
+
+        ids = [m.id for m in result.memories]
+        # mem-shared should be first due to RRF boost from appearing in both stages
+        assert ids[0] == "mem-shared"
+
+    def test_rrf_deduplicates(self, mock_store):
+        """RRF should not produce duplicate entries."""
+        pipeline = RetrievalPipeline(mock_store)
+
+        stage1 = [self._make_result("a", 0.9)]
+        stage2 = [self._make_result("a", 0.7)]
+        result = pipeline._rrf_finalize([stage1, stage2], max_memories=10)
+
+        assert len(result.memories) == 1
+        assert result.memories[0].id == "a"
+        # Should keep highest similarity version
+        assert result.memories[0].similarity == 0.9
+
+    def test_rrf_respects_max_memories(self, mock_store):
+        """RRF should limit output to max_memories."""
+        pipeline = RetrievalPipeline(mock_store)
+
+        stage1 = [self._make_result(f"s1-{i}") for i in range(5)]
+        stage2 = [self._make_result(f"s2-{i}") for i in range(5)]
+        result = pipeline._rrf_finalize([stage1, stage2], max_memories=3)
+
+        assert len(result.memories) == 3
+
+    def test_rrf_scores_proportional_to_rank(self, mock_store):
+        """Top-ranked items in a stage should have higher RRF contribution."""
+        pipeline = RetrievalPipeline(mock_store)
+
+        # Stage with 3 items: rank 0, 1, 2
+        stage1 = [
+            self._make_result("first", 0.9),
+            self._make_result("second", 0.8),
+            self._make_result("third", 0.7),
+        ]
+        # Stage2 only has 'third'
+        stage2 = [self._make_result("third", 0.5)]
+
+        result = pipeline._rrf_finalize([stage1, stage2], max_memories=10)
+
+        # 'third' has RRF from both stages:
+        #   stage1: 1/(60+3) = 1/63
+        #   stage2: 1/(60+1) = 1/61
+        #   total = 1/63 + 1/61
+        #
+        # 'first' has: 1/(60+1) = 1/61
+        # 'second' has: 1/(60+2) = 1/62
+        #
+        # So 'third' (1/63 + 1/61) > 'first' (1/61) > 'second' (1/62)
+        ids = [m.id for m in result.memories]
+        assert ids[0] == "third"  # Boosted by appearing in both stages

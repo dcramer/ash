@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.config import AshConfig
     from ash.core import Agent
-    from ash.db import Database
     from ash.llm import LLMProvider
     from ash.memory.extractor import MemoryExtractor
     from ash.providers.telegram import TelegramMessageHandler, TelegramProvider
@@ -33,7 +32,6 @@ class AshServer:
 
     def __init__(
         self,
-        database: "Database",
         agent: "Agent",
         telegram_provider: "TelegramProvider | None" = None,
         config: "AshConfig | None" = None,
@@ -45,7 +43,6 @@ class AshServer:
         memory_extractor: "MemoryExtractor | None" = None,
         agent_executor: "AgentExecutor | None" = None,
     ):
-        self._database = database
         self._agent = agent
         self._telegram_provider = telegram_provider
         self._config = config
@@ -72,7 +69,6 @@ class AshServer:
         async def lifespan(app: FastAPI) -> "AsyncIterator[None]":
             # Startup
             logger.info("Starting Ash server")
-            await self._database.connect()
 
             if self._telegram_provider:
                 from ash.providers.telegram import TelegramMessageHandler
@@ -80,7 +76,7 @@ class AshServer:
                 self._telegram_handler = TelegramMessageHandler(
                     provider=self._telegram_provider,
                     agent=self._agent,
-                    database=self._database,
+                    store=self._memory_manager,
                     streaming=False,
                     config=self._config,
                     agent_registry=self._agent_registry,
@@ -105,7 +101,6 @@ class AshServer:
             logger.info("Shutting down Ash server")
             if self._telegram_provider:
                 await self._telegram_provider.stop()
-            await self._database.disconnect()
 
         app = FastAPI(
             title="Ash",
@@ -116,7 +111,6 @@ class AshServer:
 
         # Store references in app state
         app.state.server = self
-        app.state.database = self._database
         app.state.agent = self._agent
 
         # Include routes
@@ -133,7 +127,6 @@ class AshServer:
 
 
 def create_app(
-    database: "Database",
     agent: "Agent",
     telegram_provider: "TelegramProvider | None" = None,
     config: "AshConfig | None" = None,
@@ -147,7 +140,6 @@ def create_app(
 ) -> FastAPI:
     """Create the FastAPI application."""
     server = AshServer(
-        database=database,
         agent=agent,
         telegram_provider=telegram_provider,
         config=config,

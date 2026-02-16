@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import text
-
+from ash.graph.edges import create_about_edge
 from ash.memory.secrets import contains_secret
-from ash.store.mappers import row_to_memory as _row_to_memory
-from ash.store.memories.helpers import load_subjects_batch, row_to_memory_full
 from ash.store.types import (
     MemoryEntry,
     MemoryType,
     Sensitivity,
+    matches_scope,
 )
 
 if TYPE_CHECKING:
@@ -32,7 +29,6 @@ class MemoryCrudMixin:
         if not person_ids:
             return None
 
-        # Check cache first, collect misses for lookup
         names: list[str] = []
         cache_misses: list[str] = []
 
@@ -42,7 +38,6 @@ class MemoryCrudMixin:
             else:
                 cache_misses.append(pid)
 
-        # Fetch any cache misses - try batch first, fall back to individual
         if cache_misses:
             batch_names: dict[str, str] = {}
             try:
@@ -56,7 +51,6 @@ class MemoryCrudMixin:
                     self._person_name_cache[pid] = name
                     names.append(name)
                 else:
-                    # Fall back to get_person for individual lookup
                     try:
                         person = await self.get_person(pid)
                         if person:
@@ -111,48 +105,6 @@ class MemoryCrudMixin:
         memory_id = str(uuid.uuid4())
         subject_pids = subject_person_ids or []
 
-        async with self._db.session() as session:
-            await session.execute(
-                text("""
-                    INSERT INTO memories (id, version, content, memory_type, source,
-                        owner_user_id, chat_id, source_username, source_display_name,
-                        source_session_id, source_message_id, extraction_confidence,
-                        sensitivity, portable, created_at, observed_at, expires_at,
-                        metadata)
-                    VALUES (:id, 1, :content, :memory_type, :source,
-                        :owner_user_id, :chat_id, :source_username, :source_display_name,
-                        :source_session_id, :source_message_id, :extraction_confidence,
-                        :sensitivity, :portable, :created_at, :observed_at, :expires_at,
-                        :metadata)
-                """),
-                {
-                    "id": memory_id,
-                    "content": content,
-                    "memory_type": memory_type.value,
-                    "source": source,
-                    "owner_user_id": owner_user_id,
-                    "chat_id": chat_id,
-                    "source_username": source_username,
-                    "source_display_name": source_display_name,
-                    "source_session_id": source_session_id,
-                    "source_message_id": source_message_id,
-                    "extraction_confidence": extraction_confidence,
-                    "sensitivity": sensitivity.value if sensitivity else None,
-                    "portable": 1 if portable else 0,
-                    "created_at": now.isoformat(),
-                    "observed_at": observed_at.isoformat() if observed_at else None,
-                    "expires_at": expires_at.isoformat() if expires_at else None,
-                    "metadata": json.dumps(metadata) if metadata else None,
-                },
-            )
-            for pid in subject_pids:
-                await session.execute(
-                    text(
-                        "INSERT INTO memory_subjects (memory_id, person_id) VALUES (:mid, :pid)"
-                    ),
-                    {"mid": memory_id, "pid": pid},
-                )
-
         memory = MemoryEntry(
             id=memory_id,
             version=1,
@@ -175,13 +127,26 @@ class MemoryCrudMixin:
             metadata=metadata,
         )
 
+        # Add to graph and persist
+        self._graph.add_memory(memory)
+        await self._persistence.save_memories(self._graph.memories)
+
+        # Dual-write ABOUT edges for subject_person_ids
+        if subject_pids:
+            for pid in subject_pids:
+                edge = create_about_edge(memory_id, pid, created_by=source)
+                self._graph.add_edge(edge)
+            await self._persistence.save_edges(self._graph.edges)
+
         if embedding_floats:
             embedding_base64 = MemoryEntry.encode_embedding(embedding_floats)
             try:
-                await self._index.add_embedding(memory.id, embedding_floats)
+                self._index.add(memory.id, embedding_floats)
+                await self._index.save(
+                    self._persistence.graph_dir / "embeddings" / "memories.npy"
+                )
             except Exception:
                 logger.warning("Failed to index memory, continuing", exc_info=True)
-            # Store base64 embedding on the entry for callers that need it
             memory.embedding = embedding_base64
 
         try:
@@ -222,39 +187,27 @@ class MemoryCrudMixin:
         return memory
 
     async def get_memory(self: Store, memory_id: str) -> MemoryEntry | None:
-        async with self._db.session() as session:
-            result = await session.execute(
-                text("SELECT * FROM memories WHERE id = :id AND archived_at IS NULL"),
-                {"id": memory_id},
-            )
-            row = result.fetchone()
-            if not row:
-                return None
-            return await row_to_memory_full(session, row)
+        memory = self._graph.memories.get(memory_id)
+        if memory and memory.archived_at is None:
+            return memory
+        return None
 
     async def get_memory_by_prefix(self: Store, prefix: str) -> MemoryEntry | None:
         """Find a memory by ID prefix match."""
-        async with self._db.session() as session:
-            # Try exact match first
-            result = await session.execute(
-                text("SELECT * FROM memories WHERE id = :id AND archived_at IS NULL"),
-                {"id": prefix},
-            )
-            row = result.fetchone()
-            if row:
-                return await row_to_memory_full(session, row)
+        # Try exact match first
+        memory = self._graph.memories.get(prefix)
+        if memory and memory.archived_at is None:
+            return memory
 
-            # Try prefix match
-            result = await session.execute(
-                text(
-                    "SELECT * FROM memories WHERE id LIKE :prefix AND archived_at IS NULL"
-                ),
-                {"prefix": f"{prefix}%"},
-            )
-            rows = result.fetchall()
-            if len(rows) == 1:
-                return await row_to_memory_full(session, rows[0])
-            return None
+        # Try prefix match
+        matches = [
+            m
+            for mid, m in self._graph.memories.items()
+            if mid.startswith(prefix) and m.archived_at is None
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     async def list_memories(
         self: Store,
@@ -264,51 +217,31 @@ class MemoryCrudMixin:
         owner_user_id: str | None = None,
         chat_id: str | None = None,
     ) -> list[MemoryEntry]:
-        async with self._db.session() as session:
-            conditions = ["archived_at IS NULL"]
-            params: dict[str, Any] = {}
+        now = datetime.now(UTC)
+        results: list[MemoryEntry] = []
 
+        for memory in self._graph.memories.values():
+            if memory.archived_at is not None:
+                continue
             if not include_expired:
-                conditions.append("(expires_at IS NULL OR expires_at > :now)")
-                params["now"] = datetime.now(UTC).isoformat()
-
+                if memory.expires_at and memory.expires_at <= now:
+                    continue
             if not include_superseded:
-                conditions.append("superseded_at IS NULL")
+                if memory.superseded_at:
+                    continue
+            if not matches_scope(memory, owner_user_id, chat_id):
+                continue
+            results.append(memory)
 
-            # Scope filtering in SQL so LIMIT returns the correct count
-            if owner_user_id and chat_id:
-                conditions.append(
-                    "(owner_user_id = :owner_user_id OR (owner_user_id IS NULL AND chat_id = :chat_id))"
-                )
-                params["owner_user_id"] = owner_user_id
-                params["chat_id"] = chat_id
-            elif owner_user_id:
-                conditions.append("owner_user_id = :owner_user_id")
-                params["owner_user_id"] = owner_user_id
-            elif chat_id:
-                conditions.append("(owner_user_id IS NULL AND chat_id = :chat_id)")
-                params["chat_id"] = chat_id
+        # Sort by created_at descending
+        results.sort(
+            key=lambda m: m.created_at or datetime.min.replace(tzinfo=UTC), reverse=True
+        )
 
-            where = " AND ".join(conditions)
-            query = f"SELECT * FROM memories WHERE {where} ORDER BY created_at DESC"
-            if limit is not None:
-                query += " LIMIT :limit"
-                params["limit"] = limit
+        if limit is not None:
+            results = results[:limit]
 
-            result = await session.execute(text(query), params)
-            rows = result.fetchall()
-
-            # Load subjects in batch
-            memory_ids = [row.id for row in rows]
-            subjects_map = await load_subjects_batch(session, memory_ids)
-
-            memories = []
-            for row in rows:
-                memory = _row_to_memory(row)
-                memory.subject_person_ids = subjects_map.get(memory.id, [])
-                memories.append(memory)
-
-            return memories
+        return results
 
     async def delete_memory(
         self: Store,
@@ -329,17 +262,15 @@ class MemoryCrudMixin:
             if not (is_owner or is_group_member):
                 return False
 
-        now = datetime.now(UTC).isoformat()
-        async with self._db.session() as session:
-            await session.execute(
-                text(
-                    "UPDATE memories SET archived_at = :now, archive_reason = 'user_deleted' WHERE id = :id"
-                ),
-                {"now": now, "id": full_id},
-            )
+        memory.archived_at = datetime.now(UTC)
+        memory.archive_reason = "user_deleted"
+        await self._persistence.save_memories(self._graph.memories)
 
         try:
-            await self._index.delete_embedding(full_id)
+            self._index.remove(full_id)
+            await self._index.save(
+                self._persistence.graph_dir / "embeddings" / "memories.npy"
+            )
         except Exception:
             logger.warning(
                 "Failed to delete memory embedding",
@@ -356,86 +287,36 @@ class MemoryCrudMixin:
             return 0
 
         count = 0
-        async with self._db.session() as session:
-            for entry in entries:
-                r = await session.execute(
-                    text("""
-                        UPDATE memories SET
-                            content = :content,
-                            memory_type = :memory_type,
-                            source = :source,
-                            owner_user_id = :owner_user_id,
-                            chat_id = :chat_id,
-                            source_username = :source_username,
-                            source_display_name = :source_display_name,
-                            sensitivity = :sensitivity,
-                            portable = :portable,
-                            expires_at = :expires_at,
-                            superseded_at = :superseded_at,
-                            superseded_by_id = :superseded_by_id,
-                            archived_at = :archived_at,
-                            archive_reason = :archive_reason,
-                            metadata = :metadata
-                        WHERE id = :id
-                    """),
-                    {
-                        "id": entry.id,
-                        "content": entry.content,
-                        "memory_type": entry.memory_type.value,
-                        "source": entry.source,
-                        "owner_user_id": entry.owner_user_id,
-                        "chat_id": entry.chat_id,
-                        "source_username": entry.source_username,
-                        "source_display_name": entry.source_display_name,
-                        "sensitivity": entry.sensitivity.value
-                        if entry.sensitivity
-                        else None,
-                        "portable": 1 if entry.portable else 0,
-                        "expires_at": entry.expires_at.isoformat()
-                        if entry.expires_at
-                        else None,
-                        "superseded_at": entry.superseded_at.isoformat()
-                        if entry.superseded_at
-                        else None,
-                        "superseded_by_id": entry.superseded_by_id,
-                        "archived_at": entry.archived_at.isoformat()
-                        if entry.archived_at
-                        else None,
-                        "archive_reason": entry.archive_reason,
-                        "metadata": json.dumps(entry.metadata)
-                        if entry.metadata
-                        else None,
-                    },
-                )
-                if r.rowcount > 0:  # type: ignore[possibly-missing-attribute]
-                    count += 1
+        edges_changed = False
+        for entry in entries:
+            if entry.id in self._graph.memories:
+                self._graph.memories[entry.id] = entry
+                count += 1
 
-                    # Update subjects
-                    await session.execute(
-                        text("DELETE FROM memory_subjects WHERE memory_id = :id"),
-                        {"id": entry.id},
-                    )
-                    for pid in entry.subject_person_ids:
-                        await session.execute(
-                            text(
-                                "INSERT INTO memory_subjects (memory_id, person_id) VALUES (:mid, :pid)"
-                            ),
-                            {"mid": entry.id, "pid": pid},
-                        )
+                # Sync ABOUT edges with subject_person_ids
+                existing_about = self._graph.get_outgoing(entry.id, edge_type="ABOUT")
+                existing_pids = {e.target_id for e in existing_about}
+                desired_pids = set(entry.subject_person_ids or [])
+
+                # Remove edges for persons no longer in subject list
+                for edge in existing_about:
+                    if edge.target_id not in desired_pids:
+                        self._graph.remove_edge(edge.id)
+                        edges_changed = True
+
+                # Add edges for newly added persons
+                for pid in desired_pids - existing_pids:
+                    edge = create_about_edge(entry.id, pid, created_by=entry.source)
+                    self._graph.add_edge(edge)
+                    edges_changed = True
+
+        if count > 0:
+            await self._persistence.save_memories(self._graph.memories)
+            if edges_changed:
+                await self._persistence.save_edges(self._graph.edges)
 
         return count
 
     async def get_all_memories(self: Store) -> list[MemoryEntry]:
         """Get all memories including archived."""
-        async with self._db.session() as session:
-            result = await session.execute(text("SELECT * FROM memories"))
-            rows = result.fetchall()
-            memory_ids = [row.id for row in rows]
-            subjects_map = await load_subjects_batch(session, memory_ids)
-
-            memories = []
-            for row in rows:
-                memory = _row_to_memory(row)
-                memory.subject_person_ids = subjects_map.get(memory.id, [])
-                memories.append(memory)
-            return memories
+        return list(self._graph.memories.values())

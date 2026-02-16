@@ -93,18 +93,14 @@ async def _with_store(
     action_name: str,
     callback: Callable[[Store], Awaitable[None]],
 ) -> None:
-    """Run a callback with a Store, handling database lifecycle."""
-    from ash.cli.context import get_database
+    """Run a callback with a Store."""
+    from ash.cli.commands.memory._helpers import get_store
 
-    database = await get_database(config)
-    try:
-        store = await _create_store(config, database)
-        if not store:
-            error(f"{action_name} requires [embeddings] configuration")
-            raise typer.Exit(1)
-        await callback(store)
-    finally:
-        await database.disconnect()
+    store = await get_store(config)
+    if not store:
+        error(f"{action_name} requires [embeddings] configuration")
+        raise typer.Exit(1)
+    await callback(store)
 
 
 async def _run_people_action(
@@ -378,11 +374,11 @@ async def _people_delete(
         success(f"Deleted {person.name}")
 
 
-async def _create_store(config: AshConfig, db: object) -> Store | None:
+async def _create_store(config: AshConfig) -> Store | None:
     """Create a Store for commands that need it."""
     from ash.cli.commands.memory._helpers import get_store
 
-    return await get_store(config, db)  # type: ignore[arg-type]
+    return await get_store(config)
 
 
 async def _people_doctor(config: AshConfig, force: bool) -> None:

@@ -17,9 +17,8 @@ from ash.config.models import ModelConfig
 from ash.config.workspace import Workspace
 from ash.core.agent import Agent
 from ash.core.prompt import SystemPromptBuilder
-from ash.db.engine import Database
-from ash.memory.embeddings import EmbeddingGenerator
-from ash.memory.index import VectorIndex
+from ash.graph.graph import KnowledgeGraph
+from ash.graph.persistence import GraphPersistence
 from ash.skills.registry import SkillRegistry
 from ash.store.store import Store
 from ash.store.types import MemoryType
@@ -34,28 +33,32 @@ DEFAULT_MODEL_CONFIG = {
 
 @pytest.fixture
 def mock_index():
-    index = MagicMock(spec=VectorIndex)
+    index = MagicMock()
     index.search = AsyncMock(return_value=[])
-    index.add_embedding = AsyncMock()
-    index.delete_embedding = AsyncMock()
-    index.delete_embeddings = AsyncMock()
+    index.add = AsyncMock()
+    index.remove = AsyncMock()
     return index
 
 
 @pytest.fixture
 def mock_embedding_generator():
-    generator = MagicMock(spec=EmbeddingGenerator)
+    generator = MagicMock()
     generator.embed = AsyncMock(return_value=[0.1] * 1536)
     return generator
 
 
 @pytest.fixture
-async def store(database: Database, mock_index, mock_embedding_generator) -> Store:
-    return Store(
-        db=database,
+async def store(graph_dir, mock_index, mock_embedding_generator) -> Store:
+    graph = KnowledgeGraph()
+    persistence = GraphPersistence(graph_dir)
+    s = Store(
+        graph=graph,
+        persistence=persistence,
         vector_index=mock_index,
         embedding_generator=mock_embedding_generator,
     )
+    s._llm_model = "mock-model"
+    return s
 
 
 def _make_agent(store: Store, workspace: Workspace) -> Agent:

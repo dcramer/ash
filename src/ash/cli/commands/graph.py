@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Annotated
 
 import click
 import typer
-from sqlalchemy import text
 
 from ash.cli.console import console, create_table, dim, error
 
@@ -83,34 +82,30 @@ async def _run_graph_action(
 ) -> None:
     """Run graph action asynchronously."""
     from ash.cli.commands.memory._helpers import get_store
-    from ash.cli.context import get_config, get_database
+    from ash.cli.context import get_config
 
     config = get_config(config_path)
-    database = await get_database(config)
 
-    try:
-        store = await get_store(config, database)
-        if not store:
-            error("Graph commands require [embeddings] configuration")
-            raise typer.Exit(1)
+    store = await get_store(config)
+    if not store:
+        error("Graph commands require [embeddings] configuration")
+        raise typer.Exit(1)
 
-        if action == "users":
-            await _graph_users(store)
-        elif action == "chats":
-            await _graph_chats(store)
-        elif action == "edges":
-            if not target:
-                error("Usage: ash graph edges <node-id>")
-                raise typer.Exit(1)
-            await _graph_edges(store, target)
-        elif action == "stats":
-            await _graph_stats(store)
-        else:
-            error(f"Unknown action: {action}")
-            console.print("Valid actions: users, chats, edges, stats")
+    if action == "users":
+        await _graph_users(store)
+    elif action == "chats":
+        await _graph_chats(store)
+    elif action == "edges":
+        if not target:
+            error("Usage: ash graph edges <node-id>")
             raise typer.Exit(1)
-    finally:
-        await database.disconnect()
+        await _graph_edges(store, target)
+    elif action == "stats":
+        await _graph_stats(store)
+    else:
+        error(f"Unknown action: {action}")
+        console.print("Valid actions: users, chats, edges, stats")
+        raise typer.Exit(1)
 
 
 async def _graph_users(store: Store) -> None:
@@ -185,38 +180,35 @@ async def _graph_chats(store: Store) -> None:
 
 
 async def _resolve_node_id(store: Store, prefix: str) -> tuple[str, str] | None:
-    """Resolve a node ID prefix to (full_id, table_name).
+    """Resolve a node ID prefix to (full_id, type_name).
 
-    Searches across all 4 node tables using exact match first,
-    then prefix match via LIKE.
+    Searches across all 4 node types using exact match first,
+    then prefix match.
     """
-    tables = ["memories", "people", "users", "chats"]
-    async with store._db.session() as session:
-        # Try exact match first
-        for table in tables:
-            result = await session.execute(
-                text(f"SELECT id FROM {table} WHERE id = :id"),  # noqa: S608
-                {"id": prefix},
-            )
-            row = result.fetchone()
-            if row:
-                return (row[0], table)
+    graph = store._graph
+    collections = [
+        ("memories", graph.memories),
+        ("people", graph.people),
+        ("users", graph.users),
+        ("chats", graph.chats),
+    ]
 
-        # Try prefix match
-        for table in tables:
-            result = await session.execute(
-                text(f"SELECT id FROM {table} WHERE id LIKE :prefix"),  # noqa: S608
-                {"prefix": f"{prefix}%"},
-            )
-            rows = result.fetchall()
-            if len(rows) == 1:
-                return (rows[0][0], table)
+    # Try exact match first
+    for type_name, collection in collections:
+        if prefix in collection:
+            return (prefix, type_name)
+
+    # Try prefix match
+    for type_name, collection in collections:
+        matches = [nid for nid in collection if nid.startswith(prefix)]
+        if len(matches) == 1:
+            return (matches[0], type_name)
 
     return None
 
 
 async def _graph_edges(store: Store, node_id: str) -> None:
-    """Show all edges connected to a node via SQL queries."""
+    """Show all edges connected to a node."""
     # Resolve prefix to full ID
     resolved = await _resolve_node_id(store, node_id)
     if resolved:
@@ -226,85 +218,62 @@ async def _graph_edges(store: Store, node_id: str) -> None:
         node_id = full_id
 
     edges: list[tuple[str, str, str, str]] = []
+    graph = store._graph
 
-    async with store._db.session() as session:
-        # Memory -> Person (about)
-        result = await session.execute(
-            text(
-                "SELECT memory_id, person_id FROM memory_subjects WHERE memory_id = :id OR person_id = :id"
-            ),
-            {"id": node_id},
-        )
-        for row in result.fetchall():
-            if row[0] == node_id:
-                edges.append(("about", "->", row[0], row[1]))
-            else:
-                edges.append(("about", "<-", row[0], row[1]))
+    # Memory -> Person (about) via subject_person_ids
+    for mem in graph.memories.values():
+        if mem.archived_at:
+            continue
+        if mem.id == node_id:
+            for pid in mem.subject_person_ids:
+                edges.append(("about", "->", mem.id, pid))
+        elif node_id in mem.subject_person_ids:
+            edges.append(("about", "<-", mem.id, node_id))
 
-        # Memory -> User (owned_by)
-        result = await session.execute(
-            text(
-                "SELECT id, owner_user_id FROM memories WHERE (id = :id OR owner_user_id = :id) AND owner_user_id IS NOT NULL AND archived_at IS NULL"
-            ),
-            {"id": node_id},
-        )
-        for row in result.fetchall():
-            if row[0] == node_id:
-                edges.append(("owned_by", "->", row[0], row[1]))
-            else:
-                edges.append(("owned_by", "<-", row[0], row[1]))
+    # Memory -> User (owned_by) via owner_user_id
+    for mem in graph.memories.values():
+        if mem.archived_at or not mem.owner_user_id:
+            continue
+        if mem.id == node_id:
+            edges.append(("owned_by", "->", mem.id, mem.owner_user_id))
+        elif mem.owner_user_id == node_id:
+            edges.append(("owned_by", "<-", mem.id, mem.owner_user_id))
 
-        # Memory -> Chat (in_chat)
-        result = await session.execute(
-            text(
-                "SELECT id, chat_id FROM memories WHERE (id = :id OR chat_id = :id) AND chat_id IS NOT NULL AND archived_at IS NULL"
-            ),
-            {"id": node_id},
-        )
-        for row in result.fetchall():
-            if row[0] == node_id:
-                edges.append(("in_chat", "->", row[0], row[1]))
-            else:
-                edges.append(("in_chat", "<-", row[0], row[1]))
+    # Memory -> Chat (in_chat) via chat_id
+    for mem in graph.memories.values():
+        if mem.archived_at or not mem.chat_id:
+            continue
+        if mem.id == node_id:
+            edges.append(("in_chat", "->", mem.id, mem.chat_id))
+        elif mem.chat_id == node_id:
+            edges.append(("in_chat", "<-", mem.id, mem.chat_id))
 
-        # User -> Person (is_person)
-        result = await session.execute(
-            text(
-                "SELECT id, person_id FROM users WHERE (id = :id OR person_id = :id) AND person_id IS NOT NULL"
-            ),
-            {"id": node_id},
-        )
-        for row in result.fetchall():
-            if row[0] == node_id:
-                edges.append(("is_person", "->", row[0], row[1]))
-            else:
-                edges.append(("is_person", "<-", row[0], row[1]))
+    # User -> Person (is_person) via person_id
+    for user in graph.users.values():
+        if not user.person_id:
+            continue
+        if user.id == node_id:
+            edges.append(("is_person", "->", user.id, user.person_id))
+        elif user.person_id == node_id:
+            edges.append(("is_person", "<-", user.id, user.person_id))
 
-        # Person -> Person (merged_into)
-        result = await session.execute(
-            text(
-                "SELECT id, merged_into FROM people WHERE (id = :id OR merged_into = :id) AND merged_into IS NOT NULL"
-            ),
-            {"id": node_id},
-        )
-        for row in result.fetchall():
-            if row[0] == node_id:
-                edges.append(("merged_into", "->", row[0], row[1]))
-            else:
-                edges.append(("merged_into", "<-", row[0], row[1]))
+    # Person -> Person (merged_into)
+    for person in graph.people.values():
+        if not person.merged_into:
+            continue
+        if person.id == node_id:
+            edges.append(("merged_into", "->", person.id, person.merged_into))
+        elif person.merged_into == node_id:
+            edges.append(("merged_into", "<-", person.id, person.merged_into))
 
-        # Memory -> Memory (supersedes)
-        result = await session.execute(
-            text(
-                "SELECT id, superseded_by_id FROM memories WHERE (id = :id OR superseded_by_id = :id) AND superseded_by_id IS NOT NULL"
-            ),
-            {"id": node_id},
-        )
-        for row in result.fetchall():
-            if row[0] == node_id:
-                edges.append(("supersedes", "->", row[0], row[1]))
-            else:
-                edges.append(("supersedes", "<-", row[0], row[1]))
+    # Memory -> Memory (supersedes) via superseded_by_id
+    for mem in graph.memories.values():
+        if not mem.superseded_by_id:
+            continue
+        if mem.id == node_id:
+            edges.append(("supersedes", "->", mem.id, mem.superseded_by_id))
+        elif mem.superseded_by_id == node_id:
+            edges.append(("supersedes", "<-", mem.id, mem.superseded_by_id))
 
     if not edges:
         dim(f"No edges found for node: {node_id}")
@@ -339,64 +308,62 @@ async def _graph_edges(store: Store, node_id: str) -> None:
 
 async def _graph_stats(store: Store) -> None:
     """Show graph node/edge counts and health summary."""
+    graph = store._graph
+
     users = await store.list_users()
     chats = await store.list_chats()
     people = await store.list_people()
 
-    # Count nodes and edges via SQL
-    node_counts: dict[str, int] = {}
+    # Count active memories
+    active_memories = sum(
+        1 for m in graph.memories.values() if not m.archived_at and not m.superseded_at
+    )
+
+    # Count edges by type from in-memory data
     edge_counts: dict[str, int] = {}
-    async with store._db.session() as session:
-        result = await session.execute(
-            text(
-                "SELECT COUNT(*) FROM memories WHERE archived_at IS NULL AND superseded_at IS NULL"
-            )
-        )
-        node_counts["memories"] = result.scalar() or 0
 
-        result = await session.execute(text("SELECT COUNT(*) FROM memory_subjects"))
-        edge_counts["about"] = result.scalar() or 0
+    # about: memories with subject_person_ids
+    about_count = sum(
+        len(m.subject_person_ids) for m in graph.memories.values() if not m.archived_at
+    )
+    if about_count:
+        edge_counts["about"] = about_count
 
-        result = await session.execute(
-            text(
-                "SELECT COUNT(*) FROM memories WHERE owner_user_id IS NOT NULL AND archived_at IS NULL"
-            )
-        )
-        edge_counts["owned_by"] = result.scalar() or 0
+    # owned_by: memories with owner_user_id
+    owned_by = sum(
+        1 for m in graph.memories.values() if m.owner_user_id and not m.archived_at
+    )
+    if owned_by:
+        edge_counts["owned_by"] = owned_by
 
-        result = await session.execute(
-            text(
-                "SELECT COUNT(*) FROM memories WHERE chat_id IS NOT NULL AND archived_at IS NULL"
-            )
-        )
-        edge_counts["in_chat"] = result.scalar() or 0
+    # in_chat: memories with chat_id
+    in_chat = sum(1 for m in graph.memories.values() if m.chat_id and not m.archived_at)
+    if in_chat:
+        edge_counts["in_chat"] = in_chat
 
-        result = await session.execute(
-            text("SELECT COUNT(*) FROM users WHERE person_id IS NOT NULL")
-        )
-        edge_counts["is_person"] = result.scalar() or 0
+    # is_person: users with person_id
+    is_person = sum(1 for u in graph.users.values() if u.person_id)
+    if is_person:
+        edge_counts["is_person"] = is_person
 
-        result = await session.execute(
-            text("SELECT COUNT(*) FROM people WHERE merged_into IS NOT NULL")
-        )
-        edge_counts["merged_into"] = result.scalar() or 0
+    # merged_into: people with merged_into
+    merged = sum(1 for p in graph.people.values() if p.merged_into)
+    if merged:
+        edge_counts["merged_into"] = merged
 
-        result = await session.execute(
-            text(
-                "SELECT COUNT(*) FROM memories WHERE superseded_by_id IS NOT NULL AND archived_at IS NULL"
-            )
-        )
-        edge_counts["supersedes"] = result.scalar() or 0
-
-    # Filter to non-zero
-    edge_counts = {k: v for k, v in edge_counts.items() if v > 0}
+    # supersedes: memories with superseded_by_id
+    supersedes = sum(
+        1 for m in graph.memories.values() if m.superseded_by_id and not m.archived_at
+    )
+    if supersedes:
+        edge_counts["supersedes"] = supersedes
 
     # Node summary
     console.print("[bold]Node Counts[/bold]")
     console.print(f"  Users:    {len(users)}")
     console.print(f"  Chats:    {len(chats)}")
     console.print(f"  People:   {len(people)}")
-    console.print(f"  Memories: {node_counts['memories']}")
+    console.print(f"  Memories: {active_memories}")
     console.print()
 
     if edge_counts:

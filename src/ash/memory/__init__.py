@@ -10,13 +10,11 @@ Types (from ash.store):
 - matches_scope: Utility for scope filtering
 
 Internal:
-- VectorIndex: SQLite-vec vector index
 - EmbeddingGenerator: Embedding generation
 """
 
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.extractor import MemoryExtractor
-from ash.memory.index import VectorIndex
 from ash.store.types import (
     ExtractedFact,
     GCResult,
@@ -39,6 +37,5 @@ __all__ = [
     "SearchResult",
     "matches_scope",
     # Internal
-    "VectorIndex",
     "EmbeddingGenerator",
 ]

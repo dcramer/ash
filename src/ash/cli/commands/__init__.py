@@ -3,7 +3,6 @@
 from ash.cli.commands import (
     chat,
     config,
-    database,
     graph,
     init,
     memory,
@@ -20,7 +19,6 @@ from ash.cli.commands import (
 __all__ = [
     "chat",
     "config",
-    "database",
     "graph",
     "init",
     "memory",

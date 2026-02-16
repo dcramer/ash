@@ -65,13 +65,13 @@ async def _run_server(
 
     from ash.config import WorkspaceLoader, load_config
     from ash.config.paths import (
+        get_graph_dir,
         get_logs_path,
         get_pid_path,
         get_rpc_socket_path,
         get_sessions_path,
     )
     from ash.core import create_agent
-    from ash.db import init_database
     from ash.providers.telegram import TelegramProvider
     from ash.rpc import (
         RPCServer,
@@ -97,10 +97,8 @@ async def _run_server(
         if init_sentry(ash_config.sentry, server_mode=True):
             logger.info("Sentry initialized")
 
-    # Initialize database
-    logger.info("Initializing database")
-    database = init_database(database_path=ash_config.memory.database_path)
-    await database.connect()
+    # Set up graph directory for memory
+    graph_dir = get_graph_dir()
 
     # Load workspace
     logger.info("Loading workspace")
@@ -109,14 +107,11 @@ async def _run_server(
     workspace = workspace_loader.load()
 
     # Create agent with all dependencies
-    # Create a persistent session for memory tools (remember, recall)
-    # This session lives for the duration of the server
-    # Use the factory directly to avoid the auto-commit context manager
     logger.info("Setting up agent")
     components = await create_agent(
         config=ash_config,
         workspace=workspace,
-        db=database,
+        graph_dir=graph_dir,
         model_alias="default",
     )
     agent = components.agent
@@ -215,7 +210,6 @@ async def _run_server(
     # Create FastAPI app
     logger.info("Creating server")
     fastapi_app = create_app(
-        database=database,
         agent=agent,
         telegram_provider=telegram_provider,
         config=ash_config,

@@ -25,7 +25,7 @@ from ash.sessions.types import session_key as make_session_key
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
-    from ash.db import Database
+    from ash.store.store import Store
 
 logger = logging.getLogger("telegram")
 
@@ -62,12 +62,12 @@ class SessionHandler:
         provider_name: str,
         config: AshConfig | None,
         conversation_config: ConversationConfig,
-        database: Database,
+        store: Store | None = None,
     ):
         self._provider_name = provider_name
         self._config = config
         self._conversation_config = conversation_config
-        self._database = database
+        self._store = store
 
         # Session caches
         self._session_managers: dict[str, SessionManager] = {}
@@ -149,52 +149,17 @@ class SessionHandler:
         if entries:
             session.context.chat_history = [e.model_dump(mode="json") for e in entries]
 
-        async with self._database.session() as db_session:
-            from sqlalchemy import text as _text
-
-            now_iso = datetime.now(UTC).isoformat()
-            # Upsert user into the users table
-            existing = await db_session.execute(
-                _text(
-                    "SELECT id FROM users WHERE provider = :provider AND provider_id = :provider_id"
-                ),
-                {"provider": self._provider_name, "provider_id": message.user_id},
-            )
-            if not existing.fetchone():
-                import uuid
-
-                await db_session.execute(
-                    _text("""
-                        INSERT INTO users (id, version, provider, provider_id, username,
-                            display_name, created_at, updated_at)
-                        VALUES (:id, 1, :provider, :provider_id, :username,
-                            :display_name, :created_at, :updated_at)
-                    """),
-                    {
-                        "id": str(uuid.uuid4()),
-                        "provider": self._provider_name,
-                        "provider_id": message.user_id,
-                        "username": message.username,
-                        "display_name": message.display_name,
-                        "created_at": now_iso,
-                        "updated_at": now_iso,
-                    },
+        # Upsert user via Store
+        if self._store:
+            try:
+                await self._store.ensure_user(
+                    provider=self._provider_name,
+                    provider_id=message.user_id,
+                    username=message.username,
+                    display_name=message.display_name,
                 )
-            else:
-                await db_session.execute(
-                    _text("""
-                        UPDATE users SET username = :username, display_name = :display_name,
-                            updated_at = :updated_at
-                        WHERE provider = :provider AND provider_id = :provider_id
-                    """),
-                    {
-                        "username": message.username,
-                        "display_name": message.display_name,
-                        "updated_at": now_iso,
-                        "provider": self._provider_name,
-                        "provider_id": message.user_id,
-                    },
-                )
+            except Exception:
+                logger.warning("Failed to upsert user", exc_info=True)
 
         # Update chat state with participant info
         self._update_chat_state(message, thread_id)

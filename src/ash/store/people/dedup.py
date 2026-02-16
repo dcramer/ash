@@ -6,14 +6,12 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import text
-
+from ash.graph.edges import create_merged_into_edge
 from ash.store.people.helpers import (
-    load_person_full,
     normalize_reference,
     primary_sort_key,
 )
-from ash.store.types import PersonEntry
+from ash.store.types import AliasEntry, PersonEntry
 
 if TYPE_CHECKING:
     from ash.store.store import Store
@@ -29,89 +27,62 @@ class PeopleDedupMixin:
         primary_id: str,
         secondary_id: str,
     ) -> PersonEntry | None:
-        async with self._db.session() as session:
-            primary = await load_person_full(session, primary_id)
-            secondary = await load_person_full(session, secondary_id)
-            if not primary or not secondary:
-                return None
-            if secondary.merged_into:
-                logger.debug(
-                    "Skipping merge: secondary %s already merged into %s",
-                    secondary_id,
-                    secondary.merged_into,
-                )
-                return None
-
-            now = datetime.now(UTC)
-
-            # Merge aliases
-            existing_values = {a.value.lower() for a in primary.aliases}
-            for alias in secondary.aliases:
-                if alias.value.lower() not in existing_values:
-                    await session.execute(
-                        text("""
-                            INSERT INTO person_aliases (person_id, value, added_by, created_at)
-                            VALUES (:pid, :value, :added_by, :created_at)
-                        """),
-                        {
-                            "pid": primary_id,
-                            "value": alias.value,
-                            "added_by": alias.added_by,
-                            "created_at": alias.created_at.isoformat()
-                            if alias.created_at
-                            else None,
-                        },
-                    )
-                    existing_values.add(alias.value.lower())
-
-            # Add secondary name as alias if different
-            if (
-                secondary.name.lower() != primary.name.lower()
-                and secondary.name.lower() not in existing_values
-            ):
-                await session.execute(
-                    text("""
-                        INSERT INTO person_aliases (person_id, value, added_by, created_at)
-                        VALUES (:pid, :value, NULL, :created_at)
-                    """),
-                    {
-                        "pid": primary_id,
-                        "value": secondary.name,
-                        "created_at": now.isoformat(),
-                    },
-                )
-
-            # Merge relationships
-            existing_rels = {r.relationship.lower() for r in primary.relationships}
-            for rc in secondary.relationships:
-                if rc.relationship.lower() not in existing_rels:
-                    await session.execute(
-                        text("""
-                            INSERT INTO person_relationships (person_id, relationship, stated_by, created_at)
-                            VALUES (:pid, :rel, :stated_by, :created_at)
-                        """),
-                        {
-                            "pid": primary_id,
-                            "rel": rc.relationship,
-                            "stated_by": rc.stated_by,
-                            "created_at": rc.created_at.isoformat()
-                            if rc.created_at
-                            else None,
-                        },
-                    )
-                    existing_rels.add(rc.relationship.lower())
-
-            # Mark secondary as merged
-            await session.execute(
-                text(
-                    "UPDATE people SET merged_into = :primary_id WHERE id = :secondary_id"
-                ),
-                {"primary_id": primary_id, "secondary_id": secondary_id},
+        primary = self._graph.people.get(primary_id)
+        secondary = self._graph.people.get(secondary_id)
+        if not primary or not secondary:
+            return None
+        if secondary.merged_into:
+            logger.debug(
+                "Skipping merge: secondary %s already merged into %s",
+                secondary_id,
+                secondary.merged_into,
             )
-            await session.execute(
-                text("UPDATE people SET updated_at = :now WHERE id = :id"),
-                {"now": now.isoformat(), "id": primary_id},
+            return None
+
+        now = datetime.now(UTC)
+
+        # Merge aliases
+        existing_values = {a.value.lower() for a in primary.aliases}
+        for alias in secondary.aliases:
+            if alias.value.lower() not in existing_values:
+                primary.aliases.append(
+                    AliasEntry(
+                        value=alias.value,
+                        added_by=alias.added_by,
+                        created_at=alias.created_at,
+                    )
+                )
+                existing_values.add(alias.value.lower())
+
+        # Add secondary name as alias if different
+        if (
+            secondary.name.lower() != primary.name.lower()
+            and secondary.name.lower() not in existing_values
+        ):
+            primary.aliases.append(
+                AliasEntry(
+                    value=secondary.name,
+                    added_by=None,
+                    created_at=now,
+                )
             )
+
+        # Merge relationships
+        existing_rels = {r.relationship.lower() for r in primary.relationships}
+        for rc in secondary.relationships:
+            if rc.relationship.lower() not in existing_rels:
+                primary.relationships.append(rc)
+                existing_rels.add(rc.relationship.lower())
+
+        # Mark secondary as merged (FK field — retained for backward compat)
+        secondary.merged_into = primary_id
+        primary.updated_at = now
+
+        # Dual-write: create MERGED_INTO edge in the knowledge graph
+        self._graph.add_edge(create_merged_into_edge(secondary_id, primary_id))
+
+        await self._persistence.save_people(self._graph.people)
+        await self._persistence.save_edges(self._graph.edges)
 
         logger.debug(
             "person_merged",
@@ -131,7 +102,7 @@ class PeopleDedupMixin:
         except Exception:
             logger.warning("Failed to remap memories after merge", exc_info=True)
 
-        return await self.get_person(primary_id)
+        return self._graph.people.get(primary_id)
 
     async def find_dedup_candidates(
         self: Store,
@@ -218,11 +189,16 @@ class PeopleDedupMixin:
         return results
 
     async def _follow_merge_chain(self: Store, person: PersonEntry) -> PersonEntry:
+        from ash.graph.edges import get_merged_into
+
         visited: set[str] = set()
         current = person
-        while current.merged_into and current.merged_into not in visited:
+        while True:
+            next_id = get_merged_into(self._graph, current.id)
+            if not next_id or next_id in visited:
+                break
             visited.add(current.id)
-            next_person = await self.get_person(current.merged_into)
+            next_person = self._graph.people.get(next_id)
             if not next_person:
                 break
             current = next_person
