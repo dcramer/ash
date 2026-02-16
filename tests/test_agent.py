@@ -515,9 +515,8 @@ class TestSystemPromptBuilder:
         assert "test_tool" in prompt
         assert "A test tool" in prompt
 
-    def test_build_includes_workspace_section(self, prompt_builder):
+    def test_build_includes_workspace_info(self, prompt_builder):
         prompt = prompt_builder.build()
-        assert "Workspace" in prompt
         assert "Working directory" in prompt
 
     def test_build_includes_sandbox_section(self, prompt_builder):

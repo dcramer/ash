@@ -268,26 +268,34 @@ Sections MUST appear in this order (critical rules first, context last):
 4. **Skills** - Skill list + invocation guidance
 5. **Agents** - Agent list + delegation patterns
 6. **Model Aliases** - Available model configurations
-7. **Workspace** - Working directory info
-8. **Sandbox** - Execution environment + CLI commands
-9. **Runtime** - Model, timezone, current time
-10. **Current Message** - Sender context (group chats only)
+7. **Sandbox** - Working directory, execution environment + CLI commands
+8. **Runtime** - Model, timezone, current time
+9. **Current Message** - Sender context (group chats only)
+10. **Passive Engagement** - Guidelines when not directly mentioned
 11. **Known People** - User's contacts
 12. **Memory** - Retrieved context + memory guidance
 13. **Conversation Context** - Time gap awareness
-14. **Session** - History file access
+14. **Recent Chat Messages** - Cross-thread context
+15. **Session** - History file access
 
 ### Core Principles Section
 
-Place critical behavioral constraints immediately after the soul. These are the highest-priority rules that should never be violated.
+Place critical behavioral constraints immediately after the soul. These are the highest-priority rules that should never be violated. Use a flat bullet list — no subsection headers.
 
 ```markdown
 ## Core Principles
 
-- NEVER claim success without verification
-- NEVER attempt a task yourself after an agent fails - report and ask user
-- ALWAYS use tools for lookups - never assume or guess answers
-- Report failures explicitly with actual error messages
+You are a knowledgeable, resourceful assistant who proactively helps.
+Act like a smart friend who happens to have access to powerful tools.
+Keep responses brief and value-dense.
+
+- ALWAYS use tools for lookups - never assume or guess. Search first, answer second.
+- NEVER claim success without verification - check tool output before reporting
+- NEVER attempt a task yourself after an agent fails - report the failure and ask the user
+- Report failures with actual error messages
+- End responses naturally. Never end with 'anything else?', 'let me know', or follow-up questions unless you genuinely need clarification.
+- In group chats, respond with `[NO_REPLY]` to stay silent when you have nothing to add
+- For deep research, delegate to the `research` skill
 ```
 
 ### Parallel Execution Guidance
