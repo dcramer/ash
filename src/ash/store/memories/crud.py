@@ -318,9 +318,9 @@ class MemoryCrudMixin:
 
                 # Sync ABOUT edges if subject_person_ids map is provided
                 if subject_person_ids_map and entry.id in subject_person_ids_map:
-                    existing_about = self._graph.get_outgoing(
-                        entry.id, edge_type="ABOUT"
-                    )
+                    from ash.graph.edges import ABOUT
+
+                    existing_about = self._graph.get_outgoing(entry.id, edge_type=ABOUT)
                     existing_pids = {e.target_id for e in existing_about}
                     desired_pids = set(subject_person_ids_map[entry.id])
 

@@ -94,6 +94,12 @@ class NumpyVectorIndex:
         else:
             self._vectors = self._vectors[: len(self._ids)]
 
+    def clear(self) -> None:
+        """Remove all vectors from the index."""
+        self._ids.clear()
+        self._id_to_index.clear()
+        self._vectors = np.empty((0, 0), dtype=np.float32)
+
     def has(self, node_id: str) -> bool:
         """Check if a node has an embedding."""
         return node_id in self._id_to_index

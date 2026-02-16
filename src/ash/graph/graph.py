@@ -123,6 +123,7 @@ class KnowledgeGraph:
         self._node_type[memory.id] = "memory"
 
     def remove_memory(self, memory_id: str) -> None:
+        self.remove_edges_for_node(memory_id)
         self.memories.pop(memory_id, None)
         self._node_type.pop(memory_id, None)
 
@@ -133,6 +134,7 @@ class KnowledgeGraph:
         self._node_type[person.id] = "person"
 
     def remove_person(self, person_id: str) -> None:
+        self.remove_edges_for_node(person_id)
         self.people.pop(person_id, None)
         self._node_type.pop(person_id, None)
 
@@ -143,6 +145,7 @@ class KnowledgeGraph:
         self._node_type[user.id] = "user"
 
     def remove_user(self, user_id: str) -> None:
+        self.remove_edges_for_node(user_id)
         self.users.pop(user_id, None)
         self._node_type.pop(user_id, None)
 
@@ -153,8 +156,25 @@ class KnowledgeGraph:
         self._node_type[chat.id] = "chat"
 
     def remove_chat(self, chat_id: str) -> None:
+        self.remove_edges_for_node(chat_id)
         self.chats.pop(chat_id, None)
         self._node_type.pop(chat_id, None)
+
+    def remove_edges_for_node(self, node_id: str) -> list[str]:
+        """Remove all edges connected to a node (incoming and outgoing).
+
+        Returns the IDs of removed edges.
+        """
+        edge_ids_to_remove: set[str] = set()
+        edge_ids_to_remove.update(self._outgoing.get(node_id, []))
+        edge_ids_to_remove.update(self._incoming.get(node_id, []))
+
+        removed: list[str] = []
+        for eid in edge_ids_to_remove:
+            if eid in self.edges:
+                self.remove_edge(eid)
+                removed.append(eid)
+        return removed
 
     # -- Edge operations --
 

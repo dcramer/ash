@@ -140,3 +140,20 @@ class TestNumpyVectorIndex:
 
         index.remove("mem-c")
         assert index.count == 0
+
+    async def test_clear(self, index: NumpyVectorIndex):
+        """Clear removes all vectors and resets the index."""
+        index.add("mem-a", _make_embedding(0.1))
+        index.add("mem-b", _make_embedding(0.5))
+        index.add("mem-c", _make_embedding(0.9))
+        assert index.count == 3
+
+        index.clear()
+
+        assert index.count == 0
+        assert index.search(_make_embedding(0.1), limit=5) == []
+
+    async def test_clear_empty_index(self, index: NumpyVectorIndex):
+        """Clear on an empty index is a no-op."""
+        index.clear()
+        assert index.count == 0

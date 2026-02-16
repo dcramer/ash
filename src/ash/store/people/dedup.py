@@ -6,7 +6,10 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from ash.graph.edges import create_merged_into_edge, get_merged_into
+from ash.graph.edges import (
+    create_merged_into_edge,
+    get_merged_into,
+)
 from ash.store.people.helpers import (
     normalize_reference,
     primary_sort_key,
@@ -86,7 +89,7 @@ class PeopleDedupMixin:
             extra={"primary_id": primary_id, "secondary_id": secondary_id},
         )
 
-        # Auto-remap memory references
+        # Auto-remap memory references and other edges
         try:
             remapped = await self.remap_subject_person_id(secondary_id, primary_id)
             if remapped:
@@ -98,6 +101,18 @@ class PeopleDedupMixin:
                 )
         except Exception:
             logger.warning("Failed to remap memories after merge", exc_info=True)
+
+        try:
+            edge_remapped = await self._remap_edges_for_merge(secondary_id, primary_id)
+            if edge_remapped:
+                logger.debug(
+                    "Remapped %d edges from %s to %s",
+                    edge_remapped,
+                    secondary_id,
+                    primary_id,
+                )
+        except Exception:
+            logger.warning("Failed to remap edges after merge", exc_info=True)
 
         return self._graph.people.get(primary_id)
 
@@ -184,6 +199,111 @@ class PeopleDedupMixin:
                 results.append((primary.id, secondary.id))
 
         return results
+
+    async def _remap_edges_for_merge(
+        self: Store, secondary_id: str, primary_id: str
+    ) -> int:
+        """Remap STATED_BY, IS_PERSON, and HAS_RELATIONSHIP edges from secondary to primary."""
+        from ash.graph.edges import (
+            HAS_RELATIONSHIP,
+            IS_PERSON,
+            STATED_BY,
+            create_has_relationship_edge,
+            create_is_person_edge,
+            create_stated_by_edge,
+        )
+
+        count = 0
+        edges_changed = False
+
+        # Remap STATED_BY edges: memory -> secondary becomes memory -> primary
+        for edge in list(self._graph.get_incoming(secondary_id, edge_type=STATED_BY)):
+            # Check if primary already has a STATED_BY edge from this memory
+            existing = [
+                e
+                for e in self._graph.get_outgoing(edge.source_id, edge_type=STATED_BY)
+                if e.target_id == primary_id
+            ]
+            self._graph.remove_edge(edge.id)
+            if not existing:
+                self._graph.add_edge(
+                    create_stated_by_edge(
+                        edge.source_id, primary_id, created_by="merge"
+                    )
+                )
+            count += 1
+            edges_changed = True
+
+        # Remap IS_PERSON edges: user -> secondary becomes user -> primary
+        for edge in list(self._graph.get_incoming(secondary_id, edge_type=IS_PERSON)):
+            existing = [
+                e
+                for e in self._graph.get_outgoing(edge.source_id, edge_type=IS_PERSON)
+                if e.target_id == primary_id
+            ]
+            self._graph.remove_edge(edge.id)
+            if not existing:
+                self._graph.add_edge(create_is_person_edge(edge.source_id, primary_id))
+            count += 1
+            edges_changed = True
+
+        # Remap HAS_RELATIONSHIP edges: substitute secondary with primary
+        for edge in list(
+            self._graph.get_outgoing(secondary_id, edge_type=HAS_RELATIONSHIP)
+        ):
+            other_id = edge.target_id
+            # Check for existing edge between primary and other
+            existing = [
+                e
+                for e in self._graph.get_outgoing(
+                    primary_id, edge_type=HAS_RELATIONSHIP
+                )
+                if e.target_id == other_id
+            ]
+            self._graph.remove_edge(edge.id)
+            if not existing and other_id != primary_id:
+                props = edge.properties or {}
+                self._graph.add_edge(
+                    create_has_relationship_edge(
+                        primary_id,
+                        other_id,
+                        relationship_type=props.get("relationship_type"),
+                        stated_by=props.get("stated_by"),
+                    )
+                )
+            count += 1
+            edges_changed = True
+
+        for edge in list(
+            self._graph.get_incoming(secondary_id, edge_type=HAS_RELATIONSHIP)
+        ):
+            other_id = edge.source_id
+            # Check for existing edge between other and primary
+            existing = [
+                e
+                for e in self._graph.get_incoming(
+                    primary_id, edge_type=HAS_RELATIONSHIP
+                )
+                if e.source_id == other_id
+            ]
+            self._graph.remove_edge(edge.id)
+            if not existing and other_id != primary_id:
+                props = edge.properties or {}
+                self._graph.add_edge(
+                    create_has_relationship_edge(
+                        other_id,
+                        primary_id,
+                        relationship_type=props.get("relationship_type"),
+                        stated_by=props.get("stated_by"),
+                    )
+                )
+            count += 1
+            edges_changed = True
+
+        if edges_changed:
+            await self._persistence.save_edges(self._graph.edges)
+
+        return count
 
     async def _follow_merge_chain(self: Store, person: PersonEntry) -> PersonEntry:
         visited: set[str] = set()

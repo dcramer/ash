@@ -752,3 +752,166 @@ class TestHasRelationshipEdges:
 
         edges = graph_store._graph.get_outgoing(bob.id, edge_type=HAS_RELATIONSHIP)
         assert len(edges) == 0
+
+
+# =============================================================================
+# Edge Cascade Tests (remove_edges_for_node)
+# =============================================================================
+
+
+class TestEdgeCascade:
+    """Tests for cascading edge removal when nodes are deleted."""
+
+    def test_remove_memory_cascades_edges(self):
+        from ash.graph.edges import create_stated_by_edge
+
+        graph = KnowledgeGraph()
+        graph.add_person(PersonEntry(id="person-1", name="Alice"))
+        graph.add_memory(
+            MemoryEntry(id="mem-1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        )
+        graph.add_edge(create_about_edge("mem-1", "person-1"))
+        graph.add_edge(create_stated_by_edge("mem-1", "person-1"))
+
+        assert len(graph.edges) == 2
+
+        graph.remove_memory("mem-1")
+
+        assert len(graph.edges) == 0
+        assert graph.get_outgoing("mem-1", edge_type=ABOUT) == []
+        assert graph.get_incoming("person-1", edge_type=ABOUT) == []
+
+    def test_remove_person_cascades_edges(self):
+        from ash.graph.edges import (
+            HAS_RELATIONSHIP,
+            create_has_relationship_edge,
+        )
+
+        graph = KnowledgeGraph()
+        graph.add_person(PersonEntry(id="person-1", name="Alice"))
+        graph.add_person(PersonEntry(id="person-2", name="Bob"))
+        graph.add_user(UserEntry(id="user-1", provider="test", provider_id="alice"))
+        graph.add_memory(
+            MemoryEntry(id="mem-1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        )
+
+        graph.add_edge(create_about_edge("mem-1", "person-1"))
+        graph.add_edge(create_is_person_edge("user-1", "person-1"))
+        graph.add_edge(
+            create_has_relationship_edge(
+                "person-1", "person-2", relationship_type="friend"
+            )
+        )
+
+        assert len(graph.edges) == 3
+
+        graph.remove_person("person-1")
+
+        assert len(graph.edges) == 0
+        assert graph.get_incoming("person-1", edge_type=ABOUT) == []
+        assert graph.get_outgoing("user-1", edge_type=IS_PERSON) == []
+        assert graph.get_outgoing("person-1", edge_type=HAS_RELATIONSHIP) == []
+
+    def test_remove_edges_for_node_no_edges(self):
+        graph = KnowledgeGraph()
+        graph.add_memory(
+            MemoryEntry(id="mem-1", content="test", memory_type=MemoryType.KNOWLEDGE)
+        )
+
+        removed = graph.remove_edges_for_node("mem-1")
+        assert removed == []
+
+    def test_remove_edges_for_node_nonexistent(self):
+        graph = KnowledgeGraph()
+        removed = graph.remove_edges_for_node("nonexistent")
+        assert removed == []
+
+
+# =============================================================================
+# Store Integration: Cascade + Persistence
+# =============================================================================
+
+
+class TestStoreCascadeIntegration:
+    """Tests that store operations cascade edges and persist correctly."""
+
+    async def test_compact_removes_edges(self, graph_store: Store):
+        """Compact should remove edges for archived memories."""
+
+        person = await graph_store.create_person(
+            created_by="test", name="Alice", aliases=["alice"]
+        )
+        memory = await graph_store.add_memory(
+            content="Alice fact",
+            subject_person_ids=[person.id],
+        )
+
+        # Manually archive the memory with old timestamp
+        memory.archived_at = datetime(2020, 1, 1, tzinfo=UTC)
+
+        count = await graph_store.compact(older_than_days=1)
+        assert count == 1
+
+        # Edges should be gone
+        about_edges = graph_store._graph.get_incoming(person.id, edge_type=ABOUT)
+        assert len(about_edges) == 0
+
+    async def test_clear_removes_memory_edges(self, graph_store: Store):
+        """Clear should remove all memory edges."""
+        person = await graph_store.create_person(
+            created_by="test", name="Alice", aliases=["alice"]
+        )
+        await graph_store.add_memory(
+            content="Alice fact 1",
+            subject_person_ids=[person.id],
+        )
+        await graph_store.add_memory(
+            content="Alice fact 2",
+            subject_person_ids=[person.id],
+        )
+
+        about_before = graph_store._graph.get_incoming(person.id, edge_type=ABOUT)
+        assert len(about_before) == 2
+
+        await graph_store.clear()
+
+        about_after = graph_store._graph.get_incoming(person.id, edge_type=ABOUT)
+        assert len(about_after) == 0
+        assert len(graph_store._graph.memories) == 0
+
+    async def test_delete_person_cascades_all_edges(self, graph_store: Store):
+        """Deleting a person should remove all connected edges."""
+        from ash.graph.edges import HAS_RELATIONSHIP
+
+        alice = await graph_store.create_person(
+            created_by="test", name="Alice", aliases=["alice"]
+        )
+        bob = await graph_store.create_person(
+            created_by="test", name="Bob", aliases=["bob"]
+        )
+        user = await graph_store.ensure_user(
+            provider="test",
+            provider_id="alice123",
+            username="alice",
+            person_id=alice.id,
+        )
+        await graph_store.add_memory(
+            content="About Alice",
+            subject_person_ids=[alice.id],
+        )
+        await graph_store.add_relationship(
+            alice.id, "friend", stated_by="test", related_person_id=bob.id
+        )
+
+        # Verify edges exist
+        assert len(graph_store._graph.get_incoming(alice.id, edge_type=ABOUT)) > 0
+        assert len(graph_store._graph.get_outgoing(user.id, edge_type=IS_PERSON)) > 0
+
+        await graph_store.delete_person(alice.id)
+
+        # All edges to/from alice should be gone
+        assert graph_store._graph.get_incoming(alice.id, edge_type=ABOUT) == []
+        assert graph_store._graph.get_incoming(alice.id, edge_type=IS_PERSON) == []
+        assert (
+            graph_store._graph.get_outgoing(alice.id, edge_type=HAS_RELATIONSHIP) == []
+        )

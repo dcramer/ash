@@ -1517,6 +1517,80 @@ class TestAutoRemapOnMerge:
         assert result is not None
         assert result.id == p1.id
 
+    async def test_merge_remaps_stated_by_edges(self, graph_store: Store):
+        """Merge should remap STATED_BY edges from secondary to primary."""
+        from ash.graph.edges import STATED_BY, get_stated_by_person
+
+        p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
+        p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
+
+        mem = await graph_store.add_memory(
+            content="Sksembhi said something",
+            stated_by_person_id=p2.id,
+        )
+
+        await graph_store.merge_people(p1.id, p2.id)
+
+        # STATED_BY should now point to primary
+        stated_by = get_stated_by_person(graph_store._graph, mem.id)
+        assert stated_by == p1.id
+
+        # No STATED_BY edges should point to secondary
+        secondary_edges = graph_store._graph.get_incoming(p2.id, edge_type=STATED_BY)
+        assert len(secondary_edges) == 0
+
+    async def test_merge_remaps_is_person_edges(self, graph_store: Store):
+        """Merge should remap IS_PERSON edges from secondary to primary."""
+        from ash.graph.edges import IS_PERSON, get_person_for_user
+
+        p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
+        p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
+
+        user = await graph_store.ensure_user(
+            provider="test",
+            provider_id="sks123",
+            username="sksembhi",
+            person_id=p2.id,
+        )
+
+        await graph_store.merge_people(p1.id, p2.id)
+
+        # IS_PERSON should now point to primary
+        person_id = get_person_for_user(graph_store._graph, user.id)
+        assert person_id == p1.id
+
+        # No IS_PERSON edges should point to secondary
+        secondary_edges = graph_store._graph.get_incoming(p2.id, edge_type=IS_PERSON)
+        assert len(secondary_edges) == 0
+
+    async def test_merge_remaps_has_relationship_edges(self, graph_store: Store):
+        """Merge should remap HAS_RELATIONSHIP edges from secondary to primary."""
+        from ash.graph.edges import HAS_RELATIONSHIP, get_related_people
+
+        p1 = await graph_store.create_person(created_by="user-1", name="Sarah")
+        p2 = await graph_store.create_person(created_by="user-1", name="Sksembhi")
+        p3 = await graph_store.create_person(created_by="user-1", name="Charlie")
+
+        await graph_store.add_relationship(
+            p2.id, "friend", stated_by="user-1", related_person_id=p3.id
+        )
+
+        await graph_store.merge_people(p1.id, p2.id)
+
+        # HAS_RELATIONSHIP should now be between primary and p3
+        related = get_related_people(graph_store._graph, p1.id)
+        assert p3.id in related
+
+        # No HAS_RELATIONSHIP edges should reference secondary
+        secondary_out = graph_store._graph.get_outgoing(
+            p2.id, edge_type=HAS_RELATIONSHIP
+        )
+        secondary_in = graph_store._graph.get_incoming(
+            p2.id, edge_type=HAS_RELATIONSHIP
+        )
+        assert len(secondary_out) == 0
+        assert len(secondary_in) == 0
+
 
 class TestSpeakerScopedResolution:
     """Tests for speaker-scoped resolution via find_person_for_speaker."""

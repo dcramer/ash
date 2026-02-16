@@ -85,24 +85,23 @@ class MemoryEvictionMixin:
 
         if ids_to_remove:
             await self._persistence.save_memories(self._graph.memories)
+            await self._persistence.save_edges(self._graph.edges)
             logger.info("compact_complete", extra={"removed_count": len(ids_to_remove)})
 
         return len(ids_to_remove)
 
     async def clear(self: Store) -> int:
         """Clear all memories and vector index."""
-        count = len(self._graph.memories)
+        memory_ids = list(self._graph.memories.keys())
+        count = len(memory_ids)
 
         if count > 0:
-            self._graph.memories.clear()
+            for mid in memory_ids:
+                self._graph.remove_memory(mid)
             await self._persistence.save_memories(self._graph.memories)
+            await self._persistence.save_edges(self._graph.edges)
 
-        # Clear vector index
-        self._index._ids.clear()
-        self._index._id_to_index.clear()
-        import numpy as np
-
-        self._index._vectors = np.empty((0, 0), dtype=np.float32)
+        self._index.clear()
 
         try:
             await self._index.save(

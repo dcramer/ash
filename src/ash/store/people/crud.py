@@ -140,15 +140,9 @@ class PeopleCrudMixin:
 
         name = person.name
 
-        # Clear MERGED_INTO edges pointing to this person
-        from ash.graph.edges import MERGED_INTO
-
-        for edge in self._graph.get_incoming(person_id, edge_type=MERGED_INTO):
-            self._graph.remove_edge(edge.id)
-        await self._persistence.save_edges(self._graph.edges)
-
         self._graph.remove_person(person_id)
         await self._persistence.save_people(self._graph.people)
+        await self._persistence.save_edges(self._graph.edges)
 
         logger.debug(
             "person_deleted",
