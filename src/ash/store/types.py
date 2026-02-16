@@ -209,12 +209,7 @@ class MemoryEntry:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "MemoryEntry":
-        """Deserialize from JSON dict.
-
-        Supports both old field names (source_user_id, source_user_name)
-        and new names (source_username, source_display_name) for backward compat.
-        Also accepts embedding if present (for migration reading old format).
-        """
+        """Deserialize from JSON dict."""
         return cls(
             id=d["id"],
             version=d.get("version", 1),
@@ -227,9 +222,8 @@ class MemoryEntry:
             chat_id=d.get("chat_id"),
             subject_person_ids=d.get("subject_person_ids") or [],
             source=d.get("source", "user"),
-            source_username=d.get("source_username") or d.get("source_user_id"),
-            source_display_name=d.get("source_display_name")
-            or d.get("source_user_name"),
+            source_username=d.get("source_username"),
+            source_display_name=d.get("source_display_name"),
             source_session_id=d.get("source_session_id"),
             source_message_id=d.get("source_message_id"),
             extraction_confidence=d.get("extraction_confidence"),
@@ -248,11 +242,6 @@ class MemoryEntry:
         """Encode float list to base64 string."""
         data = struct.pack(f"{len(floats)}f", *floats)
         return base64.b64encode(data).decode("ascii")
-
-    @staticmethod
-    def serialize_embedding_bytes(floats: list[float]) -> bytes:
-        """Serialize float list to bytes for sqlite-vec."""
-        return struct.pack(f"{len(floats)}f", *floats)
 
 
 @dataclass
@@ -434,27 +423,21 @@ class PersonEntry:
         ]
 
         raw_rels = d.get("relationships") or []
-        relationships: list[RelationshipClaim]
-        if isinstance(raw_rels, list):
-            relationships = [
-                RelationshipClaim(
-                    relationship=r["relationship"] if isinstance(r, dict) else r,
-                    stated_by=r.get("stated_by") if isinstance(r, dict) else None,
-                    created_at=_parse_datetime(r.get("created_at"))
-                    if isinstance(r, dict)
-                    else None,
-                )
-                for r in raw_rels
-            ]
-        else:
-            # Old format: single relationship string
-            old_rel = d.get("relationship") or d.get("relation")
-            relationships = [RelationshipClaim(relationship=old_rel)] if old_rel else []
+        relationships = [
+            RelationshipClaim(
+                relationship=r["relationship"] if isinstance(r, dict) else r,
+                stated_by=r.get("stated_by") if isinstance(r, dict) else None,
+                created_at=_parse_datetime(r.get("created_at"))
+                if isinstance(r, dict)
+                else None,
+            )
+            for r in raw_rels
+        ]
 
         return cls(
             id=d["id"],
             version=d.get("version", 1),
-            created_by=d.get("created_by") or d.get("owner_user_id", ""),
+            created_by=d.get("created_by", ""),
             name=d.get("name", ""),
             relationships=relationships,
             aliases=aliases,

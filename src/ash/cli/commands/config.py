@@ -92,7 +92,9 @@ def register(app: typer.Typer) -> None:
                     if config_obj.brave_search and config_obj.brave_search.api_key
                     else "[dim]not configured[/dim]",
                 )
-                table.add_row("Database", str(config_obj.memory.database_path))
+                from ash.config.paths import get_graph_dir
+
+                table.add_row("Graph Dir", str(get_graph_dir()))
                 table.add_row(
                     "Server", f"{config_obj.server.host}:{config_obj.server.port}"
                 )

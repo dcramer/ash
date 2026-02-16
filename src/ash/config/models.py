@@ -15,7 +15,6 @@ from pydantic import (
 )
 
 from ash.config.paths import (
-    get_database_path,
     get_system_timezone,
     get_workspace_path,
 )
@@ -174,7 +173,6 @@ class EmbeddingsConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Configuration for memory system."""
 
-    database_path: Path = Field(default_factory=get_database_path)
     max_context_messages: int = 20
     # Smart pruning configuration
     context_token_budget: int = 100000  # Target context window size in tokens

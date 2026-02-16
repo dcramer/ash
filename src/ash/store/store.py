@@ -86,38 +86,11 @@ async def create_store(
     embedding_provider: str = "openai",
     max_entries: int | None = None,
     llm_provider: str = "anthropic",
-    auto_migrate: bool = True,
 ) -> Store:
     """Create a fully-wired Store.
 
     Loads KnowledgeGraph from JSONL, NumpyVectorIndex from .npy files.
     """
-    if auto_migrate:
-        # Run old filesystem migrations (move files around)
-        try:
-            from ash.store.migration import migrate_filesystem
-
-            migrate_filesystem()
-        except Exception:
-            logger.warning("Filesystem migration failed", exc_info=True)
-
-        try:
-            from ash.memory.migration import migrate_to_graph_dir
-
-            if await migrate_to_graph_dir():
-                logger.info("Migrated to graph directory layout")
-        except Exception:
-            logger.warning("Graph directory migration failed", exc_info=True)
-
-        # SQLite → JSONL migration
-        try:
-            from ash.store.migration_export import migrate_sqlite_to_jsonl
-
-            if await migrate_sqlite_to_jsonl(graph_dir):
-                logger.info("Migrated SQLite data to JSONL")
-        except Exception:
-            logger.warning("SQLite to JSONL migration failed", exc_info=True)
-
     # Load graph from JSONL
     persistence = GraphPersistence(graph_dir)
     graph = await persistence.load()

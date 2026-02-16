@@ -76,44 +76,9 @@ def get_config_path() -> Path:
     return get_ash_home() / "config.toml"
 
 
-def get_database_path() -> Path:
-    """Get the vector index database file path."""
-    return get_index_dir() / "vectors.db"
-
-
 def get_graph_dir() -> Path:
     """Get the graph directory path (memories, people, embeddings)."""
     return get_ash_home() / "graph"
-
-
-def get_memories_jsonl_path() -> Path:
-    """Get the memories JSONL file path (source of truth)."""
-    return get_graph_dir() / "memories.jsonl"
-
-
-def get_people_jsonl_path() -> Path:
-    """Get the people JSONL file path."""
-    return get_graph_dir() / "people.jsonl"
-
-
-def get_embeddings_jsonl_path() -> Path:
-    """Get the embeddings JSONL file path (derived, for rebuild)."""
-    return get_index_dir() / "embeddings.jsonl"
-
-
-def get_index_dir() -> Path:
-    """Get the index directory path (derived data, rebuildable)."""
-    return get_ash_home() / "index"
-
-
-def get_users_jsonl_path() -> Path:
-    """Get the users JSONL file path."""
-    return get_graph_dir() / "users.jsonl"
-
-
-def get_chats_jsonl_path() -> Path:
-    """Get the chats JSONL file path."""
-    return get_graph_dir() / "chats.jsonl"
 
 
 def get_workspace_path() -> Path:
@@ -274,14 +239,7 @@ def get_all_paths() -> dict[str, Path | None]:
     return {
         "home": get_ash_home(),
         "config": get_config_path(),
-        "database": get_database_path(),
         "graph": get_graph_dir(),
-        "index": get_index_dir(),
-        "memories_jsonl": get_memories_jsonl_path(),
-        "people_jsonl": get_people_jsonl_path(),
-        "users_jsonl": get_users_jsonl_path(),
-        "chats_jsonl": get_chats_jsonl_path(),
-        "embeddings_jsonl": get_embeddings_jsonl_path(),
         "workspace": get_workspace_path(),
         "schedule": get_schedule_file(),
         "logs": get_logs_path(),

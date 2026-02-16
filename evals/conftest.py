@@ -159,7 +159,6 @@ def eval_config(eval_workspace_path: Path, tmp_path: Path) -> AshConfig:
             workspace_access="rw",
         ),
         memory=MemoryConfig(
-            database_path=tmp_path / "eval.db",
             extraction_enabled=False,  # Disable background extraction for evals
             compaction_enabled=False,  # Disable compaction for evals
         ),

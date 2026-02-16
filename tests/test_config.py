@@ -126,10 +126,7 @@ class TestMemoryConfig:
     """Tests for MemoryConfig model."""
 
     def test_defaults(self):
-        from ash.config.paths import get_database_path
-
         config = MemoryConfig()
-        assert config.database_path == get_database_path()
         assert config.max_context_messages == 20
 
 

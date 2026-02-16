@@ -7,7 +7,6 @@ from ash.config.paths import (
     get_all_paths,
     get_ash_home,
     get_config_path,
-    get_database_path,
     get_logs_path,
     get_workspace_path,
 )
@@ -49,12 +48,6 @@ class TestDerivedPaths:
 
         assert get_config_path() == tmp_path / "config.toml"
 
-    def test_database_path(self, monkeypatch, tmp_path):
-        monkeypatch.setenv(ENV_VAR, str(tmp_path))
-        get_ash_home.cache_clear()
-
-        assert get_database_path() == tmp_path / "index" / "vectors.db"
-
     def test_workspace_path(self, monkeypatch, tmp_path):
         monkeypatch.setenv(ENV_VAR, str(tmp_path))
         get_ash_home.cache_clear()
@@ -79,7 +72,7 @@ class TestGetAllPaths:
 
         assert "home" in paths
         assert "config" in paths
-        assert "database" in paths
+        assert "graph" in paths
         assert "workspace" in paths
         assert "logs" in paths
 
