@@ -106,7 +106,8 @@ Skills are listed with name and description only:
 ```markdown
 ## Skills
 
-Use the `use_skill` tool to invoke a skill with context.
+Before replying, check if any available skill matches the user's request.
+If one clearly applies, invoke it with `use_skill`. If none apply, respond directly.
 
 - **research**: Research topics using Perplexity AI
 - **code-review**: Review code for issues and improvements

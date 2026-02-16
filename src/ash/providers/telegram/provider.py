@@ -59,6 +59,76 @@ def _truncate(text: str, max_len: int = 40) -> str:
     return first_line[:max_len] + "..." if truncated else first_line
 
 
+MAX_SEND_LENGTH = 4000  # Below Telegram's 4096 limit to leave room for formatting
+
+
+def _find_split_point(text: str, max_length: int) -> int:
+    """Find the best point to split text, searching backwards from max_length.
+
+    Priority order: markdown heading > blank line > sentence-ending newline > any newline > hard cut.
+    Never splits inside a code block.
+    """
+    search_region = text[:max_length]
+
+    # Track code block state — don't split inside one
+    in_code_block = False
+    last_safe_heading = -1
+    last_safe_blank = -1
+    last_safe_sentence = -1
+    last_safe_newline = -1
+
+    i = 0
+    while i < len(search_region):
+        if search_region[i:].startswith("```"):
+            in_code_block = not in_code_block
+            i += 3
+            continue
+
+        if not in_code_block and search_region[i] == "\n":
+            # Check for heading (next line starts with #)
+            if i + 1 < len(search_region) and search_region[i + 1] == "#":
+                last_safe_heading = i + 1  # Split before the heading
+            # Check for blank line
+            elif i + 1 < len(search_region) and search_region[i + 1] == "\n":
+                last_safe_blank = i + 1
+            # Check for sentence end before this newline
+            elif i > 0 and search_region[i - 1] in ".!?)":
+                last_safe_sentence = i + 1
+            else:
+                last_safe_newline = i + 1
+
+        i += 1
+
+    # Return best split point in priority order
+    for point in (
+        last_safe_heading,
+        last_safe_blank,
+        last_safe_sentence,
+        last_safe_newline,
+    ):
+        if point > 0:
+            return point
+
+    return max_length
+
+
+def split_message(text: str, max_length: int = MAX_SEND_LENGTH) -> list[str]:
+    """Split text into chunks at paragraph/heading boundaries."""
+    if len(text) <= max_length:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= max_length:
+            chunks.append(remaining)
+            break
+        split_at = _find_split_point(remaining, max_length)
+        chunks.append(remaining[:split_at].rstrip())
+        remaining = remaining[split_at:].lstrip()
+    return chunks
+
+
 class TelegramProvider(Provider):
     """Telegram provider using aiogram 3.x."""
 
@@ -626,7 +696,25 @@ class TelegramProvider(Provider):
             logger.debug("Recorded member %s left chat %s", user.id, message.chat.id)
 
     async def send(self, message: OutgoingMessage) -> str:
-        """Send a message via Telegram."""
+        """Send a message via Telegram, splitting long messages into chunks."""
+        chunks = split_message(message.text)
+        if len(chunks) == 1:
+            return await self._send_single(message)
+
+        last_id = ""
+        for i, chunk in enumerate(chunks):
+            chunk_msg = OutgoingMessage(
+                chat_id=message.chat_id,
+                text=chunk,
+                reply_to_message_id=message.reply_to_message_id if i == 0 else None,
+                parse_mode=message.parse_mode,
+                reply_markup=message.reply_markup if i == len(chunks) - 1 else None,
+            )
+            last_id = await self._send_single(chunk_msg)
+        return last_id
+
+    async def _send_single(self, message: OutgoingMessage) -> str:
+        """Send a single message via Telegram."""
         parse_mode = _get_parse_mode(message.parse_mode)
         reply_to = (
             int(message.reply_to_message_id) if message.reply_to_message_id else None

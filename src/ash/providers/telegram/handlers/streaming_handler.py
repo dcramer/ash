@@ -129,6 +129,35 @@ class StreamingHandler:
                 tracker.thinking_msg_id = None
             raise
 
+        # Suppress [NO_REPLY] responses (passive engagement, nothing to add)
+        if response_content.strip() == "[NO_REPLY]":
+            if tracker.thinking_msg_id:
+                try:
+                    await self._provider.delete(
+                        message.chat_id, tracker.thinking_msg_id
+                    )
+                except Exception:
+                    logger.debug("Failed to delete thinking message for NO_REPLY")
+            elif response_msg_id:
+                try:
+                    await self._provider.delete(message.chat_id, response_msg_id)
+                except Exception:
+                    logger.debug("Failed to delete streamed message for NO_REPLY")
+            await self._session_handler.persist_messages(
+                message.chat_id,
+                message.user_id,
+                message.text,
+                assistant_message=None,
+                external_id=message.id,
+                reply_to_external_id=message.reply_to_message_id,
+                username=message.username,
+                display_name=message.display_name,
+                thread_id=message.metadata.get("thread_id"),
+                branch_id=session.metadata.get("branch_id"),
+            )
+            self._log_response("[NO_REPLY]")
+            return
+
         summary = tracker.get_summary_prefix()
         if summary or tracker.progress_messages:
             # Final response uses regular MARKDOWN, not MarkdownV2
@@ -142,7 +171,24 @@ class StreamingHandler:
         if not final_content.strip():
             final_content = "I processed your request but couldn't generate a response."
 
-        if tracker.thinking_msg_id:
+        # If final content exceeds Telegram's limit and we have an existing message,
+        # delete it and send as chunked messages instead
+        from ash.providers.telegram.provider import MAX_SEND_LENGTH
+
+        existing_msg_id = tracker.thinking_msg_id or response_msg_id
+        if len(final_content) > MAX_SEND_LENGTH and existing_msg_id:
+            try:
+                await self._provider.delete(message.chat_id, existing_msg_id)
+            except Exception:
+                logger.debug("Failed to delete message before chunked send")
+            sent_message_id = await self._provider.send(
+                OutgoingMessage(
+                    chat_id=message.chat_id,
+                    text=final_content,
+                    reply_to_message_id=message.id,
+                )
+            )
+        elif tracker.thinking_msg_id:
             await self._provider.edit(
                 message.chat_id, tracker.thinking_msg_id, final_content
             )

@@ -173,6 +173,9 @@ class SystemPromptBuilder:
 
         if self._workspace.soul:
             parts.append(self._workspace.soul)
+            parts.append(
+                "\n\nEmbody the persona above. Avoid stiff, generic assistant-speak."
+            )
 
         sections = [
             self._build_core_principles_section(),
@@ -218,6 +221,9 @@ class SystemPromptBuilder:
                 "- ALWAYS use tools for lookups - never assume or guess answers",
                 "- When uncertain about facts, dates, or current info: search first, answer second",
                 "- Don't wait for permission to be helpful - if a search would improve your answer, do it",
+                "",
+                "### Silence",
+                "- In group chats, you can respond with `[NO_REPLY]` to stay silent when you have nothing to add",
                 "",
                 "### Response Endings",
                 "- End responses naturally - don't always end with a question",
@@ -282,9 +288,10 @@ class SystemPromptBuilder:
                 "",
                 "### Presenting Results",
                 "",
-                "The user cannot see tool/skill/agent results - only your response.",
-                "You MUST always include text in your response - an empty response is silence to the user.",
-                "After using tools, briefly acknowledge what you did and share relevant results.",
+                "The user cannot see tool results directly — only your response.",
+                "Don't narrate routine tool use (searches, file reads, memory lookups).",
+                "Just present the answer. Only describe your process for complex multi-step work",
+                "or when the user asks how you found something.",
                 "",
                 "### Handling Failures",
                 "",
@@ -309,10 +316,11 @@ class SystemPromptBuilder:
         lines = [
             "## Skills",
             "",
-            "Use the `use_skill` tool to invoke a skill.",
+            "Before replying, check if any available skill matches the user's request.",
+            "If one clearly applies, invoke it with `use_skill`. If none apply, respond directly.",
+            "",
             "Skills take over the conversation — the user interacts directly with the skill",
             "until it completes, then control returns to you with the result.",
-            "You will not hear from the skill while it runs; just wait for its result.",
             "",
             "### Available Skills",
             "",
@@ -737,7 +745,8 @@ class SystemPromptBuilder:
                 "- Keep responses concise if your contribution is brief",
                 "- Don't insert yourself into personal conversations",
                 "- Add genuine value - answer questions, share relevant expertise",
-                "- If you realize you have nothing useful to add, a brief acknowledgment is fine",
+                "- If you have nothing useful to add, respond with exactly [NO_REPLY] — this suppresses the message entirely",
+                "- Prefer [NO_REPLY] over filler responses like 'Interesting!' or 'That's cool'",
             ]
         )
 

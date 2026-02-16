@@ -200,7 +200,7 @@ def format_skill_result(content: str, skill_name: str) -> str:
 ### MUST
 
 - State "Results are not visible to the user" in Tools, Skills, and Agents sections
-- After tool/skill/agent use, summarize what happened (Claude 4.x default is to skip this)
+- After tool/skill/agent use, present the results directly. Don't narrate the process unless it was complex.
 - Include the actual content when the user asked for content (jokes, searches, file reads)
 
 ### MUST NOT
@@ -208,6 +208,15 @@ def format_skill_result(content: str, skill_name: str) -> str:
 - React to content without showing it ("that's funny!" without the joke)
 - Say "done", "here it is", or "I ran the skill" without actual output
 - Assume the user saw what you saw
+
+### Silent Response Sentinel
+
+In passive engagement (group chats where the bot wasn't directly mentioned), the agent may respond with exactly `[NO_REPLY]` to indicate it has nothing useful to add. The provider layer detects this and suppresses message delivery entirely.
+
+- Only meaningful in passive engagement contexts
+- Must be the entire response (no surrounding text)
+- Provider deletes thinking message and skips response delivery
+- User message is still persisted; assistant message is not
 
 ## Prompt Structure
 
