@@ -1006,7 +1006,7 @@ async def create_agent(
     logger.info(f"Registered {len(tool_registry)} tools")
 
     agent_registry = AgentRegistry()
-    register_builtin_agents(agent_registry, mount_prefix=config.sandbox.mount_prefix)
+    register_builtin_agents(agent_registry)
     logger.info(f"Registered {len(agent_registry)} built-in agents")
 
     agent_executor = AgentExecutor(llm, tool_executor, config)
