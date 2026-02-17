@@ -17,6 +17,8 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
 
+    NodeEntry = MemoryEntry | PersonEntry | UserEntry | ChatEntry
+
 _logger = logging.getLogger(__name__)
 
 EdgeType = Literal[
@@ -100,7 +102,7 @@ class KnowledgeGraph:
     _user_by_provider: dict[tuple[str, str], str] = field(default_factory=dict)
     _chat_by_provider: dict[tuple[str, str], str] = field(default_factory=dict)
 
-    def get_node(self, node_id: str) -> Any:
+    def get_node(self, node_id: str) -> NodeEntry | None:
         """Look up any node by ID regardless of type."""
         ntype = self.node_types.get(node_id)
         if ntype == "memory":
@@ -243,13 +245,19 @@ class KnowledgeGraph:
             return
         self._remove_from_index(edge)
 
-    def get_outgoing(
+    def _get_edges(
         self,
+        index: defaultdict[str, list[str]],
         node_id: str,
-        edge_type: EdgeType | None = None,
+        edge_type: EdgeType | None,
+        direction: str,
     ) -> list[Edge]:
-        """Get outgoing edges, optionally filtered by type."""
-        edge_ids = self._outgoing.get(node_id, [])
+        """Shared implementation for get_outgoing/get_incoming.
+
+        Resolves edge IDs from an adjacency index, filters by type,
+        and cleans up stale references.
+        """
+        edge_ids = index.get(node_id, [])
         results: list[Edge] = []
         stale: list[str] = []
         for eid in edge_ids:
@@ -262,13 +270,22 @@ class KnowledgeGraph:
             results.append(edge)
         if stale:
             _logger.warning(
-                "Removed %d stale edge(s) from outgoing index for %s",
+                "Removed %d stale edge(s) from %s index for %s",
                 len(stale),
+                direction,
                 node_id,
             )
             for eid in stale:
                 edge_ids.remove(eid)
         return results
+
+    def get_outgoing(
+        self,
+        node_id: str,
+        edge_type: EdgeType | None = None,
+    ) -> list[Edge]:
+        """Get outgoing edges, optionally filtered by type."""
+        return self._get_edges(self._outgoing, node_id, edge_type, "outgoing")
 
     def get_incoming(
         self,
@@ -276,23 +293,4 @@ class KnowledgeGraph:
         edge_type: EdgeType | None = None,
     ) -> list[Edge]:
         """Get incoming edges, optionally filtered by type."""
-        edge_ids = self._incoming.get(node_id, [])
-        results: list[Edge] = []
-        stale: list[str] = []
-        for eid in edge_ids:
-            edge = self.edges.get(eid)
-            if not edge:
-                stale.append(eid)
-                continue
-            if edge_type and edge.edge_type != edge_type:
-                continue
-            results.append(edge)
-        if stale:
-            _logger.warning(
-                "Removed %d stale edge(s) from incoming index for %s",
-                len(stale),
-                node_id,
-            )
-            for eid in stale:
-                edge_ids.remove(eid)
-        return results
+        return self._get_edges(self._incoming, node_id, edge_type, "incoming")

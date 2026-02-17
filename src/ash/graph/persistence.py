@@ -11,12 +11,9 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ash.graph.graph import Edge, KnowledgeGraph
-
-if TYPE_CHECKING:
-    from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +24,8 @@ _VALID_COLLECTIONS = frozenset({"memories", "people", "users", "chats", "edges"}
 class GraphPersistence:
     """Load/save KnowledgeGraph to JSONL files.
 
-    Supports two persistence patterns:
-    - Immediate: ``await save_memories(graph.memories)`` writes to disk now
-    - Batched: ``mark_dirty("memories", "edges")`` + ``await flush(graph)``
-      writes all dirty collections once at the end of a logical operation
+    Use ``mark_dirty("memories", "edges")`` + ``await flush(graph)``
+    to write dirty collections to disk at the end of a logical operation.
     """
 
     def __init__(self, graph_dir: Path) -> None:
@@ -82,43 +77,6 @@ class GraphPersistence:
         import asyncio
 
         return await asyncio.to_thread(_load_raw_jsonl, self._dir)
-
-    async def save_memories(self, memories: dict[str, MemoryEntry]) -> None:
-        """Rewrite memories.jsonl atomically."""
-        import asyncio
-
-        records = [m.to_dict() for m in memories.values()]  # snapshot on event loop
-        await asyncio.to_thread(_save_collection, self._dir, "memories.jsonl", records)
-
-    async def save_people(self, people: dict[str, PersonEntry]) -> None:
-        import asyncio
-
-        records = [p.to_dict() for p in people.values()]  # snapshot on event loop
-        await asyncio.to_thread(_save_collection, self._dir, "people.jsonl", records)
-
-    async def save_users(self, users: dict[str, UserEntry]) -> None:
-        import asyncio
-
-        records = [u.to_dict() for u in users.values()]  # snapshot on event loop
-        await asyncio.to_thread(_save_collection, self._dir, "users.jsonl", records)
-
-    async def save_chats(self, chats: dict[str, ChatEntry]) -> None:
-        import asyncio
-
-        records = [c.to_dict() for c in chats.values()]  # snapshot on event loop
-        await asyncio.to_thread(_save_collection, self._dir, "chats.jsonl", records)
-
-    async def save_edges(self, edges: dict[str, Edge]) -> None:
-        import asyncio
-
-        records = [e.to_dict() for e in edges.values()]  # snapshot on event loop
-        await asyncio.to_thread(_save_collection, self._dir, "edges.jsonl", records)
-
-
-def _save_collection(graph_dir: Path, filename: str, records: list[dict]) -> None:
-    """Write a single collection to disk (runs in thread)."""
-    graph_dir.mkdir(parents=True, exist_ok=True)
-    _write_jsonl_atomic(graph_dir / filename, records)
 
 
 def _snapshot_dirty(graph: KnowledgeGraph, dirty: set[str]) -> dict[str, list[dict]]:
