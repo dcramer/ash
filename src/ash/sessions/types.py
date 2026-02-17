@@ -517,7 +517,7 @@ class BranchHead(BaseModel):
     created_at: datetime = Field(default_factory=now_utc)
 
 
-class SessionState(BaseModel):
+class PersistedSessionState(BaseModel):
     """Session metadata stored in state.json for easy lookup."""
 
     provider: str

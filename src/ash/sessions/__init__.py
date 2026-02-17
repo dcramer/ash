@@ -10,12 +10,13 @@ Sessions are stored in ~/.ash/sessions/{session_key}/ directories.
 from ash.sessions.manager import SessionManager
 from ash.sessions.reader import SessionReader, format_timestamp
 from ash.sessions.types import (
+    AgentSessionCompleteEntry,
     BranchHead,
     CompactionEntry,
     Entry,
     MessageEntry,
+    PersistedSessionState,
     SessionHeader,
-    SessionState,
     ToolResultEntry,
     ToolUseEntry,
     session_key,
@@ -31,6 +32,7 @@ from ash.sessions.utils import (
 from ash.sessions.writer import SessionWriter
 
 __all__ = [
+    "AgentSessionCompleteEntry",
     "BranchHead",
     "CompactionEntry",
     "DEFAULT_RECENCY_WINDOW",
@@ -39,7 +41,7 @@ __all__ = [
     "SessionHeader",
     "SessionManager",
     "SessionReader",
-    "SessionState",
+    "PersistedSessionState",
     "SessionWriter",
     "ToolResultEntry",
     "ToolUseEntry",

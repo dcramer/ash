@@ -21,8 +21,8 @@ from ash.providers.telegram.handlers.utils import (
 if TYPE_CHECKING:
     from ash.core import Agent, SessionState
     from ash.providers.telegram.handlers.session_handler import (
-        SessionContext,
         SessionHandler,
+        SessionLock,
     )
     from ash.providers.telegram.handlers.tool_tracker import ToolTracker
     from ash.providers.telegram.provider import TelegramProvider
@@ -51,7 +51,7 @@ class StreamingHandler:
         self,
         message: IncomingMessage,
         session: SessionState,
-        ctx: SessionContext,
+        ctx: SessionLock,
         tracker: ToolTracker | None = None,
     ) -> None:
         """Handle message with streaming response."""

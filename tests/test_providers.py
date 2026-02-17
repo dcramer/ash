@@ -262,7 +262,7 @@ class TestTelegramMessageHandler:
 
     async def test_clear_session(self, handler, incoming_message):
         """Test clearing a session."""
-        from ash.providers.telegram.handlers import SessionContext
+        from ash.providers.telegram.handlers import SessionLock
         from ash.sessions import SessionManager
 
         # Set up session manager and context directly
@@ -274,7 +274,7 @@ class TestTelegramMessageHandler:
         )
         session_key = session_manager.session_key
         handler._session_handler._session_managers[session_key] = session_manager
-        handler._session_handler._session_contexts[session_key] = SessionContext()
+        handler._session_handler._session_contexts[session_key] = SessionLock()
 
         assert len(handler._session_handler._session_contexts) == 1
         assert len(handler._session_handler._session_managers) == 1
@@ -285,7 +285,7 @@ class TestTelegramMessageHandler:
 
     async def test_clear_all_sessions(self, handler, incoming_message):
         """Test clearing all sessions."""
-        from ash.providers.telegram.handlers import SessionContext
+        from ash.providers.telegram.handlers import SessionLock
         from ash.sessions import SessionManager
 
         # Set up session managers and contexts directly
@@ -299,7 +299,7 @@ class TestTelegramMessageHandler:
             session_manager1
         )
         handler._session_handler._session_contexts[session_manager1.session_key] = (
-            SessionContext()
+            SessionLock()
         )
 
         session_manager2 = SessionManager(
@@ -312,7 +312,7 @@ class TestTelegramMessageHandler:
             session_manager2
         )
         handler._session_handler._session_contexts[session_manager2.session_key] = (
-            SessionContext()
+            SessionLock()
         )
 
         assert len(handler._session_handler._session_contexts) == 2

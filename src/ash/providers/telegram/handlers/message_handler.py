@@ -14,8 +14,8 @@ from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.handlers.checkpoint_handler import CheckpointHandler
 from ash.providers.telegram.handlers.passive_handler import PassiveHandler
 from ash.providers.telegram.handlers.session_handler import (
-    SessionContext,
     SessionHandler,
+    SessionLock,
 )
 from ash.providers.telegram.handlers.tool_tracker import (
     ToolTracker,
@@ -199,7 +199,7 @@ class TelegramMessageHandler:
             _truncate(message.text),
         )
 
-        ctx: SessionContext | None = None
+        ctx: SessionLock | None = None
         try:
             if message.timestamp:
                 age = datetime.now(UTC) - message.timestamp.replace(tzinfo=UTC)
@@ -260,7 +260,7 @@ class TelegramMessageHandler:
             await self._send_error(message.chat_id)
 
     async def _process_message_loop(
-        self, initial_message: IncomingMessage, ctx: SessionContext
+        self, initial_message: IncomingMessage, ctx: SessionLock
     ) -> None:
         """Process a message and any pending messages that arrive."""
         message: IncomingMessage | None = initial_message
@@ -282,7 +282,7 @@ class TelegramMessageHandler:
                         message = None
 
     async def _process_single_message(
-        self, message: IncomingMessage, ctx: SessionContext
+        self, message: IncomingMessage, ctx: SessionLock
     ) -> None:
         """Process a single message within the session lock."""
         from ash.logging import log_context
@@ -296,7 +296,7 @@ class TelegramMessageHandler:
             await self._process_single_message_inner(message, ctx)
 
     async def _process_single_message_inner(
-        self, message: IncomingMessage, ctx: SessionContext
+        self, message: IncomingMessage, ctx: SessionLock
     ) -> None:
         """Inner implementation of _process_single_message (runs with log context)."""
         await self._provider.set_reaction(message.chat_id, message.id, "👀")

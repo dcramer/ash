@@ -327,7 +327,7 @@ class Agent:
             is_scheduled_task=ctx.is_scheduled_task,
             is_passive_engagement=ctx.passive_engagement,
             is_name_mentioned=ctx.name_mentioned,
-            chat_history=ctx.chat_history,
+            chat_history=None,
         )
 
         system_tokens = estimate_tokens(system_prompt)

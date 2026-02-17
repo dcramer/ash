@@ -23,8 +23,8 @@ from ash.providers.telegram.handlers.checkpoint_handler import CheckpointHandler
 from ash.providers.telegram.handlers.message_handler import TelegramMessageHandler
 from ash.providers.telegram.handlers.passive_handler import PassiveHandler
 from ash.providers.telegram.handlers.session_handler import (
-    SessionContext,
     SessionHandler,
+    SessionLock,
 )
 from ash.providers.telegram.handlers.tool_tracker import (
     ProgressMessageTool,
@@ -49,7 +49,7 @@ __all__ = [
     "CheckpointHandler",
     "PassiveHandler",
     "ProgressMessageTool",
-    "SessionContext",
+    "SessionLock",
     "SessionHandler",
     "TelegramMessageHandler",
     "ToolTracker",

@@ -2,7 +2,7 @@
 
 This module provides:
 - SessionHandler: Manages session lifecycle, persistence, and thread routing
-- SessionContext: Per-session state for message handling
+- SessionLock: Per-session state for message handling
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ logger = logging.getLogger("telegram")
 
 
 @dataclass
-class SessionContext:
+class SessionLock:
     """Per-session state for message handling."""
 
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -71,7 +71,7 @@ class SessionHandler:
 
         # Session caches
         self._session_managers: dict[str, SessionManager] = {}
-        self._session_contexts: dict[str, SessionContext] = {}
+        self._session_contexts: dict[str, SessionLock] = {}
         self._thread_indexes: dict[str, ThreadIndex] = {}
 
     def get_session_manager(
@@ -88,10 +88,10 @@ class SessionHandler:
             )
         return self._session_managers[key]
 
-    def get_session_context(self, session_key: str) -> SessionContext:
-        """Get or create a SessionContext for the given session key."""
+    def get_session_context(self, session_key: str) -> SessionLock:
+        """Get or create a SessionLock for the given session key."""
         if session_key not in self._session_contexts:
-            self._session_contexts[session_key] = SessionContext()
+            self._session_contexts[session_key] = SessionLock()
         return self._session_contexts[session_key]
 
     def get_thread_index(self, chat_id: str) -> ThreadIndex:

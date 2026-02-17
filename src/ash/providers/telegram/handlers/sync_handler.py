@@ -18,8 +18,8 @@ if TYPE_CHECKING:
     from ash.core import Agent, SessionState
     from ash.core.types import AgentResponse
     from ash.providers.telegram.handlers.session_handler import (
-        SessionContext,
         SessionHandler,
+        SessionLock,
     )
     from ash.providers.telegram.handlers.tool_tracker import ToolTracker
     from ash.providers.telegram.provider import TelegramProvider
@@ -50,7 +50,7 @@ class SyncHandler:
         self,
         message: IncomingMessage,
         session: SessionState,
-        ctx: SessionContext,
+        ctx: SessionLock,
         tracker: ToolTracker | None = None,
     ) -> None:
         """Handle message with synchronous response."""
@@ -60,7 +60,7 @@ class SyncHandler:
         self,
         message: IncomingMessage,
         session: SessionState,
-        ctx: SessionContext,
+        ctx: SessionLock,
         tracker: ToolTracker | None = None,
     ) -> AgentResponse:
         """Handle message with synchronous response, returning the AgentResponse."""

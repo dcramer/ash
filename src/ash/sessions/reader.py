@@ -16,7 +16,6 @@ from ash.llm.types import (
     Role,
     TextContent,
     ToolResult,
-    ToolUse,
 )
 from ash.sessions.types import (
     CompactionEntry,
@@ -184,23 +183,13 @@ class SessionReader:
         if isinstance(content, str):
             return content
 
-        blocks: list[ContentBlock] = []
-        for block in content:
-            block_type = block.get("type")
-            if block_type == "text":
-                blocks.append(TextContent(text=block["text"]))
-            elif block_type == "tool_use":
-                blocks.append(
-                    ToolUse(id=block["id"], name=block["name"], input=block["input"])
-                )
-            elif block_type == "tool_result":
-                blocks.append(
-                    ToolResult(
-                        tool_use_id=block["tool_use_id"],
-                        content=block["content"],
-                        is_error=block.get("is_error", False),
-                    )
-                )
+        from ash.sessions.utils import content_block_from_dict
+
+        blocks: list[ContentBlock] = [
+            block
+            for item in content
+            if (block := content_block_from_dict(item)) is not None
+        ]
         return blocks if blocks else ""
 
     def _prefix_with_timestamp(

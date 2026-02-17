@@ -26,7 +26,6 @@ class SessionContext:
     display_name: str | None = None
     chat_type: str | None = None
     chat_title: str | None = None
-    chat_history: list[dict[str, Any]] | None = None
     thread_id: str | None = None
     branch_id: str | None = None
     branch_head_id: str | None = None
@@ -49,8 +48,6 @@ class SessionContext:
             d["chat_type"] = self.chat_type
         if self.chat_title is not None:
             d["chat_title"] = self.chat_title
-        if self.chat_history is not None:
-            d["chat_history"] = self.chat_history
         if self.thread_id is not None:
             d["thread_id"] = self.thread_id
         if self.branch_id is not None:
@@ -81,7 +78,6 @@ class SessionContext:
             display_name=data.get("display_name"),
             chat_type=data.get("chat_type"),
             chat_title=data.get("chat_title"),
-            chat_history=data.get("chat_history"),
             thread_id=data.get("thread_id"),
             branch_id=data.get("branch_id"),
             branch_head_id=data.get("branch_head_id"),

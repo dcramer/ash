@@ -201,8 +201,8 @@ class TestSessionManager:
         assert len(messages) >= 3
 
     @pytest.mark.asyncio
-    async def test_list_and_get_sessions(self, sessions_path):
-        """Can list all sessions and retrieve by key."""
+    async def test_list_sessions(self, sessions_path):
+        """Can list all sessions."""
         m1 = SessionManager(provider="cli", sessions_path=sessions_path)
         await m1.ensure_session()
 
@@ -216,17 +216,6 @@ class TestSessionManager:
         sessions = await SessionManager.list_sessions(sessions_path)
         assert len(sessions) == 2
         assert {s["provider"] for s in sessions} == {"cli", "telegram"}
-
-        # Can retrieve by key
-        retrieved = await SessionManager.get_session("telegram_123", sessions_path)
-        assert retrieved is not None
-        messages, _ = await retrieved.load_messages_for_llm()
-        assert len(messages) == 1
-
-    @pytest.mark.asyncio
-    async def test_get_session_not_found(self, sessions_path):
-        result = await SessionManager.get_session("nonexistent", sessions_path)
-        assert result is None
 
 
 class TestSessionBranching:
@@ -805,38 +794,9 @@ class TestDMThreading:
 class TestChatHistoryInjection:
     """Tests for removal of cross-thread chat history injection."""
 
-    @pytest.mark.asyncio
-    async def test_session_has_no_chat_history(self, tmp_path):
-        """get_or_create_session should not inject chat_history into context."""
-        from ash.config.models import ConversationConfig
-        from ash.providers.base import IncomingMessage
-        from ash.providers.telegram.handlers.session_handler import SessionHandler
-        from ash.sessions.manager import SessionManager
+    def test_session_context_has_no_chat_history_field(self):
+        """SessionContext should not have a chat_history field (removed)."""
+        from ash.core.session import SessionContext
 
-        handler = SessionHandler(
-            provider_name="telegram",
-            config=None,
-            conversation_config=ConversationConfig(),
-        )
-
-        msg = IncomingMessage(
-            id="100",
-            chat_id="chat1",
-            user_id="user1",
-            text="hello",
-            metadata={"chat_type": "private"},
-        )
-
-        # Set up a session manager to avoid filesystem issues
-        sm = SessionManager(
-            provider="telegram",
-            chat_id="chat1",
-            user_id="user1",
-            sessions_path=tmp_path / "sessions",
-        )
-        handler._session_managers[sm.session_key] = sm
-
-        session = await handler.get_or_create_session(msg)
-
-        # chat_history should not be populated (injection removed)
-        assert not getattr(session.context, "chat_history", None)
+        ctx = SessionContext()
+        assert not hasattr(ctx, "chat_history")

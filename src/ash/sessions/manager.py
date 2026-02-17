@@ -16,8 +16,8 @@ from ash.sessions.types import (
     BranchHead,
     CompactionEntry,
     MessageEntry,
+    PersistedSessionState,
     SessionHeader,
-    SessionState,
     ToolResultEntry,
     ToolUseEntry,
     generate_id,
@@ -97,7 +97,7 @@ class SessionManager:
         if self.state_path.exists():
             return
 
-        state = SessionState(
+        state = PersistedSessionState(
             provider=self.provider,
             chat_id=self.chat_id,
             user_id=self.user_id,
@@ -344,29 +344,6 @@ class SessionManager:
                 )
         return sessions
 
-    @classmethod
-    async def get_session(
-        cls,
-        key: str,
-        sessions_path: Path | None = None,
-    ) -> SessionManager | None:
-        base_path = sessions_path or get_sessions_path()
-        session_dir = base_path / key
-
-        if not session_dir.exists():
-            return None
-
-        header = await SessionReader(session_dir).load_header()
-        if not header:
-            return None
-
-        return cls(
-            provider=header.provider,
-            chat_id=header.chat_id,
-            user_id=header.user_id,
-            sessions_path=base_path,
-        )
-
     def fork_at_message(self, message_id: str) -> str:
         """Create a new branch forking from the given message.
 
@@ -375,7 +352,7 @@ class SessionManager:
         """
         state = self._load_state()
         if state is None:
-            state = SessionState(provider=self.provider)
+            state = PersistedSessionState(provider=self.provider)
 
         # If no branches tracked yet, create "main" for the current linear tip
         if not state.branches and self._current_message_id:
@@ -425,18 +402,18 @@ class SessionManager:
                 return branch
         return None
 
-    def _load_state(self) -> SessionState | None:
+    def _load_state(self) -> PersistedSessionState | None:
         """Load the session state from state.json."""
         if not self.state_path.exists():
             return None
         try:
             data = json.loads(self.state_path.read_text())
-            return SessionState.model_validate(data)
+            return PersistedSessionState.model_validate(data)
         except Exception as e:
             logger.warning("session_state_load_failed", extra={"error.message": str(e)})
             return None
 
-    def _save_state(self, state: SessionState) -> None:
+    def _save_state(self, state: PersistedSessionState) -> None:
         """Save the session state to state.json."""
         self._session_dir.mkdir(parents=True, exist_ok=True)
         self.state_path.write_text(

@@ -50,7 +50,7 @@ Ash uses a **one session per thread** model for group chats:
 - Support compaction entries for context window management
 - Provide session listing and search functionality
 - Include user metadata (username, display_name) in history
-- Inject recent chat history into LLM system prompt for cross-thread awareness
+- Cross-thread awareness via tool-based chat history lookup (not injected into system prompt)
 
 ### MAY
 
@@ -188,7 +188,7 @@ Lives at `~/.ash/chats/{provider}/{chat_id}/state.json`. Managed by `ChatStateMa
 | `updated_at` | `datetime` | yes | Last update time |
 | `graph_chat_id` | `str \| null` | no | Graph store chat ID |
 
-### Session-level state.json — `SessionState`
+### Session-level state.json — `PersistedSessionState`
 
 Lives at `~/.ash/sessions/{session_key}/state.json`.
 
