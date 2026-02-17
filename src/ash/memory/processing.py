@@ -212,10 +212,18 @@ async def process_extracted_facts(
             subject_to_pid: dict[str, str] = {}
             if fact.subjects:
                 subject_person_ids = []
+                # Check if this is a joint fact (owner + others) vs pure self-fact
+                non_owner_subjects = [
+                    s for s in fact.subjects if not is_owner_name(s, owner_matchers)
+                ]
+                is_pure_self_fact = len(non_owner_subjects) == 0
                 for subject in fact.subjects:
-                    if is_owner_name(subject, owner_matchers):
-                        logger.debug("Skipping owner as subject: %s", subject)
+                    if is_owner_name(subject, owner_matchers) and is_pure_self_fact:
+                        # Pure self-fact: owner is only subject, skip
+                        # (self-fact injection handles it below)
+                        logger.debug("Skipping owner as sole subject: %s", subject)
                         continue
+                    # Joint fact or non-owner subject: resolve normally
                     try:
                         result = await store.resolve_or_create_person(
                             created_by=user_id,

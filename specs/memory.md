@@ -44,6 +44,7 @@ The memory subsystem is best understood as a graph. Memory entries are nodes; at
 | Query | Traversal |
 |-------|-----------|
 | "what about Bob?" | Bob(person) ←ABOUT← memories →filter(privacy, portable)→ **results** |
+| "search Alice" | "Alice" →resolve→ Person →ABOUT← memories + Person →HAS_RELATIONSHIP→ related →ABOUT← memories → **results** |
 | hearsay check | memory →STATED_BY→ user; memory →ABOUT→ persons; overlap? → fact, else hearsay |
 | cross-context | person ←ABOUT← memories →filter(portable=true, privacy)→ **results** |
 
@@ -131,13 +132,14 @@ When users say "remember that..." / "don't forget..." / "save this...", the agen
 ### The agent can search memory
 
 Memory search happens in two ways:
-1. **Automatic context injection** - Before each response, relevant memories are retrieved via semantic search and included in the system prompt
-2. **Explicit search** - In the sandbox, `ash memory search <query>` searches stored facts via RPC
+1. **Automatic context injection** - Before each response, the retrieval pipeline gathers relevant memories and includes them in the system prompt
+2. **Explicit search** - `ash memory search <query>` and `memory.search` RPC perform hybrid search
 
-Search features:
-- Semantic search (meaning, not just keywords)
-- Filter by person ("what do I know about Sarah?")
-- Returns relevant facts ranked by similarity
+Search combines two retrieval strategies:
+- **Vector search** - Semantic similarity via embeddings (OpenAI text-embedding-3-small)
+- **Person-graph search** - If the query resolves to a person (by name, username, or alias), retrieves memories linked via ABOUT edges, plus memories about related people (1-hop via HAS_RELATIONSHIP)
+
+Results from both strategies are merged (deduplicated, highest score kept) and ranked by similarity.
 
 ### Facts about people are tracked
 
@@ -287,6 +289,19 @@ When Bob asks "what do you know about me?" in different contexts:
 | Group chat (Bob asking) | ✓ | ✓ | ✗ |
 | Group chat (others asking) | ✓ | ✗ | ✗ |
 
+## Retrieval Pipeline
+
+Automatic context injection uses a multi-stage retrieval pipeline:
+
+| Stage | Input | Method | Score |
+|-------|-------|--------|-------|
+| 1. Primary search | User message | Hybrid vector + person-graph search | Vector similarity (0-1) or 0.75/0.55 for graph |
+| 2. Cross-context | Participant person IDs | ABOUT edges across all owners | 0.7 fixed |
+| 3. Multi-hop BFS | Seed persons from stages 1-2 | 2-hop graph traversal | 0.5 (1-hop) / 0.3 (2-hop) |
+| 4. RRF fusion | All stage results | Reciprocal Rank Fusion (K=60) | Combined RRF score |
+
+Stage 2 excludes the querying user's own memories (covered by stage 1). Stage 3 skips SUPERSEDES edges and filters by portable/privacy. RRF fusion boosts memories appearing in multiple stages.
+
 ## Background Extraction
 
 Optionally, facts are extracted automatically from conversations:
@@ -383,6 +398,30 @@ Assistant: Great choices!
 ```
 
 The LLM then attributes each extracted fact to the appropriate speaker.
+
+## Multi-Subject Facts
+
+Facts can be about multiple people simultaneously. The `subject_person_ids` list supports multiple entries, creating ABOUT edges to each person.
+
+### Joint Facts
+
+When a fact inherently involves multiple people as participants (not just one person reporting about another), all participants should be subjects:
+
+| Statement | Subjects | Why |
+|-----------|----------|-----|
+| "Alice and Bob are starting a company" | [Alice, Bob] | Joint venture, both are participants |
+| "The team is relocating to Austin" | [Alice, Bob, Carol] | Affects all team members |
+| "My coworker and I are working on project X" | [coworker] + speaker | Joint effort |
+
+### Speaker as Subject
+
+When the speaker is one of multiple participants in a joint fact, they should be included as a subject. The processing pipeline only treats the speaker as a self-fact (subjects=[]) when they are the SOLE subject — not when they are one of several.
+
+| Statement | subjects (extraction) | subject_person_ids (after processing) |
+|-----------|----------------------|--------------------------------------|
+| "I like pizza" | [] | [speaker_pid] (self-fact injection) |
+| "Alice and I started a company" | ["Alice", speaker_name] | [alice_pid, speaker_pid] |
+| "Alice started a company" | ["Alice"] | [alice_pid] |
 
 ## Schema
 

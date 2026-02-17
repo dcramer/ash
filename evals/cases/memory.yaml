@@ -29,3 +29,36 @@ cases:
     tags:
       - memory
       - recall
+
+  - id: memory_recall_via_relationship
+    description: Recall facts about a person through a relationship reference
+    skip_suite_setup: true
+    setup:
+      - user_id: eval-user
+        username: david
+        display_name: "David Cramer"
+        chat_type: private
+        messages:
+          - "Remember that Alice is my business partner"
+        drain_extraction: true
+      - user_id: eval-user
+        username: david
+        display_name: "David Cramer"
+        chat_type: private
+        messages:
+          - "Remember Alice's product launch is scheduled for March 15"
+        drain_extraction: true
+    prompt: "When is my business partner's product launch?"
+    expected_behavior: |
+      The agent should recall that the user's business partner is Alice and
+      that Alice's product launch is on March 15. The memories may have been
+      automatically injected into context or retrieved via tools — either
+      path is valid.
+    criteria:
+      - Identifies Alice as the business partner
+      - Mentions March 15 as the product launch date
+      - Response is conversational
+    tags:
+      - memory
+      - recall
+      - graph-retrieval

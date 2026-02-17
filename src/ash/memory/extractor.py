@@ -153,6 +153,16 @@ experiencing them, NOT the person reporting them:
 - "My son got into Stanford" -> The SON was admitted (subjects: ["son's name"])
 - "My brother broke his leg" -> The BROTHER is injured (subjects: ["brother's name"])
 
+HOWEVER, when the speaker is an EQUAL PARTICIPANT in a joint activity or life event
+with another person, include BOTH in subjects. Use the speaker's name (from the owner names above):
+- "Alice and I are starting a company" -> BOTH are co-founders (subjects: [speaker_name, "Alice"])
+- "Bob and I went to Tokyo together" -> BOTH traveled (subjects: [speaker_name, "Bob"])
+- "My wife and I are expecting a baby" -> BOTH are expecting (subjects: [speaker_name, "wife's name"])
+- "Sarah and I bought a house" -> BOTH bought it (subjects: [speaker_name, "Sarah"])
+
+The key distinction: REPORTING about someone else's state = only that person is a subject.
+PARTICIPATING together in something = both speaker and other person are subjects.
+
 ## Speaker Attribution
 Look for the @username prefix in <user> content to determine the speaker:
 - "@david (David Cramer): I like pizza" -> speaker is "david"
@@ -166,7 +176,16 @@ The subjects array should contain people the fact is PRIMARILY ABOUT:
 - "My wife gave me a watch" -> subjects: [] (fact is about speaker owning watch; wife is just context)
 - "The watch my wife got me" -> subjects: [] (speaker OWNS the watch, wife GAVE it)
 - "My wife loves watches" -> subjects: ["wife's name"] (fact is about the wife)
-- "Sarah and I went to dinner" -> subjects: ["Sarah"] if fact is about Sarah, [] if about speaker's experience
+
+When a fact involves BOTH the speaker AND another person as equal participants,
+include both in subjects. Use the speaker's name (from the owner names above):
+- "Alice and I are starting a company" -> subjects: [speaker_name, "Alice"] (joint venture)
+- "Bob and I went to Tokyo together" -> subjects: [speaker_name, "Bob"] (joint trip)
+- "My wife and I are expecting" -> subjects: [speaker_name, "wife's name"] (joint life event)
+
+But if the speaker is just REPORTING about someone else's state:
+- "My dad has diabetes" -> subjects: ["dad's name"] (only dad has it)
+- "My coworker got promoted" -> subjects: ["coworker's name"] (only they were promoted)
 
 WRONG: "My wife got me a Grand Seiko" -> extracting that wife owns a Grand Seiko (she GAVE it, speaker owns it)
 RIGHT: "My wife got me a Grand Seiko" -> speaker owns Grand Seiko, subjects: []

@@ -901,3 +901,110 @@ class TestHearsaySupersession:
         from ash.graph.edges import get_superseded_by
 
         assert get_superseded_by(graph_store.graph, hearsay.id) == self_fact.id
+
+
+class TestOwnerFilteringInProcessing:
+    """Tests for owner filtering in process_extracted_facts.
+
+    Ensures joint facts (owner + others) keep the owner as a subject,
+    while pure self-facts (owner is sole subject) strip the owner.
+    """
+
+    @pytest.mark.asyncio
+    async def test_joint_fact_keeps_owner_and_non_owner_subjects(
+        self, graph_store: Store
+    ):
+        """When owner is one of multiple subjects, both should be kept."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact
+
+        # Create the other person first so resolve_or_create_person can find them
+        alice = await graph_store.create_person(created_by="user-1", name="Alice")
+
+        facts = [
+            ExtractedFact(
+                content="David and Alice are starting a company together",
+                subjects=["David", "Alice"],
+                shared=False,
+                confidence=0.9,
+            )
+        ]
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=graph_store,
+            user_id="user-1",
+            speaker_username="david",
+            speaker_display_name="David Cramer",
+            owner_names=["david", "David Cramer"],
+        )
+
+        assert len(stored_ids) == 1
+        mem = graph_store.graph.memories[stored_ids[0]]
+        from ash.graph.edges import get_subject_person_ids
+
+        subject_pids = get_subject_person_ids(graph_store.graph, mem.id)
+        # Both David (resolved as a person) and Alice should be subjects
+        assert len(subject_pids) >= 2
+        assert alice.id in subject_pids
+
+    @pytest.mark.asyncio
+    async def test_pure_self_fact_strips_owner(self, graph_store: Store):
+        """When owner is the sole subject, it should be stripped (self-fact injection handles it)."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact
+
+        facts = [
+            ExtractedFact(
+                content="David likes pizza",
+                subjects=["David"],
+                shared=False,
+                confidence=0.9,
+            )
+        ]
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=graph_store,
+            user_id="user-1",
+            speaker_username="david",
+            speaker_display_name="David Cramer",
+            speaker_person_id="speaker-pid-1",
+            owner_names=["david", "David Cramer"],
+        )
+
+        assert len(stored_ids) == 1
+        from ash.graph.edges import get_subject_person_ids
+
+        subject_pids = get_subject_person_ids(graph_store.graph, stored_ids[0])
+        # Self-fact injection should set speaker_person_id, not the owner as a resolved person
+        assert subject_pids == ["speaker-pid-1"]
+
+    @pytest.mark.asyncio
+    async def test_non_owner_subjects_unaffected(self, graph_store: Store):
+        """Non-owner subjects should always be resolved normally."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact
+
+        bob = await graph_store.create_person(created_by="user-1", name="Bob")
+
+        facts = [
+            ExtractedFact(
+                content="Bob got promoted at work",
+                subjects=["Bob"],
+                shared=False,
+                confidence=0.9,
+            )
+        ]
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=graph_store,
+            user_id="user-1",
+            speaker_username="david",
+            speaker_display_name="David Cramer",
+            owner_names=["david", "David Cramer"],
+        )
+
+        assert len(stored_ids) == 1
+        from ash.graph.edges import get_subject_person_ids
+
+        subject_pids = get_subject_person_ids(graph_store.graph, stored_ids[0])
+        assert bob.id in subject_pids

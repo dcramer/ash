@@ -7,10 +7,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ash.graph.graph import KnowledgeGraph
+from ash.graph.persistence import GraphPersistence
+from ash.memory.embeddings import EmbeddingGenerator
 from ash.store.retrieval import (
     RetrievalContext,
     RetrievalPipeline,
 )
+from ash.store.store import Store
 from ash.store.types import SearchResult, Sensitivity
 
 
@@ -20,6 +24,37 @@ def mock_store():
     store = MagicMock()
     store.search = AsyncMock(return_value=[])
     store._resolve_subject_name = AsyncMock(return_value=None)
+    return store
+
+
+@pytest.fixture
+def mock_embedding_generator():
+    generator = MagicMock(spec=EmbeddingGenerator)
+    generator.embed = AsyncMock(return_value=[0.1] * 1536)
+    return generator
+
+
+@pytest.fixture
+def mock_index():
+    index = MagicMock()
+    index.search = MagicMock(return_value=[])
+    index.add = MagicMock()
+    index.remove = MagicMock()
+    index.save = AsyncMock()
+    return index
+
+
+@pytest.fixture
+async def graph_store(graph_dir, mock_index, mock_embedding_generator) -> Store:
+    graph = KnowledgeGraph()
+    persistence = GraphPersistence(graph_dir)
+    store = Store(
+        graph=graph,
+        persistence=persistence,
+        vector_index=mock_index,
+        embedding_generator=mock_embedding_generator,
+    )
+    store._llm_model = "mock-model"
     return store
 
 
@@ -384,3 +419,175 @@ class TestRRFFusion:
         # So 'third' (1/63 + 1/61) > 'first' (1/61) > 'second' (1/62)
         ids = [m.id for m in result.memories]
         assert ids[0] == "third"  # Boosted by appearing in both stages
+
+
+class TestHybridSearch:
+    """Tests for hybrid vector + person-graph search in store.search()."""
+
+    @pytest.mark.asyncio
+    async def test_search_by_person_name_returns_about_linked_memories(
+        self, graph_store: Store, mock_index
+    ):
+        """Searching a person's name should return memories linked via ABOUT edges."""
+        person = await graph_store.create_person(created_by="user-1", name="Alice")
+        mem = await graph_store.add_memory(
+            content="Alice's product launch is March 15",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+        # Vector search returns nothing (low similarity)
+        mock_index.search.return_value = []
+
+        results = await graph_store.search("Alice", limit=5, owner_user_id="user-1")
+
+        assert len(results) == 1
+        assert results[0].id == mem.id
+        assert results[0].similarity > 0
+
+    @pytest.mark.asyncio
+    async def test_search_follows_has_relationship_one_hop(
+        self, graph_store: Store, mock_index
+    ):
+        """Search should follow HAS_RELATIONSHIP to find related people's memories."""
+        alice = await graph_store.create_person(created_by="user-1", name="Alice")
+        bob = await graph_store.create_person(created_by="user-1", name="Bob")
+        await graph_store.add_relationship(
+            alice.id, "business_partner", related_person_id=bob.id
+        )
+        mem = await graph_store.add_memory(
+            content="Bob's keynote is on Friday",
+            owner_user_id="user-1",
+            subject_person_ids=[bob.id],
+        )
+        mock_index.search.return_value = []
+
+        results = await graph_store.search("Alice", limit=5, owner_user_id="user-1")
+
+        assert len(results) == 1
+        assert results[0].id == mem.id
+        # Related person memories get lower score
+        assert results[0].similarity < 0.75
+
+    @pytest.mark.asyncio
+    async def test_vector_and_graph_results_merge_dedup(
+        self, graph_store: Store, mock_index
+    ):
+        """Vector and graph results should merge, keeping the higher score."""
+        person = await graph_store.create_person(created_by="user-1", name="Alice")
+        mem = await graph_store.add_memory(
+            content="Alice likes Italian food",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+        # Vector search also finds this memory with high similarity
+        mock_index.search.return_value = [(mem.id, 0.92)]
+
+        results = await graph_store.search("Alice", limit=5, owner_user_id="user-1")
+
+        # Should be deduplicated to one result
+        assert len(results) == 1
+        assert results[0].id == mem.id
+        # Should keep the higher score (vector 0.92 > graph 0.75)
+        assert results[0].similarity > 0.8
+
+    @pytest.mark.asyncio
+    async def test_no_person_match_falls_back_to_vector_only(
+        self, graph_store: Store, mock_index
+    ):
+        """When query doesn't resolve to a person, only vector results are returned."""
+        mem = await graph_store.add_memory(
+            content="The sky is blue",
+            owner_user_id="user-1",
+        )
+        mock_index.search.return_value = [(mem.id, 0.85)]
+
+        results = await graph_store.search("sky color", limit=5, owner_user_id="user-1")
+
+        assert len(results) == 1
+        assert results[0].id == mem.id
+
+    @pytest.mark.asyncio
+    async def test_scope_filtering_applies_to_graph_results(
+        self, graph_store: Store, mock_index
+    ):
+        """Graph results should respect scope filtering (owner_user_id)."""
+        person = await graph_store.create_person(created_by="user-1", name="Alice")
+        # Memory owned by user-2
+        await graph_store.add_memory(
+            content="Alice's secret project",
+            owner_user_id="user-2",
+            subject_person_ids=[person.id],
+        )
+        mock_index.search.return_value = []
+
+        results = await graph_store.search("Alice", limit=5, owner_user_id="user-1")
+
+        # user-1 should not see user-2's personal memory
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_archived_superseded_expired_excluded_from_graph(
+        self, graph_store: Store, mock_index
+    ):
+        """Archived, superseded, and expired memories should be excluded from graph results."""
+        from datetime import timedelta
+
+        person = await graph_store.create_person(created_by="user-1", name="Alice")
+
+        # Archived memory
+        archived = await graph_store.add_memory(
+            content="Alice old fact",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+        graph_store.graph.memories[archived.id].archived_at = archived.created_at
+
+        # Superseded memory
+        superseded = await graph_store.add_memory(
+            content="Alice outdated fact",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+        graph_store.graph.memories[superseded.id].superseded_at = superseded.created_at
+
+        # Expired memory
+        from datetime import UTC, datetime
+
+        await graph_store.add_memory(
+            content="Alice temp fact",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+            expires_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+
+        # Active memory
+        active = await graph_store.add_memory(
+            content="Alice current fact",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+
+        mock_index.search.return_value = []
+
+        results = await graph_store.search("Alice", limit=10, owner_user_id="user-1")
+
+        assert len(results) == 1
+        assert results[0].id == active.id
+
+    @pytest.mark.asyncio
+    async def test_search_by_alias(self, graph_store: Store, mock_index):
+        """Searching by a person's alias should find their memories."""
+        person = await graph_store.create_person(
+            created_by="user-1", name="Alice", aliases=["Al"]
+        )
+        mem = await graph_store.add_memory(
+            content="Alice enjoys hiking",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+        mock_index.search.return_value = []
+
+        results = await graph_store.search("Al", limit=5, owner_user_id="user-1")
+
+        assert len(results) == 1
+        assert results[0].id == mem.id
