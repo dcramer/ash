@@ -86,7 +86,6 @@ class TestGraphEdgeOps:
         assert edge.id in graph.edges
         assert edge.id in graph._outgoing["mem-1"]
         assert edge.id in graph._incoming["person-1"]
-        assert edge.id in graph._edges_by_type[ABOUT]
 
     def test_remove_edge(self):
         graph = KnowledgeGraph()
@@ -97,7 +96,6 @@ class TestGraphEdgeOps:
         assert edge.id not in graph.edges
         assert edge.id not in graph._outgoing.get("mem-1", [])
         assert edge.id not in graph._incoming.get("person-1", [])
-        assert edge.id not in graph._edges_by_type.get(ABOUT, [])
 
     def test_remove_nonexistent_edge(self):
         graph = KnowledgeGraph()
@@ -121,16 +119,6 @@ class TestGraphEdgeOps:
         about_out = graph.get_outgoing("mem-1", edge_type=ABOUT)
         assert len(about_out) == 2
         assert {e.target_id for e in about_out} == {"person-1", "person-2"}
-
-    def test_remove_edge_cleans_empty_edges_by_type(self):
-        """Removing the last edge of a type should delete the _edges_by_type key."""
-        graph = KnowledgeGraph()
-        edge = create_about_edge("mem-1", "person-1")
-        graph.add_edge(edge)
-        assert ABOUT in graph._edges_by_type
-
-        graph.remove_edge(edge.id)
-        assert ABOUT not in graph._edges_by_type
 
     def test_get_outgoing_cleans_stale_entries(self):
         """Stale edge IDs in _outgoing are detected, warned, and removed."""
@@ -958,7 +946,6 @@ class TestAddEdgeDedup:
         # adjacency lists have exactly one entry each
         assert graph._outgoing["mem-1"].count(edge.id) == 1
         assert graph._incoming["person-1"].count(edge.id) == 1
-        assert graph._edges_by_type[ABOUT].count(edge.id) == 1
 
     def test_readd_edge_different_object_same_id(self):
         """Re-adding an edge with the same ID but different object cleans up old indexes."""
@@ -1001,7 +988,6 @@ class TestAddEdgeDedup:
         assert len(graph.edges) == 1
         assert graph._outgoing["mem-1"].count(edge.id) == 1
         assert graph._incoming["person-1"].count(edge.id) == 1
-        assert graph._edges_by_type[ABOUT].count(edge.id) == 1
 
     def test_add_remove_add_cycle(self):
         """Edge can be added, removed, and added again cleanly."""
@@ -1073,8 +1059,7 @@ class TestPersistenceRoundTrip:
         assert not persistence._dirty
 
     async def test_load_save_roundtrip(self, tmp_path):
-        from ash.graph.persistence import GraphPersistence
-        from ash.store.store import _hydrate_graph
+        from ash.graph.persistence import GraphPersistence, hydrate_graph
 
         graph = KnowledgeGraph()
         graph.add_memory(
@@ -1090,7 +1075,7 @@ class TestPersistenceRoundTrip:
         # Load into fresh graph
         persistence2 = GraphPersistence(tmp_path / "graph")
         raw_data = await persistence2.load_raw()
-        loaded = _hydrate_graph(raw_data)
+        loaded = hydrate_graph(raw_data)
 
         assert "mem-1" in loaded.memories
         assert "person-1" in loaded.people
@@ -1101,8 +1086,7 @@ class TestPersistenceRoundTrip:
         assert edge.target_id == "person-1"
 
     async def test_load_rebuilds_adjacency_indexes(self, tmp_path):
-        from ash.graph.persistence import GraphPersistence
-        from ash.store.store import _hydrate_graph
+        from ash.graph.persistence import GraphPersistence, hydrate_graph
 
         graph = KnowledgeGraph()
         graph.add_memory(
@@ -1117,7 +1101,7 @@ class TestPersistenceRoundTrip:
         await persistence.flush(graph)
 
         raw_data = await GraphPersistence(tmp_path / "graph").load_raw()
-        loaded = _hydrate_graph(raw_data)
+        loaded = hydrate_graph(raw_data)
 
         # Adjacency indexes should be rebuilt from edges
         outgoing = loaded.get_outgoing("mem-1", edge_type=ABOUT)

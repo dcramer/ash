@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ash.graph.graph import Edge, KnowledgeGraph
+from ash.graph.graph import KnowledgeGraph
 from ash.graph.persistence import GraphPersistence
 from ash.graph.vectors import NumpyVectorIndex
 from ash.memory.embeddings import EmbeddingGenerator
@@ -84,26 +84,6 @@ class Store(
         self._llm_model = model
 
 
-def _hydrate_graph(raw_data: dict) -> KnowledgeGraph:
-    """Build a KnowledgeGraph from raw JSONL dicts."""
-    from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
-
-    graph = KnowledgeGraph()
-
-    for d in raw_data["raw_memories"]:
-        graph.add_memory(MemoryEntry.from_dict(d))
-    for d in raw_data["raw_people"]:
-        graph.add_person(PersonEntry.from_dict(d))
-    for d in raw_data["raw_users"]:
-        graph.add_user(UserEntry.from_dict(d))
-    for d in raw_data["raw_chats"]:
-        graph.add_chat(ChatEntry.from_dict(d))
-    for d in raw_data["raw_edges"]:
-        graph.add_edge(Edge.from_dict(d))
-
-    return graph
-
-
 async def create_store(
     graph_dir: Path,
     llm_registry: LLMRegistry,
@@ -117,11 +97,12 @@ async def create_store(
     Loads KnowledgeGraph from JSONL, NumpyVectorIndex from .npy files.
     """
     from ash.graph.backfill import backfill_edges_from_raw
+    from ash.graph.persistence import hydrate_graph
 
     # Load raw JSONL and hydrate into typed graph
     persistence = GraphPersistence(graph_dir)
     raw_data = await persistence.load_raw()
-    graph = _hydrate_graph(raw_data)
+    graph = hydrate_graph(raw_data)
 
     # Backfill edges from legacy FK fields if edges.jsonl is empty
     if not graph.edges and (graph.memories or graph.people or graph.users):

@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_VALID_COLLECTIONS = frozenset({"memories", "people", "users", "chats", "edges"})
+
+
 class GraphPersistence:
     """Load/save KnowledgeGraph to JSONL files.
 
@@ -44,6 +47,12 @@ class GraphPersistence:
         Valid names: "memories", "people", "users", "chats", "edges".
         Call ``flush()`` to write all dirty collections to disk.
         """
+        invalid = set(collections) - _VALID_COLLECTIONS
+        if invalid:
+            raise ValueError(
+                f"Invalid collection names: {invalid}. "
+                f"Valid: {sorted(_VALID_COLLECTIONS)}"
+            )
         self._dirty.update(collections)
 
     async def flush(self, graph: KnowledgeGraph) -> None:
@@ -194,3 +203,23 @@ def _write_jsonl_atomic(path: Path, records: list[dict]) -> None:
         except OSError:
             pass
         raise
+
+
+def hydrate_graph(raw_data: dict[str, list[dict[str, Any]]]) -> KnowledgeGraph:
+    """Build a KnowledgeGraph from raw JSONL dicts."""
+    from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
+
+    graph = KnowledgeGraph()
+
+    for d in raw_data["raw_memories"]:
+        graph.add_memory(MemoryEntry.from_dict(d))
+    for d in raw_data["raw_people"]:
+        graph.add_person(PersonEntry.from_dict(d))
+    for d in raw_data["raw_users"]:
+        graph.add_user(UserEntry.from_dict(d))
+    for d in raw_data["raw_chats"]:
+        graph.add_chat(ChatEntry.from_dict(d))
+    for d in raw_data["raw_edges"]:
+        graph.add_edge(Edge.from_dict(d))
+
+    return graph

@@ -24,6 +24,16 @@ EdgeType = Literal[
 ]
 NodeType = Literal["memory", "person", "user", "chat"]
 
+# Valid (source_type, target_type) pairs for each edge type
+_EDGE_TYPE_SCHEMA: dict[str, tuple[str, str]] = {
+    "ABOUT": ("memory", "person"),
+    "STATED_BY": ("memory", "person"),
+    "SUPERSEDES": ("memory", "memory"),
+    "IS_PERSON": ("user", "person"),
+    "MERGED_INTO": ("person", "person"),
+    "HAS_RELATIONSHIP": ("person", "person"),
+}
+
 
 class Edge(BaseModel):
     """Typed, temporal edge between two nodes."""
@@ -40,6 +50,16 @@ class Edge(BaseModel):
     properties: dict[str, Any] | None = None
     created_at: datetime | None = None
     created_by: str | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        expected = _EDGE_TYPE_SCHEMA.get(self.edge_type)
+        if expected:
+            exp_src, exp_tgt = expected
+            if self.source_type != exp_src or self.target_type != exp_tgt:
+                raise ValueError(
+                    f"{self.edge_type} edge requires {exp_src}→{exp_tgt}, "
+                    f"got {self.source_type}→{self.target_type}"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         d = self.model_dump(mode="json", exclude_none=True)
@@ -73,10 +93,6 @@ class KnowledgeGraph:
     _incoming: defaultdict[str, list[str]] = field(
         default_factory=lambda: defaultdict(list)
     )
-    _edges_by_type: defaultdict[str, list[str]] = field(
-        default_factory=lambda: defaultdict(list)
-    )
-
     # Node type index for uniform lookup
     node_types: dict[str, NodeType] = field(default_factory=dict)
 
@@ -204,7 +220,6 @@ class KnowledgeGraph:
         self.edges[edge.id] = edge
         self._outgoing[edge.source_id].append(edge.id)
         self._incoming[edge.target_id].append(edge.id)
-        self._edges_by_type[edge.edge_type].append(edge.id)
 
     def _remove_from_index(self, edge: Edge) -> None:
         """Remove an edge from adjacency indexes (but not from self.edges)."""
@@ -220,14 +235,6 @@ class KnowledgeGraph:
                 in_list.remove(edge.id)
             except ValueError:
                 pass
-        type_list = self._edges_by_type.get(edge.edge_type)
-        if type_list:
-            try:
-                type_list.remove(edge.id)
-            except ValueError:
-                pass
-            if not type_list:
-                del self._edges_by_type[edge.edge_type]
 
     def remove_edge(self, edge_id: str) -> None:
         """Hard-remove edge from all indexes."""

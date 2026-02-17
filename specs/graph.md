@@ -61,21 +61,18 @@ All edges are stored in `edges.jsonl` and indexed in in-memory adjacency lists.
 | `MERGED_INTO` | Person → Person | Duplicate person merged into primary |
 | `HAS_RELATIONSHIP` | Person → Person | Relationship link between people |
 
-**Edge dataclass** (`ash.graph.graph.Edge`):
+**Edge model** (`ash.graph.graph.Edge`, Pydantic BaseModel):
 ```python
-@dataclass
-class Edge:
+class Edge(BaseModel):
     id: str
-    edge_type: str          # ABOUT, SUPERSEDES, etc.
-    source_type: str        # "memory", "person", "user"
+    edge_type: EdgeType     # ABOUT, SUPERSEDES, etc.
+    source_type: NodeType   # "memory", "person", "user", "chat"
     source_id: str
-    target_type: str
+    target_type: NodeType
     target_id: str
     weight: float = 1.0
-    properties: dict | None = None
+    properties: dict[str, Any] | None = None
     created_at: datetime | None = None
-    valid_from: datetime | None = None
-    invalid_at: datetime | None = None  # Soft-delete timestamp
     created_by: str | None = None
 ```
 
@@ -112,17 +109,16 @@ KnowledgeGraph
 ├── edges: dict[str, Edge]
 ├── _outgoing: defaultdict[str, list[str]]   # node_id → [edge_ids]
 ├── _incoming: defaultdict[str, list[str]]   # node_id → [edge_ids]
-├── _edges_by_type: defaultdict[str, list[str]]
-└── _node_type: dict[str, str]               # node_id → "memory"|"person"|...
+└── node_types: dict[str, NodeType]          # node_id → "memory"|"person"|...
 ```
 
-Operations: `add_edge()`, `remove_edge()`, `invalidate_edge()`, `get_outgoing()`, `get_incoming()`.
+Operations: `add_edge()`, `remove_edge()`, `get_outgoing()`, `get_incoming()`, `remove_edges_for_node()`.
 
 ### GraphPersistence (`graph/persistence.py`)
 
 JSONL load/save with atomic writes. Each node type has its own `.jsonl` file.
 
-- `load()` — Reads all JSONL files, builds KnowledgeGraph, auto-backfills edges
+- `load_raw()` — Reads all JSONL files into raw dicts; hydration and backfill handled by caller
 - `save_memories()`, `save_people()`, `save_users()`, `save_chats()`, `save_edges()` — Atomic rewrite
 
 ### NumpyVectorIndex (`graph/vectors.py`)
@@ -213,7 +209,7 @@ The `portable` flag controls whether a memory can appear outside its original co
 ```
 src/ash/graph/
 ├── __init__.py          # Exports
-├── graph.py             # KnowledgeGraph, Edge dataclass
+├── graph.py             # KnowledgeGraph dataclass, Edge Pydantic model
 ├── edges.py             # Edge type constants, factories, query helpers
 ├── persistence.py       # JSONL load/save, edge backfill
 ├── vectors.py           # NumpyVectorIndex
