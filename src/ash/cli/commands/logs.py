@@ -299,6 +299,7 @@ def _follow_logs(
     current_file: Path | None = None
     file_handle = None
     last_pos = 0
+    last_date: str | None = None
 
     try:
         while True:
@@ -348,7 +349,9 @@ def _follow_logs(
                             continue
 
                     # Display entry
-                    _display_entries([entry], output_json)
+                    last_date = _display_entries(
+                        [entry], output_json, last_date=last_date
+                    )
 
                 last_pos = file_handle.tell()
 
@@ -394,14 +397,16 @@ def _format_extras(entry: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
-def _display_entries(entries: list[dict[str, Any]], output_json: bool) -> None:
-    """Display log entries to console."""
+def _display_entries(
+    entries: list[dict[str, Any]],
+    output_json: bool,
+    last_date: str | None = None,
+) -> str | None:
+    """Display log entries to console. Returns the last displayed date."""
     if output_json:
         for entry in entries:
             console.print(json.dumps(entry))
-        return
-
-    last_date: str | None = None
+        return last_date
 
     for entry in entries:
         ts_raw = entry.get("ts", "")
@@ -440,6 +445,8 @@ def _display_entries(entries: list[dict[str, Any]], output_json: bool) -> None:
         if exc := entry.get("exception"):
             for exc_line in exc.splitlines():
                 console.print(f"[dim]  │ {exc_line}[/dim]")
+
+    return last_date
 
 
 # Level order mapping used throughout this module
