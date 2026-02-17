@@ -11,6 +11,39 @@ import typer
 
 from ash.cli.console import console, dim
 
+# Level indicator symbols and their Rich styles
+LEVEL_SYMBOLS: dict[str, tuple[str, str]] = {
+    "DEBUG": ("·", "dim"),
+    "INFO": ("▸", "cyan"),
+    "WARNING": ("▲", "yellow"),
+    "ERROR": ("✕", "red bold"),
+}
+
+# Rename verbose OTel keys for compact display
+FIELD_ALIASES: dict[str, str] = {
+    "gen_ai.tool.name": "tool",
+    "gen_ai.agent.name": "agent",
+    "gen_ai.request.model": "model",
+    "error.type": "err",
+    "process.command": "cmd",
+    "process.exit_code": "exit",
+}
+
+# Fields to skip in extra display (already shown elsewhere or noisy)
+HIDDEN_FIELDS: set[str] = {
+    "logger",
+    "ts",
+    "level",
+    "component",
+    "chat_id",
+    "session_id",
+    "user_id",
+    "provider",
+    "exception",
+    "message",
+    "duration_ms",
+}
+
 
 def register(app: typer.Typer) -> None:
     """Register the logs command."""
@@ -327,34 +360,86 @@ def _follow_logs(
             file_handle.close()
 
 
+def _format_duration(ms: float) -> str:
+    """Format duration_ms as a compact string."""
+    if ms >= 1000:
+        return f"{ms / 1000:.1f}s"
+    return f"{int(ms)}ms"
+
+
+def _format_extras(entry: dict[str, Any]) -> str:
+    """Render extra fields as concise key=value tags."""
+    parts: list[str] = []
+
+    # Handle duration_ms specially
+    if "duration_ms" in entry:
+        try:
+            parts.append(_format_duration(float(entry["duration_ms"])))
+        except (TypeError, ValueError):
+            pass
+
+    for key, value in entry.items():
+        if key in HIDDEN_FIELDS:
+            continue
+
+        # Apply alias
+        display_key = FIELD_ALIASES.get(key, key)
+
+        val_str = str(value)
+        if len(val_str) > 40:
+            val_str = val_str[:37] + "..."
+
+        parts.append(f"{display_key}={val_str}")
+
+    return " ".join(parts)
+
+
 def _display_entries(entries: list[dict[str, Any]], output_json: bool) -> None:
     """Display log entries to console."""
-    level_styles = {
-        "DEBUG": "dim",
-        "INFO": "cyan",
-        "WARNING": "yellow",
-        "ERROR": "red bold",
-    }
+    if output_json:
+        for entry in entries:
+            console.print(json.dumps(entry))
+        return
+
+    last_date: str | None = None
 
     for entry in entries:
-        if output_json:
-            console.print(json.dumps(entry))
-        else:
-            ts = entry.get("ts", "")[:19]  # Truncate to seconds
-            level = entry.get("level", "?")
-            component = entry.get("component", "?")
-            message = entry.get("message", "")
+        ts_raw = entry.get("ts", "")
 
-            level_style = level_styles.get(level, "")
-            level_display = f"[{level_style}]{level:<7}[/{level_style}]"
+        # Extract date and time parts
+        try:
+            dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+            time_str = dt.strftime("%H:%M:%S")
+            date_str = dt.strftime("%Y-%m-%d")
+        except (ValueError, AttributeError):
+            time_str = ts_raw[:8] if len(ts_raw) >= 8 else ts_raw
+            date_str = None
 
-            console.print(
-                f"[dim]{ts}[/dim] {level_display} [blue]{component:<10}[/blue] {message}"
-            )
+        # Print date separator when day changes
+        if date_str and date_str != last_date:
+            if last_date is not None:
+                console.print()
+            console.print(f"[dim]── {date_str} ──[/dim]")
+            last_date = date_str
 
-            # Show exception if present
-            if exc := entry.get("exception"):
-                console.print(f"[dim]{exc}[/dim]")
+        level = entry.get("level", "INFO")
+        symbol, style = LEVEL_SYMBOLS.get(level, ("?", ""))
+        comp = entry.get("component", "")
+        message = entry.get("message", "")
+
+        extras = _format_extras(entry)
+        extras_str = f"  [dim]{extras}[/dim]" if extras else ""
+
+        console.print(
+            f"[dim]{time_str}[/dim]  [{style}]{symbol}[/{style}]"
+            f"  [blue]{comp:<12}[/blue]"
+            f" {message}{extras_str}"
+        )
+
+        # Show exception indented with dim border
+        if exc := entry.get("exception"):
+            for exc_line in exc.splitlines():
+                console.print(f"[dim]  │ {exc_line}[/dim]")
 
 
 # Level order mapping used throughout this module
