@@ -186,6 +186,7 @@ class Agent:
         thread_state_path: str | None = None,
         is_scheduled_task: bool = False,
         is_passive_engagement: bool = False,
+        is_name_mentioned: bool = False,
         chat_history: list[dict[str, Any]] | None = None,
     ) -> str:
         """Build system prompt with optional memory context."""
@@ -206,6 +207,7 @@ class Agent:
                 thread_state_path=thread_state_path,
                 is_scheduled_task=is_scheduled_task,
                 is_passive_engagement=is_passive_engagement,
+                is_name_mentioned=is_name_mentioned,
             ),
             conversation_gap_minutes=conversation_gap_minutes,
             has_reply_context=has_reply_context,
@@ -316,6 +318,7 @@ class Agent:
             ),
             is_scheduled_task=ctx.is_scheduled_task,
             is_passive_engagement=ctx.passive_engagement,
+            is_name_mentioned=ctx.name_mentioned,
             chat_history=ctx.chat_history,
         )
 

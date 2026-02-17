@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from ash.agents.types import ChildActivated
 from ash.core.session import SessionState
 from ash.events.schedule import ScheduleEntry
 
 if TYPE_CHECKING:
+    from ash.agents.executor import AgentExecutor
+    from ash.agents.types import StackFrame
     from ash.core.agent import Agent
 
 logger = logging.getLogger(__name__)
@@ -115,6 +118,7 @@ class ScheduledTaskHandler:
         senders: dict[str, MessageSender],
         registrars: dict[str, MessageRegistrar] | None = None,
         timezone: str = "UTC",
+        agent_executor: "AgentExecutor | None" = None,
     ):
         """Initialize the handler.
 
@@ -123,11 +127,13 @@ class ScheduledTaskHandler:
             senders: Map of provider name -> send function.
             registrars: Map of provider name -> message registrar for thread tracking.
             timezone: Fallback IANA timezone for computing fire times.
+            agent_executor: Optional executor for running subagent skill loops.
         """
         self._agent = agent
         self._senders = senders
         self._registrars = registrars or {}
         self._timezone = timezone
+        self._agent_executor = agent_executor
 
     async def handle(self, entry: ScheduleEntry) -> None:
         """Process a scheduled task.
@@ -204,38 +210,224 @@ class ScheduledTaskHandler:
                 user_id=entry.user_id,
             )
 
-            # Send response back
-            if response.text and entry.chat_id and entry.provider:
-                sender = self._senders.get(entry.provider)
-                if sender:
-                    # Prepend @mention if we have a username
-                    response_text = response.text
-                    if entry.username:
-                        response_text = f"@{entry.username} {response_text}"
-
-                    # Thread final response to the same chain as skill messages
-                    reply_to = session.context.reply_to_message_id
-                    message_id = await sender(
-                        entry.chat_id, response_text, reply_to=reply_to
-                    )
-                    logger.info(
-                        f"Sent scheduled response to {entry.provider}/{entry.chat_id}: "
-                        f"{response_text[:50]}..."
-                    )
-
-                    # Register the message in thread index so replies get tracked
-                    registrar = self._registrars.get(entry.provider)
-                    if registrar:
-                        await registrar(entry.chat_id, message_id)
-                        logger.debug(
-                            f"Registered scheduled message {message_id} in thread index"
-                        )
-                else:
-                    logger.warning(
-                        f"No sender configured for provider: {entry.provider}"
-                    )
-            elif not response.text:
+            if response.text:
+                await self._send_response(entry, session, response.text)
+            else:
                 logger.info("Scheduled task completed with no response to send")
+
+        except ChildActivated as ca:
+            # A skill was invoked — run the subagent loop to completion
+            if self._agent_executor and ca.main_frame and ca.child_frame:
+                result_text = await self._run_skill_loop(
+                    ca.main_frame, ca.child_frame, session
+                )
+                if result_text:
+                    await self._send_response(entry, session, result_text)
+            else:
+                logger.error("ChildActivated raised but agent_executor not available")
 
         except Exception as e:
             logger.error(f"Scheduled task failed: {e}", exc_info=True)
+
+    async def _send_response(
+        self,
+        entry: ScheduleEntry,
+        session: SessionState,
+        text: str,
+    ) -> None:
+        """Send a response message back to the chat that scheduled the task."""
+        if not entry.chat_id or not entry.provider:
+            return
+
+        sender = self._senders.get(entry.provider)
+        if not sender:
+            logger.warning(f"No sender configured for provider: {entry.provider}")
+            return
+
+        response_text = text
+        if entry.username:
+            response_text = f"@{entry.username} {response_text}"
+
+        reply_to = session.context.reply_to_message_id
+        message_id = await sender(entry.chat_id, response_text, reply_to=reply_to)
+        logger.info(
+            f"Sent scheduled response to {entry.provider}/{entry.chat_id}: "
+            f"{response_text[:50]}..."
+        )
+
+        registrar = self._registrars.get(entry.provider)
+        if registrar:
+            await registrar(entry.chat_id, message_id)
+            logger.debug(f"Registered scheduled message {message_id} in thread index")
+
+    async def _run_skill_loop(
+        self,
+        main_frame: "StackFrame",
+        child_frame: "StackFrame",
+        session: SessionState,
+    ) -> str | None:
+        """Run a subagent skill loop to completion without user interaction.
+
+        Pushes the main and child frames onto a temporary stack and drives
+        execute_turn until the stack unwinds back to the main agent producing
+        a final text response.
+
+        Returns:
+            Collected text output, or None if no output was produced.
+        """
+        from ash.agents.types import AgentStack, TurnAction
+
+        assert self._agent_executor is not None
+
+        stack = AgentStack()
+        stack.push(main_frame)
+        stack.push(child_frame)
+
+        collected_text: list[str] = []
+        max_turns = 50  # Safety limit
+
+        for _ in range(max_turns):
+            top = stack.top
+            if top is None:
+                break
+
+            is_main = stack.depth == 1
+
+            # First turn for a newly pushed child has no user_message/tool_result
+            result = await self._agent_executor.execute_turn(top)
+
+            if result.action == TurnAction.COMPLETE:
+                # Subagent finished — pop it and feed result to parent
+                completed = stack.pop()
+                parent = stack.top
+                if parent and completed.parent_tool_use_id:
+                    # Feed result back as tool_result for the parent's tool_use
+                    result2 = await self._agent_executor.execute_turn(
+                        parent,
+                        tool_result=(
+                            completed.parent_tool_use_id,
+                            result.text,
+                            False,
+                        ),
+                    )
+                    # Process the parent's response
+                    if result2.action == TurnAction.SEND_TEXT:
+                        if stack.depth == 1:
+                            collected_text.append(result2.text)
+                            break
+                    elif result2.action == TurnAction.COMPLETE:
+                        stack.pop()
+                        if result2.text:
+                            collected_text.append(result2.text)
+                        break
+                    elif result2.action == TurnAction.CHILD_ACTIVATED:
+                        if result2.child_frame:
+                            stack.push(result2.child_frame)
+                    elif result2.action in (
+                        TurnAction.ERROR,
+                        TurnAction.MAX_ITERATIONS,
+                    ):
+                        logger.error(
+                            "Parent agent error after skill completion: %s",
+                            result2.text,
+                        )
+                        stack.pop()
+                        break
+                    # INTERRUPT in scheduled mode — no user to interact with
+                    elif result2.action == TurnAction.INTERRUPT:
+                        logger.warning(
+                            "Agent interrupted in scheduled mode (no user), "
+                            "feeding error to parent"
+                        )
+                        break
+                else:
+                    # No parent or no tool_use_id — just collect text
+                    if result.text:
+                        collected_text.append(result.text)
+                    break
+
+            elif result.action == TurnAction.SEND_TEXT:
+                if is_main:
+                    # Main agent produced text — final output
+                    collected_text.append(result.text)
+                    break
+                # Subagent "sent text" — in scheduled mode, treat as completion
+                # since there's no user to interact with
+                completed = stack.pop()
+                parent = stack.top
+                if parent and completed.parent_tool_use_id:
+                    result2 = await self._agent_executor.execute_turn(
+                        parent,
+                        tool_result=(
+                            completed.parent_tool_use_id,
+                            result.text,
+                            False,
+                        ),
+                    )
+                    if result2.action == TurnAction.SEND_TEXT:
+                        if stack.depth == 1:
+                            collected_text.append(result2.text)
+                            break
+                    elif result2.action == TurnAction.COMPLETE:
+                        stack.pop()
+                        if result2.text:
+                            collected_text.append(result2.text)
+                        break
+                    elif result2.action == TurnAction.CHILD_ACTIVATED:
+                        if result2.child_frame:
+                            stack.push(result2.child_frame)
+                    elif result2.action in (
+                        TurnAction.ERROR,
+                        TurnAction.MAX_ITERATIONS,
+                    ):
+                        logger.error(
+                            "Parent agent error after subagent text: %s",
+                            result2.text,
+                        )
+                        stack.pop()
+                        break
+                else:
+                    if result.text:
+                        collected_text.append(result.text)
+                    break
+
+            elif result.action == TurnAction.CHILD_ACTIVATED:
+                if result.child_frame:
+                    stack.push(result.child_frame)
+
+            elif result.action == TurnAction.INTERRUPT:
+                # No user in scheduled mode — feed error to parent
+                logger.warning("Subagent interrupted in scheduled mode (no user)")
+                completed = stack.pop()
+                parent = stack.top
+                if parent and completed.parent_tool_use_id:
+                    await self._agent_executor.execute_turn(
+                        parent,
+                        tool_result=(
+                            completed.parent_tool_use_id,
+                            "Error: agent requires user interaction but running in scheduled mode",
+                            True,
+                        ),
+                    )
+                break
+
+            elif result.action in (TurnAction.ERROR, TurnAction.MAX_ITERATIONS):
+                logger.error(
+                    "Subagent error in scheduled mode: action=%s text=%s",
+                    result.action.name,
+                    result.text,
+                )
+                completed = stack.pop()
+                parent = stack.top
+                if parent and completed.parent_tool_use_id:
+                    await self._agent_executor.execute_turn(
+                        parent,
+                        tool_result=(
+                            completed.parent_tool_use_id,
+                            f"Skill error: {result.text}",
+                            True,
+                        ),
+                    )
+                break
+
+        return "\n\n".join(collected_text) if collected_text else None

@@ -96,6 +96,7 @@ class ChatInfo:
     thread_state_path: str | None = None  # Path to thread-specific state.json
     is_scheduled_task: bool = False  # True when executing a scheduled task
     is_passive_engagement: bool = False  # True when engaging via passive listening
+    is_name_mentioned: bool = False  # True when bot was addressed by name
 
 
 @dataclass
@@ -158,6 +159,10 @@ class PromptContext:
     def get_is_passive_engagement(self) -> bool:
         """Get passive engagement flag from composed object."""
         return self.chat.is_passive_engagement if self.chat else False
+
+    def get_is_name_mentioned(self) -> bool:
+        """Get name-mentioned flag from composed object."""
+        return self.chat.is_name_mentioned if self.chat else False
 
 
 class SystemPromptBuilder:
@@ -727,6 +732,16 @@ class SystemPromptBuilder:
         """Build section for passive engagement context."""
         if not context.get_is_passive_engagement():
             return ""
+
+        if context.get_is_name_mentioned():
+            return "\n".join(
+                [
+                    "## Passive Engagement",
+                    "",
+                    "You were addressed by name in a group chat. Respond naturally and conversationally.",
+                    "Treat this like a direct message — no need to justify your presence.",
+                ]
+            )
 
         return "\n".join(
             [

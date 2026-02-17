@@ -248,6 +248,8 @@ class PassiveHandler:
 
             # Mark metadata so downstream code knows this was passive
             message.metadata["passive_engagement"] = True
+            if name_mentioned:
+                message.metadata["name_mentioned"] = True
 
             # Promote to active processing - this calls handle_message() which
             # creates a full agent session and generates a response

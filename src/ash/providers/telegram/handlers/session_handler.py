@@ -131,6 +131,8 @@ class SessionHandler:
             session.context.chat_title = chat_title
         if message.metadata.get("passive_engagement"):
             session.context.passive_engagement = True
+        if message.metadata.get("name_mentioned"):
+            session.context.name_mentioned = True
 
         if thread_id:
             session.context.thread_id = thread_id

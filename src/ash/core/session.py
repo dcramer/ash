@@ -33,6 +33,7 @@ class SessionContext:
     conversation_gap_minutes: float | None = None
     is_scheduled_task: bool = False
     passive_engagement: bool = False
+    name_mentioned: bool = False
     reply_to_message_id: str | None = None
     current_message_id: str | None = None
     has_reply_context: bool = False
@@ -62,6 +63,8 @@ class SessionContext:
             d["is_scheduled_task"] = True
         if self.passive_engagement:
             d["passive_engagement"] = True
+        if self.name_mentioned:
+            d["name_mentioned"] = True
         if self.reply_to_message_id is not None:
             d["reply_to_message_id"] = self.reply_to_message_id
         if self.current_message_id is not None:
@@ -85,6 +88,7 @@ class SessionContext:
             conversation_gap_minutes=data.get("conversation_gap_minutes"),
             is_scheduled_task=data.get("is_scheduled_task", False),
             passive_engagement=data.get("passive_engagement", False),
+            name_mentioned=data.get("name_mentioned", False),
             reply_to_message_id=data.get("reply_to_message_id"),
             current_message_id=data.get("current_message_id"),
             has_reply_context=data.get("has_reply_context", False),
