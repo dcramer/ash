@@ -123,7 +123,11 @@ class RetrievalPipeline:
                         )
             except Exception:
                 logger.warning(
-                    "cross_context_retrieval_failed", extra={"username": username}
+                    "cross_context_retrieval_failed",
+                    extra={
+                        "username": username,
+                        "person.ids": list(person_ids),
+                    },
                 )
 
         return results
@@ -178,7 +182,11 @@ class RetrievalPipeline:
                 max_hops=2,
             )
         except Exception:
-            logger.warning("bfs_traversal_failed", exc_info=True)
+            logger.warning(
+                "bfs_traversal_failed",
+                extra={"person.seed_ids": list(seed_person_ids)},
+                exc_info=True,
+            )
             return []
 
         now = datetime.now(UTC)

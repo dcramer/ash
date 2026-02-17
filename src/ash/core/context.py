@@ -137,13 +137,15 @@ class ContextGatherer:
                     "memory_retrieval",
                     extra={
                         "memory.count": len(memory_context.memories),
+                        "memory.ids": [m.id for m in memory_context.memories],
                         "duration_ms": duration_ms,
                     },
                 )
                 for mem in memory_context.memories:
                     logger.debug(
-                        "  recalled: %s (sim=%.2f, meta=%s)",
+                        "  recalled: %s (id=%s, sim=%.2f, meta=%s)",
                         mem.content[:80],
+                        mem.id,
                         mem.similarity,
                         mem.metadata,
                     )

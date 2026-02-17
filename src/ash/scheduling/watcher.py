@@ -155,6 +155,7 @@ class ScheduleWatcher:
             logger.info(
                 "scheduled_task_triggered",
                 extra={
+                    "schedule.entry_id": entry_id,
                     "schedule.message_preview": entry.message[:50],
                     "messaging.chat_id": entry.chat_id,
                     "messaging.chat_title": entry.chat_title,
@@ -165,7 +166,10 @@ class ScheduleWatcher:
                 for handler in self._handlers:
                     await handler(entry)
             except Exception as e:
-                logger.error("schedule_handler_error", extra={"error.message": str(e)})
+                logger.error(
+                    "schedule_handler_error",
+                    extra={"schedule.entry_id": entry_id, "error.message": str(e)},
+                )
                 # Mark entry as processed even on failure to prevent infinite retries
 
             # Always mark entry as processed (success or failure)

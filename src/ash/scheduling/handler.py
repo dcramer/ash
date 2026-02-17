@@ -149,6 +149,7 @@ class ScheduledTaskHandler:
             logger.error(
                 "scheduled_task_missing_routing",
                 extra={
+                    "schedule.entry_id": entry.id,
                     "provider": entry.provider,
                     "messaging.chat_id": entry.chat_id,
                 },
