@@ -86,9 +86,28 @@ def _format_time_local(iso_time: str, timezone: str) -> str:
         dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
         tz = ZoneInfo(timezone)
         local_dt = dt.astimezone(tz)
-        return local_dt.strftime("%Y-%m-%d %H:%M")
+        return local_dt.strftime("%a %Y-%m-%d %H:%M")
     except Exception:
         return iso_time[:16]
+
+
+def _format_next_cron(cron_expr: str, timezone: str) -> str | None:
+    """Return the next fire time for a cron expression in the given timezone."""
+    from zoneinfo import ZoneInfo
+
+    try:
+        from croniter import croniter
+    except ImportError:
+        return None
+
+    try:
+        tz = ZoneInfo(timezone)
+        now_local = datetime.now(UTC).astimezone(tz)
+        it = croniter(cron_expr, now_local)
+        next_fire = it.get_next(datetime)
+        return next_fire.strftime("%a %Y-%m-%d %H:%M")
+    except Exception:
+        return None
 
 
 @app.command()
@@ -108,14 +127,24 @@ def create(
             help="Cron in local time (e.g., '0 8 * * *' for 8am daily, '45 7 * * 1-5' for 7:45am weekdays)",
         ),
     ] = None,
+    timezone: Annotated[
+        str | None,
+        typer.Option(
+            "--tz",
+            help="Timezone for schedule (IANA name, e.g., 'America/New_York'). Overrides default.",
+        ),
+    ] = None,
 ) -> None:
     """Create a scheduled task.
 
     Examples:
         ash-sb schedule create "Remind me to check the build" --at "tomorrow at 9am"
         ash-sb schedule create "Daily status check" --cron "0 8 * * *"
+        ash-sb schedule create "Standup" --cron "0 10 * * 1-5" --tz America/New_York
     """
     ctx = _require_routing_context()
+    if timezone:
+        ctx["timezone"] = timezone
 
     if not at and not cron:
         typer.echo(
@@ -189,14 +218,23 @@ def create(
     entry = result.get("entry", {})
     preview = _truncate(message)
 
+    tz = ctx["timezone"]
     if trigger_at_iso:
-        local_time = _format_time_local(trigger_at_iso, ctx["timezone"])
+        local_time = _format_time_local(trigger_at_iso, tz)
         typer.echo(f"Scheduled reminder (id={entry_id})")
-        typer.echo(f"  Time: {local_time} ({ctx['timezone']})")
+        typer.echo(f"  Time: {local_time} ({tz})")
         typer.echo(f"  UTC:  {entry.get('trigger_at', trigger_at_iso)}")
         typer.echo(f"  Task: {preview}")
     else:
-        typer.echo(f"Scheduled recurring task (id={entry_id}) ({cron}): {preview}")
+        assert cron is not None
+        next_fire = _format_next_cron(cron, tz)
+        typer.echo(f"Scheduled recurring task (id={entry_id})")
+        typer.echo(f"  Cron: {cron} ({tz})")
+        if next_fire:
+            typer.echo(f"  Next: {next_fire}")
+        typer.echo(f"  Task: {preview}")
+        if tz == "UTC":
+            typer.echo("  Hint: Use --tz to set timezone (e.g. --tz America/New_York)")
 
 
 @app.command("list")
@@ -222,40 +260,31 @@ def list_tasks() -> None:
         return
 
     typer.echo(f"Scheduled tasks (times shown in {timezone}):\n")
-    typer.echo(
-        f"{'ID':<10} {'Type':<10} {'Target':<18} {'By':<12} {'Schedule':<18} {'Message'}"
-    )
-    typer.echo("-" * 110)
-
     for entry in entries:
         entry_id = entry.get("id", "?")
         task_type = "periodic" if "cron" in entry else "one-shot"
-
-        chat_title = entry.get("chat_title")
-        if chat_title:
-            target = f"{entry.get('provider', '?')}:{chat_title}"
-        else:
-            chat_id = entry.get("chat_id", "?")
-            truncated_chat = chat_id[:10] if len(chat_id) > 10 else chat_id
-            target = f"{entry.get('provider', '?')}:{truncated_chat}"
-
-        username = entry.get("username", "")
-        scheduled_by = f"@{username}" if username else "?"
-        message_preview = _truncate(entry.get("message", ""), max_len=25)
+        message_preview = _truncate(entry.get("message", ""), max_len=40)
 
         if "cron" in entry:
-            schedule = entry["cron"]
+            entry_tz = entry.get("timezone", timezone)
+            schedule = f"{entry['cron']} ({entry_tz})"
+            next_fire = _format_next_cron(entry["cron"], entry_tz)
         elif "trigger_at" in entry:
-            schedule = _format_time_local(entry["trigger_at"], timezone)
+            schedule = (
+                f"{_format_time_local(entry['trigger_at'], timezone)} ({timezone})"
+            )
+            next_fire = None
         else:
             schedule = "?"
+            next_fire = None
 
-        typer.echo(
-            f"{entry_id:<10} {task_type:<10} {target:<18} {scheduled_by:<12} "
-            f"{schedule:<18} {message_preview}"
-        )
+        typer.echo(f"  {entry_id}  {task_type:<10} {schedule}")
+        if next_fire:
+            typer.echo(f"           Next: {next_fire}")
+        typer.echo(f"           Task: {message_preview}")
+        typer.echo()
 
-    typer.echo(f"\nTotal: {len(entries)} task(s)")
+    typer.echo(f"Total: {len(entries)} task(s)")
 
 
 @app.command()
@@ -280,7 +309,9 @@ def cancel(
         raise typer.Exit(1) from None
 
     if result.get("cancelled"):
-        typer.echo(f"Cancelled task: {entry_id}")
+        entry = result.get("entry", {})
+        preview = _truncate(entry.get("message", ""), max_len=50)
+        typer.echo(f"Cancelled task (id={entry_id}): {preview}")
     else:
         typer.echo(f"Error: No task found with ID {entry_id}", err=True)
         raise typer.Exit(1)
@@ -381,10 +412,15 @@ def update(
     if result.get("updated"):
         entry = result.get("entry", {})
         preview = _truncate(entry.get("message", ""))
+        entry_tz = entry.get("timezone", ctx["timezone"])
         is_periodic = "cron" in entry
         if is_periodic:
+            cron_expr = entry.get("cron", "")
+            next_fire = _format_next_cron(cron_expr, entry_tz)
             typer.echo(f"Updated recurring task (id={entry_id})")
-            typer.echo(f"  Cron: {entry.get('cron')}")
+            typer.echo(f"  Cron: {cron_expr} ({entry_tz})")
+            if next_fire:
+                typer.echo(f"  Next: {next_fire}")
             typer.echo(f"  Task: {preview}")
         else:
             local_time = _format_time_local(entry["trigger_at"], ctx["timezone"])

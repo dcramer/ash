@@ -62,32 +62,105 @@ Examples:
 - `*/15 * * * *` - Every 15 minutes
 - `0 0 1 * *` - First of each month at midnight
 
-## Agent Usage
+## Sandbox CLI (`ash-sb schedule`)
 
-The agent uses sandbox CLI commands to manage entries. These commands communicate with the host process via RPC (`schedule.create`, `schedule.list`, `schedule.cancel`, `schedule.update`):
+The agent uses sandbox CLI commands to manage entries. These commands communicate with the host process via RPC (`schedule.create`, `schedule.list`, `schedule.cancel`, `schedule.update`).
 
-```bash
-# One-time task
-ash schedule create "Check the build" --at 2026-01-12T09:00:00Z
-
-# Recurring task
-ash schedule create "Daily summary" --cron "0 8 * * *"
-
-# List scheduled tasks
-ash schedule list
-
-# Cancel a task by ID
-ash schedule cancel --id abc12345
-
-# Update a task
-ash schedule update --id abc12345 --message "New task text"
-ash schedule update --id abc12345 --at 2026-01-15T10:00:00Z
-ash schedule update --id abc12345 --cron "0 9 * * *" --tz America/Los_Angeles
-```
-
-The commands automatically inject `chat_id`, `user_id`, and `provider` from environment variables (`ASH_CHAT_ID`, `ASH_USER_ID`, `ASH_PROVIDER`).
+The commands automatically inject `chat_id`, `user_id`, `provider`, and `timezone` from environment variables (`ASH_CHAT_ID`, `ASH_USER_ID`, `ASH_PROVIDER`, `ASH_TIMEZONE`).
 
 **Note:** Scheduling only works from providers with persistent chats (e.g., Telegram). Cannot schedule from CLI.
+
+**Design principle:** Output is optimized for LLM consumption — every response includes enough context for the agent to verify correctness and report results to the user. Timezone, next fire time, and task message are always shown.
+
+### `ash-sb schedule create`
+
+```bash
+# One-time task (natural language or ISO 8601)
+ash-sb schedule create "Check the build" --at "tomorrow at 9am"
+ash-sb schedule create "Check the build" --at 2026-01-12T09:00:00Z
+
+# Recurring task
+ash-sb schedule create "Daily summary" --cron "0 8 * * *"
+
+# With explicit timezone (overrides ASH_TIMEZONE default)
+ash-sb schedule create "Standup" --cron "0 10 * * 1-5" --tz America/New_York
+```
+
+**One-shot output:**
+```
+Scheduled reminder (id=a1b2c3d4)
+  Time: Sat 2026-02-21 14:00 (America/Los_Angeles)
+  UTC:  2026-02-21T22:00:00Z
+  Task: Check the build
+```
+
+**Recurring output:**
+```
+Scheduled recurring task (id=e5f6a7b8)
+  Cron: 0 10 * * 1-5 (America/New_York)
+  Next: Mon 2026-02-23 10:00
+  Task: Standup
+```
+
+When timezone is UTC, a hint is shown:
+```
+  Hint: Use --tz to set timezone (e.g. --tz America/New_York)
+```
+
+### `ash-sb schedule list`
+
+```bash
+ash-sb schedule list
+```
+
+**Output:**
+```
+Scheduled tasks (times shown in America/Los_Angeles):
+
+  a1b2c3d4  one-shot   Sat 2026-02-21 14:00 (America/Los_Angeles)
+           Task: Check the build
+
+  e5f6a7b8  periodic   0 10 * * 1-5 (America/New_York)
+           Next: Mon 2026-02-23 10:00
+           Task: Standup
+
+Total: 2 task(s)
+```
+
+### `ash-sb schedule cancel`
+
+```bash
+ash-sb schedule cancel --id a1b2c3d4
+```
+
+**Output:**
+```
+Cancelled task (id=a1b2c3d4): Check the build
+```
+
+### `ash-sb schedule update`
+
+```bash
+ash-sb schedule update --id a1b2c3d4 --message "New task text"
+ash-sb schedule update --id a1b2c3d4 --at "tomorrow at 10am"
+ash-sb schedule update --id a1b2c3d4 --cron "0 9 * * *" --tz America/Los_Angeles
+```
+
+**Recurring output:**
+```
+Updated recurring task (id=e5f6a7b8)
+  Cron: 0 9 * * * (America/Los_Angeles)
+  Next: Mon 2026-02-23 09:00
+  Task: Standup
+```
+
+**One-shot output:**
+```
+Updated reminder (id=a1b2c3d4)
+  Time: Tue 2026-02-24 10:00 (America/Los_Angeles)
+  UTC:  2026-02-24T18:00:00Z
+  Task: New task text
+```
 
 ## Behavior
 

@@ -109,7 +109,7 @@ def register_schedule_methods(
             raise ValueError(f"Task {entry_id} does not belong to you")
 
         store.remove_entry(entry_id)
-        return {"cancelled": True}
+        return {"cancelled": True, "entry": _entry_to_dict(entry)}
 
     async def schedule_update(params: dict[str, Any]) -> dict[str, Any]:
         """Update a scheduled task.
