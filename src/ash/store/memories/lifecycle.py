@@ -42,20 +42,7 @@ class MemoryLifecycleMixin:
         if archived_ids:
             self._persistence.mark_dirty("memories")
             await self._persistence.flush(self._graph)
-
-        for memory_id in archived_ids:
-            try:
-                self._index.remove(memory_id)
-            except Exception:
-                logger.debug("Failed to delete embedding for %s", memory_id)
-
-        if archived_ids:
-            try:
-                await self._index.save(
-                    self._persistence.graph_dir / "embeddings" / "memories.npy"
-                )
-            except Exception:
-                logger.debug("Failed to save index after gc")
+            await self._remove_from_vector_index(archived_ids)
 
         logger.info("gc_complete", extra={"removed_count": len(archived_ids)})
         return GCResult(removed_count=len(archived_ids), archived_ids=archived_ids)
@@ -105,18 +92,7 @@ class MemoryLifecycleMixin:
         self._persistence.mark_dirty("memories")
         await self._persistence.flush(self._graph)
 
-        for memory_id in to_archive:
-            try:
-                self._index.remove(memory_id)
-            except Exception:
-                logger.debug("Failed to delete embedding for %s", memory_id)
-
-        try:
-            await self._index.save(
-                self._persistence.graph_dir / "embeddings" / "memories.npy"
-            )
-        except Exception:
-            logger.debug("Failed to save index after forget_person")
+        await self._remove_from_vector_index(to_archive)
 
         if delete_person_record:
             await self.delete_person(person_id)
@@ -174,19 +150,7 @@ class MemoryLifecycleMixin:
             self._persistence.mark_dirty("memories")
             await self._persistence.flush(self._graph)
 
-        for memory_id in archived:
-            try:
-                self._index.remove(memory_id)
-            except Exception:
-                logger.debug("Failed to delete embedding for %s", memory_id)
-
-        if archived:
-            try:
-                await self._index.save(
-                    self._persistence.graph_dir / "embeddings" / "memories.npy"
-                )
-            except Exception:
-                logger.debug("Failed to save index after archive_memories")
+        await self._remove_from_vector_index(archived)
 
         return archived
 

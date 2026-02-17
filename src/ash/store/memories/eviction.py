@@ -19,13 +19,7 @@ class MemoryEvictionMixin:
         now = datetime.now(UTC)
 
         # Count active memories
-        active = [
-            m
-            for m in self._graph.memories.values()
-            if m.archived_at is None
-            and m.superseded_at is None
-            and (m.expires_at is None or m.expires_at > now)
-        ]
+        active = [m for m in self._graph.memories.values() if m.is_active(now)]
 
         if len(active) <= max_entries:
             return 0
@@ -50,19 +44,7 @@ class MemoryEvictionMixin:
             self._persistence.mark_dirty("memories")
             await self._persistence.flush(self._graph)
 
-        for mid in ids_to_evict:
-            try:
-                self._index.remove(mid)
-            except Exception:
-                logger.warning("Failed to delete embedding for %s during eviction", mid)
-
-        if ids_to_evict:
-            try:
-                await self._index.save(
-                    self._persistence.graph_dir / "embeddings" / "memories.npy"
-                )
-            except Exception:
-                logger.debug("Failed to save index after eviction")
+        await self._remove_from_vector_index(ids_to_evict)
 
         if len(ids_to_evict) < excess:
             logger.warning(
@@ -104,22 +86,13 @@ class MemoryEvictionMixin:
 
         self._index.clear()
 
-        try:
-            await self._index.save(
-                self._persistence.graph_dir / "embeddings" / "memories.npy"
-            )
-        except Exception:
-            logger.debug("Failed to save cleared index", exc_info=True)
+        await self._save_vector_index()
 
         return count
 
     async def rebuild_index(self: Store) -> int:
         """Rebuild vector index, generating embeddings for any memories missing them."""
-        active_memories = [
-            m
-            for m in self._graph.memories.values()
-            if m.archived_at is None and m.superseded_at is None
-        ]
+        active_memories = [m for m in self._graph.memories.values() if m.is_active()]
 
         existing_ids = self._index.get_ids()
 
@@ -138,9 +111,7 @@ class MemoryEvictionMixin:
                 )
 
         if generated:
-            await self._index.save(
-                self._persistence.graph_dir / "embeddings" / "memories.npy"
-            )
+            await self._save_vector_index()
             logger.info(
                 "Generated embeddings during rebuild",
                 extra={"generated": generated, "already_indexed": len(existing_ids)},

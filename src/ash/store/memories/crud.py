@@ -186,12 +186,7 @@ class MemoryCrudMixin:
 
         # Save vector index after flush (separate file)
         if embedding_floats:
-            try:
-                await self._index.save(
-                    self._persistence.graph_dir / "embeddings" / "memories.npy"
-                )
-            except Exception:
-                logger.warning("Failed to save vector index", exc_info=True)
+            await self._save_vector_index()
 
         logger.debug(
             "memory_added",
@@ -285,17 +280,7 @@ class MemoryCrudMixin:
         self._persistence.mark_dirty("memories")
         await self._persistence.flush(self._graph)
 
-        try:
-            self._index.remove(full_id)
-            await self._index.save(
-                self._persistence.graph_dir / "embeddings" / "memories.npy"
-            )
-        except Exception:
-            logger.warning(
-                "Failed to delete memory embedding",
-                extra={"memory_id": full_id},
-                exc_info=True,
-            )
+        await self._remove_from_vector_index([full_id])
 
         logger.info("memory_deleted", extra={"memory_id": full_id})
         return True

@@ -83,6 +83,27 @@ class Store(
         self._llm = llm
         self._llm_model = model
 
+    @property
+    def _vector_index_path(self) -> Path:
+        return self._persistence.graph_dir / "embeddings" / "memories.npy"
+
+    async def _save_vector_index(self) -> None:
+        """Save the vector index to disk."""
+        try:
+            await self._index.save(self._vector_index_path)
+        except Exception:
+            logger.warning("Failed to save vector index", exc_info=True)
+
+    async def _remove_from_vector_index(self, memory_ids: list[str]) -> None:
+        """Remove memory IDs from vector index and save."""
+        for mid in memory_ids:
+            try:
+                self._index.remove(mid)
+            except Exception:
+                logger.warning("Failed to remove embedding for %s", mid)
+        if memory_ids:
+            await self._save_vector_index()
+
 
 async def create_store(
     graph_dir: Path,

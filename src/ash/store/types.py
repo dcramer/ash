@@ -139,6 +139,19 @@ class MemoryEntry(BaseModel):
     # Extensibility
     metadata: dict[str, Any] | None = None
 
+    def is_active(self, now: datetime | None = None) -> bool:
+        """Return True if memory is not archived, not superseded, and not expired.
+
+        If ``now`` is omitted the expiry check is skipped.
+        """
+        if self.archived_at is not None:
+            return False
+        if self.superseded_at is not None:
+            return False
+        if now and self.expires_at and self.expires_at <= now:
+            return False
+        return True
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
         d = self.model_dump(mode="json", exclude_none=True, exclude={"embedding"})

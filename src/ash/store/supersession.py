@@ -203,17 +203,7 @@ class SupersessionMixin:
         self._persistence.mark_dirty("memories", "edges")
         await self._persistence.flush(self._graph)
 
-        try:
-            self._index.remove(old_memory_id)
-            await self._index.save(
-                self._persistence.graph_dir / "embeddings" / "memories.npy"
-            )
-        except Exception:
-            logger.warning(
-                "Failed to delete superseded memory embedding",
-                extra={"memory_id": old_memory_id},
-                exc_info=True,
-            )
+        await self._remove_from_vector_index([old_memory_id])
         return True
 
     def _mark_superseded_batched(
@@ -298,22 +288,7 @@ class SupersessionMixin:
             self._persistence.mark_dirty("memories", "edges")
             await self._persistence.flush(self._graph)
 
-            for mid in marked:
-                try:
-                    self._index.remove(mid)
-                except Exception:
-                    logger.debug("Failed to remove embedding for %s", mid)
-
-            try:
-                await self._index.save(
-                    self._persistence.graph_dir / "embeddings" / "memories.npy"
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to delete embeddings for superseded memories",
-                    extra={"count": len(marked)},
-                    exc_info=True,
-                )
+            await self._remove_from_vector_index(marked)
 
         return marked
 
@@ -344,13 +319,7 @@ class SupersessionMixin:
         hearsay_candidates: list[MemoryEntry] = []
         for mid in candidate_mids:
             memory = self._graph.memories.get(mid)
-            if not memory:
-                continue
-            if memory.archived_at is not None:
-                continue
-            if memory.superseded_at is not None:
-                continue
-            if memory.expires_at and memory.expires_at <= now:
+            if not memory or not memory.is_active(now):
                 continue
             # Use trust classification: skip facts (speaker is subject)
             trust = classify_trust(self._graph, mid)
@@ -421,15 +390,6 @@ class SupersessionMixin:
 
         if count > 0:
             await self._persistence.flush(self._graph)
-            try:
-                await self._index.save(
-                    self._persistence.graph_dir / "embeddings" / "memories.npy"
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to save embeddings after hearsay supersession",
-                    extra={"count": count},
-                    exc_info=True,
-                )
+            await self._save_vector_index()
 
         return count
