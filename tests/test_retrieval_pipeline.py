@@ -251,6 +251,204 @@ class TestPrivacyFilter:
         assert result is False
 
 
+class TestStage1PrivacyFilter:
+    """Tests for Stage 1 privacy filtering.
+
+    Stage 1 returns the owner's own memories. The filter targets SENSITIVE
+    memories about other people in group chats (health, medical, financial).
+    Self-memories, PERSONAL notes, and PUBLIC facts pass through.
+    """
+
+    @pytest.fixture
+    def pipeline(self, mock_store):
+        return RetrievalPipeline(mock_store)
+
+    @pytest.mark.asyncio
+    async def test_stage1_sensitive_filtered_in_group(self, mock_store):
+        """SENSITIVE memory about a non-participant excluded in group chat."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-sensitive",
+                    content="Sarah is pregnant",
+                    similarity=0.9,
+                    metadata={
+                        "sensitivity": "sensitive",
+                        "subject_person_ids": ["person-sarah"],
+                    },
+                    source_type="memory",
+                )
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="what do you know about people",
+            chat_type="group",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 0
+
+    @pytest.mark.asyncio
+    async def test_stage1_sensitive_passes_for_participant_in_group(self, mock_store):
+        """SENSITIVE memory passes in group when subject is a participant."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-sensitive",
+                    content="Sarah is pregnant",
+                    similarity=0.9,
+                    metadata={
+                        "sensitivity": "sensitive",
+                        "subject_person_ids": ["person-sarah"],
+                    },
+                    source_type="memory",
+                )
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="what do you know about Sarah",
+            chat_type="group",
+            participant_person_ids={"sarah": {"person-sarah"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 1
+
+    @pytest.mark.asyncio
+    async def test_stage1_personal_passes_in_group(self, mock_store):
+        """PERSONAL memory passes in group — owner's own notes are accessible."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-personal",
+                    content="Looking for a new job",
+                    similarity=0.85,
+                    metadata={
+                        "sensitivity": "personal",
+                        "subject_person_ids": ["person-alice"],
+                    },
+                    source_type="memory",
+                )
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="what do you know about Alice",
+            chat_type="group",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 1
+
+    @pytest.mark.asyncio
+    async def test_stage1_public_passes_in_group(self, mock_store):
+        """PUBLIC and None-sensitivity memories pass through in group chat."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-public",
+                    content="Alice likes pizza",
+                    similarity=0.9,
+                    metadata={
+                        "sensitivity": "public",
+                        "subject_person_ids": ["person-alice"],
+                    },
+                    source_type="memory",
+                ),
+                SearchResult(
+                    id="mem-none",
+                    content="Bob works at Acme",
+                    similarity=0.85,
+                    metadata={
+                        "sensitivity": None,
+                        "subject_person_ids": ["person-bob"],
+                    },
+                    source_type="memory",
+                ),
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="what do you know about people",
+            chat_type="group",
+            participant_person_ids={"alice": {"person-alice"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 2
+
+    @pytest.mark.asyncio
+    async def test_stage1_sensitive_passes_in_private(self, mock_store):
+        """SENSITIVE memory passes in private chat (filter only applies to groups)."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-sensitive",
+                    content="Sarah is pregnant",
+                    similarity=0.9,
+                    metadata={
+                        "sensitivity": "sensitive",
+                        "subject_person_ids": ["person-sarah"],
+                    },
+                    source_type="memory",
+                )
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="what do you know about Sarah",
+            chat_type="private",
+            participant_person_ids={"sarah": {"person-sarah"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 1
+        assert result.memories[0].id == "mem-sensitive"
+
+    @pytest.mark.asyncio
+    async def test_stage1_self_memory_passes_in_group(self, mock_store):
+        """Self-memory (no subjects) always visible to owner in group chat."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-self",
+                    content="I have anxiety",
+                    similarity=0.9,
+                    metadata={
+                        "sensitivity": "sensitive",
+                        "subject_person_ids": [],
+                    },
+                    source_type="memory",
+                )
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="how am I doing",
+            chat_type="group",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 1
+
+
 class TestFinalizeRanking:
     """Tests for _finalize ranking behavior."""
 

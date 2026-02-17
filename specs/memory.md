@@ -235,6 +235,7 @@ Memories can be classified by sensitivity level to control sharing:
 | "Looking for a new job" | personal | Sensitive career info |
 | "Has anxiety" | sensitive | Mental health |
 | "Salary is $150k" | sensitive | Financial |
+| "Is pregnant, due August" | sensitive | Medical/health |
 | "Has a dog named Max" | public | General fact |
 
 ### Privacy Filtering

@@ -625,11 +625,11 @@ class TestPrivacyFilter:
 
 
 class TestOwnMemoryPrivacy:
-    """Verify owner's own memories are never filtered by privacy rules.
+    """Verify owner's self-memories and personal notes survive Stage 1 filtering.
 
-    Regression: the privacy filter was applied to ALL memories including the
-    owner's primary search results, incorrectly blocking SENSITIVE self-memories
-    (empty subjects) and PERSONAL memories about others in group chats.
+    Stage 1 privacy filtering targets SENSITIVE memories about other people
+    in group chats (health, medical, financial). Self-memories (no subjects)
+    and PERSONAL notes the owner wrote always pass through.
     """
 
     async def test_sensitive_self_memory_returned_in_group(

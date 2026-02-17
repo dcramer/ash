@@ -244,7 +244,7 @@ Classify each fact's privacy level for sharing decisions:
 - "personal": Share only with the subject or owner. Personal details not for group disclosure.
   Examples: "Just went through a breakup", "Looking for a new job", "Having relationship troubles"
 - "sensitive": High privacy - medical, financial, mental health. Only share in private with the subject.
-  Examples: "Has anxiety", "Taking medication for depression", "Salary is $X", "Has diabetes", "Seeing a therapist"
+  Examples: "Has anxiety", "Taking medication for depression", "Salary is $X", "Has diabetes", "Seeing a therapist", "Is pregnant", "Undergoing fertility treatment"
 
 Default to "public" unless the content clearly involves private matters.
 
@@ -276,7 +276,7 @@ Return a JSON object with:
 
 ## Guidelines:
 - subjects should contain people the fact is PRIMARILY ABOUT (not the speaker)
-- Default sensitivity to "public" unless clearly private/medical/financial
+- Default sensitivity to "public" unless clearly private/medical/financial. Pregnancy, reproductive health, and medical conditions are always "sensitive"
 - Default portable to true unless clearly ephemeral
 - Default shared to false unless clearly group knowledge
 

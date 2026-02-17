@@ -64,6 +64,7 @@ class RetrievalPipeline:
         """Execute the full retrieval pipeline."""
         # Stage 1: Primary vector search
         stage1 = await self._primary_search(context)
+        stage1 = self._filter_results_by_privacy(stage1, context)
 
         # Stage 2: Cross-context retrieval
         stage2: list[SearchResult] = []
@@ -331,6 +332,48 @@ class RetrievalPipeline:
             reverse=True,
         )
         return result_memories[:limit]
+
+    def _filter_results_by_privacy(
+        self,
+        results: list[SearchResult],
+        context: RetrievalContext,
+    ) -> list[SearchResult]:
+        """Filter Stage 1 results for sensitive information in group chats.
+
+        Stage 1 returns the owner's own memories. Self-memories (no subjects)
+        always pass. For memories about others, only SENSITIVE items are
+        filtered — these are health/medical/financial facts that shouldn't
+        be disclosed in group contexts.
+        """
+        if context.chat_type != "group":
+            return results
+
+        all_participant_ids: set[str] = set()
+        for pids in context.participant_person_ids.values():
+            all_participant_ids |= pids
+
+        filtered = []
+        for result in results:
+            meta = result.metadata or {}
+            subject_person_ids = meta.get("subject_person_ids", [])
+
+            # Self-memories (no subjects) always visible to the owner
+            if not subject_person_ids:
+                filtered.append(result)
+                continue
+
+            sensitivity_str = meta.get("sensitivity")
+            if sensitivity_str != Sensitivity.SENSITIVE.value:
+                filtered.append(result)
+                continue
+
+            # SENSITIVE memory about others: only pass if a subject is
+            # among the chat participants (they can see their own info)
+            if set(subject_person_ids) & all_participant_ids:
+                filtered.append(result)
+            # else: filtered out — don't disclose sensitive info about
+            # non-participants in group chat
+        return filtered
 
     def _passes_privacy_filter(
         self,
