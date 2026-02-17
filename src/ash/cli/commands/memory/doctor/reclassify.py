@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
 
 from ash.cli.commands.memory.doctor._helpers import (
     confirm_or_cancel,
@@ -13,7 +12,7 @@ from ash.cli.commands.memory.doctor._helpers import (
     llm_complete,
     truncate,
 )
-from ash.cli.console import console, dim, success, warning
+from ash.cli.console import console, create_table, dim, success, warning
 
 if TYPE_CHECKING:
     from ash.config.models import AshConfig
@@ -119,13 +118,17 @@ async def memory_doctor_reclassify(
         success("No memories needed reclassification")
         return
 
-    table = Table(title="Proposed Reclassifications")
-    table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Old Type", style="yellow")
-    table.add_column("New Type", style="green")
-    table.add_column("Content", style="white", max_width=40)
+    table = create_table(
+        "Proposed Reclassifications",
+        [
+            ("ID", {"style": "dim", "max_width": 8}),
+            ("Old Type", "yellow"),
+            ("New Type", "green"),
+            ("Content", {"style": "white", "max_width": 40}),
+        ],
+    )
 
-    for full_id, old_type, new_type in changes:
+    for full_id, old_type, new_type in changes[:10]:
         mem = mem_by_id.get(full_id)
         table.add_row(
             full_id[:8],
@@ -133,6 +136,9 @@ async def memory_doctor_reclassify(
             new_type,
             truncate(mem.content) if mem else "-",
         )
+
+    if len(changes) > 10:
+        table.add_row("...", "...", "...", f"... and {len(changes) - 10} more")
 
     console.print(table)
     console.print(f"\n[bold]{len(changes)} reclassifications proposed[/bold]")

@@ -35,7 +35,6 @@ def register(app: typer.Typer) -> None:
 
         from pydantic import ValidationError
         from rich.syntax import Syntax
-        from rich.table import Table
 
         from ash.config import load_config
         from ash.config.paths import get_config_path
@@ -63,9 +62,12 @@ def register(app: typer.Typer) -> None:
                 config_obj = load_config(expanded_path)
 
                 # Show validation success with summary
-                table = Table(title="Configuration Summary")
-                table.add_column("Setting", style="cyan")
-                table.add_column("Value", style="green")
+                from ash.cli.console import create_table
+
+                table = create_table(
+                    "Configuration Summary",
+                    [("Setting", "cyan"), ("Value", "green")],
+                )
 
                 table.add_row("Workspace", str(config_obj.workspace))
 

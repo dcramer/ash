@@ -5,10 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
 
 from ash.cli.commands.memory.doctor._helpers import confirm_or_cancel, truncate
-from ash.cli.console import console, dim, success, warning
+from ash.cli.console import console, create_table, dim, success, warning
 
 if TYPE_CHECKING:
     from ash.store.store import Store
@@ -33,10 +32,14 @@ async def memory_doctor_embed_missing(store: Store, force: bool) -> None:
         f"(out of {len(memories)} total)"
     )
 
-    table = Table(title="Memories Without Embeddings")
-    table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Type", style="cyan")
-    table.add_column("Content", style="white", max_width=50)
+    table = create_table(
+        "Memories Without Embeddings",
+        [
+            ("ID", {"style": "dim", "max_width": 8}),
+            ("Type", "cyan"),
+            ("Content", {"style": "white", "max_width": 50}),
+        ],
+    )
     for m in missing[:10]:
         table.add_row(m.id[:8], m.memory_type.value, truncate(m.content))
     if len(missing) > 10:

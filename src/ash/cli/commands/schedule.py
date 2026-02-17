@@ -142,8 +142,7 @@ def register(app: typer.Typer) -> None:
 
 def _schedule_list(schedule_file) -> None:
     """List all scheduled tasks."""
-    from rich.table import Table
-
+    from ash.cli.console import create_table
     from ash.config import load_config
     from ash.scheduling import ScheduleStore
 
@@ -155,13 +154,17 @@ def _schedule_list(schedule_file) -> None:
         warning("No scheduled tasks found")
         return
 
-    table = Table(show_header=True)
-    table.add_column("ID", style="dim")
-    table.add_column("Type")
-    table.add_column("Chat")
-    table.add_column("Message")
-    table.add_column("Schedule")
-    table.add_column("Next Fire")
+    table = create_table(
+        "Scheduled Tasks",
+        [
+            ("ID", "dim"),
+            ("Type", ""),
+            ("Chat", ""),
+            ("Message", ""),
+            ("Schedule", ""),
+            ("Next Fire", ""),
+        ],
+    )
 
     for entry in entries:
         entry_type = "periodic" if entry.is_periodic else "one-shot"

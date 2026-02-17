@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rich.table import Table
-
 from ash.cli.commands.memory.doctor._helpers import confirm_or_cancel, truncate
-from ash.cli.console import console, success
+from ash.cli.console import console, create_table, success
 from ash.store.types import MemoryType
 
 if TYPE_CHECKING:
@@ -70,11 +68,15 @@ async def memory_doctor_self_facts(store: Store, force: bool) -> None:
         success("No self-facts need subject attribution fix")
         return
 
-    table = Table(title="Self-Facts Missing Subject Attribution")
-    table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Speaker", style="cyan")
-    table.add_column("Person ID", style="green", max_width=8)
-    table.add_column("Content", style="white", max_width=40)
+    table = create_table(
+        "Self-Facts Missing Subject Attribution",
+        [
+            ("ID", {"style": "dim", "max_width": 8}),
+            ("Speaker", "cyan"),
+            ("Person ID", {"style": "green", "max_width": 8}),
+            ("Content", {"style": "white", "max_width": 40}),
+        ],
+    )
 
     for memory, person_id in to_fix[:10]:
         table.add_row(

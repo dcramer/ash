@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rich.table import Table
-
 from ash.cli.commands.memory.doctor._helpers import confirm_or_cancel, truncate
-from ash.cli.console import console, success
+from ash.cli.console import console, create_table, success
 from ash.core.filters import build_owner_matchers, is_owner_name
 from ash.store.types import MemoryType
 
@@ -102,11 +100,15 @@ async def memory_doctor_backfill_subjects(store: Store, force: bool) -> None:
         success("No memories need subject backfill")
         return
 
-    table = Table(title="Memories Missing Subject Attribution")
-    table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Matched", style="green")
-    table.add_column("Person ID", style="cyan", max_width=8)
-    table.add_column("Content", style="white", max_width=40)
+    table = create_table(
+        "Memories Missing Subject Attribution",
+        [
+            ("ID", {"style": "dim", "max_width": 8}),
+            ("Matched", "green"),
+            ("Person ID", {"style": "cyan", "max_width": 8}),
+            ("Content", {"style": "white", "max_width": 40}),
+        ],
+    )
 
     for memory, person_id, matched_name in to_fix[:10]:
         table.add_row(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ash.cli.console import console, dim, warning
+from ash.cli.console import console, create_table, dim, warning
 
 if TYPE_CHECKING:
     from ash.store.store import Store
@@ -19,8 +19,6 @@ async def memory_list(
     scope: str | None,
 ) -> None:
     """List memory entries."""
-    from rich.table import Table
-
     # Apply scope-based filters
     owner_user_id = None
     filter_chat_id = None
@@ -74,13 +72,17 @@ async def memory_list(
         warning("No memory entries found")
         return
 
-    table = Table(title="Memory Entries")
-    table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Type", style="blue", max_width=12)
-    table.add_column("About", style="green", max_width=16)
-    table.add_column("Said by", style="cyan", max_width=14)
-    table.add_column("Created", style="dim", max_width=10)
-    table.add_column("Content", style="white", max_width=80)
+    table = create_table(
+        "Memory Entries",
+        [
+            ("ID", {"style": "dim", "max_width": 8}),
+            ("Type", {"style": "blue", "max_width": 12}),
+            ("About", {"style": "green", "max_width": 16}),
+            ("Said by", {"style": "cyan", "max_width": 14}),
+            ("Created", {"style": "dim", "max_width": 10}),
+            ("Content", {"style": "white", "max_width": 80}),
+        ],
+    )
 
     from ash.graph.edges import get_subject_person_ids
 

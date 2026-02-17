@@ -82,8 +82,7 @@ def register(app: typer.Typer) -> None:
     @service_app.command("status")
     def service_status() -> None:
         """Show Ash service status."""
-        from rich.table import Table
-
+        from ash.cli.console import create_table
         from ash.service import ServiceManager, ServiceState, read_runtime_state
 
         manager = ServiceManager()
@@ -91,9 +90,13 @@ def register(app: typer.Typer) -> None:
         runtime_state = read_runtime_state()
 
         # Build status display
-        table = Table(title="Ash Service Status")
-        table.add_column("Property", style="cyan")
-        table.add_column("Value")
+        table = create_table(
+            "Ash Service Status",
+            [
+                ("Property", "cyan"),
+                ("Value", ""),
+            ],
+        )
 
         # State with color
         state_colors = {

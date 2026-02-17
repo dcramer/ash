@@ -1,10 +1,18 @@
 """Shared console utilities for CLI commands."""
 
+from __future__ import annotations
+
 import subprocess
 from enum import Enum
+from typing import TYPE_CHECKING
 
+import typer
 from rich.console import Console
 from rich.table import Table
+
+if TYPE_CHECKING:
+    from ash.config.models import AshConfig
+    from ash.llm.base import LLMProvider
 
 
 class DockerStatus(Enum):
@@ -97,3 +105,29 @@ def create_table(
         else:
             table.add_column(name, style=style_or_kwargs)
     return table
+
+
+def confirm_or_cancel(prompt: str, force: bool) -> bool:
+    """Return True if the user confirms (or force is set). Print cancel on decline."""
+    if force:
+        return True
+    confirmed = typer.confirm(prompt)
+    if not confirmed:
+        dim("Cancelled")
+    return confirmed
+
+
+def create_llm(
+    config: AshConfig, model_alias: str | None = None
+) -> tuple[LLMProvider, str]:
+    """Create an LLM provider from config. Returns (provider, model_name)."""
+    from ash.llm import create_llm_provider
+
+    alias = model_alias or "default"
+    model_config = config.get_model(alias)
+    api_key = config.resolve_api_key(alias)
+    llm = create_llm_provider(
+        model_config.provider,
+        api_key=api_key.get_secret_value() if api_key else None,
+    )
+    return llm, model_config.model

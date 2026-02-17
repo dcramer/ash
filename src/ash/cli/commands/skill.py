@@ -133,8 +133,7 @@ def register(app: typer.Typer) -> None:
             ash skill list --source
             ash skill list --all  # Include opt-in skills not enabled
         """
-        from rich.table import Table
-
+        from ash.cli.console import create_table
         from ash.skills.registry import SkillRegistry
 
         config = get_config(config_path)
@@ -149,16 +148,17 @@ def register(app: typer.Typer) -> None:
             warning("No skills found")
             return
 
-        table = Table(title="Skills")
-        table.add_column("Name", style="cyan")
-        table.add_column("Description", style="white")
+        columns: list[tuple[str, str | dict]] = [
+            ("Name", "cyan"),
+            ("Description", "white"),
+        ]
         if show_source:
-            table.add_column("Source", style="yellow")
-            table.add_column("Repo/Path", style="dim")
+            columns.extend([("Source", "yellow"), ("Repo/Path", "dim")])
         else:
-            table.add_column("Path", style="dim")
+            columns.append(("Path", "dim"))
         if show_all:
-            table.add_column("Status", style="yellow")
+            columns.append(("Status", "yellow"))
+        table = create_table("Skills", columns)
 
         for skill in sorted(skills, key=lambda s: s.name):
             # Determine status for --all view
@@ -432,8 +432,7 @@ def register(app: typer.Typer) -> None:
         Examples:
             ash skill sources
         """
-        from rich.table import Table
-
+        from ash.cli.console import create_table
         from ash.skills.installer import SkillInstaller
 
         config = get_config(config_path)
@@ -444,12 +443,16 @@ def register(app: typer.Typer) -> None:
             warning("No skill sources configured or installed")
             return
 
-        table = Table(title="Skill Sources")
-        table.add_column("Type", style="cyan")
-        table.add_column("Source", style="white")
-        table.add_column("Ref", style="yellow")
-        table.add_column("Status", style="green")
-        table.add_column("Skills", style="dim")
+        table = create_table(
+            "Skill Sources",
+            [
+                ("Type", "cyan"),
+                ("Source", "white"),
+                ("Ref", "yellow"),
+                ("Status", "green"),
+                ("Skills", "dim"),
+            ],
+        )
 
         # Build set of config keys for orphan detection
         config_keys = {_source_key(s.repo, s.path) for s in config.skill_sources}

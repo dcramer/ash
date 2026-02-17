@@ -7,13 +7,23 @@ import re
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 
-import typer
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from ash.cli.console import dim
+from ash.cli.console import (
+    confirm_or_cancel as confirm_or_cancel,
+)
+from ash.cli.console import (
+    console,
+    dim,
+)
+from ash.cli.console import (
+    create_llm as create_llm,
+)
 
 if TYPE_CHECKING:
-    from ash.config.models import AshConfig
     from ash.llm.base import LLMProvider
+    from ash.store.store import Store
+    from ash.store.types import MemoryEntry
 
 
 def normalize_for_comparison(s: str) -> str:
@@ -94,19 +104,6 @@ def truncate(text: str, length: int = 120) -> str:
     return flat
 
 
-def create_llm(config: AshConfig) -> tuple[LLMProvider, str]:
-    """Create an LLM provider from config. Returns (provider, model_name)."""
-    from ash.llm import create_llm_provider
-
-    model_config = config.default_model
-    api_key = config.resolve_api_key("default")
-    llm = create_llm_provider(
-        model_config.provider,
-        api_key=api_key.get_secret_value() if api_key else None,
-    )
-    return llm, model_config.model
-
-
 async def llm_complete(
     llm: LLMProvider, model: str, prompt: str, max_tokens: int = 1024
 ) -> dict[str, Any]:
@@ -120,16 +117,6 @@ async def llm_complete(
         temperature=0.1,
     )
     return parse_json_from_response(response.message.get_text())
-
-
-def confirm_or_cancel(prompt: str, force: bool) -> bool:
-    """Return True if the user confirms (or force is set). Print cancel on decline."""
-    if force:
-        return True
-    confirmed = typer.confirm(prompt)
-    if not confirmed:
-        dim("Cancelled")
-    return confirmed
 
 
 def parse_json_from_response(text: str) -> dict[str, Any]:
@@ -150,3 +137,96 @@ def parse_json_from_response(text: str) -> dict[str, Any]:
         if not isinstance(result, dict):
             raise
         return result
+
+
+class UnionFind:
+    """Simple union-find data structure for clustering."""
+
+    def __init__(self) -> None:
+        self._parent: dict[str, str] = {}
+
+    def find(self, x: str) -> str:
+        while self._parent.get(x, x) != x:
+            self._parent[x] = self._parent.get(self._parent[x], self._parent[x])
+            x = self._parent[x]
+        return x
+
+    def union(self, a: str, b: str) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self._parent[ra] = rb
+
+
+async def search_and_cluster(
+    store: Store,
+    memories: list[MemoryEntry],
+    similarity_threshold: float,
+    description: str = "Finding related memories...",
+) -> dict[str, list[str]]:
+    """Search for similar memories and cluster them using union-find.
+
+    Returns clusters of 2+ memory IDs, keyed by root ID.
+    """
+    mem_by_id: dict[str, MemoryEntry] = {m.id: m for m in memories}
+    uf = UnionFind()
+    seen_pairs: set[frozenset[str]] = set()
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task(description, total=len(memories))
+
+        for memory in memories:
+            try:
+                results = await store.search(memory.content, limit=10)
+                for result in results:
+                    if result.id == memory.id:
+                        continue
+                    if result.similarity < similarity_threshold:
+                        continue
+                    if result.id not in mem_by_id:
+                        continue
+                    pair = frozenset({memory.id, result.id})
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+                    uf.union(memory.id, result.id)
+            except Exception as e:
+                dim(f"Search failed for {memory.id[:8]}: {e}")
+
+            progress.advance(task, 1)
+
+    # Build clusters, keeping only groups of 2+
+    clusters: dict[str, list[str]] = {}
+    for mid in mem_by_id:
+        root = uf.find(mid)
+        clusters.setdefault(root, []).append(mid)
+
+    return {k: v for k, v in clusters.items() if len(v) > 1}
+
+
+def resolve_short_ids(
+    cluster_mems: list[MemoryEntry],
+    result_dict: dict[str, Any],
+    single_key: str,
+    list_key: str,
+) -> tuple[str | None, list[str]]:
+    """Map LLM short-ID responses back to full IDs.
+
+    Args:
+        cluster_mems: Memories in the cluster.
+        result_dict: LLM response dict.
+        single_key: Key for the single ID (e.g. "canonical_id", "current_id").
+        list_key: Key for the list of IDs (e.g. "duplicate_ids", "outdated_ids").
+
+    Returns:
+        Tuple of (single_full_id, list_of_full_ids).
+    """
+    short_to_full = {m.id[:8]: m.id for m in cluster_mems}
+    single_full = short_to_full.get(result_dict.get(single_key, ""))
+    list_fulls = [
+        short_to_full[s] for s in result_dict.get(list_key, []) if s in short_to_full
+    ]
+    return single_full, list_fulls

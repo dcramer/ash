@@ -482,8 +482,7 @@ def register(app: typer.Typer) -> None:
 
 async def _sessions_list(limit: int) -> None:
     """List conversation sessions."""
-    from rich.table import Table
-
+    from ash.cli.console import create_table
     from ash.sessions import SessionManager, SessionReader
 
     sessions = await SessionManager.list_sessions()
@@ -496,12 +495,16 @@ async def _sessions_list(limit: int) -> None:
     sessions.sort(key=lambda s: s["created_at"], reverse=True)
     sessions = sessions[:limit]
 
-    table = Table(title="Conversation Sessions")
-    table.add_column("Key", style="dim", max_width=20)
-    table.add_column("Provider", style="cyan")
-    table.add_column("Chat ID", style="dim", max_width=15)
-    table.add_column("Messages", style="green", justify="right")
-    table.add_column("Created", style="dim")
+    table = create_table(
+        "Conversation Sessions",
+        [
+            ("Key", {"style": "dim", "max_width": 20}),
+            ("Provider", "cyan"),
+            ("Chat ID", {"style": "dim", "max_width": 15}),
+            ("Messages", {"style": "green", "justify": "right"}),
+            ("Created", "dim"),
+        ],
+    )
 
     for sess in sessions:
         # Count messages in this session
@@ -796,7 +799,6 @@ async def _sessions_tools(
     verbose: bool = False,
 ) -> None:
     """Show tool analysis with filtering and aggregation."""
-    from rich.table import Table
 
     session_dir = _find_session_dir(query)
     if not session_dir:
@@ -851,12 +853,18 @@ async def _sessions_tools(
 
     if summary_only:
         # Summary table
-        table = Table(title="Tool Summary")
-        table.add_column("Tool", style="magenta")
-        table.add_column("Calls", justify="right")
-        table.add_column("Success", justify="right", style="green")
-        table.add_column("Failed", justify="right", style="red")
-        table.add_column("Avg Duration", justify="right", style="dim")
+        from ash.cli.console import create_table
+
+        table = create_table(
+            "Tool Summary",
+            [
+                ("Tool", "magenta"),
+                ("Calls", {"justify": "right"}),
+                ("Success", {"justify": "right", "style": "green"}),
+                ("Failed", {"justify": "right", "style": "red"}),
+                ("Avg Duration", {"justify": "right", "style": "dim"}),
+            ],
+        )
 
         for name, s in sorted(stats.items(), key=lambda x: x[1].calls, reverse=True):
             table.add_row(
@@ -1066,8 +1074,7 @@ def _format_tool_input(name: str, input_data: dict[str, Any], verbose: bool) -> 
 
 async def _sessions_search(query: str, limit: int) -> None:
     """Search messages across all sessions."""
-    from rich.table import Table
-
+    from ash.cli.console import create_table
     from ash.config.paths import get_sessions_path
     from ash.sessions import SessionReader
     from ash.sessions.types import MessageEntry
@@ -1102,11 +1109,15 @@ async def _sessions_search(query: str, limit: int) -> None:
     results.sort(key=lambda x: x[1].created_at, reverse=True)
     results = results[:limit]
 
-    table = Table(title=f"Message Search: '{query}'")
-    table.add_column("Session", style="dim", max_width=15)
-    table.add_column("Time", style="dim")
-    table.add_column("Role", style="cyan")
-    table.add_column("Content", style="white", max_width=60)
+    table = create_table(
+        f"Message Search: '{query}'",
+        [
+            ("Session", {"style": "dim", "max_width": 15}),
+            ("Time", "dim"),
+            ("Role", "cyan"),
+            ("Content", {"style": "white", "max_width": 60}),
+        ],
+    )
 
     for session_key, msg in results:
         content = _extract_message_text(msg.content)

@@ -119,7 +119,7 @@ async def memory_show(store: Store, memory_id: str) -> None:
 
 async def memory_history(store: Store, memory_id: str) -> None:
     """Show supersession chain for a memory."""
-    from rich.table import Table
+    from ash.cli.console import create_table
 
     # First, find the memory
     memory = await store.get_memory_by_prefix(memory_id)
@@ -135,12 +135,16 @@ async def memory_history(store: Store, memory_id: str) -> None:
         console.print(f"\nCurrent: {memory.content[:100]}")
         return
 
-    table = Table(title=f"Supersession Chain for {memory.id[:8]}")
-    table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Created", style="dim")
-    table.add_column("Archived", style="yellow")
-    table.add_column("Reason", style="cyan")
-    table.add_column("Content", style="white", max_width=50)
+    table = create_table(
+        f"Supersession Chain for {memory.id[:8]}",
+        [
+            ("ID", {"style": "dim", "max_width": 8}),
+            ("Created", "dim"),
+            ("Archived", "yellow"),
+            ("Reason", "cyan"),
+            ("Content", {"style": "white", "max_width": 50}),
+        ],
+    )
 
     for entry in chain:
         content = (

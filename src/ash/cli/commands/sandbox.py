@@ -174,9 +174,7 @@ def _sandbox_build(dockerfile_path: Path, config_path: Path | None = None) -> bo
 
 def _sandbox_status() -> None:
     """Show sandbox status."""
-    from rich.table import Table
-
-    from ash.cli.console import DockerStatus, check_docker
+    from ash.cli.console import DockerStatus, check_docker, create_table
 
     docker_running = check_docker() == DockerStatus.AVAILABLE
 
@@ -213,9 +211,13 @@ def _sandbox_status() -> None:
             len(result.stdout.strip().split("\n")) if result.stdout.strip() else 0
         )
 
-    table = Table(title="Sandbox Status")
-    table.add_column("Component", style="cyan")
-    table.add_column("Status", style="green")
+    table = create_table(
+        "Sandbox Status",
+        [
+            ("Component", "cyan"),
+            ("Status", "green"),
+        ],
+    )
 
     table.add_row(
         "Docker",

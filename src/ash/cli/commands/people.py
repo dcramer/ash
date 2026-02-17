@@ -10,7 +10,15 @@ from typing import TYPE_CHECKING, Annotated
 import click
 import typer
 
-from ash.cli.console import console, create_table, dim, error, success, warning
+from ash.cli.console import (
+    confirm_or_cancel,
+    console,
+    create_table,
+    dim,
+    error,
+    success,
+    warning,
+)
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
@@ -327,14 +335,12 @@ async def _people_merge(
         error("Cannot merge a person with themselves")
         raise typer.Exit(1)
 
-    if not force:
-        warning(
-            f"Merge: {primary.name} ({primary.id[:8]}) <- {secondary.name} ({secondary.id[:8]})"
-        )
-        dim("The second person will be merged into the first (primary).")
-        if not typer.confirm("Proceed?"):
-            dim("Cancelled")
-            return
+    warning(
+        f"Merge: {primary.name} ({primary.id[:8]}) <- {secondary.name} ({secondary.id[:8]})"
+    )
+    dim("The second person will be merged into the first (primary).")
+    if not confirm_or_cancel("Proceed?", force):
+        return
 
     result = await store.merge_people(primary.id, secondary.id)
     if result:
@@ -355,16 +361,14 @@ async def _people_delete(
     # Check for connected memories
     memory_ids = await store.memories_about_person(person.id)
 
-    if not force:
-        warning(f"Delete person: {person.name} ({person.id[:8]})")
-        if memory_ids:
-            warning(f"  {len(memory_ids)} memories reference this person")
-            dim(
-                "  Memories will be archived (use 'ash memory forget' for explicit control)"
-            )
-        if not typer.confirm("Proceed?"):
-            dim("Cancelled")
-            return
+    warning(f"Delete person: {person.name} ({person.id[:8]})")
+    if memory_ids:
+        warning(f"  {len(memory_ids)} memories reference this person")
+        dim(
+            "  Memories will be archived (use 'ash memory forget' for explicit control)"
+        )
+    if not confirm_or_cancel("Proceed?", force):
+        return
 
     # Archive connected memories first
     if memory_ids:
@@ -390,16 +394,11 @@ async def _people_doctor(config: AshConfig, force: bool) -> None:
     async def _run(store: Store) -> None:
         # Set up LLM for dedup verification
         try:
-            from ash.llm import create_llm_provider
+            from ash.cli.console import create_llm
 
             extraction_model_alias = config.memory.extraction_model or "default"
-            model_config = config.get_model(extraction_model_alias)
-            api_key = config.resolve_api_key(extraction_model_alias)
-            llm = create_llm_provider(
-                model_config.provider,
-                api_key=api_key.get_secret_value() if api_key else None,
-            )
-            store.set_llm(llm, model_config.model)
+            llm, model_name = create_llm(config, extraction_model_alias)
+            store.set_llm(llm, model_name)
         except Exception as e:
             error(f"Failed to initialize LLM for verification: {e}")
             dim("Doctor requires an LLM to verify merge candidates.")
@@ -453,8 +452,7 @@ async def _doctor_check_duplicates(store: Store, force: bool) -> None:
         )
     console.print(table)
 
-    if not force and not typer.confirm("Apply these merges?"):
-        dim("Cancelled")
+    if not confirm_or_cancel("Apply these merges?", force):
         return
 
     merged = 0
@@ -483,8 +481,6 @@ async def _doctor_check_broken_merges(store: Store, force: bool) -> None:
         success("No broken merge chains found")
         return
 
-    from ash.graph.edges import get_merged_into
-
     table = create_table(
         f"Broken Merge References ({len(broken)})",
         [
@@ -498,8 +494,7 @@ async def _doctor_check_broken_merges(store: Store, force: bool) -> None:
         table.add_row(person.id[:12], person.name, merged_into_id or "-")
     console.print(table)
 
-    if not force and not typer.confirm("Clear broken merged_into references?"):
-        dim("Cancelled")
+    if not confirm_or_cancel("Clear broken merged_into references?", force):
         return
 
     for person in broken:
@@ -546,8 +541,7 @@ async def _doctor_check_orphans(store: Store, force: bool) -> None:
         table.add_row(person.id[:12], person.name, created)
     console.print(table)
 
-    if not force and not typer.confirm("Delete orphaned people?"):
-        dim("Cancelled")
+    if not confirm_or_cancel("Delete orphaned people?", force):
         return
 
     for person in orphans:

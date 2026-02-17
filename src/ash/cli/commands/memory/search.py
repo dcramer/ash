@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ash.cli.console import console, dim, warning
+from ash.cli.console import console, create_table, dim, warning
 
 if TYPE_CHECKING:
     from ash.store.store import Store
@@ -18,8 +18,6 @@ async def memory_search(
     chat_id: str | None,
 ) -> None:
     """Search memories using semantic similarity."""
-    from rich.table import Table
-
     results = await store.search(
         query=query,
         limit=limit,
@@ -35,12 +33,16 @@ async def memory_search(
     people = await store.list_people()
     people_by_id = {p.id: p for p in people}
 
-    table = Table(title=f"Memory Search: '{query}'")
-    table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Type", style="blue", max_width=10)
-    table.add_column("Score", style="yellow", max_width=6)
-    table.add_column("About", style="green", max_width=12)
-    table.add_column("Content", style="white", max_width=50)
+    table = create_table(
+        f"Memory Search: '{query}'",
+        [
+            ("ID", {"style": "dim", "max_width": 8}),
+            ("Type", {"style": "blue", "max_width": 10}),
+            ("Score", {"style": "yellow", "max_width": 6}),
+            ("About", {"style": "green", "max_width": 12}),
+            ("Content", {"style": "white", "max_width": 50}),
+        ],
+    )
 
     for result in results:
         content = (

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
 
 from ash.cli.commands.memory.doctor._helpers import (
     confirm_or_cancel,
@@ -16,7 +15,7 @@ from ash.cli.commands.memory.doctor._helpers import (
     should_block_archive,
     truncate,
 )
-from ash.cli.console import console, dim, success, warning
+from ash.cli.console import console, create_table, dim, success, warning
 
 if TYPE_CHECKING:
     from ash.config.models import AshConfig
@@ -94,8 +93,6 @@ async def _resolve_subject_names(
         person = await store.get_person(pid)
         if person and person.name:
             person_names[pid] = person.name
-
-    from ash.graph.edges import get_subject_person_ids
 
     result: dict[str, list[str]] = {}
     for m in memories:
@@ -193,21 +190,33 @@ async def memory_doctor_quality(store: Store, config: AshConfig, force: bool) ->
         return
 
     if rewrites:
-        table = Table(title="Proposed Rewrites")
-        table.add_column("ID", style="dim", max_width=8)
-        table.add_column("Before", style="yellow", max_width=40)
-        table.add_column("After", style="green", max_width=40)
-        for full_id, old, new in rewrites:
+        table = create_table(
+            "Proposed Rewrites",
+            [
+                ("ID", {"style": "dim", "max_width": 8}),
+                ("Before", {"style": "yellow", "max_width": 40}),
+                ("After", {"style": "green", "max_width": 40}),
+            ],
+        )
+        for full_id, old, new in rewrites[:10]:
             table.add_row(full_id[:8], truncate(old), truncate(new))
+        if len(rewrites) > 10:
+            table.add_row("...", "...", f"... and {len(rewrites) - 10} more")
         console.print(table)
 
     if archives:
-        table = Table(title="Proposed Archives")
-        table.add_column("ID", style="dim", max_width=8)
-        table.add_column("Content", style="red", max_width=50)
-        table.add_column("Reason", style="yellow")
-        for full_id, content, reason in archives:
+        table = create_table(
+            "Proposed Archives",
+            [
+                ("ID", {"style": "dim", "max_width": 8}),
+                ("Content", {"style": "red", "max_width": 50}),
+                ("Reason", "yellow"),
+            ],
+        )
+        for full_id, content, reason in archives[:10]:
             table.add_row(full_id[:8], truncate(content), reason)
+        if len(archives) > 10:
+            table.add_row("...", "...", f"... and {len(archives) - 10} more")
         console.print(table)
 
     console.print(

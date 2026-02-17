@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rich.table import Table
-
 from ash.cli.commands.memory.doctor._helpers import confirm_or_cancel, truncate
-from ash.cli.console import console, success
+from ash.cli.console import console, create_table, success
 
 if TYPE_CHECKING:
     from ash.store.store import Store
@@ -62,13 +60,17 @@ async def memory_doctor_fix_names(store: Store, force: bool) -> None:
         )
         return
 
-    table = Table(title="Numeric Usernames to Resolve")
-    table.add_column("ID", style="dim", max_width=8)
-    table.add_column("Numeric ID", style="yellow")
-    table.add_column("Display Name", style="green")
-    table.add_column("Content", style="white", max_width=40)
+    table = create_table(
+        "Numeric Usernames to Resolve",
+        [
+            ("ID", {"style": "dim", "max_width": 8}),
+            ("Numeric ID", "yellow"),
+            ("Display Name", "green"),
+            ("Content", {"style": "white", "max_width": 40}),
+        ],
+    )
 
-    for memory, person in fixes[:15]:
+    for memory, person in fixes[:10]:
         table.add_row(
             memory.id[:8],
             memory.source_username,
@@ -76,8 +78,8 @@ async def memory_doctor_fix_names(store: Store, force: bool) -> None:
             truncate(memory.content, 50),
         )
 
-    if len(fixes) > 15:
-        table.add_row("...", "...", "...", f"... and {len(fixes) - 15} more")
+    if len(fixes) > 10:
+        table.add_row("...", "...", "...", f"... and {len(fixes) - 10} more")
 
     console.print(table)
     console.print(f"\n[bold]{len(fixes)} memories to update[/bold]")
