@@ -185,7 +185,10 @@ async def sync_participates_in_edges(
                 participant.username
             )
         except Exception:
-            logger.debug("Failed to resolve person for %s", participant.username)
+            logger.debug(
+                "person_resolve_failed",
+                extra={"username": participant.username},
+            )
             continue
 
         if not person_ids:

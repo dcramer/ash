@@ -463,13 +463,15 @@ class Agent:
                 },
             )
             for fact in facts:
-                logger.debug(
-                    "  fact: %s (type=%s, confidence=%.2f, subjects=%s, speaker=%s)",
-                    fact.content[:80],
-                    fact.memory_type.value,
-                    fact.confidence,
-                    fact.subjects,
-                    fact.speaker,
+                logger.info(
+                    "fact_extracted",
+                    extra={
+                        "fact.content": fact.content[:80],
+                        "fact.type": fact.memory_type.value,
+                        "fact.confidence": fact.confidence,
+                        "fact.subjects": fact.subjects,
+                        "fact.speaker": fact.speaker,
+                    },
                 )
 
             # Resolve graph_chat_id for LEARNED_IN edges

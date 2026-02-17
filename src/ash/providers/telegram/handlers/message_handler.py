@@ -212,7 +212,10 @@ class TelegramMessageHandler:
                     return
 
             if await self._session_handler.is_duplicate_message(message):
-                logger.debug("Skipping duplicate message %s", message.id)
+                logger.debug(
+                    "duplicate_message_skipped",
+                    extra={"message.id": str(message.id)},
+                )
                 return
 
             if await self._session_handler.should_skip_reply(message):

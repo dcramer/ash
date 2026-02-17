@@ -36,7 +36,7 @@ def validate_speaker(speaker: str | None) -> str | None:
     if not speaker:
         return None
     if speaker.lower() in _INVALID_SPEAKERS:
-        logger.debug("Filtering invalid speaker: %s", speaker)
+        logger.debug("invalid_speaker_filtered", extra={"speaker": speaker})
         return None
     return speaker
 
@@ -114,8 +114,9 @@ async def ensure_self_person(
                 relationship_stated_by=username or None,
             )
             logger.debug(
-                "Created self-person for user",
+                "self_person_created",
                 extra={
+                    "person.id": new_person.id,
                     "user_id": user_id,
                     "person_name": display_name,
                     "username": username,
@@ -222,7 +223,9 @@ async def process_extracted_facts(
                     if is_owner_name(subject, owner_matchers) and is_pure_self_fact:
                         # Pure self-fact: owner is only subject, skip
                         # (self-fact injection handles it below)
-                        logger.debug("Skipping owner as sole subject: %s", subject)
+                        logger.debug(
+                            "owner_sole_subject_skipped", extra={"subject": subject}
+                        )
                         continue
                     # Joint fact or non-owner subject: resolve normally
                     try:
@@ -238,7 +241,9 @@ async def process_extracted_facts(
                             newly_created_person_ids.append(result.person_id)
                     except Exception:
                         logger.warning(
-                            "subject_resolution_failed", extra={"subject": subject}
+                            "subject_resolution_failed",
+                            extra={"subject": subject},
+                            exc_info=True,
                         )
 
             # For RELATIONSHIP facts, attach the term to the person record
@@ -255,9 +260,11 @@ async def process_extracted_facts(
                             )
                         except Exception:
                             logger.debug(
-                                "Failed to add relationship %s to %s",
-                                rel_term,
-                                pid,
+                                "relationship_add_failed",
+                                extra={
+                                    "person.id": pid,
+                                    "relationship": rel_term,
+                                },
                             )
 
             # Register explicit aliases from extraction
@@ -275,9 +282,11 @@ async def process_extracted_facts(
                             )
                         except Exception:
                             logger.debug(
-                                "Failed to add alias %s to person %s",
-                                alias_val,
-                                pid,
+                                "alias_add_failed",
+                                extra={
+                                    "person.id": pid,
+                                    "alias": alias_val,
+                                },
                             )
 
             # Capture whether this is a self-fact before injecting speaker_person_id
@@ -312,7 +321,8 @@ async def process_extracted_facts(
                         stated_by_pid = next(iter(pids))
                 except Exception:
                     logger.debug(
-                        "Failed to resolve stated_by person for %s", source_username
+                        "stated_by_resolve_failed",
+                        extra={"source_username": source_username},
                     )
 
             new_memory = await store.add_memory(
@@ -332,11 +342,16 @@ async def process_extracted_facts(
                 graph_chat_id=graph_chat_id,
             )
 
-            logger.debug(
-                "Extracted memory: %s (confidence=%.2f, speaker=%s)",
-                fact.content[:50],
-                fact.confidence,
-                source_username,
+            logger.info(
+                "memory_stored",
+                extra={
+                    "memory.id": new_memory.id,
+                    "memory.type": fact.memory_type.value,
+                    "memory.content": fact.content[:80],
+                    "fact.confidence": fact.confidence,
+                    "source_username": source_username,
+                    "subject_person_ids": subject_person_ids,
+                },
             )
             stored_ids.append(new_memory.id)
 
@@ -350,9 +365,9 @@ async def process_extracted_facts(
                     source_username=source_username,
                 )
         except Exception:
-            logger.debug(
-                "Failed to store extracted fact: %s",
-                fact.content[:50],
+            logger.warning(
+                "fact_store_failed",
+                extra={"fact.content": fact.content[:80]},
                 exc_info=True,
             )
 

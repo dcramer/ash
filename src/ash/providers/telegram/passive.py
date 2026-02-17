@@ -234,7 +234,10 @@ class PassiveEngagementThrottler:
         state.last_engagement_time = now
         state.recent_active_count = 0
         self._global_state.record_engagement()
-        logger.debug("Recorded passive engagement for chat %s", chat_id[:8])
+        logger.debug(
+            "passive_engagement_recorded",
+            extra={"messaging.chat_id": chat_id},
+        )
 
     def record_active_message(self, chat_id: str) -> None:
         """Record that an active (mentioned) message was processed.

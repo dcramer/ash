@@ -681,7 +681,13 @@ class TelegramProvider(Provider):
                 return
 
             chat_state.record_member_left(str(user.id))
-            logger.debug("Recorded member %s left chat %s", user.id, message.chat.id)
+            logger.debug(
+                "member_left_chat",
+                extra={
+                    "user.id": str(user.id),
+                    "messaging.chat_id": str(message.chat.id),
+                },
+            )
 
     async def send(self, message: OutgoingMessage) -> str:
         """Send a message via Telegram, splitting long messages into chunks."""
@@ -754,7 +760,13 @@ class TelegramProvider(Provider):
             text=text,
             reply_to=int(reply_to) if reply_to else None,
         )
-        logger.debug("Sent message to chat %s: %s", chat_id, _truncate(text))
+        logger.debug(
+            "message_sent",
+            extra={
+                "messaging.chat_id": chat_id,
+                "message.preview": _truncate(text),
+            },
+        )
         return str(sent.message_id)
 
     async def send_streaming(

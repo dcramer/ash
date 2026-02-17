@@ -57,7 +57,10 @@ class MemoryCrudMixin:
                             self._person_name_cache[pid] = person.name
                             names.append(person.name)
                     except Exception:
-                        logger.debug("Failed to resolve person name for %s", pid)
+                        logger.debug(
+                            "person_name_resolve_failed",
+                            extra={"person.id": pid},
+                        )
 
         return ", ".join(names) if names else None
 
@@ -160,7 +163,11 @@ class MemoryCrudMixin:
             try:
                 self._index.add(memory.id, embedding_floats)
             except Exception:
-                logger.warning("memory_index_failed", exc_info=True)
+                logger.warning(
+                    "memory_index_failed",
+                    extra={"memory.id": memory.id},
+                    exc_info=True,
+                )
             memory.embedding = embedding_base64
 
         superseded_count = 0
@@ -171,13 +178,19 @@ class MemoryCrudMixin:
                 chat_id=chat_id,
             )
             if superseded_count > 0:
-                logger.debug(
-                    "Memory superseded %d older entries",
-                    superseded_count,
-                    extra={"new_memory_id": memory.id},
+                logger.info(
+                    "memory_superseded",
+                    extra={
+                        "memory.id": memory.id,
+                        "superseded_count": superseded_count,
+                    },
                 )
         except Exception:
-            logger.warning("conflicting_memories_check_failed", exc_info=True)
+            logger.warning(
+                "conflicting_memories_check_failed",
+                extra={"memory.id": memory.id},
+                exc_info=True,
+            )
 
         if self._max_entries is not None:
             try:
