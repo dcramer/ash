@@ -749,11 +749,10 @@ class SystemPromptBuilder:
             [
                 "## Passive Engagement",
                 "",
-                "You were NOT directly mentioned. The system determined your input could add value.",
+                "You were NOT directly mentioned, but the message seems relevant to you.",
                 "",
-                "- Only contribute if you have genuine expertise or a direct answer to offer",
-                "- Don't insert yourself into personal conversations",
-                "- If you have nothing useful to add, respond with [NO_REPLY] (see Silent Replies)",
+                "- Respond naturally and concisely",
+                "- Don't insert yourself into personal conversations between others",
             ]
         )
 
