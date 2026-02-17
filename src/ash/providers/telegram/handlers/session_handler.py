@@ -164,7 +164,7 @@ class SessionHandler:
                 logger.warning("Failed to upsert user", exc_info=True)
 
         # Update chat state with participant info
-        self._update_chat_state(message, thread_id)
+        await self._update_chat_state(message, thread_id)
 
         return session
 
@@ -238,13 +238,14 @@ class SessionHandler:
                 f"Restored {len(messages)} messages for session {session.session_id}{gap_str}"
             )
 
-    def _update_chat_state(
+    async def _update_chat_state(
         self, message: IncomingMessage, thread_id: str | None
     ) -> None:
         """Update chat state with participant and chat info.
 
         Always updates chat-level state so all participants are tracked at the
         chat level. Additionally updates thread-specific state when in a thread.
+        Syncs PARTICIPATES_IN graph edges when a store is available.
         """
         # Always update chat-level state (no thread_id)
         chat_state = ChatStateManager(
@@ -268,6 +269,22 @@ class SessionHandler:
             display_name=message.display_name,
             session_id=chat_session_id,
         )
+
+        # Sync PARTICIPATES_IN edges when store is available
+        if self._store:
+            try:
+                from ash.chats.manager import sync_participates_in_edges
+
+                state = chat_state.load()
+                await sync_participates_in_edges(
+                    state=state,
+                    store=self._store,
+                    provider=self._provider_name,
+                    chat_id=message.chat_id,
+                )
+                chat_state.save()
+            except Exception:
+                logger.debug("Failed to sync PARTICIPATES_IN edges", exc_info=True)
 
         # Additionally update thread-specific state when in a thread
         if thread_id:

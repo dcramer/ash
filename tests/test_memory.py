@@ -655,10 +655,10 @@ class TestOwnMemoryPrivacy:
         assert len(ctx.memories) == 1
         assert ctx.memories[0].content == "I have been dealing with anxiety"
 
-    async def test_personal_memory_about_other_returned_in_group(
+    async def test_personal_memory_about_non_participant_excluded_in_group(
         self, graph_store: Store, mock_index
     ):
-        """PERSONAL memory about someone else visible to owner in group chat."""
+        """PERSONAL memory about a non-participant excluded in group chat."""
         memory = await graph_store.add_memory(
             content="Sarah is going through a hard time",
             owner_user_id="user-1",
@@ -673,6 +673,28 @@ class TestOwnMemoryPrivacy:
             user_message="how is Sarah",
             chat_type="group",
             participant_person_ids={"dcramer": {"self-person-id"}},
+        )
+
+        assert len(ctx.memories) == 0
+
+    async def test_personal_memory_about_participant_shown_in_group(
+        self, graph_store: Store, mock_index
+    ):
+        """PERSONAL memory about a participant shown in group chat."""
+        memory = await graph_store.add_memory(
+            content="Sarah is going through a hard time",
+            owner_user_id="user-1",
+            sensitivity=Sensitivity.PERSONAL,
+            subject_person_ids=["sarah-person-id"],
+        )
+
+        mock_index.search.return_value = [(memory.id, 0.9)]
+
+        ctx = await graph_store.get_context_for_message(
+            user_id="user-1",
+            user_message="how is Sarah",
+            chat_type="group",
+            participant_person_ids={"sarah": {"sarah-person-id"}},
         )
 
         assert len(ctx.memories) == 1

@@ -46,6 +46,7 @@ class RetrievalContext:
     max_memories: int = 10
     chat_type: str | None = None
     participant_person_ids: dict[str, set[str]] = field(default_factory=dict)
+    graph_chat_id: str | None = None  # Graph chat node ID for contextual disclosure
 
 
 class RetrievalPipeline:
@@ -338,16 +339,106 @@ class RetrievalPipeline:
         results: list[SearchResult],
         context: RetrievalContext,
     ) -> list[SearchResult]:
-        """Filter Stage 1 results for sensitive information in group chats.
+        """Filter Stage 1 results based on chat context.
 
-        Stage 1 returns the owner's own memories. Self-memories (no subjects)
-        always pass. For memories about others, only SENSITIVE items are
-        filtered — these are health/medical/financial facts that shouldn't
-        be disclosed in group contexts.
+        In group chats: filters SENSITIVE and PERSONAL memories about
+        non-participants to prevent information leakage.
+
+        In private chats (DMs): applies contextual disclosure — only
+        surfaces memories about third parties if the DM partner was
+        present when the memory was learned.
         """
-        if context.chat_type != "group":
-            return results
+        if context.chat_type == "private":
+            return self._filter_dm_contextual(results, context)
 
+        if context.chat_type in ("group", "supergroup"):
+            return self._filter_group_privacy(results, context)
+
+        return results
+
+    def _filter_dm_contextual(
+        self,
+        results: list[SearchResult],
+        context: RetrievalContext,
+    ) -> list[SearchResult]:
+        """DM contextual disclosure filter.
+
+        A memory is disclosable if:
+        - It's about the DM partner (ABOUT edge)
+        - It was stated by the DM partner (STATED_BY edge)
+        - The DM partner was in the chat where it was learned (LEARNED_IN → PARTICIPATES_IN)
+        - It's a self-memory (no subjects)
+        - It has no LEARNED_IN edge (legacy data, fail-open)
+        """
+        from ash.graph.edges import (
+            get_learned_in_chat,
+            get_stated_by_person,
+            person_participates_in_chat,
+        )
+
+        # Collect DM partner person IDs
+        partner_person_ids: set[str] = set()
+        for pids in context.participant_person_ids.values():
+            partner_person_ids |= pids
+
+        if not partner_person_ids:
+            return results  # No partner info — fail-open
+
+        graph = self._store.graph
+        filtered = []
+        for result in results:
+            meta = result.metadata or {}
+            subject_person_ids = meta.get("subject_person_ids", [])
+
+            # Self-memories (no subjects) always pass
+            if not subject_person_ids:
+                filtered.append(result)
+                continue
+
+            # Memory is ABOUT the DM partner
+            if set(subject_person_ids) & partner_person_ids:
+                filtered.append(result)
+                continue
+
+            # Memory was STATED_BY the DM partner
+            stated_by = get_stated_by_person(graph, result.id)
+            if stated_by and stated_by in partner_person_ids:
+                filtered.append(result)
+                continue
+
+            # Check LEARNED_IN → partner was present in that chat
+            learned_in_chat = get_learned_in_chat(graph, result.id)
+            if learned_in_chat is None:
+                # Legacy memory without LEARNED_IN — fail-open
+                filtered.append(result)
+                continue
+
+            # Partner participated in the source chat
+            if any(
+                person_participates_in_chat(graph, pid, learned_in_chat)
+                for pid in partner_person_ids
+            ):
+                filtered.append(result)
+                continue
+
+            # Memory about a third party, partner not present — exclude
+
+        return filtered
+
+    def _filter_group_privacy(
+        self,
+        results: list[SearchResult],
+        context: RetrievalContext,
+    ) -> list[SearchResult]:
+        """Group chat privacy filter.
+
+        - PUBLIC: always included
+        - PERSONAL about non-participants: excluded
+        - PERSONAL about participants: included
+        - SENSITIVE about non-participants: excluded
+        - SENSITIVE about participants: included
+        - Self-memories (no subjects): always included
+        """
         all_participant_ids: set[str] = set()
         for pids in context.participant_person_ids.values():
             all_participant_ids |= pids
@@ -363,16 +454,18 @@ class RetrievalPipeline:
                 continue
 
             sensitivity_str = meta.get("sensitivity")
-            if sensitivity_str != Sensitivity.SENSITIVE.value:
+            if sensitivity_str not in (
+                Sensitivity.SENSITIVE.value,
+                Sensitivity.PERSONAL.value,
+            ):
                 filtered.append(result)
                 continue
 
-            # SENSITIVE memory about others: only pass if a subject is
-            # among the chat participants (they can see their own info)
+            # SENSITIVE/PERSONAL memory about others: only pass if a subject
+            # is among the chat participants
             if set(subject_person_ids) & all_participant_ids:
                 filtered.append(result)
-            # else: filtered out — don't disclose sensitive info about
-            # non-participants in group chat
+            # else: filtered out
         return filtered
 
     def _passes_privacy_filter(

@@ -322,8 +322,39 @@ class TestStage1PrivacyFilter:
         assert len(result.memories) == 1
 
     @pytest.mark.asyncio
-    async def test_stage1_personal_passes_in_group(self, mock_store):
-        """PERSONAL memory passes in group — owner's own notes are accessible."""
+    async def test_stage1_personal_passes_for_participant_in_group(self, mock_store):
+        """PERSONAL memory passes in group when subject is a participant."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-personal",
+                    content="Looking for a new job",
+                    similarity=0.85,
+                    metadata={
+                        "sensitivity": "personal",
+                        "subject_person_ids": ["person-alice"],
+                    },
+                    source_type="memory",
+                )
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="what do you know about Alice",
+            chat_type="group",
+            participant_person_ids={"alice": {"person-alice"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 1
+
+    @pytest.mark.asyncio
+    async def test_stage1_personal_excluded_for_non_participant_in_group(
+        self, mock_store
+    ):
+        """PERSONAL memory excluded in group when subject is not a participant."""
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -348,7 +379,7 @@ class TestStage1PrivacyFilter:
         )
 
         result = await pipeline.retrieve(context)
-        assert len(result.memories) == 1
+        assert len(result.memories) == 0
 
     @pytest.mark.asyncio
     async def test_stage1_public_passes_in_group(self, mock_store):
@@ -789,3 +820,260 @@ class TestHybridSearch:
 
         assert len(results) == 1
         assert results[0].id == mem.id
+
+
+class TestDMContextualFilter:
+    """Tests for DM contextual disclosure filtering.
+
+    In private chats, memories about third parties should only surface
+    if the DM partner was present when the memory was learned.
+    """
+
+    @pytest.fixture
+    def pipeline(self, mock_store):
+        """Create a pipeline with a real graph for edge queries."""
+        from ash.graph.graph import KnowledgeGraph
+        from ash.store.types import ChatEntry
+
+        graph = KnowledgeGraph()
+        # Register chat and people nodes
+        graph.add_chat(
+            ChatEntry(id="chat-source", provider="telegram", provider_id="100")
+        )
+        mock_store.graph = graph
+        mock_store._graph = graph
+        return RetrievalPipeline(mock_store)
+
+    def _make_result(
+        self,
+        id: str,
+        subject_person_ids: list[str] | None = None,
+        sensitivity: str | None = None,
+    ) -> SearchResult:
+        return SearchResult(
+            id=id,
+            content=f"Content of {id}",
+            similarity=0.9,
+            metadata={
+                "subject_person_ids": subject_person_ids or [],
+                "sensitivity": sensitivity,
+            },
+            source_type="memory",
+        )
+
+    def test_dm_self_memory_always_passes(self, pipeline):
+        """Self-memories (no subjects) always pass in DMs."""
+        results = [self._make_result("mem-self", subject_person_ids=[])]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="private",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_results_by_privacy(results, context)
+        assert len(filtered) == 1
+
+    def test_dm_memory_about_partner_passes(self, pipeline):
+        """Memory ABOUT the DM partner passes."""
+        from ash.graph.edges import create_about_edge
+
+        graph = pipeline._store.graph
+        graph.add_edge(create_about_edge("mem-about-bob", "person-bob"))
+
+        results = [
+            self._make_result("mem-about-bob", subject_person_ids=["person-bob"])
+        ]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="private",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_results_by_privacy(results, context)
+        assert len(filtered) == 1
+
+    def test_dm_memory_stated_by_partner_passes(self, pipeline):
+        """Memory STATED_BY the DM partner passes."""
+        from ash.graph.edges import create_stated_by_edge
+
+        graph = pipeline._store.graph
+        graph.add_edge(create_stated_by_edge("mem-stated", "person-bob"))
+
+        results = [self._make_result("mem-stated", subject_person_ids=["person-carol"])]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="private",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_results_by_privacy(results, context)
+        assert len(filtered) == 1
+
+    def test_dm_partner_in_learned_in_chat_passes(self, pipeline):
+        """Memory passes if partner participated in the chat where it was learned."""
+        from ash.graph.edges import (
+            create_learned_in_edge,
+            create_participates_in_edge,
+        )
+
+        graph = pipeline._store.graph
+
+        from ash.store.types import PersonEntry
+
+        graph.add_person(PersonEntry(id="person-bob", name="Bob"))
+
+        # Memory was learned in chat-source
+        graph.add_edge(create_learned_in_edge("mem-third", "chat-source"))
+        # Bob participated in chat-source
+        graph.add_edge(create_participates_in_edge("person-bob", "chat-source"))
+
+        results = [self._make_result("mem-third", subject_person_ids=["person-carol"])]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="private",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_results_by_privacy(results, context)
+        assert len(filtered) == 1
+
+    def test_dm_third_party_partner_not_present_excluded(self, pipeline):
+        """Memory about third party excluded when partner wasn't present."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = pipeline._store.graph
+        # Memory was learned in chat-source, but Bob has no PARTICIPATES_IN edge
+        graph.add_edge(create_learned_in_edge("mem-secret", "chat-source"))
+
+        results = [self._make_result("mem-secret", subject_person_ids=["person-carol"])]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="private",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_results_by_privacy(results, context)
+        assert len(filtered) == 0
+
+    def test_dm_legacy_memory_no_learned_in_passes(self, pipeline):
+        """Legacy memories without LEARNED_IN edges pass (backward compat)."""
+        results = [self._make_result("mem-legacy", subject_person_ids=["person-carol"])]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="private",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_results_by_privacy(results, context)
+        assert len(filtered) == 1
+
+    def test_dm_no_partner_info_passes_all(self, pipeline):
+        """When no partner person IDs available, all memories pass (fail-open)."""
+        results = [self._make_result("mem-any", subject_person_ids=["person-carol"])]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="private",
+            participant_person_ids={},
+        )
+        filtered = pipeline._filter_results_by_privacy(results, context)
+        assert len(filtered) == 1
+
+
+class TestGroupPersonalFilter:
+    """Tests for PERSONAL memory filtering in group chats.
+
+    PERSONAL memories about non-participants should be excluded
+    in group chats, just like SENSITIVE memories.
+    """
+
+    @pytest.fixture
+    def pipeline(self, mock_store):
+        return RetrievalPipeline(mock_store)
+
+    @pytest.mark.asyncio
+    async def test_group_personal_about_participant_passes(self, mock_store):
+        """PERSONAL memory about a participant passes in group."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-personal",
+                    content="Alice is looking for a new job",
+                    similarity=0.9,
+                    metadata={
+                        "sensitivity": "personal",
+                        "subject_person_ids": ["person-alice"],
+                    },
+                    source_type="memory",
+                )
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="what about Alice",
+            chat_type="group",
+            participant_person_ids={"alice": {"person-alice"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 1
+
+    @pytest.mark.asyncio
+    async def test_group_personal_about_non_participant_excluded(self, mock_store):
+        """PERSONAL memory about a non-participant excluded in group."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-personal",
+                    content="Carol is looking for a new job",
+                    similarity=0.9,
+                    metadata={
+                        "sensitivity": "personal",
+                        "subject_person_ids": ["person-carol"],
+                    },
+                    source_type="memory",
+                )
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="what about Carol",
+            chat_type="group",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 0
+
+    @pytest.mark.asyncio
+    async def test_group_public_always_passes(self, mock_store):
+        """PUBLIC memories always pass in group regardless of subjects."""
+        mock_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id="mem-public",
+                    content="Carol likes pizza",
+                    similarity=0.9,
+                    metadata={
+                        "sensitivity": "public",
+                        "subject_person_ids": ["person-carol"],
+                    },
+                    source_type="memory",
+                )
+            ]
+        )
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="what about Carol",
+            chat_type="group",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+
+        result = await pipeline.retrieve(context)
+        assert len(result.memories) == 1

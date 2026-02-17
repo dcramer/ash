@@ -38,6 +38,8 @@ The memory subsystem is best understood as a graph. Memory entries are nodes; at
 | **OWNED_BY** | Memory → user_id | `owner_user_id` field | — |
 | **IN_CHAT** | Memory → chat_id | `chat_id` field | — |
 | **SUPERSEDES** | Memory → Memory | `superseded_by_id` field | superseded_at |
+| **LEARNED_IN** | Memory → Chat | Graph edge | Where a memory was first learned |
+| **PARTICIPATES_IN** | Person → Chat | Graph edge | Chat membership (best-effort) |
 
 ### Key Traversals
 
@@ -47,6 +49,7 @@ The memory subsystem is best understood as a graph. Memory entries are nodes; at
 | "search Alice" | "Alice" →resolve→ Person →ABOUT← memories + Person →HAS_RELATIONSHIP→ related →ABOUT← memories → **results** |
 | hearsay check | memory →STATED_BY→ user; memory →ABOUT→ persons; overlap? → fact, else hearsay |
 | cross-context | person ←ABOUT← memories →filter(portable=true, privacy)→ **results** |
+| contextual disclosure | memory →LEARNED_IN→ chat ←PARTICIPATES_IN← partner? → include/exclude |
 
 See [specs/people.md](people.md) for Person-owned edges (SELF, KNOWS, ALIAS, MERGED_INTO).
 
@@ -240,7 +243,29 @@ Memories can be classified by sensitivity level to control sharing:
 
 ### Privacy Filtering
 
-When retrieving memories:
+Privacy rules depend on the chat context:
+
+**Group chats:**
+
+| Sensitivity | Subject is participant | Subject is NOT participant |
+|-------------|----------------------|--------------------------|
+| PUBLIC | Shown | Shown |
+| PERSONAL | Shown | Excluded |
+| SENSITIVE | Shown | Excluded |
+
+**Private chats (DMs) — contextual disclosure:**
+
+A memory is disclosable if any of:
+- Memory is ABOUT the DM partner
+- Memory was STATED_BY the DM partner
+- DM partner has a PARTICIPATES_IN edge to the memory's LEARNED_IN chat (they were present when it was said)
+- Memory is a self-memory (no subjects)
+- Memory has no LEARNED_IN edge (legacy data — fail-open)
+
+Otherwise, memories about third parties are excluded.
+
+**Cross-context retrieval:**
+
 1. **PUBLIC**: Always shown
 2. **PERSONAL**: Only shown to the subject person or memory owner
 3. **SENSITIVE**: Only shown in private chat with the subject
@@ -277,8 +302,8 @@ Facts learned about a person in one context (e.g., group chat) can be recalled i
 
 When someone asks about a person in a group chat:
 - **PUBLIC** facts: shown
-- **PERSONAL** facts: shown only if the subject is asking
-- **SENSITIVE** facts: NOT shown (group context)
+- **PERSONAL** facts: shown only if the subject is a chat participant
+- **SENSITIVE** facts: shown only if the subject is a chat participant
 
 ### Self-Query Example
 

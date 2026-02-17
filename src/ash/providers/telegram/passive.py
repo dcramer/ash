@@ -482,6 +482,16 @@ class PassiveMemoryExtractor:
             if not facts:
                 return 0
 
+            # Resolve graph_chat_id for LEARNED_IN edges
+            graph_chat_id: str | None = None
+            provider = message.metadata.get("provider", "telegram")
+            if message.chat_id:
+                chat_entry = self._memory_manager.graph.find_chat_by_provider(
+                    provider, message.chat_id
+                )
+                if chat_entry:
+                    graph_chat_id = chat_entry.id
+
             stored_ids = await process_extracted_facts(
                 facts=facts,
                 store=self._memory_manager,
@@ -492,6 +502,7 @@ class PassiveMemoryExtractor:
                 speaker_person_id=speaker_person_id,
                 owner_names=owner_names,
                 source="passive",
+                graph_chat_id=graph_chat_id,
             )
 
             stored = len(stored_ids)

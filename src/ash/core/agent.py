@@ -462,6 +462,15 @@ class Agent:
                     fact.speaker,
                 )
 
+            # Resolve graph_chat_id for LEARNED_IN edges
+            graph_chat_id: str | None = None
+            if session.provider and session.chat_id and self._memory:
+                chat_entry = self._memory.graph.find_chat_by_provider(
+                    session.provider, session.chat_id
+                )
+                if chat_entry:
+                    graph_chat_id = chat_entry.id
+
             await process_extracted_facts(
                 facts=facts,
                 store=self._memory,
@@ -473,6 +482,7 @@ class Agent:
                 owner_names=owner_names,
                 source="background_extraction",
                 confidence_threshold=self._config.extraction_confidence_threshold,
+                graph_chat_id=graph_chat_id,
             )
 
         except Exception:

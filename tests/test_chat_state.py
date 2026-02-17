@@ -348,7 +348,7 @@ class TestChatStateManager:
 
 
 class TestTelegramChatStateIntegration:
-    def test_private_message_updates_state(
+    async def test_private_message_updates_state(
         self,
         monkeypatch,
         mock_get_chat_dir,
@@ -361,8 +361,9 @@ class TestTelegramChatStateIntegration:
 
         handler = MagicMock(spec=SessionHandler)
         handler._provider_name = "telegram"
+        handler._store = None
 
-        SessionHandler._update_chat_state(
+        await SessionHandler._update_chat_state(
             handler, telegram_private_message, thread_id=None
         )
 
@@ -383,7 +384,7 @@ class TestTelegramChatStateIntegration:
         assert data["participants"][0]["username"] == "alice"
         assert data["participants"][0]["display_name"] == "Alice Smith"
 
-    def test_group_message_updates_state(
+    async def test_group_message_updates_state(
         self,
         monkeypatch,
         mock_get_chat_dir,
@@ -396,8 +397,9 @@ class TestTelegramChatStateIntegration:
 
         handler = MagicMock(spec=SessionHandler)
         handler._provider_name = "telegram"
+        handler._store = None
 
-        SessionHandler._update_chat_state(
+        await SessionHandler._update_chat_state(
             handler, telegram_group_message, thread_id=None
         )
 
@@ -417,7 +419,7 @@ class TestTelegramChatStateIntegration:
         assert len(data["participants"]) == 1
         assert data["participants"][0]["username"] == "bob"
 
-    def test_thread_message_updates_state(
+    async def test_thread_message_updates_state(
         self,
         monkeypatch,
         mock_get_chat_dir,
@@ -430,9 +432,10 @@ class TestTelegramChatStateIntegration:
 
         handler = MagicMock(spec=SessionHandler)
         handler._provider_name = "telegram"
+        handler._store = None
 
         thread_id = telegram_thread_message.metadata.get("thread_id")
-        SessionHandler._update_chat_state(
+        await SessionHandler._update_chat_state(
             handler, telegram_thread_message, thread_id=thread_id
         )
 
@@ -450,7 +453,7 @@ class TestTelegramChatStateIntegration:
         data = json.loads(state_path.read_text())
         assert data["participants"][0]["username"] == "charlie"
 
-    def test_message_without_username(
+    async def test_message_without_username(
         self,
         monkeypatch,
         mock_get_chat_dir,
@@ -463,8 +466,9 @@ class TestTelegramChatStateIntegration:
 
         handler = MagicMock(spec=SessionHandler)
         handler._provider_name = "telegram"
+        handler._store = None
 
-        SessionHandler._update_chat_state(
+        await SessionHandler._update_chat_state(
             handler, telegram_message_no_username, thread_id=None
         )
 
@@ -481,7 +485,7 @@ class TestTelegramChatStateIntegration:
         assert data["participants"][0]["username"] is None
         assert data["participants"][0]["display_name"] == "No Username User"
 
-    def test_multiple_users_in_group(
+    async def test_multiple_users_in_group(
         self,
         monkeypatch,
         mock_get_chat_dir,
@@ -493,6 +497,7 @@ class TestTelegramChatStateIntegration:
 
         handler = MagicMock(spec=SessionHandler)
         handler._provider_name = "telegram"
+        handler._store = None
 
         chat_id = "-100999888777"
         users = [
@@ -513,7 +518,7 @@ class TestTelegramChatStateIntegration:
                 display_name=display_name,
                 metadata={"chat_type": "supergroup", "chat_title": "Test Group"},
             )
-            SessionHandler._update_chat_state(handler, message, thread_id=None)
+            await SessionHandler._update_chat_state(handler, message, thread_id=None)
 
         state_path = ash_home / "chats" / "telegram" / chat_id / "state.json"
         data = json.loads(state_path.read_text())
@@ -594,7 +599,7 @@ class TestBidirectionalReferences:
         assert participant is not None
         assert participant.session_id == "telegram_-123456_user-1"
 
-    def test_telegram_handler_sets_session_id(
+    async def test_telegram_handler_sets_session_id(
         self,
         monkeypatch,
         mock_get_chat_dir,
@@ -607,8 +612,9 @@ class TestBidirectionalReferences:
 
         handler = MagicMock(spec=SessionHandler)
         handler._provider_name = "telegram"
+        handler._store = None
 
-        SessionHandler._update_chat_state(
+        await SessionHandler._update_chat_state(
             handler, telegram_group_message, thread_id=None
         )
 

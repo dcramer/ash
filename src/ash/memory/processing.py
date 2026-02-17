@@ -188,6 +188,7 @@ async def process_extracted_facts(
     owner_names: list[str] | None = None,
     source: str = "background_extraction",
     confidence_threshold: float = 0.7,
+    graph_chat_id: str | None = None,
 ) -> list[str]:
     """Process extracted facts through the full post-extraction pipeline.
 
@@ -326,6 +327,7 @@ async def process_extracted_facts(
                 sensitivity=fact.sensitivity,
                 portable=fact.portable,
                 stated_by_person_id=stated_by_pid,
+                graph_chat_id=graph_chat_id,
             )
 
             logger.debug(

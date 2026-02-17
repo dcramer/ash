@@ -56,6 +56,18 @@ def pytest_configure(config: pytest.Config) -> None:
         mod_logger.addHandler(handler)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _require_docker() -> None:
+    """Fail fast if Docker is not available."""
+    import docker
+
+    try:
+        client = docker.from_env()
+        client.ping()
+    except Exception:
+        pytest.skip("Docker is not running — start Docker Desktop and retry")
+
+
 @pytest.fixture(autouse=True)
 def _isolate_ash_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -24,6 +24,8 @@ SUPERSEDES = "SUPERSEDES"  # Memory → Memory (new supersedes old)
 IS_PERSON = "IS_PERSON"  # User → Person (user identity maps to person)
 MERGED_INTO = "MERGED_INTO"  # Person → Person (source merged into target)
 HAS_RELATIONSHIP = "HAS_RELATIONSHIP"  # Person → Person (relationship link)
+LEARNED_IN = "LEARNED_IN"  # Memory → Chat (where a memory was first learned)
+PARTICIPATES_IN = "PARTICIPATES_IN"  # Person → Chat (chat membership)
 
 
 def _make_edge_id() -> str:
@@ -247,3 +249,64 @@ def get_related_people(graph: KnowledgeGraph, person_id: str) -> list[str]:
         if other not in result:
             result.append(other)
     return result
+
+
+# -- LEARNED_IN helpers --
+
+
+def create_learned_in_edge(
+    memory_id: str,
+    chat_id: str,
+    *,
+    created_by: str | None = None,
+) -> Edge:
+    """Create a LEARNED_IN edge: Memory → Chat."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=LEARNED_IN,
+        source_type="memory",
+        source_id=memory_id,
+        target_type="chat",
+        target_id=chat_id,
+        created_at=datetime.now(UTC),
+        created_by=created_by,
+    )
+
+
+def get_learned_in_chat(graph: KnowledgeGraph, memory_id: str) -> str | None:
+    """Get the chat ID where this memory was learned."""
+    edges = graph.get_outgoing(memory_id, edge_type=LEARNED_IN)
+    return edges[0].target_id if edges else None
+
+
+# -- PARTICIPATES_IN helpers --
+
+
+def create_participates_in_edge(
+    person_id: str,
+    chat_id: str,
+) -> Edge:
+    """Create a PARTICIPATES_IN edge: Person → Chat."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=PARTICIPATES_IN,
+        source_type="person",
+        source_id=person_id,
+        target_type="chat",
+        target_id=chat_id,
+        created_at=datetime.now(UTC),
+    )
+
+
+def get_chat_participant_person_ids(graph: KnowledgeGraph, chat_id: str) -> set[str]:
+    """Get all person IDs that participate in a chat."""
+    edges = graph.get_incoming(chat_id, edge_type=PARTICIPATES_IN)
+    return {e.source_id for e in edges}
+
+
+def person_participates_in_chat(
+    graph: KnowledgeGraph, person_id: str, chat_id: str
+) -> bool:
+    """Check if a person participates in a specific chat."""
+    edges = graph.get_outgoing(person_id, edge_type=PARTICIPATES_IN)
+    return any(e.target_id == chat_id for e in edges)

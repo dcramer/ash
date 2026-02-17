@@ -140,3 +140,68 @@ class ChatStateManager:
     def _create_default_state(self) -> ChatState:
         """Create default state for a new chat."""
         return ChatState(chat=ChatInfo(id=self.chat_id))
+
+
+async def sync_participates_in_edges(
+    state: ChatState,
+    store: object,
+    provider: str,
+    chat_id: str,
+) -> None:
+    """Sync PARTICIPATES_IN edges for chat participants.
+
+    Resolves person IDs from participant usernames and ensures
+    edges exist between each person and the graph chat node.
+    Called from session handlers after participant updates.
+
+    Args:
+        state: Current chat state with participants.
+        store: Store instance (has graph and find_person_ids_for_username).
+        provider: Chat provider name (e.g. "telegram").
+        chat_id: Provider-level chat ID.
+    """
+    from ash.graph.edges import PARTICIPATES_IN, create_participates_in_edge
+
+    # Resolve graph chat node
+    graph = store._graph  # type: ignore[attr-defined]
+    chat_entry = graph.find_chat_by_provider(provider, chat_id)
+    if not chat_entry:
+        return
+
+    graph_chat_id = chat_entry.id
+
+    # Ensure graph_chat_id is recorded in state
+    if state.graph_chat_id != graph_chat_id:
+        state.graph_chat_id = graph_chat_id
+
+    for participant in state.participants:
+        if participant.is_bot or not participant.username:
+            continue
+
+        # Resolve person ID from username
+        try:
+            person_ids = await store.find_person_ids_for_username(  # type: ignore[attr-defined]
+                participant.username
+            )
+        except Exception:
+            logger.debug("Failed to resolve person for %s", participant.username)
+            continue
+
+        if not person_ids:
+            continue
+
+        person_id = next(iter(person_ids))
+
+        # Check if edge already exists
+        existing = graph.get_outgoing(person_id, edge_type=PARTICIPATES_IN)
+        if any(e.target_id == graph_chat_id for e in existing):
+            continue
+
+        edge = create_participates_in_edge(person_id, graph_chat_id)
+        graph.add_edge(edge)
+        store._persistence.mark_dirty("edges")  # type: ignore[attr-defined]
+
+    try:
+        await store._persistence.flush(graph)  # type: ignore[attr-defined]
+    except Exception:
+        logger.debug("Failed to flush PARTICIPATES_IN edges", exc_info=True)

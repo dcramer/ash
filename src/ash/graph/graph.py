@@ -22,7 +22,14 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 EdgeType = Literal[
-    "ABOUT", "STATED_BY", "SUPERSEDES", "IS_PERSON", "MERGED_INTO", "HAS_RELATIONSHIP"
+    "ABOUT",
+    "STATED_BY",
+    "SUPERSEDES",
+    "IS_PERSON",
+    "MERGED_INTO",
+    "HAS_RELATIONSHIP",
+    "LEARNED_IN",
+    "PARTICIPATES_IN",
 ]
 NodeType = Literal["memory", "person", "user", "chat"]
 
@@ -34,6 +41,8 @@ _EDGE_TYPE_SCHEMA: dict[str, tuple[str, str]] = {
     "IS_PERSON": ("user", "person"),
     "MERGED_INTO": ("person", "person"),
     "HAS_RELATIONSHIP": ("person", "person"),
+    "LEARNED_IN": ("memory", "chat"),
+    "PARTICIPATES_IN": ("person", "chat"),
 }
 
 

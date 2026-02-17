@@ -81,6 +81,7 @@ class MemoryCrudMixin:
         portable: bool = True,
         metadata: dict[str, Any] | None = None,
         stated_by_person_id: str | None = None,
+        graph_chat_id: str | None = None,
     ) -> MemoryEntry:
         """Add a memory entry."""
         if contains_secret(content):
@@ -144,6 +145,15 @@ class MemoryCrudMixin:
 
             self._graph.add_edge(
                 create_stated_by_edge(memory_id, stated_by_person_id, created_by=source)
+            )
+            self._persistence.mark_dirty("edges")
+
+        # Create LEARNED_IN edge to track source chat
+        if graph_chat_id:
+            from ash.graph.edges import create_learned_in_edge
+
+            self._graph.add_edge(
+                create_learned_in_edge(memory_id, graph_chat_id, created_by=source)
             )
             self._persistence.mark_dirty("edges")
 
