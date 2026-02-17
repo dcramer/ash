@@ -98,7 +98,6 @@
   },
   "enabledPlugins": {
     "plugin-dev@claude-code-plugins": true,
-    "frontend-design@claude-code-plugins": true,
     "sentry-skills@sentry-skills": true,
     "pr-review-toolkit@claude-plugins-official": true,
     "agnix@agentsys": true,
@@ -111,16 +110,12 @@
     "next-task@agentsys": true,
     "perf@agentsys": true,
     "repo-map@agentsys": true,
-    "ship@agentsys": true,
     "sync-docs@agentsys": true,
-    "alembic-migrations@python-backend-plugins": true,
     "clean-code@python-backend-plugins": true,
     "code-review@python-backend-plugins": true,
-    "fastapi-scaffold@python-backend-plugins": true,
     "feature-list@python-backend-plugins": true,
     "full-cycle-dev@python-backend-plugins": true,
     "pytest-assistant@python-backend-plugins": true,
-    "python-typing@python-backend-plugins": true,
     "ruff-lint@python-backend-plugins": true,
     "software-architect@python-backend-plugins": true
   }
