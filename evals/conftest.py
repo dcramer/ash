@@ -173,6 +173,9 @@ async def eval_agent(
 ) -> AsyncGenerator[AgentComponents, None]:
     """Create a fully configured agent with real tools for eval testing.
 
+    Starts an RPC server so sandbox CLI commands (e.g. ``ash-sb schedule``)
+    can call back into the host over a Unix socket.
+
     This creates a complete agent with:
     - Real sandbox execution
     - Graph-backed memory store
@@ -181,6 +184,10 @@ async def eval_agent(
     The workspace is isolated to /tmp/ash-evals-{uuid}/ to prevent
     interference with real user data.
     """
+    from ash.config.paths import get_rpc_socket_path, get_schedule_file
+    from ash.rpc.methods.schedule import register_schedule_methods
+    from ash.rpc.server import RPCServer
+
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         pytest.skip("ANTHROPIC_API_KEY not set")
@@ -191,9 +198,14 @@ async def eval_agent(
         graph_dir=eval_graph_dir,
     )
 
+    # Start RPC server so sandbox CLI can call schedule methods
+    rpc_server = RPCServer(get_rpc_socket_path())
+    register_schedule_methods(rpc_server, get_schedule_file())
+    await rpc_server.start()
+
     yield components
 
-    # Cleanup: stop sandbox if running
+    await rpc_server.stop()
     if components.sandbox_executor:
         await components.sandbox_executor.cleanup()
 
@@ -241,9 +253,21 @@ async def eval_memory_agent(
 ) -> AsyncGenerator[AgentComponents, None]:
     """Create agent with memory (embeddings + extraction) for memory evals.
 
+    Starts an RPC server so sandbox CLI commands (e.g. ``ash-sb memory extract``)
+    can call back into the real memory pipeline over a Unix socket.
+
     File stores are isolated via the _isolate_ash_home autouse fixture.
     Requires both ANTHROPIC_API_KEY and OPENAI_API_KEY.
     """
+    from ash.config.paths import (
+        get_rpc_socket_path,
+        get_schedule_file,
+        get_sessions_path,
+    )
+    from ash.rpc.methods.memory import register_memory_methods
+    from ash.rpc.methods.schedule import register_schedule_methods
+    from ash.rpc.server import RPCServer
+
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         pytest.skip("ANTHROPIC_API_KEY not set")
@@ -254,7 +278,21 @@ async def eval_memory_agent(
         graph_dir=eval_graph_dir,
     )
 
+    # Start RPC server so sandbox CLI can call memory.extract and schedule.*
+    assert components.memory_manager is not None
+    rpc_server = RPCServer(get_rpc_socket_path())
+    register_memory_methods(
+        rpc_server,
+        components.memory_manager,
+        components.person_manager,
+        memory_extractor=components.memory_extractor,
+        sessions_path=get_sessions_path(),
+    )
+    register_schedule_methods(rpc_server, get_schedule_file())
+    await rpc_server.start()
+
     yield components
 
+    await rpc_server.stop()
     if components.sandbox_executor:
         await components.sandbox_executor.cleanup()

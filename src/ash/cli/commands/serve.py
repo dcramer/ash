@@ -69,6 +69,7 @@ async def _run_server(
         get_logs_path,
         get_pid_path,
         get_rpc_socket_path,
+        get_schedule_file,
         get_sessions_path,
     )
     from ash.core import create_agent
@@ -140,10 +141,11 @@ async def _run_server(
             logger.info(f"Cleaned up {gc_result.removed_count} memories")
 
     # Start RPC server for sandbox communication
-    rpc_server: RPCServer | None = None
+    from ash.rpc.methods.schedule import register_schedule_methods
+
+    rpc_socket_path = get_rpc_socket_path()
+    rpc_server = RPCServer(rpc_socket_path)
     if components.memory_manager:
-        rpc_socket_path = get_rpc_socket_path()
-        rpc_server = RPCServer(rpc_socket_path)
         register_memory_methods(
             rpc_server,
             components.memory_manager,
@@ -151,10 +153,11 @@ async def _run_server(
             memory_extractor=components.memory_extractor,
             sessions_path=get_sessions_path(),
         )
-        register_config_methods(rpc_server, ash_config, components.skill_registry)
-        register_log_methods(rpc_server, get_logs_path())
-        await rpc_server.start()
-        logger.info(f"RPC server started at {rpc_socket_path}")
+    register_config_methods(rpc_server, ash_config, components.skill_registry)
+    register_log_methods(rpc_server, get_logs_path())
+    register_schedule_methods(rpc_server, get_schedule_file())
+    await rpc_server.start()
+    logger.info(f"RPC server started at {rpc_socket_path}")
 
     logger.debug(f"Tools: {', '.join(components.tool_registry.names)}")
     if components.skill_registry:
@@ -173,7 +176,6 @@ async def _run_server(
         )
 
     # Set up schedule watcher
-    from ash.config.paths import get_schedule_file
     from ash.events import ScheduledTaskHandler, ScheduleWatcher
 
     schedule_file = get_schedule_file()
