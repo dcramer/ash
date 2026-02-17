@@ -26,7 +26,7 @@ def _validate_package_names(packages: list[str]) -> list[str]:
         if _SAFE_PACKAGE_NAME.match(pkg):
             valid.append(pkg)
         else:
-            logger.warning(f"Skipping invalid package name: {pkg!r}")
+            logger.warning("invalid_package_name", extra={"package_name": pkg})
     return valid
 
 
@@ -109,6 +109,6 @@ def warn_missing_apt_packages(apt_packages: list[str]) -> None:
     """
     if apt_packages:
         logger.warning(
-            f"Skills require apt packages not installable at runtime: {', '.join(apt_packages)}. "
-            f"Add to [sandbox].apt_packages in config and run 'ash sandbox build --force'."
+            "apt_packages_not_installable",
+            extra={"packages": apt_packages},
         )

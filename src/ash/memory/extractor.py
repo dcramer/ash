@@ -353,7 +353,9 @@ class MemoryExtractor:
 
         except Exception:
             logger.warning(
-                "Fact classification failed for: %s", content[:80], exc_info=True
+                "fact_classification_failed",
+                extra={"content_preview": content[:80]},
+                exc_info=True,
             )
             return None
 
@@ -412,7 +414,7 @@ class MemoryExtractor:
             return self._parse_extraction_response(response.message.get_text())
 
         except Exception as e:
-            logger.warning("Memory extraction failed: %s", e)
+            logger.warning("memory_extraction_failed", extra={"error.message": str(e)})
             return []
 
     @staticmethod
@@ -527,7 +529,8 @@ This ensures memories remain meaningful when recalled later.
 
         if contains_secret(content):
             logger.warning(
-                "Filtered potential secret from extraction: %s...", content[:30]
+                "secret_filtered_from_extraction",
+                extra={"content_preview": content[:30]},
             )
             return None
 

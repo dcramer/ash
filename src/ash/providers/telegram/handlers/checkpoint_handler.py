@@ -144,8 +144,8 @@ class CheckpointHandler:
                             "thread_id": sm.thread_id,
                         }
                         logger.info(
-                            "Recovered checkpoint %s from session log",
-                            truncated_id[:20],
+                            "checkpoint_recovered_from_log",
+                            extra={"checkpoint_id": truncated_id[:20]},
                         )
                         return routing, checkpoint
 
@@ -164,8 +164,8 @@ class CheckpointHandler:
                     "thread_id": None,
                 }
                 logger.info(
-                    "Recovered checkpoint %s from disk using chat context",
-                    truncated_id[:20],
+                    "checkpoint_recovered_from_disk",
+                    extra={"checkpoint_id": truncated_id[:20]},
                 )
                 return routing, checkpoint
 
@@ -201,7 +201,9 @@ class CheckpointHandler:
             user_id=context.user_id,
         )
         if checkpoint is None or routing is None:
-            logger.warning("Checkpoint not found: %s", context.truncated_id)
+            logger.warning(
+                "checkpoint_not_found", extra={"checkpoint_id": context.truncated_id}
+            )
             await callback_query.answer(
                 "Checkpoint not found. It may have expired or the session was lost.",
                 show_alert=True,
@@ -290,9 +292,8 @@ class CheckpointHandler:
         if not has_agent_context or not has_tool_registry:
             reason = "agent context" if not has_agent_context else "tool registry"
             logger.warning(
-                "Missing %s for checkpoint %s, falling back to message flow",
-                reason,
-                truncated_id,
+                "checkpoint_fallback_to_message_flow",
+                extra={"missing": reason, "checkpoint_id": truncated_id},
             )
             # Clear checkpoint before fallback (fallback will create new session context)
             self.clear_checkpoint(truncated_id)
@@ -302,10 +303,12 @@ class CheckpointHandler:
             return
 
         logger.info(
-            "Resuming checkpoint via direct tool call: agent=%s, checkpoint=%s, response='%s'",
-            agent_name,
-            truncated_id[:20],
-            selected_option,
+            "checkpoint_resuming",
+            extra={
+                "agent_name": agent_name,
+                "checkpoint_id": truncated_id[:20],
+                "selected_option": selected_option,
+            },
         )
 
         await self._provider.send_typing(chat_id)
@@ -318,7 +321,7 @@ class CheckpointHandler:
 
         use_agent_tool = self._tool_registry.get("use_agent")
         if not isinstance(use_agent_tool, UseAgentTool):
-            logger.error("use_agent tool is not a UseAgentTool instance")
+            logger.error("use_agent_tool_type_mismatch")
             await self._provider.send(
                 OutgoingMessage(
                     chat_id=chat_id,
@@ -335,8 +338,8 @@ class CheckpointHandler:
             checkpoint_state = CheckpointState.from_dict(checkpoint)
             await use_agent_tool.store_checkpoint(checkpoint_state)
             logger.info(
-                "Restored checkpoint %s to UseAgentTool cache",
-                truncated_id,
+                "checkpoint_restored_to_cache",
+                extra={"checkpoint_id": truncated_id},
             )
 
         # Create tracker for resume flow (reply to checkpoint message)
@@ -453,13 +456,21 @@ class CheckpointHandler:
         )
 
         logger.info(
-            "Processing checkpoint callback via message flow: '%s' (session=%s)",
-            selected_option,
-            routing.get("session_key", ""),
+            "checkpoint_callback_via_message_flow",
+            extra={
+                "selected_option": selected_option,
+                "session_id": routing.get("session_key", ""),
+            },
         )
 
         await self._handle_message(synthetic_message)
 
     def _log_response(self, text: str | None) -> None:
         bot_name = self._provider.bot_username or "bot"
-        logger.info("[cyan]%s:[/cyan] %s", bot_name, _truncate(text or "(no response)"))
+        logger.info(
+            "bot_response_sent",
+            extra={
+                "bot_name": bot_name,
+                "output.preview": _truncate(text or "(no response)"),
+            },
+        )

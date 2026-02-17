@@ -209,7 +209,7 @@ async def _run_chat(
         session.set_message_ids(message_ids)
 
         if messages:
-            logger.info(f"Loaded {len(messages)} messages from previous session")
+            logger.info("session_messages_loaded", extra={"count": len(messages)})
 
         async def process_message(
             user_input: str, show_prefix: bool = False, show_meta: bool = False
@@ -292,11 +292,11 @@ async def _run_chat(
             try:
                 await rpc_server.stop()
             except Exception as e:
-                logger.warning(f"Error stopping RPC server: {e}")
+                logger.warning("rpc_server_stop_error", extra={"error.message": str(e)})
 
         # Clean up sandbox container
         if components and components.sandbox_executor:
             try:
                 await components.sandbox_executor.cleanup()
             except Exception as e:
-                logger.warning(f"Error cleaning up sandbox: {e}")
+                logger.warning("sandbox_cleanup_error", extra={"error.message": str(e)})

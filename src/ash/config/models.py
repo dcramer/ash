@@ -407,16 +407,10 @@ class AshConfig(BaseModel):
             return self
 
         if "default" in self.models:
-            logger.warning(
-                "Both [default_llm] and [models.default] present. "
-                "Using [models.default], ignoring [default_llm]."
-            )
+            logger.warning("config_duplicate_default_llm")
             return self
 
-        logger.warning(
-            "[default_llm] is deprecated and will be removed in a future version. "
-            "Please migrate to [models.default] format. See docs for details."
-        )
+        logger.warning("config_deprecated_default_llm")
 
         self.models["default"] = ModelConfig(
             provider=self.default_llm.provider,

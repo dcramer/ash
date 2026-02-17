@@ -43,7 +43,7 @@ def register_memory_methods(
                         lookup[alias.value.lower()] = p.name
             return lookup
         except Exception:
-            logger.warning("Failed to build username lookup", exc_info=True)
+            logger.warning("username_lookup_build_failed", exc_info=True)
             return {}
 
     def _resolve_source(
@@ -398,7 +398,7 @@ def register_memory_methods(
                 people = await person_manager.list_people()
                 people_by_id = {p.id: p for p in people}
             except Exception:
-                logger.warning("Failed to load people for list", exc_info=True)
+                logger.warning("people_list_load_failed", exc_info=True)
 
         result = []
         for m in memories:

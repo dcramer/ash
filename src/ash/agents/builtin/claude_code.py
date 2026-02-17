@@ -66,12 +66,11 @@ class ClaudeCodeAgent(Agent):
         if model:
             cmd.extend(["--model", model])
             logger.info(
-                f"Running Claude CLI: {cmd[0]} -p '<prompt>' --model {model} --output-format stream-json"
+                "claude_cli_executing",
+                extra={"gen_ai.request.model": model},
             )
         else:
-            logger.info(
-                f"Running Claude CLI: {cmd[0]} -p '<prompt>' --output-format stream-json"
-            )
+            logger.info("claude_cli_executing")
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -85,7 +84,11 @@ class ClaudeCodeAgent(Agent):
             if process.returncode != 0:
                 error_msg = stderr.decode("utf-8", errors="replace").strip()
                 logger.error(
-                    f"Claude CLI failed with code {process.returncode}: {error_msg}"
+                    "claude_cli_failed",
+                    extra={
+                        "process.exit_code": process.returncode,
+                        "error.message": error_msg,
+                    },
                 )
                 return AgentResult.error(f"Claude CLI error: {error_msg}")
 
@@ -100,7 +103,7 @@ class ClaudeCodeAgent(Agent):
             return AgentResult.success(response_text)
 
         except Exception as e:
-            logger.error(f"Failed to execute Claude CLI: {e}")
+            logger.error("claude_cli_execution_failed", extra={"error.message": str(e)})
             return AgentResult.error(f"Failed to execute Claude CLI: {e}")
 
     def _parse_stream_json(self, output: str) -> str:

@@ -191,18 +191,23 @@ class PassiveEngagementThrottler:
         cooldown_seconds = self._config.chat_cooldown_minutes * 60
         if now - state.last_engagement_time < cooldown_seconds:
             logger.info(
-                "Passive throttled: chat %s in cooldown (%.0fs remaining)",
-                chat_id[:8],
-                cooldown_seconds - (now - state.last_engagement_time),
+                "passive_throttled_cooldown",
+                extra={
+                    "chat_id": chat_id[:8],
+                    "remaining_seconds": cooldown_seconds
+                    - (now - state.last_engagement_time),
+                },
             )
             return False
 
         # Check if too many recent active messages
         if state.recent_active_count >= self._config.skip_after_active_messages:
             logger.info(
-                "Passive throttled: %d active messages since last passive in chat %s",
-                state.recent_active_count,
-                chat_id[:8],
+                "passive_throttled_active_messages",
+                extra={
+                    "chat_id": chat_id[:8],
+                    "active_message_count": state.recent_active_count,
+                },
             )
             return False
 
@@ -212,9 +217,11 @@ class PassiveEngagementThrottler:
             >= self._config.max_engagements_per_hour
         ):
             logger.info(
-                "Passive throttled: global hourly limit reached (%d/%d)",
-                self._global_state.count_last_hour(),
-                self._config.max_engagements_per_hour,
+                "passive_throttled_global_limit",
+                extra={
+                    "current_count": self._global_state.count_last_hour(),
+                    "max_per_hour": self._config.max_engagements_per_hour,
+                },
             )
             return False
 
@@ -306,7 +313,7 @@ class PassiveEngagementDecider:
 
         # Fast path: if bot name is mentioned, engage immediately
         if check_bot_name_mention(text, bot_context):
-            logger.info("Fast path: bot name mentioned in message")
+            logger.info("passive_fast_path_name_mentioned")
             return True
 
         # Format context
@@ -334,9 +341,11 @@ class PassiveEngagementDecider:
         )
 
         logger.info(
-            "Engagement prompt: memories=%d, context=%d msgs",
-            len(relevant_memories) if relevant_memories else 0,
-            len(recent_messages),
+            "engagement_prompt_prepared",
+            extra={
+                "memory_count": len(relevant_memories) if relevant_memories else 0,
+                "context_message_count": len(recent_messages),
+            },
         )
 
         try:
@@ -354,17 +363,21 @@ class PassiveEngagementDecider:
             should_engage = decision.startswith("ENGAGE")
 
             logger.info(
-                "Engagement decision: %s (message: '%s')",
-                "ENGAGE" if should_engage else "SILENT",
-                text[:50],
+                "engagement_decision",
+                extra={
+                    "decision": "ENGAGE" if should_engage else "SILENT",
+                    "input.preview": text[:50],
+                },
             )
             return should_engage
 
         except TimeoutError:
-            logger.warning("Engagement decision timed out, defaulting to SILENT")
+            logger.warning("engagement_decision_timed_out")
             return False
         except Exception as e:
-            logger.warning("Engagement decision failed: %s, defaulting to SILENT", e)
+            logger.warning(
+                "engagement_decision_failed", extra={"error.message": str(e)}
+            )
             return False
 
 
@@ -508,13 +521,17 @@ class PassiveMemoryExtractor:
             stored = len(stored_ids)
             if stored:
                 logger.info(
-                    "Extracted %d facts from passive message in chat %s",
-                    stored,
-                    message.chat_id[:8],
+                    "passive_facts_extracted",
+                    extra={
+                        "fact_count": stored,
+                        "chat_id": message.chat_id[:8],
+                    },
                 )
 
             return stored
 
         except Exception as e:
-            logger.warning("Passive memory extraction failed: %s", e)
+            logger.warning(
+                "passive_memory_extraction_failed", extra={"error.message": str(e)}
+            )
             return 0

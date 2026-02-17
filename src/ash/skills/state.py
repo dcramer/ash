@@ -33,8 +33,8 @@ class SkillStateStore:
                 return data
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(
-                "Failed to load skill state, starting fresh",
-                extra={"skill_name": skill_name, "error": str(e)},
+                "skill_state_load_failed",
+                extra={"skill.name": skill_name, "error.message": str(e)},
             )
             return {"global": {}, "users": {}}
 

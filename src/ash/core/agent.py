@@ -245,8 +245,11 @@ class Agent:
             return None
 
         logger.info(
-            f"Context near limit ({total_tokens}/{self._config.context_token_budget} tokens), "
-            "running compaction"
+            "compaction_triggered",
+            extra={
+                "tokens_current": total_tokens,
+                "tokens_budget": self._config.context_token_budget,
+            },
         )
 
         start_time = time.monotonic()
@@ -267,8 +270,13 @@ class Agent:
         session._token_counts = new_token_counts
 
         logger.info(
-            f"Compaction complete: {result.tokens_before} -> {result.tokens_after} tokens "
-            f"({result.messages_removed} messages summarized) | {duration_ms}ms"
+            "compaction_complete",
+            extra={
+                "tokens_before": result.tokens_before,
+                "tokens_after": result.tokens_after,
+                "messages_removed": result.messages_removed,
+                "duration_ms": duration_ms,
+            },
         )
 
         return CompactionInfo(
@@ -448,9 +456,11 @@ class Agent:
             )
 
             logger.info(
-                "Extracted %d facts from conversation (speaker=%s)",
-                len(facts),
-                speaker_info.username if speaker_info else None,
+                "facts_extracted",
+                extra={
+                    "count": len(facts),
+                    "speaker": speaker_info.username if speaker_info else None,
+                },
             )
             for fact in facts:
                 logger.debug(
@@ -498,7 +508,9 @@ class Agent:
 
         def handle_error(task: asyncio.Task[None]) -> None:
             if not task.cancelled() and (exc := task.exception()):
-                logger.warning("Memory extraction task failed: %s", exc)
+                logger.warning(
+                    "memory_extraction_task_failed", extra={"error.message": str(exc)}
+                )
 
         task = asyncio.create_task(
             self._extract_memories_background(session, user_id, chat_id),
@@ -655,7 +667,8 @@ class Agent:
                             is_error=True,
                         )
                     logger.info(
-                        f"Steering received: skipping {len(pending_tools) - i - 1} remaining tools"
+                        "steering_received",
+                        extra={"tools_skipped": len(pending_tools) - i - 1},
                     )
                     return tool_calls, steering
 
@@ -708,8 +721,12 @@ class Agent:
                 text_len = len(response.message.get_text() or "")
                 tool_names = [t.name for t in pending_tools]
                 logger.info(
-                    f"Main agent iteration {iterations}: text_len={text_len}, "
-                    f"tools={tool_names}"
+                    "main_agent_iteration",
+                    extra={
+                        "iteration": iterations,
+                        "text_len": text_len,
+                        "tools": tool_names,
+                    },
                 )
 
                 if not pending_tools:
@@ -768,7 +785,8 @@ class Agent:
                             session.add_user_message(msg.text)
 
             logger.warning(
-                f"Max tool iterations ({self._config.max_tool_iterations}) reached"
+                "max_tool_iterations",
+                extra={"max_iterations": self._config.max_tool_iterations},
             )
             self._maybe_spawn_memory_extraction(
                 user_message, setup.effective_user_id, session
@@ -921,7 +939,7 @@ async def create_agent(
 
     skill_registry = SkillRegistry(skill_config=config.skills)
     skill_registry.discover(config.workspace)
-    logger.info(f"Discovered {len(skill_registry)} skills from workspace")
+    logger.info("skills_discovered", extra={"count": len(skill_registry)})
 
     sandbox_manager_config = build_sandbox_manager_config(
         config.sandbox, config.workspace
@@ -965,16 +983,21 @@ async def create_agent(
     # Create unified graph store (replaces separate memory_manager + person_manager)
     graph_store: Store | None = None
     if not graph_dir:
-        logger.info("Memory tools disabled: no graph directory")
+        logger.info("memory_tools_disabled", extra={"reason": "no_graph_directory"})
     elif not config.embeddings:
-        logger.info("Memory tools disabled: [embeddings] not configured")
+        logger.info(
+            "memory_tools_disabled", extra={"reason": "embeddings_not_configured"}
+        )
     else:
         try:
             embeddings_key = config.resolve_embeddings_api_key()
             if not embeddings_key:
                 logger.info(
-                    f"No API key for {config.embeddings.provider} embeddings, "
-                    "memory features disabled"
+                    "memory_tools_disabled",
+                    extra={
+                        "reason": "no_api_key",
+                        "provider": config.embeddings.provider,
+                    },
                 )
                 raise ValueError("Embeddings API key required for memory")
 
@@ -1032,11 +1055,11 @@ async def create_agent(
             logger.warning("Failed to initialize memory extractor", exc_info=True)
 
     tool_executor = ToolExecutor(tool_registry)
-    logger.info(f"Registered {len(tool_registry)} tools")
+    logger.info("tools_registered", extra={"count": len(tool_registry)})
 
     agent_registry = AgentRegistry()
     register_builtin_agents(agent_registry)
-    logger.info(f"Registered {len(agent_registry)} built-in agents")
+    logger.info("agents_registered", extra={"count": len(agent_registry)})
 
     runtime = RuntimeInfo.from_environment(
         model=model_config.model,

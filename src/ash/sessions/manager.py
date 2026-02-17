@@ -90,7 +90,7 @@ class SessionManager:
         )
         await self._writer.write_header(self._header)
         self._ensure_state_file()
-        logger.info("Created new session: %s", self._key)
+        logger.info("session_created", extra={"session.key": self._key})
         return self._header
 
     def _ensure_state_file(self) -> None:
@@ -416,7 +416,7 @@ class SessionManager:
             data = json.loads(self.state_path.read_text())
             return SessionState.model_validate(data)
         except Exception as e:
-            logger.warning(f"Failed to load session state: {e}")
+            logger.warning("session_state_load_failed", extra={"error.message": str(e)})
             return None
 
     def _save_state(self, state: SessionState) -> None:

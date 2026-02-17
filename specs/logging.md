@@ -1,6 +1,6 @@
 # Logging
 
-> Centralized logging configuration with consistent formatting.
+> Centralized logging with structured events and OTel-aligned attributes.
 
 Files: src/ash/logging.py, src/ash/cli/commands/serve.py, src/ash/cli/commands/chat.py, src/ash/tools/executor.py
 
@@ -13,6 +13,11 @@ Files: src/ash/logging.py, src/ash/cli/commands/serve.py, src/ash/cli/commands/c
 - Suppress noisy third-party loggers (httpx, aiogram, anthropic, openai)
 - Environment variable `ASH_LOG_LEVEL` controls log level
 - Tool execution logged once per call (in executor.py only)
+- Every `logger.info/warning/error()` call MUST use `extra={}` for all variable data
+- Message string MUST be a static snake_case event name (no f-strings, no %-formatting)
+- `logger.debug()` MAY use f-strings (development-only, not in JSONL production path)
+- Errors MUST include `error.type` and/or `error.message` in extra
+- Context fields (chat_id, session_id, agent_name, model, provider, user_id) are auto-injected — do NOT pass them in extra
 
 ### SHOULD
 - Default log level is INFO
@@ -55,18 +60,69 @@ def configure_logging(
 | Invalid log level in env var | Defaults to INFO |
 | Rich not installed | ImportError on `use_rich=True` |
 
-## Structured Logging Conventions
+## Structured Logging Format
 
 ### Event-name messages
 
-Use short, snake_case event names as the log message for structured events:
+The log message is a static, snake_case event identifier — NOT a human sentence:
 
 ```python
-logger.info("agent_completed", extra={"agent": name, "iterations": n})
-logger.warning("agent_max_iterations", extra={"agent": name, "max_iterations": n})
+# CORRECT
+logger.info("agent_completed", extra={"gen_ai.agent.name": name, "iterations": n})
+logger.warning("agent_max_iterations", extra={"gen_ai.agent.name": name, "max_iterations": n})
+logger.error("tool_not_found", extra={"gen_ai.tool.name": name, "error.type": "KeyError"})
+
+# WRONG — f-string message
+logger.info(f"Agent {name} completed in {n} iterations")
+logger.error(f"Tool not found: {name}")
 ```
 
 Per-event data goes in `extra={}`. Ambient context (chat_id, session_id, agent_name, model, provider, user_id) is injected automatically via `log_context()`.
+
+### Attribute Naming (OTel-aligned)
+
+Use dot-namespaced, snake_case attribute names. Prefer OTel semantic conventions where they exist; use OTel naming style for custom attributes.
+
+#### OTel attributes (use as-is)
+
+| Attribute | OTel Convention | Usage |
+|-----------|----------------|-------|
+| `error.type` | `error.type` | Error classification (exception class name) |
+| `error.message` | Custom (OTel uses exception.*) | Error detail string |
+| `server.address` | `server.address` | Server host |
+| `server.port` | `server.port` | Server port |
+| `gen_ai.agent.name` | `gen_ai.agent.name` | Agent name |
+| `gen_ai.request.model` | `gen_ai.request.model` | Model being used |
+| `gen_ai.tool.name` | `gen_ai.tool.name` | Tool name |
+| `gen_ai.tool.call.id` | `gen_ai.tool.call.id` | Tool call identifier |
+| `gen_ai.tool.call.arguments` | `gen_ai.tool.call.arguments` | Tool input dict |
+| `process.command` | `process.command` | Bash command |
+| `process.exit_code` | `process.exit_code` | Command exit code |
+
+#### Custom attributes (OTel naming style, no existing convention)
+
+| Attribute | Usage |
+|-----------|-------|
+| `duration_ms` | Execution duration in milliseconds |
+| `skill.name` | Skill identifier |
+| `skill.source` | Skill source (repo URL or path) |
+| `session.key` | Session key |
+| `output.preview` | Truncated output for context |
+| `memory.id` | Memory identifier |
+| `memory.count` | Number of memories affected |
+| `schedule.cron` | Cron expression |
+| `schedule.task_id` | Scheduled task identifier |
+| `sandbox.image` | Container image name |
+| `file.path` | File path |
+| `count` | Generic count for items loaded/registered/etc. |
+
+### Rules
+
+1. **info/warning/error**: Static snake_case message + `extra={}` for all variable data
+2. **debug**: May use f-strings (development-only, not in JSONL production path)
+3. **Errors**: Include `error.type` (exception class) and/or `error.message` in extra
+4. **No context duplication**: Never pass chat_id, session_id, agent_name, model, provider, user_id in extra — they're auto-injected
+5. **exc_info-only calls**: `logger.warning("some_event", exc_info=True)` is valid without extra when the event name is self-explanatory and the traceback provides all context
 
 ### Context propagation
 
@@ -105,20 +161,42 @@ Each line in `~/.ash/logs/YYYY-MM-DD.jsonl`:
 
 Priority: `extra` fields override context fields of the same name.
 
+### Console format
+
+The `ComponentFormatter` appends extra fields as `key=value` pairs:
+
+```
+14:32:05 [-542863 @main] tools | tool_executed gen_ai.tool.name=bash duration_ms=450
+14:32:06 [-542863 @main] core  | agent_completed iterations=3
+```
+
+- Extra fields extracted from LogRecord (same logic as JSONLHandler)
+- Space-separated `key=value` pairs after the message
+- Long string values truncated to 60 chars
+- Complex values (dicts/lists) skipped in console (available in JSONL)
+
 ## Verification
 
 ```bash
+# No f-strings in info/warning/error log calls (debug is exempt)
+grep -rn 'logger\.\(info\|warning\|error\)(f"' src/ash/ | grep -v test  # Should return nothing
+grep -rn 'logger\.\(info\|warning\|error\)(".*%[sd]' src/ash/ | grep -v test  # Should return nothing
+
+# All info/warning/error calls use extra= (except exc_info-only and static messages)
+grep -rn 'logger\.\(info\|warning\|error\)(' src/ash/ | grep -v test | grep -v 'extra=' | grep -v 'exc_info='  # Minimal results (static event names only)
+
 # Check tool logging is single source
 grep -r "Tool call:" src/ash/core/agent.py  # Should return nothing
 grep -r "Tool result:" src/ash/core/agent.py  # Should return nothing
-grep "Tool:" src/ash/tools/executor.py  # Should find logging
 
 # Check configure_logging is used
 grep "configure_logging" src/ash/cli/commands/serve.py
 grep "configure_logging" src/ash/cli/commands/chat.py
 
-# Run server and verify output format
-ASH_LOG_LEVEL=DEBUG uv run ash serve --help
+# Lint and test
+uv run ruff check --fix .
+uv run ruff format .
+uv run pytest tests/
 ```
 
 - No duplicate tool logging in output

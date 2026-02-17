@@ -60,7 +60,7 @@ class SandboxExecutor:
         if self._initialized:
             return True
         if not await self._manager.ensure_image(self._dockerfile_path):
-            logger.error("Failed to ensure sandbox image")
+            logger.error("sandbox_image_ensure_failed")
             return False
         self._initialized = True
         return True
@@ -96,7 +96,11 @@ class SandboxExecutor:
                 timed_out=exit_code == -1 and "timed out" in stderr.lower(),
             )
         except Exception as e:
-            logger.error(f"Execution failed: {e}", exc_info=True)
+            logger.error(
+                "sandbox_execution_failed",
+                extra={"error.message": str(e)},
+                exc_info=True,
+            )
             return ExecutionResult(exit_code=-1, stdout="", stderr=str(e))
 
     async def execute_script(
@@ -127,7 +131,9 @@ class SandboxExecutor:
             try:
                 await self._manager.remove_container(self._container_id)
             except Exception as e:
-                logger.warning(f"Failed to remove container: {e}")
+                logger.warning(
+                    "container_removal_failed", extra={"error.message": str(e)}
+                )
             finally:
                 self._container_id = None
 
@@ -141,14 +147,17 @@ class SandboxExecutor:
         await self._manager.start_container(container_id)
 
         if self._setup_command and not self._container_setup_done:
-            logger.info("Running container setup command")
+            logger.info("container_setup_running")
             exit_code, stdout, stderr = await self._manager.exec_command(
                 container_id,
                 self._setup_command,
                 timeout=300,
             )
             if exit_code != 0:
-                logger.warning(f"Setup command failed (exit {exit_code}): {stderr}")
+                logger.warning(
+                    "setup_command_failed",
+                    extra={"process.exit_code": exit_code, "error.message": stderr},
+                )
             else:
                 logger.debug(
                     f"Setup command completed: {stdout[:200] if stdout else ''}"

@@ -135,10 +135,10 @@ async def ensure_self_person(
                     if secondary_id == new_person.id:
                         result_id = primary_id
             except Exception:
-                logger.warning("Self-person dedup failed", exc_info=True)
+                logger.warning("self_person_dedup_failed", exc_info=True)
             return result_id
         except Exception:
-            logger.warning("Failed to ensure self-person", exc_info=True)
+            logger.warning("ensure_self_person_failed", exc_info=True)
             return None
 
 
@@ -237,7 +237,9 @@ async def process_extracted_facts(
                         if result.created:
                             newly_created_person_ids.append(result.person_id)
                     except Exception:
-                        logger.warning("Failed to resolve subject: %s", subject)
+                        logger.warning(
+                            "subject_resolution_failed", extra={"subject": subject}
+                        )
 
             # For RELATIONSHIP facts, attach the term to the person record
             if fact.memory_type == MemoryType.RELATIONSHIP and subject_person_ids:
@@ -363,6 +365,6 @@ async def process_extracted_facts(
             for primary_id, secondary_id in candidates:
                 await store.merge_people(primary_id, secondary_id)
         except Exception:
-            logger.warning("Post-extraction dedup failed", exc_info=True)
+            logger.warning("post_extraction_dedup_failed", exc_info=True)
 
     return stored_ids

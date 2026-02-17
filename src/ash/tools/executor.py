@@ -22,26 +22,6 @@ def _truncate(text: str, max_len: int) -> str:
     return text[:max_len] + "..."
 
 
-# Tool input summarizers: each returns a summary string from input_data
-_TOOL_SUMMARIZERS: dict[str, Any] = {
-    "write_file": lambda d: f"{d.get('file_path', '?')}, {d.get('content', '').count(chr(10)) + 1 if d.get('content') else 0} lines",
-    "read_file": lambda d: d.get("file_path", "?"),
-    "bash": lambda d: _truncate(d.get("command", ""), 50),
-    "use_agent": lambda d: d.get("agent", "?"),
-    "use_skill": lambda d: f"{d.get('skill', '?')}: {_truncate(d.get('message', ''), 40)}",
-    "web_search": lambda d: _truncate(d.get("query", "?"), 40),
-    "web_fetch": lambda d: _truncate(d.get("url", "?"), 50),
-}
-
-
-def _summarize_input(tool_name: str, input_data: dict[str, Any]) -> str:
-    if summarizer := _TOOL_SUMMARIZERS.get(tool_name):
-        return summarizer(input_data)
-    if input_data:
-        return ", ".join(list(input_data.keys())[:3])
-    return ""
-
-
 class ToolExecutor:
     def __init__(
         self,
@@ -65,7 +45,10 @@ class ToolExecutor:
             try:
                 tool = self._registry.get(tool_name)
             except KeyError:
-                logger.error(f"Tool not found: {tool_name}")
+                logger.error(
+                    "tool_not_found",
+                    extra={"gen_ai.tool.name": tool_name, "error.type": "KeyError"},
+                )
                 return ToolResult.error(f"Tool '{tool_name}' not found")
 
         logger.debug(f"Tool {tool_name} input: {input_data}")
@@ -79,27 +62,40 @@ class ToolExecutor:
 
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
-        input_summary = _summarize_input(tool_name, input_data)
         exit_code = result.metadata.get("exit_code") if result.metadata else None
 
+        log_extra: dict[str, Any] = {
+            "gen_ai.tool.name": tool_name,
+            "gen_ai.tool.call.arguments": input_data,
+            "duration_ms": duration_ms,
+        }
+        if exit_code is not None:
+            log_extra["process.exit_code"] = exit_code
+
         if result.is_error:
+            log_extra["error.message"] = result.content[:500]
             logger.error(
-                f"Tool: {tool_name} | {input_summary} | failed: {result.content[:200]}"
+                "tool_executed",
+                extra=log_extra,
             )
         elif exit_code is not None and exit_code != 0:
-            output_preview = _truncate(result.content, 100)
+            log_extra["output.preview"] = _truncate(result.content, 200)
             logger.warning(
-                f"Tool: {tool_name} | {input_summary} | exit={exit_code} | {output_preview}"
+                "tool_executed",
+                extra=log_extra,
             )
         else:
-            logger.info(f"Tool: {tool_name} | {input_summary} | {duration_ms}ms")
+            logger.info(
+                "tool_executed",
+                extra=log_extra,
+            )
             logger.debug(f"Tool {tool_name} result: {result.content[:200]}")
 
         if self._on_execution:
             try:
                 self._on_execution(tool_name, input_data, result, duration_ms)
             except Exception:
-                logger.exception("Execution callback failed")
+                logger.warning("execution_callback_failed", exc_info=True)
 
         return result
 

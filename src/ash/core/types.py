@@ -148,16 +148,21 @@ class _StreamToolAccumulator:
     def finish(self) -> ToolUse | None:
         if not self._tool_id or not self._tool_name:
             logger.warning(
-                "Tool use end without start: id=%s, name=%s",
-                self._tool_id,
-                self._tool_name,
+                "tool_use_end_without_start",
+                extra={
+                    "gen_ai.tool.call.id": self._tool_id,
+                    "gen_ai.tool.name": self._tool_name,
+                },
             )
             return None
 
         try:
             args = json.loads(self._tool_args) if self._tool_args else {}
         except json.JSONDecodeError as e:
-            logger.warning("Invalid JSON in tool args for %s: %s", self._tool_name, e)
+            logger.warning(
+                "invalid_tool_args_json",
+                extra={"gen_ai.tool.name": self._tool_name, "error.message": str(e)},
+            )
             args = {}
 
         tool_use = ToolUse(

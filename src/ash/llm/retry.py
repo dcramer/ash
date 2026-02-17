@@ -103,7 +103,13 @@ async def with_retry[T](
             # Don't retry if we've exhausted attempts
             if attempt >= config.max_retries:
                 logger.warning(
-                    f"{operation_name} failed after {config.max_retries + 1} attempts: {e}"
+                    "retry_exhausted",
+                    extra={
+                        "operation": operation_name,
+                        "attempts": config.max_retries + 1,
+                        "error.message": str(e),
+                        "error.type": type(e).__name__,
+                    },
                 )
                 raise
 
@@ -115,8 +121,15 @@ async def with_retry[T](
             delay_s = delay_ms / 1000
 
             logger.info(
-                f"{operation_name} failed (attempt {attempt + 1}/{config.max_retries + 1}), "
-                f"retrying in {delay_s:.1f}s: {e}"
+                "retry_attempt",
+                extra={
+                    "operation": operation_name,
+                    "attempt": attempt + 1,
+                    "max_attempts": config.max_retries + 1,
+                    "retry_delay_s": round(delay_s, 1),
+                    "error.message": str(e),
+                    "error.type": type(e).__name__,
+                },
             )
 
             await asyncio.sleep(delay_s)

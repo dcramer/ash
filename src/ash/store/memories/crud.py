@@ -99,9 +99,7 @@ class MemoryCrudMixin:
         try:
             embedding_floats = await self._embeddings.embed(content)
         except Exception:
-            logger.warning(
-                "Failed to generate embedding, continuing without", exc_info=True
-            )
+            logger.warning("embedding_generation_failed", exc_info=True)
 
         now = datetime.now(UTC)
         memory_id = str(uuid.uuid4())
@@ -162,7 +160,7 @@ class MemoryCrudMixin:
             try:
                 self._index.add(memory.id, embedding_floats)
             except Exception:
-                logger.warning("Failed to index memory, continuing", exc_info=True)
+                logger.warning("memory_index_failed", exc_info=True)
             memory.embedding = embedding_base64
 
         superseded_count = 0
@@ -179,18 +177,18 @@ class MemoryCrudMixin:
                     extra={"new_memory_id": memory.id},
                 )
         except Exception:
-            logger.warning("Failed to check for conflicting memories", exc_info=True)
+            logger.warning("conflicting_memories_check_failed", exc_info=True)
 
         if self._max_entries is not None:
             try:
                 evicted = await self.enforce_max_entries(self._max_entries)
                 if evicted > 0:
                     logger.info(
-                        "Evicted memories to enforce limit",
-                        extra={"evicted": evicted, "max_entries": self._max_entries},
+                        "memories_evicted",
+                        extra={"count": evicted, "max_entries": self._max_entries},
                     )
             except Exception:
-                logger.warning("Failed to enforce max_entries limit", exc_info=True)
+                logger.warning("max_entries_enforcement_failed", exc_info=True)
 
         # Single flush for all mutations in this operation
         await self._persistence.flush(self._graph)
@@ -288,7 +286,7 @@ class MemoryCrudMixin:
 
         await self.archive_memories({full_id}, reason="user_deleted")
 
-        logger.info("memory_deleted", extra={"memory_id": full_id})
+        logger.info("memory_deleted", extra={"memory.id": full_id})
         return True
 
     async def batch_update_memories(

@@ -203,7 +203,11 @@ async def compact_messages(
     kept_tokens = token_counts[boundary:]
 
     logger.info(
-        f"Compacting {len(to_summarize)} messages into summary, keeping {len(to_keep)}"
+        "compaction_started",
+        extra={
+            "messages_to_summarize": len(to_summarize),
+            "messages_to_keep": len(to_keep),
+        },
     )
 
     # Generate summary
@@ -234,8 +238,12 @@ async def compact_messages(
     )
 
     logger.info(
-        f"Compaction complete: {tokens_before} -> {tokens_after} tokens "
-        f"({len(to_summarize)} messages summarized)"
+        "compaction_complete",
+        extra={
+            "tokens_before": tokens_before,
+            "tokens_after": tokens_after,
+            "messages_summarized": len(to_summarize),
+        },
     )
 
     return new_messages, new_token_counts, result

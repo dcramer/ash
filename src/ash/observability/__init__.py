@@ -64,5 +64,5 @@ def init_sentry(config: "SentryConfig", server_mode: bool = False) -> bool:
         integrations=integrations,
     )
 
-    logger.info(f"Sentry initialized (environment={config.environment})")
+    logger.info("sentry_initialized", extra={"environment": config.environment})
     return True

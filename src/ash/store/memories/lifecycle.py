@@ -38,10 +38,10 @@ class MemoryLifecycleMixin:
         for mid in archived_ids:
             logger.info(
                 "gc_archive_memory",
-                extra={"memory_id": mid, "reason": reasons[mid]},
+                extra={"memory.id": mid, "reason": reasons[mid]},
             )
 
-        logger.info("gc_complete", extra={"removed_count": len(archived_ids)})
+        logger.info("gc_complete", extra={"count": len(archived_ids)})
         return GCResult(removed_count=len(archived_ids), archived_ids=archived_ids)
 
     @staticmethod
@@ -86,8 +86,8 @@ class MemoryLifecycleMixin:
         logger.info(
             "forget_person_complete",
             extra={
-                "person_id": person_id,
-                "archived_count": len(archived),
+                "person.id": person_id,
+                "count": len(archived),
                 "deleted_person": delete_person_record,
             },
         )

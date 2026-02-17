@@ -233,8 +233,11 @@ class UseSkillTool(Tool):
                 env[var_name] = config_env[var_name]
             else:
                 logger.warning(
-                    f"Skill '{skill.name}' needs {var_name} but not found in "
-                    f"[skills.{skill.name}] config"
+                    "skill_env_var_missing",
+                    extra={
+                        "skill.name": skill.name,
+                        "env.var": var_name,
+                    },
                 )
         return env
 
@@ -268,7 +271,10 @@ class UseSkillTool(Tool):
         else:
             agent_context = AgentContext()
 
-        logger.info(f"Invoking claude-code skill with message: {message[:100]}...")
+        logger.info(
+            "skill_invoking",
+            extra={"skill.name": "claude-code", "input.preview": message[:100]},
+        )
 
         result = await agent.execute_passthrough(message, agent_context, model=model)
 
@@ -360,9 +366,11 @@ class UseSkillTool(Tool):
                 resolved_model = self._config.get_model(model_alias).model
             except Exception:
                 logger.warning(
-                    "Failed to resolve model '%s' for skill '%s'",
-                    model_alias,
-                    skill_name,
+                    "model_resolution_failed",
+                    extra={
+                        "model.alias": model_alias,
+                        "skill.name": skill_name,
+                    },
                 )
 
         logger.info(

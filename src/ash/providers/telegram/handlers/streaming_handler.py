@@ -73,8 +73,8 @@ class StreamingHandler:
             pending = ctx.take_pending()
             if pending:
                 logger.info(
-                    "Steering: %d new message(s) arrived during processing",
-                    len(pending),
+                    "steering_messages_received",
+                    extra={"count": len(pending)},
                 )
             return pending
 

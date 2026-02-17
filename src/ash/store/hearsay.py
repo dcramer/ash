@@ -64,7 +64,7 @@ async def supersede_hearsay_for_fact(
 
     except Exception:
         logger.warning(
-            "Failed to check for hearsay supersession",
+            "hearsay_supersession_check_failed",
             exc_info=True,
         )
         return 0

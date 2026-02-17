@@ -97,7 +97,14 @@ def backfill_edges_from_raw(
             f"Ambiguous username '{username}' matches {len(unique)} people "
             f"during backfill ({context}), skipping"
         )
-        logger.warning(msg)
+        logger.warning(
+            "backfill_ambiguous_username",
+            extra={
+                "username": username,
+                "match_count": len(unique),
+                "context": context,
+            },
+        )
         result.skipped.append(msg)
         return None
 

@@ -139,7 +139,10 @@ def _read_jsonl(path: Path) -> list[dict]:
             try:
                 results.append(json.loads(line))
             except json.JSONDecodeError:
-                logger.warning("Corrupt JSONL line %d in %s, skipping", line_no, path)
+                logger.warning(
+                    "corrupt_jsonl_line",
+                    extra={"line_no": line_no, "file.path": str(path)},
+                )
     return results
 
 

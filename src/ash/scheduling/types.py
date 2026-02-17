@@ -103,14 +103,17 @@ class ScheduleEntry:
             try:
                 tz = ZoneInfo(timezone)
             except Exception:
-                logger.warning(f"Invalid timezone '{timezone}', falling back to UTC")
+                logger.warning("invalid_timezone", extra={"timezone": timezone})
                 tz = ZoneInfo("UTC")
 
             now = datetime.now(tz)
             prev_local = croniter(self.cron, now).get_prev(datetime)
             return prev_local.astimezone(UTC)
         except Exception as e:
-            logger.warning(f"Failed to compute prev fire time for '{self.cron}': {e}")
+            logger.warning(
+                "prev_fire_time_failed",
+                extra={"schedule.cron": self.cron, "error.message": str(e)},
+            )
             return None
 
     def is_due(self, timezone: str = "UTC") -> bool:
@@ -170,7 +173,7 @@ class ScheduleEntry:
             try:
                 tz = ZoneInfo(timezone)
             except Exception:
-                logger.warning(f"Invalid timezone '{timezone}', falling back to UTC")
+                logger.warning("invalid_timezone", extra={"timezone": timezone})
                 tz = ZoneInfo("UTC")
 
             # Convert base time to local timezone for cron evaluation
@@ -191,7 +194,12 @@ class ScheduleEntry:
             return next_utc
         except Exception as e:
             logger.warning(
-                f"Failed to parse cron expression '{self.cron}' for entry {self.id}: {e}"
+                "cron_parse_failed",
+                extra={
+                    "schedule.cron": self.cron,
+                    "schedule.entry_id": self.id,
+                    "error.message": str(e),
+                },
             )
             return None
 

@@ -386,7 +386,7 @@ class TestBackwardCompatibility:
         assert config.models["default"].provider == "openai"
         assert config.models["default"].model == "gpt-4o"
         # Warning should be logged
-        assert "Both [default_llm] and [models.default] present" in caplog.text
+        assert "config_duplicate_default_llm" in caplog.text
 
     def test_no_default_model_raises_error(self):
         """Test error when no default model is configured."""

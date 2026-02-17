@@ -61,10 +61,12 @@ class SessionReader:
                     entries.append(parse_entry(json.loads(line)))
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(
-                        "Failed to parse line %d in %s: %s",
-                        line_num,
-                        self.context_file,
-                        e,
+                        "context_parse_error",
+                        extra={
+                            "line_num": line_num,
+                            "file": str(self.context_file),
+                            "error.message": str(e),
+                        },
                     )
         return entries
 

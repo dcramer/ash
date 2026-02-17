@@ -76,8 +76,8 @@ class SyncHandler:
             pending = ctx.take_pending()
             if pending:
                 logger.info(
-                    "Steering: %d new message(s) arrived during processing",
-                    len(pending),
+                    "steering_messages_received",
+                    extra={"count": len(pending)},
                 )
             return pending
 
@@ -173,9 +173,11 @@ class SyncHandler:
             else:
                 final_content = checkpoint_msg
             logger.info(
-                "Checkpoint detected, showing inline keyboard (id=%s, agent=%s)",
-                truncated_id,
-                agent_name,
+                "checkpoint_detected",
+                extra={
+                    "checkpoint.id": truncated_id,
+                    "agent.name": agent_name,
+                },
             )
 
         from ash.providers.telegram.provider import MAX_SEND_LENGTH

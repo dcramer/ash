@@ -73,12 +73,14 @@ class CallbackValidator:
         from ash.providers.telegram.checkpoint_ui import parse_callback_data
 
         if not callback_query.data:
-            logger.warning("Callback query has no data")
+            logger.warning("callback_query_no_data")
             return None, "Invalid callback data"
 
         parsed = parse_callback_data(callback_query.data)
         if parsed is None:
-            logger.warning("Failed to parse callback data: %s", callback_query.data)
+            logger.warning(
+                "callback_parse_failed", extra={"callback_data": callback_query.data}
+            )
             return None, "Invalid callback format"
 
         truncated_id, option_index = parsed
@@ -91,7 +93,7 @@ class CallbackValidator:
     def validate_options(option_index: int, options: list[str]) -> ValidationResult:
         """Validate that option index is within bounds."""
         if option_index < 0 or option_index >= len(options):
-            logger.warning("Invalid option index: %d", option_index)
+            logger.warning("invalid_option_index", extra={"option_index": option_index})
             return ValidationResult(
                 success=False, error_message="Invalid option selected"
             )
@@ -104,7 +106,7 @@ class CallbackValidator:
         """Validate that the clicking user is the expected user."""
         from_user = callback_query.from_user
         if not from_user:
-            logger.warning("Callback query has no from_user, rejecting")
+            logger.warning("callback_query_no_user")
             return ValidationResult(
                 success=False,
                 error_message="Unable to verify user.",
@@ -194,8 +196,8 @@ class ResponseFinalizer:
             reply_markup = create_checkpoint_keyboard(new_checkpoint)
             response_text = format_checkpoint_message(new_checkpoint)
             logger.info(
-                "Nested checkpoint detected, showing new keyboard (id=%s)",
-                new_truncated_id,
+                "nested_checkpoint_detected",
+                extra={"checkpoint_id": new_truncated_id},
             )
 
         sent_message_id: str | None = None

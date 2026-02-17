@@ -73,13 +73,16 @@ class TypedJSONL[T: Serializable]:
                     entries.append(self._entry_type.from_dict(data))
                 except Exception as e:
                     error_count += 1
-                    logger.warning("Skipping malformed JSONL line: %s", e)
+                    logger.warning(
+                        "malformed_jsonl_line", extra={"error.message": str(e)}
+                    )
                     continue
 
         self.last_error_count = error_count
         if error_count > 0:
             logger.warning(
-                "JSONL file %s had %d corrupted lines", self.path.name, error_count
+                "jsonl_file_corrupted",
+                extra={"file.name": self.path.name, "error_count": error_count},
             )
 
         return entries

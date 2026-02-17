@@ -88,7 +88,7 @@ async def _run_server(
     write_pid_file(pid_path)
 
     # Load configuration
-    logger.info("Loading configuration")
+    logger.info("config_loading")
     ash_config = load_config(config_path)
 
     # Initialize Sentry for server mode
@@ -96,19 +96,19 @@ async def _run_server(
         from ash.observability import init_sentry
 
         if init_sentry(ash_config.sentry, server_mode=True):
-            logger.info("Sentry initialized")
+            logger.info("sentry_initialized")
 
     # Set up graph directory for memory
     graph_dir = get_graph_dir()
 
     # Load workspace
-    logger.info("Loading workspace")
+    logger.info("workspace_loading")
     workspace_loader = WorkspaceLoader(ash_config.workspace)
     workspace_loader.ensure_workspace()
     workspace = workspace_loader.load()
 
     # Create agent with all dependencies
-    logger.info("Setting up agent")
+    logger.info("agent_setup")
     components = await create_agent(
         config=ash_config,
         workspace=workspace,
@@ -125,8 +125,14 @@ async def _run_server(
 
     sandbox = ash_config.sandbox
     logger.info(
-        f"Sandbox: image={sandbox.image}, network={sandbox.network_mode}, "
-        f"runtime={sandbox.runtime}, workspace={workspace.path} ({sandbox.workspace_access})"
+        "sandbox_config",
+        extra={
+            "sandbox.image": sandbox.image,
+            "sandbox.network_mode": sandbox.network_mode,
+            "sandbox.runtime": sandbox.runtime,
+            "sandbox.workspace_path": str(workspace.path),
+            "sandbox.workspace_access": sandbox.workspace_access,
+        },
     )
 
     # Write runtime state for service status
@@ -138,7 +144,9 @@ async def _run_server(
         logger.debug("Running memory garbage collection")
         gc_result = await components.memory_manager.gc()
         if gc_result.removed_count > 0:
-            logger.info(f"Cleaned up {gc_result.removed_count} memories")
+            logger.info(
+                "memory_gc_complete", extra={"memory.count": gc_result.removed_count}
+            )
 
     # Start RPC server for sandbox communication
     from ash.rpc.methods.schedule import register_schedule_methods
@@ -160,7 +168,7 @@ async def _run_server(
     register_log_methods(rpc_server, get_logs_path())
     register_schedule_methods(rpc_server, schedule_store)
     await rpc_server.start()
-    logger.info(f"RPC server started at {rpc_socket_path}")
+    logger.info("rpc_server_started", extra={"socket_path": str(rpc_socket_path)})
 
     logger.debug(f"Tools: {', '.join(components.tool_registry.names)}")
     if components.skill_registry:
@@ -169,7 +177,7 @@ async def _run_server(
     # Set up Telegram if configured
     telegram_provider = None
     if ash_config.telegram and ash_config.telegram.bot_token:
-        logger.info("Setting up Telegram provider")
+        logger.info("telegram_provider_setup")
         telegram_provider = TelegramProvider(
             bot_token=ash_config.telegram.bot_token.get_secret_value(),
             allowed_users=ash_config.telegram.allowed_users,
@@ -216,7 +224,7 @@ async def _run_server(
         logger.debug("Schedule watcher disabled (no providers)")
 
     # Create FastAPI app
-    logger.info("Creating server")
+    logger.info("server_creating")
     fastapi_app = create_app(
         agent=agent,
         telegram_provider=telegram_provider,
@@ -231,7 +239,7 @@ async def _run_server(
     )
 
     # Start server
-    logger.info(f"Server starting on http://{host}:{port}")
+    logger.info("server_starting", extra={"server.address": host, "server.port": port})
 
     try:
         uvicorn_config = uvicorn.Config(
@@ -261,7 +269,7 @@ async def _run_server(
 
             if shutdown_count == 1:
                 # First signal: graceful shutdown
-                logger.info("Shutting down gracefully...")
+                logger.info("server_shutting_down")
                 server.should_exit = True
                 shutdown_event.set()
                 # Stop telegram polling before cancelling task
@@ -274,7 +282,7 @@ async def _run_server(
                     telegram_task.cancel()
             else:
                 # Second signal: force immediate exit
-                logger.warning("Forcing immediate shutdown...")
+                logger.warning("server_force_shutdown")
                 import os
 
                 os._exit(1)
@@ -284,7 +292,7 @@ async def _run_server(
 
         if telegram_provider:
             # Run both uvicorn and telegram polling
-            logger.info("Starting Telegram polling")
+            logger.info("telegram_polling_starting")
 
             async def start_telegram():
                 # Wait for server to be ready and handler to be created
@@ -299,9 +307,9 @@ async def _run_server(
                     try:
                         await telegram_provider.start(handler.handle_message)
                     except asyncio.CancelledError:
-                        logger.info("Telegram polling cancelled")
+                        logger.info("telegram_polling_cancelled")
                 else:
-                    logger.error("Failed to get Telegram handler after timeout")
+                    logger.error("telegram_handler_timeout")
 
             telegram_task = asyncio.create_task(start_telegram())
             # return_exceptions=True ensures we wait for server to finish graceful
@@ -344,9 +352,14 @@ async def _cleanup_server(
                     getattr(resource, method)(), timeout=cleanup_timeout
                 )
             except TimeoutError:
-                logger.warning(f"Cleanup {method} timed out after {cleanup_timeout}s")
+                logger.warning(
+                    "cleanup_timed_out",
+                    extra={"method": method, "timeout": cleanup_timeout},
+                )
             except Exception as e:
-                logger.warning(f"Error during {method}: {e}")
+                logger.warning(
+                    "cleanup_error", extra={"method": method, "error.message": str(e)}
+                )
 
     remove_pid_file(pid_path)
     remove_runtime_state()

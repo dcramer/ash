@@ -98,7 +98,7 @@ class PeopleDedupMixin:
                     primary_id,
                 )
         except Exception:
-            logger.warning("Failed to remap memories after merge", exc_info=True)
+            logger.warning("merge_remap_memories_failed", exc_info=True)
 
         try:
             edge_remapped = self._remap_edges_for_merge_batched(
@@ -112,7 +112,7 @@ class PeopleDedupMixin:
                     primary_id,
                 )
         except Exception:
-            logger.warning("Failed to remap edges after merge", exc_info=True)
+            logger.warning("merge_remap_edges_failed", exc_info=True)
 
         # Single flush for all merge mutations
         await self._persistence.flush(self._graph)

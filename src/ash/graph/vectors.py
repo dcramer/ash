@@ -77,7 +77,7 @@ class NumpyVectorIndex:
         vec = np.array(embedding, dtype=np.float32)
         norm = np.linalg.norm(vec)
         if norm == 0:
-            logger.warning("Skipping zero-norm embedding for %s", node_id)
+            logger.warning("zero_norm_embedding", extra={"node_id": node_id})
             return
         vec /= norm
 
@@ -201,9 +201,11 @@ class NumpyVectorIndex:
 
             if len(index._ids) != index._vectors.shape[0]:
                 logger.warning(
-                    "Vector index size mismatch: %d ids, %d vectors. Rebuilding.",
-                    len(index._ids),
-                    index._vectors.shape[0],
+                    "vector_index_size_mismatch",
+                    extra={
+                        "id_count": len(index._ids),
+                        "vector_count": index._vectors.shape[0],
+                    },
                 )
                 return cls()
 

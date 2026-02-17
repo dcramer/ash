@@ -397,7 +397,39 @@ class ComponentFormatter(logging.Formatter):
     - ash.core.agent -> core
 
     Also injects chat_id/session_id context from contextvars when available.
+    Appends extra fields as key=value pairs after the message.
     """
+
+    # Standard LogRecord attributes to exclude from extra display
+    _STANDARD_ATTRS = frozenset(
+        {
+            "name",
+            "msg",
+            "args",
+            "created",
+            "filename",
+            "funcName",
+            "levelname",
+            "levelno",
+            "lineno",
+            "module",
+            "msecs",
+            "pathname",
+            "process",
+            "processName",
+            "relativeCreated",
+            "stack_info",
+            "exc_info",
+            "exc_text",
+            "thread",
+            "threadName",
+            "taskName",
+            "message",
+            # Custom attrs set by this formatter
+            "component",
+            "context",
+        }
+    )
 
     def format(self, record: logging.LogRecord) -> str:
         # Extract component from logger name
@@ -427,7 +459,24 @@ class ComponentFormatter(logging.Formatter):
 
         record.context = f"[{' '.join(ctx_parts)}] " if ctx_parts else ""
 
-        return super().format(record)
+        formatted = super().format(record)
+
+        # Append extra fields as key=value pairs
+        extra_parts: list[str] = []
+        for key, value in record.__dict__.items():
+            if key.startswith("_") or key in self._STANDARD_ATTRS:
+                continue
+            if isinstance(value, dict | list):
+                continue
+            display = str(value)
+            if len(display) > 60:
+                display = display[:57] + "..."
+            extra_parts.append(f"{key}={display}")
+
+        if extra_parts:
+            formatted = f"{formatted} {' '.join(extra_parts)}"
+
+        return formatted
 
 
 # Third-party loggers that are too noisy at INFO level

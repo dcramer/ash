@@ -393,7 +393,7 @@ class WorkspaceLoader:
         else:
             workspace.soul = PERSONALITIES["zoomer"]
             workspace.soul_config = SoulConfig(extends="zoomer")
-            logger.info("No SOUL.md found, using default zoomer personality")
+            logger.info("soul_default_applied", extra={"personality": "zoomer"})
 
         return workspace
 
@@ -408,14 +408,20 @@ class WorkspaceLoader:
                     config.extends = data.get("extends")
                     config.extra = {k: v for k, v in data.items() if k != "extends"}
             except yaml.YAMLError as e:
-                logger.warning(f"Failed to parse SOUL.md frontmatter: {e}")
+                logger.warning(
+                    "soul_frontmatter_parse_failed", extra={"error.message": str(e)}
+                )
 
         if config.extends:
             base_name = config.extends.lower().replace("-", "_").replace(" ", "_")
             if base := PERSONALITIES.get(base_name):
                 return (f"{base}\n\n{body}" if body else base), config
             logger.warning(
-                f"Unknown personality '{config.extends}', available: {', '.join(PERSONALITIES.keys())}"
+                "soul_personality_unknown",
+                extra={
+                    "personality": config.extends,
+                    "available": list(PERSONALITIES.keys()),
+                },
             )
 
         return body or PERSONALITIES["zoomer"], config
@@ -433,7 +439,7 @@ class WorkspaceLoader:
         soul_path = self._path / self.SOUL_FILENAME
         if not soul_path.exists():
             soul_path.write_text(DEFAULT_SOUL, encoding="utf-8")
-            logger.info(f"Created default {self.SOUL_FILENAME}")
+            logger.info("soul_default_created", extra={"file.path": self.SOUL_FILENAME})
 
 
 DEFAULT_SOUL = """---

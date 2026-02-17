@@ -61,7 +61,7 @@ class RPCServer:
         self._socket_path.chmod(0o600)
 
         self._running = True
-        logger.info("RPC server started", extra={"socket": str(self._socket_path)})
+        logger.info("rpc_server_started", extra={"socket": str(self._socket_path)})
 
     async def stop(self) -> None:
         """Stop the RPC server."""
@@ -75,7 +75,7 @@ class RPCServer:
         # Clean up socket file
         self._socket_path.unlink(missing_ok=True)
 
-        logger.info("RPC server stopped")
+        logger.info("rpc_server_stopped")
 
     async def _handle_connection(
         self,
@@ -98,7 +98,7 @@ class RPCServer:
                 await writer.drain()
 
         except Exception:
-            logger.exception("Error handling RPC connection")
+            logger.error("rpc_connection_error", exc_info=True)
         finally:
             writer.close()
             await writer.wait_closed()
@@ -149,13 +149,15 @@ class RPCServer:
                     request_id, ErrorCode.INVALID_PARAMS, f"Invalid params: {e}"
                 )
             except Exception as e:
-                logger.exception("RPC method error", extra={"method": request.method})
+                logger.error(
+                    "rpc_method_error", extra={"method": request.method}, exc_info=True
+                )
                 return RPCResponse.error_response(
                     request_id, ErrorCode.INTERNAL_ERROR, str(e)
                 )
 
         except Exception as e:
-            logger.exception("RPC processing error")
+            logger.error("rpc_processing_error", exc_info=True)
             return RPCResponse.error_response(
                 request_id, ErrorCode.INTERNAL_ERROR, str(e)
             )

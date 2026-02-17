@@ -16,7 +16,9 @@ class AgentRegistry:
     def register(self, agent: Agent) -> None:
         name = agent.config.name
         if name in self._agents:
-            logger.warning(f"Agent '{name}' already registered, overwriting")
+            logger.warning(
+                "agent_already_registered", extra={"gen_ai.agent.name": name}
+            )
         self._agents[name] = agent
         logger.debug(f"Registered agent: {name}")
 

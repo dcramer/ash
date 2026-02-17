@@ -175,9 +175,9 @@ class TelegramMessageHandler:
         logger.info(
             "bot_response",
             extra={
-                "bot": bot_name,
+                "bot_name": bot_name,
                 "output_len": len(text) if text else 0,
-                "output_preview": (text or "")[:500],
+                "output.preview": (text or "")[:500],
             },
         )
 
@@ -235,9 +235,11 @@ class TelegramMessageHandler:
                 ctx.add_pending(message)
                 await self._provider.set_reaction(message.chat_id, message.id, "👀")
                 logger.info(
-                    "Message from %s queued for steering (session %s busy)",
-                    message.username or message.user_id,
-                    session_key,
+                    "message_queued_for_steering",
+                    extra={
+                        "username": message.username or message.user_id,
+                        "session_id": session_key,
+                    },
                 )
                 return
 
@@ -320,14 +322,17 @@ class TelegramMessageHandler:
 
         if session.has_incomplete_tool_use():
             logger.warning(
-                f"Session {session.session_id} has incomplete tool use, repairing..."
+                "session_incomplete_tool_use",
+                extra={"session_id": session.session_id},
             )
             session.repair_incomplete_tool_use()
 
         logger.info(
-            "[dim]%s:[/dim] %s",
-            message.username or message.user_id,
-            _truncate(message.text),
+            "user_message_received",
+            extra={
+                "username": message.username or message.user_id,
+                "input.preview": _truncate(message.text),
+            },
         )
 
         # Create tracker before try/except so it's accessible in ChildActivated handler
@@ -350,10 +355,11 @@ class TelegramMessageHandler:
                 stack.push(ca.main_frame)
                 stack.push(ca.child_frame)
                 logger.info(
-                    "Child activated: entering orchestration loop "
-                    "(stack depth=%d, child=%s)",
-                    stack.depth,
-                    ca.child_frame.agent_name,
+                    "child_activated",
+                    extra={
+                        "stack_depth": stack.depth,
+                        "child_agent": ca.child_frame.agent_name,
+                    },
                 )
                 bot_response_id = await self._run_orchestration_loop(
                     message,
@@ -383,7 +389,7 @@ class TelegramMessageHandler:
                     except Exception:
                         logger.debug("Failed to delete orphaned thinking message")
             else:
-                logger.warning("ChildActivated raised but agent_executor not available")
+                logger.warning("child_activated_no_executor")
         finally:
             await self._provider.clear_reaction(message.chat_id, message.id)
             steered = ctx.take_steered()
@@ -399,9 +405,11 @@ class TelegramMessageHandler:
     ) -> None:
         """Route a user message to the top of the interactive subagent stack."""
         logger.info(
-            "[dim]%s:[/dim] %s (→ stack)",
-            message.username or message.user_id,
-            _truncate(message.text),
+            "user_message_received_stack",
+            extra={
+                "username": message.username or message.user_id,
+                "input.preview": _truncate(message.text),
+            },
         )
         bot_response_id = await self._run_orchestration_loop(
             message, session_key, entry_user_message=message.text
@@ -445,7 +453,7 @@ class TelegramMessageHandler:
             top = stack.top
             if top is None:
                 # Stack is empty — shouldn't normally happen here
-                logger.warning("Orchestration loop: stack is empty")
+                logger.warning("orchestration_loop_stack_empty")
                 return bot_response_id
 
             result = await self._agent_executor.execute_turn(
@@ -477,9 +485,11 @@ class TelegramMessageHandler:
                 case TurnAction.COMPLETE:
                     completed = stack.pop()
                     logger.info(
-                        "Stack frame completed: %s (remaining depth=%d)",
-                        completed.agent_name,
-                        stack.depth,
+                        "stack_frame_completed",
+                        extra={
+                            "agent_name": completed.agent_name,
+                            "remaining_depth": stack.depth,
+                        },
                     )
                     if stack.is_empty:
                         # Edge case: no parent to cascade to
@@ -505,9 +515,11 @@ class TelegramMessageHandler:
                     assert result.child_frame is not None
                     stack.push(result.child_frame)
                     logger.info(
-                        "Nested child activated: %s (stack depth=%d)",
-                        result.child_frame.agent_name,
-                        stack.depth,
+                        "nested_child_activated",
+                        extra={
+                            "child_agent": result.child_frame.agent_name,
+                            "stack_depth": stack.depth,
+                        },
                     )
                     continue  # Run child's first turn
 
@@ -522,7 +534,8 @@ class TelegramMessageHandler:
                 case TurnAction.MAX_ITERATIONS:
                     failed = stack.pop()
                     logger.warning(
-                        "Stack frame hit max iterations: %s", failed.agent_name
+                        "stack_frame_max_iterations",
+                        extra={"agent_name": failed.agent_name},
                     )
                     if stack.is_empty:
                         bot_response_id = await self._send_stack_response(
@@ -544,9 +557,11 @@ class TelegramMessageHandler:
                 case TurnAction.ERROR:
                     failed = stack.pop()
                     logger.error(
-                        "Stack frame error: %s - %s",
-                        failed.agent_name,
-                        result.text,
+                        "stack_frame_error",
+                        extra={
+                            "agent_name": failed.agent_name,
+                            "error.message": result.text,
+                        },
                     )
                     if stack.is_empty:
                         bot_response_id = await self._send_stack_response(
@@ -580,7 +595,10 @@ class TelegramMessageHandler:
         if not text.strip():
             return None
         bot_name = self._provider.bot_username or "bot"
-        logger.info("[cyan]%s:[/cyan] %s", bot_name, _truncate(text))
+        logger.info(
+            "bot_response_sent",
+            extra={"bot_name": bot_name, "output.preview": _truncate(text)},
+        )
 
         from ash.providers.telegram.provider import MAX_SEND_LENGTH
 
@@ -606,9 +624,11 @@ class TelegramMessageHandler:
     async def _handle_image_message(self, message: IncomingMessage) -> None:
         """Handle a message containing images."""
         logger.info(
-            "[dim]%s:[/dim] %s",
-            message.username or message.user_id,
-            _truncate(message.text) if message.text else "[image]",
+            "user_message_received_image",
+            extra={
+                "username": message.username or message.user_id,
+                "input.preview": _truncate(message.text) if message.text else "[image]",
+            },
         )
 
         if not message.text:

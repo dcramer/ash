@@ -92,7 +92,7 @@ class Store(
         try:
             await self._index.save(self._vector_index_path)
         except Exception:
-            logger.warning("Failed to save vector index", exc_info=True)
+            logger.warning("vector_index_save_failed", exc_info=True)
 
     async def _remove_from_vector_index(self, memory_ids: list[str]) -> None:
         """Remove memory IDs from vector index and save."""
@@ -100,7 +100,7 @@ class Store(
             try:
                 self._index.remove(mid)
             except Exception:
-                logger.warning("Failed to remove embedding for %s", mid)
+                logger.warning("embedding_removal_failed", extra={"memory.id": mid})
         if memory_ids:
             await self._save_vector_index()
 
@@ -134,10 +134,10 @@ async def create_store(
             raw_data["raw_users"],
         )
         if result.created > 0:
-            logger.info("Backfilled %d edges from existing data", result.created)
+            logger.info("edges_backfilled", extra={"count": result.created})
             if result.skipped:
                 for msg in result.skipped:
-                    logger.warning("Backfill: %s", msg)
+                    logger.warning("backfill_warning", extra={"error.message": msg})
             persistence.mark_dirty("edges")
             await persistence.flush(graph)
 

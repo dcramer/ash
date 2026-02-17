@@ -117,9 +117,7 @@ class SupersessionMixin:
             answer = response.message.get_text().strip().upper()
             return answer.startswith("YES")
         except Exception:
-            logger.warning(
-                "LLM verification failed, skipping supersession", exc_info=True
-            )
+            logger.warning("llm_verification_failed", exc_info=True)
             return False
 
     async def supersede_conflicting_memories(
@@ -183,11 +181,11 @@ class SupersessionMixin:
             return True
         except Exception:
             logger.error(
-                "Subject authority check failed, conservatively protecting memory",
+                "subject_authority_check_failed",
                 extra={
-                    "candidate_id": candidate.id,
-                    "new_memory_id": new_memory.id,
-                    "candidate_source": candidate.source_username,
+                    "candidate.id": candidate.id,
+                    "memory.id": new_memory.id,
+                    "candidate.source": candidate.source_username,
                 },
                 exc_info=True,
             )
@@ -218,8 +216,8 @@ class SupersessionMixin:
                 self._index.remove(old_id)
             except Exception:
                 logger.warning(
-                    "Failed to delete superseded memory embedding",
-                    extra={"memory_id": old_id},
+                    "superseded_embedding_delete_failed",
+                    extra={"memory.id": old_id},
                     exc_info=True,
                 )
             marked.append(old_id)
@@ -329,7 +327,7 @@ class SupersessionMixin:
                 query_embedding, limit=len(hearsay_candidates) + 5
             )
         except Exception:
-            logger.warning("Failed to search for hearsay similarity", exc_info=True)
+            logger.warning("hearsay_similarity_search_failed", exc_info=True)
             return 0
 
         similarity_by_id: dict[str, float] = {mid: sim for mid, sim in similar}
@@ -353,18 +351,18 @@ class SupersessionMixin:
                 pair_similarities[hearsay.id] = similarity
             except Exception:
                 logger.warning(
-                    "Failed to check hearsay similarity",
-                    extra={"hearsay_id": hearsay.id},
+                    "hearsay_check_failed",
+                    extra={"memory.id": hearsay.id},
                     exc_info=True,
                 )
 
         marked = self._supersede_batch(pairs)
         for mid in marked:
             logger.info(
-                "Hearsay superseded by fact",
+                "hearsay_superseded",
                 extra={
-                    "hearsay_id": mid,
-                    "fact_id": new_memory.id,
+                    "memory.id": mid,
+                    "fact.id": new_memory.id,
                     "similarity": pair_similarities.get(mid, 0.0),
                 },
             )

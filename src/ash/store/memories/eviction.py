@@ -38,8 +38,8 @@ class MemoryEvictionMixin:
 
         if len(evicted) < excess:
             logger.warning(
-                "Could not evict enough memories - all remaining are recent",
-                extra={"excess": excess, "evicted": len(evicted)},
+                "eviction_insufficient",
+                extra={"excess": excess, "evicted_count": len(evicted)},
             )
 
         return len(evicted)
@@ -59,7 +59,7 @@ class MemoryEvictionMixin:
         if ids_to_remove:
             self._persistence.mark_dirty("memories", "edges")
             await self._persistence.flush(self._graph)
-            logger.info("compact_complete", extra={"removed_count": len(ids_to_remove)})
+            logger.info("compact_complete", extra={"count": len(ids_to_remove)})
 
         return len(ids_to_remove)
 
@@ -103,8 +103,11 @@ class MemoryEvictionMixin:
         if generated:
             await self._save_vector_index()
             logger.info(
-                "Generated embeddings during rebuild",
-                extra={"generated": generated, "already_indexed": len(existing_ids)},
+                "rebuild_index_complete",
+                extra={
+                    "generated_count": generated,
+                    "already_indexed": len(existing_ids),
+                },
             )
 
         return generated

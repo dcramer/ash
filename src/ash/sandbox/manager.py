@@ -138,11 +138,15 @@ class SandboxManager:
             return True
         except ImageNotFound:
             if dockerfile_path and dockerfile_path.exists():
-                logger.info(f"Building image {self._config.image}")
+                logger.info(
+                    "sandbox_image_building",
+                    extra={"sandbox.image": self._config.image},
+                )
                 await self._build_image(dockerfile_path)
                 return True
             logger.error(
-                f"Image {self._config.image} not found and no Dockerfile provided"
+                "sandbox_image_not_found",
+                extra={"sandbox.image": self._config.image},
             )
             return False
 
@@ -358,7 +362,7 @@ class SandboxManager:
                 timeout=timeout,
             )
         except TimeoutError:
-            logger.warning(f"Command timed out after {timeout}s")
+            logger.warning("sandbox_command_timeout", extra={"timeout": timeout})
             return -1, "", f"Command timed out after {timeout} seconds"
 
         inspect_result = await asyncio.to_thread(

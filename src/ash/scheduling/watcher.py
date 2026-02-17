@@ -62,7 +62,10 @@ class ScheduleWatcher:
         if self._running:
             return
         self._running = True
-        logger.info(f"Starting schedule watcher: {self._store.schedule_file}")
+        logger.info(
+            "schedule_watcher_started",
+            extra={"file.path": str(self._store.schedule_file)},
+        )
         self._task = asyncio.create_task(self._poll_loop())
 
     async def stop(self) -> None:
@@ -85,12 +88,15 @@ class ScheduleWatcher:
                 self._poll_count += 1
                 if self._poll_count % heartbeat_interval == 0:
                     logger.info(
-                        f"Schedule watcher heartbeat: poll #{self._poll_count}, "
-                        f"file={self._store.schedule_file}"
+                        "schedule_watcher_heartbeat",
+                        extra={
+                            "poll.count": self._poll_count,
+                            "file.path": str(self._store.schedule_file),
+                        },
                     )
                 await self._check_schedule()
             except Exception as e:
-                logger.error(f"Error checking schedule: {e}")
+                logger.error("schedule_check_error", extra={"error.message": str(e)})
             await asyncio.sleep(self._poll_interval)
 
     async def _check_schedule(self) -> None:
@@ -136,27 +142,30 @@ class ScheduleWatcher:
                     delay = (datetime.now(UTC) - fire_time).total_seconds()
                     if delay > MAX_STALENESS_SECONDS:
                         logger.warning(
-                            f"Skipping stale periodic task {entry_id}: "
-                            f"fire_time was {delay / 3600:.1f}h ago"
+                            "stale_periodic_task_skipped",
+                            extra={
+                                "schedule.entry_id": entry_id,
+                                "schedule.delay_hours": round(delay / 3600, 1),
+                            },
                         )
                         entry.last_run = datetime.now(UTC)
                         updates[entry_id] = entry
                         continue
 
-            chat_display = (
-                f"{entry.chat_title} ({entry.chat_id})"
-                if entry.chat_title
-                else entry.chat_id
-            )
             logger.info(
-                f"Triggering scheduled task: {entry.message[:50]}... "
-                f"(chat={chat_display}, provider={entry.provider})"
+                "scheduled_task_triggered",
+                extra={
+                    "schedule.message_preview": entry.message[:50],
+                    "messaging.chat_id": entry.chat_id,
+                    "messaging.chat_title": entry.chat_title,
+                    "provider": entry.provider,
+                },
             )
             try:
                 for handler in self._handlers:
                     await handler(entry)
             except Exception as e:
-                logger.error(f"Handler error for scheduled task: {e}")
+                logger.error("schedule_handler_error", extra={"error.message": str(e)})
                 # Mark entry as processed even on failure to prevent infinite retries
 
             # Always mark entry as processed (success or failure)

@@ -85,17 +85,11 @@ class PassiveHandler:
 
         # Validate required components
         if not self._llm_provider:
-            logger.error(
-                "Passive listening enabled but no LLM provider - "
-                "passive listening will be disabled"
-            )
+            logger.error("passive_listening_no_llm_provider")
             return
 
         if not self._memory_manager:
-            logger.error(
-                "Passive listening enabled but no memory manager - "
-                "passive listening will be disabled"
-            )
+            logger.error("passive_listening_no_memory_manager")
             return
 
         # Initialize components
@@ -112,7 +106,7 @@ class PassiveHandler:
                 memory_manager=self._memory_manager,
             )
 
-        logger.info("Passive listening initialized")
+        logger.info("passive_listening_initialized")
 
     def _get_bot_display_name(self) -> str:
         """Extract display name from bot username.
@@ -172,7 +166,7 @@ class PassiveHandler:
         name_mentioned = check_bot_name_mention(text, bot_context)
 
         if name_mentioned:
-            logger.info("Fast path: bot name mentioned, bypassing throttle")
+            logger.info("passive_fast_path_name_mentioned")
         else:
             # Step 3: Throttle check (only if not directly addressed)
             # Enforces per-chat cooldowns, active message limits, and global
@@ -181,7 +175,7 @@ class PassiveHandler:
                 chat_id
             ):
                 return
-            logger.info("Passive engagement: throttle passed, evaluating message")
+            logger.info("passive_throttle_passed")
 
         # Step 4: Background memory extraction (fire-and-forget)
         # Runs async via create_task so it doesn't block the engagement decision.
@@ -227,7 +221,10 @@ class PassiveHandler:
                     relevant_memories=relevant_memories,
                 )
             except Exception as e:
-                logger.exception("Passive engagement decision failed: %s", e)
+                logger.exception(
+                    "passive_engagement_decision_failed",
+                    extra={"error.message": str(e)},
+                )
                 return
 
         # Note: The engagement decision could be recorded to history.jsonl here
@@ -237,8 +234,8 @@ class PassiveHandler:
         # Step 6: Act on the engagement decision
         if should_engage:
             logger.info(
-                "Passive engagement: engaging with message from %s",
-                message.username or message.user_id,
+                "passive_engaging",
+                extra={"username": message.username or message.user_id},
             )
 
             # Record the engagement so throttler knows when we last engaged
@@ -289,7 +286,9 @@ class PassiveHandler:
                 )
 
         except Exception as e:
-            logger.warning("Passive memory extraction failed: %s", e)
+            logger.warning(
+                "passive_memory_extraction_failed", extra={"error.message": str(e)}
+            )
 
     async def _get_recent_message_texts(
         self, chat_id: str, limit: int = 5
@@ -348,8 +347,10 @@ class PassiveHandler:
             return None
 
         except TimeoutError:
-            logger.warning("Memory lookup timed out for passive engagement")
+            logger.warning("passive_memory_lookup_timed_out")
             return None
         except Exception as e:
-            logger.warning("Memory lookup failed for passive engagement: %s", e)
+            logger.warning(
+                "passive_memory_lookup_failed", extra={"error.message": str(e)}
+            )
             return None

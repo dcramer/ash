@@ -68,7 +68,7 @@ class AshServer:
         @asynccontextmanager
         async def lifespan(app: FastAPI) -> "AsyncIterator[None]":
             # Startup
-            logger.info("Starting Ash server")
+            logger.info("server_starting")
 
             if self._telegram_provider:
                 from ash.providers.telegram import TelegramMessageHandler
@@ -98,7 +98,7 @@ class AshServer:
             yield
 
             # Shutdown
-            logger.info("Shutting down Ash server")
+            logger.info("server_shutting_down")
             if self._telegram_provider:
                 await self._telegram_provider.stop()
 

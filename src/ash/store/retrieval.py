@@ -88,10 +88,7 @@ class RetrievalPipeline:
                 chat_id=context.chat_id,
             )
         except Exception:
-            logger.error(
-                "Primary memory search failed, returning without context",
-                exc_info=True,
-            )
+            logger.error("primary_search_failed", exc_info=True)
             return []
 
     async def _cross_context(self, context: RetrievalContext) -> list[SearchResult]:
@@ -125,7 +122,9 @@ class RetrievalPipeline:
                             )
                         )
             except Exception:
-                logger.warning("Failed to get cross-context memories for %s", username)
+                logger.warning(
+                    "cross_context_retrieval_failed", extra={"username": username}
+                )
 
         return results
 
@@ -179,7 +178,7 @@ class RetrievalPipeline:
                 max_hops=2,
             )
         except Exception:
-            logger.warning("BFS traversal failed", exc_info=True)
+            logger.warning("bfs_traversal_failed", exc_info=True)
             return []
 
         now = datetime.now(UTC)

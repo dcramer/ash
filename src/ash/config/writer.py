@@ -99,7 +99,7 @@ class ConfigWriter:
 
         sources.append(new_source)
         self._save()
-        logger.info(f"Added skill source: {repo or path}")
+        logger.info("skill_source_added", extra={"skill.source": repo or str(path)})
         return True
 
     def remove_skill_source(
@@ -134,12 +134,12 @@ class ConfigWriter:
             if repo and source.get("repo") == repo:
                 del sources[i]
                 self._save()
-                logger.info(f"Removed skill source: repo={repo}")
+                logger.info("skill_source_removed", extra={"skill.source": repo})
                 return True
             if path and source.get("path") == path:
                 del sources[i]
                 self._save()
-                logger.info(f"Removed skill source: path={path}")
+                logger.info("skill_source_removed", extra={"skill.source": str(path)})
                 return True
 
         return False
@@ -186,7 +186,9 @@ class ConfigWriter:
                 elif "ref" in source:
                     del source["ref"]
                 self._save()
-                logger.info(f"Updated skill source ref: {repo}@{ref}")
+                logger.info(
+                    "skill_source_ref_updated", extra={"skill.source": repo, "ref": ref}
+                )
                 return True
 
         return False

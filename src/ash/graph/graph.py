@@ -279,10 +279,12 @@ class KnowledgeGraph:
             results.append(edge)
         if stale:
             _logger.warning(
-                "Removed %d stale edge(s) from %s index for %s",
-                len(stale),
-                direction,
-                node_id,
+                "stale_edges_removed",
+                extra={
+                    "count": len(stale),
+                    "direction": direction,
+                    "node.id": node_id,
+                },
             )
             for eid in stale:
                 edge_ids.remove(eid)

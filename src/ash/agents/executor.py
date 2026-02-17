@@ -172,9 +172,8 @@ class AgentExecutor:
                 )
             except TimeoutError:
                 logger.error(
-                    "Agent '%s' timed out after %ds",
-                    agent.config.name,
-                    timeout,
+                    "agent_timed_out",
+                    extra={"gen_ai.agent.name": agent.config.name, "timeout": timeout},
                 )
                 return AgentResult.error(f"Agent timed out after {timeout} seconds")
 
@@ -209,8 +208,12 @@ class AgentExecutor:
         # Handle passthrough agents - they bypass the LLM loop entirely
         if agent_config.is_passthrough:
             logger.info(
-                f"Executing passthrough agent '{agent_config.name}' with input: "
-                f"{input_message[:100]}..."
+                "agent_executing",
+                extra={
+                    "gen_ai.agent.name": agent_config.name,
+                    "mode": "passthrough",
+                    "input.preview": input_message[:100],
+                },
             )
             return await agent.execute_passthrough(input_message, context)
 
@@ -230,15 +233,20 @@ class AgentExecutor:
                 )
 
             logger.info(
-                f"Resuming agent '{agent_config.name}' from checkpoint "
-                f"{resume_from.checkpoint_id}"
+                "agent_resuming",
+                extra={
+                    "gen_ai.agent.name": agent_config.name,
+                    "checkpoint_id": resume_from.checkpoint_id,
+                },
             )
 
             # Restore session from checkpoint
             try:
                 session = SessionState.from_json(resume_from.session_json)
             except Exception as e:
-                logger.error(f"Failed to restore checkpoint session: {e}")
+                logger.error(
+                    "checkpoint_restore_failed", extra={"error.message": str(e)}
+                )
                 return AgentResult.error(f"Checkpoint session corrupted: {e}")
             start_iteration = resume_from.iteration
 
@@ -250,8 +258,11 @@ class AgentExecutor:
             )
         else:
             logger.info(
-                f"Executing agent '{agent_config.name}' with input: "
-                f"{input_message[:100]}..."
+                "agent_executing",
+                extra={
+                    "gen_ai.agent.name": agent_config.name,
+                    "input.preview": input_message[:100],
+                },
             )
             start_iteration = 1
             session = SessionState(
@@ -282,13 +293,21 @@ class AgentExecutor:
             except Exception as e:
                 available = ", ".join(sorted(self._config.models.keys()))
                 logger.error(
-                    f"Agent '{agent_config.name}' has invalid model alias '{model_alias}'. "
-                    f"Available aliases: {available}"
+                    "agent_invalid_model",
+                    extra={
+                        "gen_ai.agent.name": agent_config.name,
+                        "model_alias": model_alias,
+                        "available": available,
+                    },
                 )
                 return AgentResult.error(f"Invalid model alias: {model_alias}. {e}")
 
         logger.info(
-            f"Agent '{agent_config.name}' using model: {resolved_model or 'default'}"
+            "agent_model_resolved",
+            extra={
+                "gen_ai.agent.name": agent_config.name,
+                "gen_ai.request.model": resolved_model or "default",
+            },
         )
 
         # Update log context with the resolved model (outer context has agent_name/provider already)
@@ -321,7 +340,13 @@ class AgentExecutor:
                     max_tokens=4096,
                 )
             except Exception as e:
-                logger.error(f"Agent '{agent_config.name}' LLM error: {e}")
+                logger.error(
+                    "agent_llm_error",
+                    extra={
+                        "gen_ai.agent.name": agent_config.name,
+                        "error.message": str(e),
+                    },
+                )
                 return AgentResult.error(f"LLM error: {e}")
 
             message = response.message
@@ -340,11 +365,11 @@ class AgentExecutor:
                 logger.info(
                     "agent_completed",
                     extra={
-                        "agent": agent_config.name,
+                        "gen_ai.agent.name": agent_config.name,
                         "iterations": iteration,
-                        "model": resolved_model or "default",
+                        "gen_ai.request.model": resolved_model or "default",
                         "output_len": output_len,
-                        "output_preview": (text or "")[:500],
+                        "output.preview": (text or "")[:500],
                     },
                 )
                 result_metadata = self._build_result_metadata(tool_context)
@@ -383,8 +408,12 @@ class AgentExecutor:
                 )
 
                 logger.info(
-                    f"Agent '{agent_config.name}' interrupted at iteration "
-                    f"{iteration}: {prompt[:100]}..."
+                    "agent_interrupted",
+                    extra={
+                        "gen_ai.agent.name": agent_config.name,
+                        "iteration": iteration,
+                        "prompt": prompt[:100],
+                    },
                 )
 
                 return AgentResult.interrupted(checkpoint, iterations=iteration)
@@ -418,7 +447,7 @@ class AgentExecutor:
                     output = result.content
                     is_error = result.is_error
                 except Exception as e:
-                    logger.error(f"Agent tool execution error: {e}")
+                    logger.error("agent_tool_error", extra={"error.message": str(e)})
                     output = f"Tool error: {e}"
                     is_error = True
 
@@ -434,9 +463,9 @@ class AgentExecutor:
         logger.warning(
             "agent_max_iterations",
             extra={
-                "agent": agent_config.name,
+                "gen_ai.agent.name": agent_config.name,
                 "max_iterations": max_iterations,
-                "model": resolved_model or "default",
+                "gen_ai.request.model": resolved_model or "default",
                 "mode": "batch",
             },
         )
@@ -593,7 +622,10 @@ class AgentExecutor:
                             max_tokens=4096,
                         )
                     except Exception as e:
-                        logger.error("Interactive turn LLM error: %s", e)
+                        logger.error(
+                            "interactive_turn_llm_error",
+                            extra={"error.message": str(e)},
+                        )
                         return TurnResult(TurnAction.ERROR, text=f"LLM error: {e}")
 
                     session.add_assistant_message(response.message.content)
@@ -673,7 +705,10 @@ class AgentExecutor:
                             TurnAction.CHILD_ACTIVATED, child_frame=ca.child_frame
                         )
                     except Exception as e:
-                        logger.error("Interactive turn tool error: %s", e)
+                        logger.error(
+                            "interactive_turn_tool_error",
+                            extra={"error.message": str(e)},
+                        )
                         session.add_tool_result(
                             tool_use.id, f"Tool error: {e}", is_error=True
                         )
@@ -688,9 +723,9 @@ class AgentExecutor:
             logger.warning(
                 "agent_max_iterations",
                 extra={
-                    "agent": frame.agent_name,
+                    "gen_ai.agent.name": frame.agent_name,
                     "max_iterations": frame.max_iterations,
-                    "model": frame.model or "default",
+                    "gen_ai.request.model": frame.model or "default",
                     "mode": "interactive",
                 },
             )

@@ -121,7 +121,9 @@ class SkillInstaller:
                 for key, value in data.get("sources", {}).items()
             }
         except (json.JSONDecodeError, KeyError) as e:
-            logger.warning(f"Failed to load sources metadata: {e}")
+            logger.warning(
+                "sources_metadata_load_failed", extra={"error.message": str(e)}
+            )
             self._sources = {}
 
         return self._sources
@@ -238,7 +240,9 @@ class SkillInstaller:
         if source_key in sources and not force:
             existing = sources[source_key]
             if Path(existing.install_path).exists():
-                logger.info(f"Skill source already installed: {repo}")
+                logger.info(
+                    "skill_source_already_installed", extra={"skill.source": repo}
+                )
                 return existing
 
         # Clone the repo
@@ -249,7 +253,7 @@ class SkillInstaller:
         if install_path.exists():
             shutil.rmtree(install_path)
 
-        logger.info(f"Cloning {repo}...")
+        logger.info("skill_source_cloning", extra={"skill.source": repo})
         clone_cmd = ["git", "clone", "--depth", "1"]
         if ref:
             clone_cmd.extend(["--branch", ref])
@@ -280,8 +284,12 @@ class SkillInstaller:
         self._save_metadata()
 
         logger.info(
-            f"Installed {repo}: {len(discovered_skills)} skill(s) found "
-            f"({', '.join(discovered_skills) if discovered_skills else 'none'})"
+            "skill_source_installed",
+            extra={
+                "skill.source": repo,
+                "count": len(discovered_skills),
+                "skills": discovered_skills,
+            },
         )
         return source
 
@@ -320,7 +328,9 @@ class SkillInstaller:
         if source_key in sources and not force:
             existing = sources[source_key]
             if Path(existing.install_path).exists():
-                logger.info(f"Skill source already installed: {path}")
+                logger.info(
+                    "skill_source_already_installed", extra={"skill.source": str(path)}
+                )
                 return existing
 
         # Create symlink
@@ -331,7 +341,13 @@ class SkillInstaller:
             symlink_path.unlink()
 
         symlink_path.symlink_to(resolved_path)
-        logger.info(f"Created symlink: {symlink_path} -> {resolved_path}")
+        logger.info(
+            "skill_source_symlinked",
+            extra={
+                "symlink_path": str(symlink_path),
+                "target_path": str(resolved_path),
+            },
+        )
 
         # Discover skills (root level or skills/ subdirectory)
         discovered_skills = self._discover_all_skills(resolved_path)
@@ -350,8 +366,12 @@ class SkillInstaller:
         self._save_metadata()
 
         logger.info(
-            f"Installed {path}: {len(discovered_skills)} skill(s) found "
-            f"({', '.join(discovered_skills) if discovered_skills else 'none'})"
+            "skill_source_installed",
+            extra={
+                "skill.source": str(path),
+                "count": len(discovered_skills),
+                "skills": discovered_skills,
+            },
         )
         return source
 
@@ -412,16 +432,22 @@ class SkillInstaller:
         # Remove files
         if install_path.is_symlink():
             install_path.unlink()
-            logger.info(f"Removed symlink: {install_path}")
+            logger.info(
+                "skill_source_symlink_removed", extra={"file.path": str(install_path)}
+            )
         elif install_path.exists():
             shutil.rmtree(install_path)
-            logger.info(f"Removed directory: {install_path}")
+            logger.info(
+                "skill_source_directory_removed", extra={"file.path": str(install_path)}
+            )
 
         # Remove from metadata
         del sources[source_key]
         self._save_metadata()
 
-        logger.info(f"Uninstalled: {repo or path}")
+        logger.info(
+            "skill_source_uninstalled", extra={"skill.source": repo or str(path)}
+        )
         return True
 
     def update(
@@ -444,7 +470,7 @@ class SkillInstaller:
         if repo:
             source_key = f"repo:{repo}"
             if source_key not in sources:
-                logger.warning(f"Source not found: {repo}")
+                logger.warning("skill_source_not_found", extra={"skill.source": repo})
                 return None
             sources_to_update = [sources[source_key]]
         else:
@@ -454,10 +480,13 @@ class SkillInstaller:
         for source in sources_to_update:
             install_path = Path(source.install_path)
             if not install_path.exists():
-                logger.warning(f"Install path missing: {install_path}")
+                logger.warning(
+                    "skill_source_install_path_missing",
+                    extra={"file.path": str(install_path)},
+                )
                 continue
 
-            logger.info(f"Updating {source.repo}...")
+            logger.info("skill_source_updating", extra={"skill.source": source.repo})
 
             # Fetch and reset to origin
             fetch_cmd = ["git", "fetch", "origin"]
@@ -466,7 +495,11 @@ class SkillInstaller:
             )
             if result.returncode != 0:
                 logger.warning(
-                    f"Failed to fetch {source.repo}: {result.stderr.strip()}"
+                    "skill_source_fetch_failed",
+                    extra={
+                        "skill.source": source.repo,
+                        "error.message": result.stderr.strip(),
+                    },
                 )
                 continue
 
@@ -483,7 +516,11 @@ class SkillInstaller:
             )
             if result.returncode != 0:
                 logger.warning(
-                    f"Failed to reset {source.repo}: {result.stderr.strip()}"
+                    "skill_source_reset_failed",
+                    extra={
+                        "skill.source": source.repo,
+                        "error.message": result.stderr.strip(),
+                    },
                 )
                 continue
 
@@ -495,7 +532,10 @@ class SkillInstaller:
             source.skills = self._discover_all_skills(install_path)
 
             self._save_metadata()
-            logger.info(f"Updated {source.repo} to {source.commit_sha}")
+            logger.info(
+                "skill_source_updated",
+                extra={"skill.source": source.repo, "commit_sha": source.commit_sha},
+            )
             updated = source
 
         return updated
@@ -518,7 +558,13 @@ class SkillInstaller:
                 installed = self.install_source(source)
                 results.append(installed)
             except SkillInstallerError as e:
-                logger.error(f"Failed to install {source.repo or source.path}: {e}")
+                logger.error(
+                    "skill_install_failed",
+                    extra={
+                        "skill.source": source.repo or str(source.path),
+                        "error.message": str(e),
+                    },
+                )
 
         return results
 

@@ -161,7 +161,7 @@ class SessionHandler:
                     display_name=message.display_name,
                 )
             except Exception:
-                logger.warning("Failed to upsert user", exc_info=True)
+                logger.warning("user_upsert_failed", exc_info=True)
 
         # Update chat state with participant info
         await self._update_chat_state(message, thread_id)
@@ -472,7 +472,11 @@ class SessionHandler:
                 first_kept_entry_id="",
             )
             logger.info(
-                f"Recorded compaction: {compaction.tokens_before} -> {compaction.tokens_after} tokens"
+                "compaction_recorded",
+                extra={
+                    "tokens_before": compaction.tokens_before,
+                    "tokens_after": compaction.tokens_after,
+                },
             )
 
     async def persist_steered_messages(

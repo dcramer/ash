@@ -174,7 +174,13 @@ class SkillRegistry:
                             source_ref=source_ref,
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to load skill from {skill_file}: {e}")
+                        logger.warning(
+                            "skill_load_failed",
+                            extra={
+                                "file.path": str(skill_file),
+                                "error.message": str(e),
+                            },
+                        )
 
         for md_file in skills_dir.glob("*.md"):
             try:
@@ -185,7 +191,10 @@ class SkillRegistry:
                     source_ref=source_ref,
                 )
             except Exception as e:
-                logger.warning(f"Failed to load skill from {md_file}: {e}")
+                logger.warning(
+                    "skill_load_failed",
+                    extra={"file.path": str(md_file), "error.message": str(e)},
+                )
 
         for pattern in ("*.yaml", "*.yml"):
             for yaml_file in skills_dir.glob(pattern):
@@ -197,11 +206,17 @@ class SkillRegistry:
                         source_ref=source_ref,
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to load skill from {yaml_file}: {e}")
+                    logger.warning(
+                        "skill_load_failed",
+                        extra={"file.path": str(yaml_file), "error.message": str(e)},
+                    )
 
         count_loaded = len(self._skills) - count_before
         if count_loaded > 0:
-            logger.info(f"Loaded {count_loaded} skills from {skills_dir}")
+            logger.info(
+                "skills_loaded",
+                extra={"count": count_loaded, "file.path": str(skills_dir)},
+            )
 
     @staticmethod
     def _resolve_allowed_tools(data: dict[str, Any]) -> list[str]:
@@ -229,9 +244,8 @@ class SkillRegistry:
         unknown = set(data.keys()) - KNOWN_FRONTMATTER_FIELDS
         if unknown:
             logger.warning(
-                "Skill '%s' has unknown frontmatter fields: %s",
-                name,
-                ", ".join(sorted(unknown)),
+                "skill_unknown_frontmatter_fields",
+                extra={"skill.name": name, "fields": ", ".join(sorted(unknown))},
             )
 
         return SkillDefinition(

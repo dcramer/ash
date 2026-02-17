@@ -296,9 +296,11 @@ class UseAgentTool(Tool):
                 resolved_model = self._config.get_model(model_alias).model
             except Exception:
                 logger.warning(
-                    "Failed to resolve model '%s' for agent '%s'",
-                    model_alias,
-                    agent_config.name,
+                    "model_resolution_failed",
+                    extra={
+                        "model.alias": model_alias,
+                        "agent.name": agent_config.name,
+                    },
                 )
 
         # Start agent session for logging

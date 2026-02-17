@@ -120,7 +120,7 @@ class SendMessageTool(Tool):
             )
         except Exception as e:
             # Log but don't fail - message was sent successfully
-            logger.warning("Failed to persist sent message to session: %s", e)
+            logger.warning("message_persist_failed", extra={"error.message": str(e)})
 
         return ToolResult.success(
             f"Message sent successfully (id: {sent_id})",

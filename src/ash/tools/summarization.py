@@ -146,7 +146,7 @@ class ToolResultSummarizer:
             )
 
         except Exception as e:
-            logger.warning(f"Summarization failed: {e}")
+            logger.warning("summarization_failed", extra={"error.message": str(e)})
             # Fall back to original content
             return SummarizationResult(
                 content=content,

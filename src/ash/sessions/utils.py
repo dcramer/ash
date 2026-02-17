@@ -161,8 +161,8 @@ def validate_tool_pairs(
         result_msgs.append(_make_synthetic_results(pending_tool_uses))
         result_ids.append("")
         logger.warning(
-            "Inserted %d synthetic tool_result(s) for orphaned tool_use(s)",
-            len(pending_tool_uses),
+            "synthetic_tool_results_inserted",
+            extra={"count": len(pending_tool_uses)},
         )
         pending_tool_uses.clear()
 

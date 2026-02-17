@@ -50,7 +50,8 @@ class ChatStateManager:
                 self._state = ChatState.model_validate(data)
             except (json.JSONDecodeError, ValueError):
                 logger.warning(
-                    "Corrupt state.json, creating fresh: %s", self._state_path
+                    "corrupt_state_file",
+                    extra={"path": str(self._state_path)},
                 )
                 self._state = self._create_default_state()
         else:

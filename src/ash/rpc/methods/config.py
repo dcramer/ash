@@ -57,14 +57,18 @@ def register_config_methods(
             if skill_registry is not None:
                 skill_registry.reload_workspace(config.workspace)
                 logger.info(
-                    f"Reloaded {len(skill_registry)} skills from {config.workspace}"
+                    "skills_reloaded",
+                    extra={
+                        "skill_count": len(skill_registry),
+                        "workspace": str(config.workspace),
+                    },
                 )
 
-            logger.info("Config reloaded successfully")
+            logger.info("config_reloaded")
             return {"success": True}
 
         except Exception as e:
-            logger.exception("Failed to reload config")
+            logger.error("config_reload_failed", exc_info=True)
             return {"success": False, "error": str(e)}
 
     # Register handlers

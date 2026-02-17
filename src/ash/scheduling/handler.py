@@ -147,19 +147,23 @@ class ScheduledTaskHandler:
         # Validate routing context
         if not entry.provider or not entry.chat_id:
             logger.error(
-                f"Skipping scheduled task - missing routing context: "
-                f"provider={entry.provider!r}, chat_id={entry.chat_id!r}"
+                "scheduled_task_missing_routing",
+                extra={
+                    "provider": entry.provider,
+                    "messaging.chat_id": entry.chat_id,
+                },
             )
             raise ValueError("Missing required routing context (provider/chat_id)")
 
-        chat_display = (
-            f"{entry.chat_title} ({entry.chat_id})"
-            if entry.chat_title
-            else entry.chat_id
-        )
         logger.info(
-            f"Executing scheduled task: {entry.message[:50]}... "
-            f"(provider={entry.provider}, chat={chat_display})"
+            "scheduled_task_executing",
+            extra={
+                "schedule.entry_id": entry.id,
+                "schedule.message_preview": entry.message[:50],
+                "provider": entry.provider,
+                "messaging.chat_id": entry.chat_id,
+                "messaging.chat_title": entry.chat_title,
+            },
         )
 
         # Compute fire time and delay
@@ -172,9 +176,13 @@ class ScheduledTaskHandler:
         fire_time_str = fire_time.astimezone(tz).strftime("%Y-%m-%d %H:%M")
 
         logger.info(
-            f"Scheduled task timing: entry={entry.id}, "
-            f"fire_time={fire_time_str}, current={current_time_str}, "
-            f"delay={format_delay(delay_seconds)}"
+            "scheduled_task_timing",
+            extra={
+                "schedule.entry_id": entry.id,
+                "schedule.fire_time": fire_time_str,
+                "schedule.current_time": current_time_str,
+                "schedule.delay": format_delay(delay_seconds),
+            },
         )
 
         # Build schedule line
@@ -219,7 +227,7 @@ class ScheduledTaskHandler:
             if response.text and not is_no_reply(response.text):
                 await self._send_response(entry, session, response.text)
             else:
-                logger.info("Scheduled task produced no sendable response")
+                logger.info("scheduled_task_no_response")
 
         except ChildActivated as ca:
             # A skill was invoked — run the subagent loop to completion
@@ -230,10 +238,12 @@ class ScheduledTaskHandler:
                 if result_text and not is_no_reply(result_text):
                     await self._send_response(entry, session, result_text)
             else:
-                logger.error("ChildActivated raised but agent_executor not available")
+                logger.error("scheduled_task_no_executor")
 
         except Exception as e:
-            logger.error(f"Scheduled task failed: {e}", exc_info=True)
+            logger.error(
+                "scheduled_task_failed", extra={"error.message": str(e)}, exc_info=True
+            )
 
     async def _send_response(
         self,
@@ -247,7 +257,7 @@ class ScheduledTaskHandler:
 
         sender = self._senders.get(entry.provider)
         if not sender:
-            logger.warning(f"No sender configured for provider: {entry.provider}")
+            logger.warning("no_sender_configured", extra={"provider": entry.provider})
             return
 
         response_text = text
@@ -257,8 +267,12 @@ class ScheduledTaskHandler:
         reply_to = session.context.reply_to_message_id
         message_id = await sender(entry.chat_id, response_text, reply_to=reply_to)
         logger.info(
-            f"Sent scheduled response to {entry.provider}/{entry.chat_id}: "
-            f"{response_text[:50]}..."
+            "scheduled_response_sent",
+            extra={
+                "provider": entry.provider,
+                "messaging.chat_id": entry.chat_id,
+                "response.preview": response_text[:50],
+            },
         )
 
         registrar = self._registrars.get(entry.provider)
@@ -334,17 +348,14 @@ class ScheduledTaskHandler:
                         TurnAction.MAX_ITERATIONS,
                     ):
                         logger.error(
-                            "Parent agent error after skill completion: %s",
-                            result2.text,
+                            "parent_agent_error_after_skill",
+                            extra={"error.message": result2.text},
                         )
                         stack.pop()
                         break
                     # INTERRUPT in scheduled mode — no user to interact with
                     elif result2.action == TurnAction.INTERRUPT:
-                        logger.warning(
-                            "Agent interrupted in scheduled mode (no user), "
-                            "feeding error to parent"
-                        )
+                        logger.warning("agent_interrupted_scheduled_mode")
                         break
                 else:
                     # No parent or no tool_use_id — just collect text
@@ -387,8 +398,8 @@ class ScheduledTaskHandler:
                         TurnAction.MAX_ITERATIONS,
                     ):
                         logger.error(
-                            "Parent agent error after subagent text: %s",
-                            result2.text,
+                            "parent_agent_error_after_subagent",
+                            extra={"error.message": result2.text},
                         )
                         stack.pop()
                         break
@@ -403,7 +414,7 @@ class ScheduledTaskHandler:
 
             elif result.action == TurnAction.INTERRUPT:
                 # No user in scheduled mode — feed error to parent
-                logger.warning("Subagent interrupted in scheduled mode (no user)")
+                logger.warning("subagent_interrupted_scheduled_mode")
                 completed = stack.pop()
                 parent = stack.top
                 if parent and completed.parent_tool_use_id:
@@ -419,9 +430,11 @@ class ScheduledTaskHandler:
 
             elif result.action in (TurnAction.ERROR, TurnAction.MAX_ITERATIONS):
                 logger.error(
-                    "Subagent error in scheduled mode: action=%s text=%s",
-                    result.action.name,
-                    result.text,
+                    "subagent_error_scheduled_mode",
+                    extra={
+                        "action": result.action.name,
+                        "error.message": result.text,
+                    },
                 )
                 completed = stack.pop()
                 parent = stack.top

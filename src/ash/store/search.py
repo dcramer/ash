@@ -173,7 +173,7 @@ class SearchMixin:
         try:
             query_embedding = await self._embeddings.embed(query)
         except Exception:
-            logger.warning("Failed to generate query embedding", exc_info=True)
+            logger.warning("query_embedding_failed", exc_info=True)
             return []
 
         vector_results = self._index.search(query_embedding, limit=limit * 2)
@@ -240,7 +240,7 @@ class SearchMixin:
                     if existing is None or result.similarity > existing.similarity:
                         results_by_id[result.id] = result
         except Exception:
-            logger.warning("Person-graph search failed", exc_info=True)
+            logger.warning("person_graph_search_failed", exc_info=True)
 
         # Sort by similarity and limit
         sorted_results = sorted(

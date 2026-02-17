@@ -48,7 +48,7 @@ def _get_parse_mode(mode: str | None) -> ParseMode:
     try:
         return ParseMode[normalized]
     except KeyError:
-        logger.warning(f"Unknown parse mode '{mode}', using MARKDOWN")
+        logger.warning("unknown_parse_mode", extra={"parse_mode": mode})
         return ParseMode.MARKDOWN
 
 
@@ -363,11 +363,8 @@ class TelegramProvider(Provider):
 
         # Log ALL incoming messages with processing decision
         logger.info(
-            "[dim]%s:[/dim] %s",
-            username or user_id,
-            _truncate(message.text or message.caption or "", 40),
+            "incoming_message",
             extra={
-                "event": "incoming_message",
                 "external_id": str(message.message_id),
                 "chat_id": str(message.chat.id),
                 "user_id": str(user_id) if user_id else None,
@@ -376,6 +373,7 @@ class TelegramProvider(Provider):
                 "was_processed": processing_mode is not None,
                 "processing_mode": processing_mode,
                 "skip_reason": skip_reason,
+                "input.preview": _truncate(message.text or message.caption or "", 40),
             },
         )
 
@@ -452,13 +450,15 @@ class TelegramProvider(Provider):
         try:
             bot_info = await self._bot.get_me()
             self._bot_username = bot_info.username
-            logger.info(f"Bot username: @{self._bot_username}")
+            logger.info(
+                "bot_username_resolved", extra={"bot_username": self._bot_username}
+            )
         except Exception as e:
-            logger.warning(f"Failed to get bot info: {e}")
+            logger.warning("bot_info_failed", extra={"error.message": str(e)})
 
         self._running = True
 
-        logger.info("Starting Telegram bot in polling mode")
+        logger.info("telegram_bot_starting")
         await self._bot.delete_webhook(drop_pending_updates=False)
         # Disable aiogram's signal handling - let the app handle SIGINT/SIGTERM
         await self._dp.start_polling(
@@ -484,7 +484,7 @@ class TelegramProvider(Provider):
         except Exception as e:
             logger.debug(f"Error closing bot session: {e}")
 
-        logger.info("Telegram bot stopped")
+        logger.info("telegram_bot_stopped")
 
     def _setup_handlers(self) -> None:
         """Set up message handlers on the dispatcher."""
@@ -543,12 +543,12 @@ class TelegramProvider(Provider):
             try:
                 file = await self._bot.get_file(photo.file_id)
                 if not file.file_path:
-                    logger.warning("Photo file has no file_path")
+                    logger.warning("photo_file_no_path")
                     return
                 file_data = await self._bot.download_file(file.file_path)
                 image_bytes = file_data.read() if file_data else None
             except Exception as e:
-                logger.warning(f"Failed to download photo: {e}")
+                logger.warning("photo_download_failed", extra={"error.message": str(e)})
                 image_bytes = None
 
             # Create image attachment
@@ -848,7 +848,7 @@ class TelegramProvider(Provider):
                 reaction=[ReactionTypeEmoji(emoji=emoji)],
             )
         except Exception as e:
-            logger.warning(f"Failed to set reaction: {e}")
+            logger.warning("reaction_failed", extra={"error.message": str(e)})
 
     async def clear_reaction(self, chat_id: str, message_id: str) -> None:
         try:

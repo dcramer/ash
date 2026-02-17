@@ -134,9 +134,11 @@ class ContextGatherer:
             duration_ms = int((time.monotonic() - start_time) * 1000)
             if memory_context and memory_context.memories:
                 logger.info(
-                    "Memory retrieval: %d memories | %dms",
-                    len(memory_context.memories),
-                    duration_ms,
+                    "memory_retrieval",
+                    extra={
+                        "memory.count": len(memory_context.memories),
+                        "duration_ms": duration_ms,
+                    },
                 )
                 for mem in memory_context.memories:
                     logger.debug(
@@ -146,12 +148,15 @@ class ContextGatherer:
                         mem.metadata,
                     )
             else:
-                logger.info("Memory retrieval: 0 memories | %dms", duration_ms)
+                logger.info(
+                    "memory_retrieval",
+                    extra={"memory.count": 0, "duration_ms": duration_ms},
+                )
 
             return memory_context
 
         except Exception:
-            logger.warning("Failed to retrieve memory context", exc_info=True)
+            logger.warning("memory_retrieval_failed", exc_info=True)
             return None
 
     async def _list_known_people(
@@ -165,5 +170,5 @@ class ContextGatherer:
         try:
             return await self._store.list_people(limit=50)
         except Exception:
-            logger.warning("Failed to get known people", exc_info=True)
+            logger.warning("known_people_failed", exc_info=True)
             return None
