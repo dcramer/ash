@@ -1,5 +1,36 @@
+schema_version: "2.0"
 name: Identity Resolution
 description: Tests person recognition and identity resolution across sessions and users
+
+defaults:
+  agent: memory
+  drain_extraction: true
+  session:
+    provider: telegram
+    user_id: user-david
+    username: dcramer
+    display_name: "David Cramer"
+    chat_type: private
+
+setup:
+  - chat_id: eval-group-123
+    chat_type: supergroup
+    chat_title: "Eval Test Group"
+    user_id: user-david
+    username: dcramer
+    display_name: "David Cramer"
+    messages:
+      - "My wife Sukhpreet loves hiking, we went on a great trail last weekend."
+    drain_extraction: true
+  - chat_id: eval-group-123
+    chat_type: supergroup
+    chat_title: "Eval Test Group"
+    user_id: user-sukhpreet
+    username: sksembhi
+    display_name: "Sukhpreet Sembhi"
+    messages:
+      - "I'm training for a marathon next month, so excited!"
+    drain_extraction: true
 
 cases:
   - id: identity_group_chat_recall
@@ -38,6 +69,17 @@ cases:
 
   - id: identity_the_prefix_resolution
     description: Resolve "the boss" via relationship prefix stripping
+    skip_suite_setup: true
+    setup:
+      - chat_id: eval-group-123
+        chat_type: supergroup
+        chat_title: "Eval Test Group"
+        user_id: user-david
+        username: dcramer
+        display_name: "David Cramer"
+        messages:
+          - "My boss Marcus is intense about deadlines, we had a long sprint review today."
+        drain_extraction: true
     prompt: "What does the boss think about our timeline?"
     expected_behavior: |
       The assistant should resolve "the boss" to the person with the "boss"

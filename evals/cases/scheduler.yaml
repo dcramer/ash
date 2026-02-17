@@ -1,23 +1,48 @@
+schema_version: "2.0"
 name: Scheduler Behavior
 description: Multi-step scheduling scenario testing creation, timezone, recurring, listing, and cancellation
+
+defaults:
+  agent: default
+  session:
+    provider: eval
+    user_id: eval-user
 
 cases:
   - id: scheduler_multi_step
     description: Multi-turn scheduling flow covering recurring, timezone, one-off, listing, and cancellation
-    prompt: "Set up a daily standup reminder at 10am EST on weekdays. Also remind me about my dentist appointment this Saturday at 2pm."
-    expected_behavior: |
-      The assistant should handle both requests in a single turn:
-      1. A recurring weekday reminder at 10am EST for standup
-      2. A one-off reminder for Saturday at 2pm for the dentist
+    turns:
+      - prompt: "Set up a daily standup reminder at 10am EST on weekdays. Also remind me about my dentist appointment this Saturday at 2pm."
+        expected_behavior: |
+          The assistant should handle both requests in a single turn:
+          1. A recurring weekday reminder at 10am EST for standup
+          2. A one-off reminder for Saturday at 2pm for the dentist
+        criteria:
+          - Acknowledges the recurring standup reminder (weekdays at 10am EST)
+          - Acknowledges the one-off dentist reminder (Saturday at 2pm)
+          - Handles the EST timezone specification
+          - Distinguishes between recurring and one-off scheduling
+          - Provides confirmation of both reminders
 
-      It should use scheduling tools and confirm both reminders with
-      their respective times and recurrence patterns.
-    criteria:
-      - Acknowledges the recurring standup reminder (weekdays at 10am EST)
-      - Acknowledges the one-off dentist reminder (Saturday at 2pm)
-      - Handles the EST timezone specification
-      - Distinguishes between recurring and one-off scheduling
-      - Provides confirmation of both reminders
+      - prompt: "What reminders do I have?"
+        expected_behavior: |
+          The assistant should list the scheduled reminders, including
+          the recurring standup at 10am EST on weekdays and the dentist
+          appointment this Saturday at 2pm.
+        criteria:
+          - Mentions the standup/daily reminder
+          - Mentions the dentist appointment
+          - Shows both reminders (not just one)
+
+      - prompt: "Cancel the dentist one"
+        expected_behavior: |
+          The assistant should cancel the dentist appointment reminder
+          while keeping the standup reminder active. It should confirm
+          which reminder was cancelled.
+        criteria:
+          - Cancels the dentist reminder specifically
+          - Confirms the cancellation
+          - Does not cancel the standup reminder
     tags:
       - scheduler
       - recurring

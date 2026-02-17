@@ -1,5 +1,18 @@
+schema_version: "2.0"
 name: Memory Recall
 description: Tests end-to-end memory flow - extraction from one session, recall in another
+
+defaults:
+  agent: memory
+  drain_extraction: true
+  session:
+    provider: eval
+    user_id: eval-user
+
+setup:
+  - messages:
+      - "My favorite programming language is Rust and I live in Portland, Oregon."
+    drain_extraction: true
 
 cases:
   - id: memory_recall_cross_session

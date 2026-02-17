@@ -52,12 +52,85 @@ class EvalConfig:
             self.cases_dir = Path(self.cases_dir)
 
 
+# --- v2.0 YAML schema models ---
+
+
+class SessionConfig(BaseModel):
+    """Session configuration for eval cases.
+
+    session_id is always auto-generated — never specify it manually.
+    """
+
+    provider: str | None = None
+    chat_id: str | None = None
+    user_id: str | None = None
+    username: str | None = None
+    display_name: str | None = None
+    chat_type: str | None = None
+    chat_title: str | None = None
+
+
+class SetupStep(BaseModel):
+    """A setup step that seeds messages into an agent before the eval prompt.
+
+    session_id is always auto-generated — never specify it manually.
+    """
+
+    provider: str | None = None
+    chat_id: str | None = None
+    user_id: str | None = None
+    username: str | None = None
+    display_name: str | None = None
+    chat_type: str | None = None
+    chat_title: str | None = None
+    messages: list[str] = Field(default_factory=list)
+    drain_extraction: bool = False
+
+
+class EvalTurn(BaseModel):
+    """A single turn in a multi-turn eval case."""
+
+    prompt: str
+    expected_behavior: str = ""
+    criteria: list[str] = Field(default_factory=list)
+
+
+class MemoryAssertion(BaseModel):
+    """Structural assertion about stored memories."""
+
+    content_contains: list[str] = Field(default_factory=list)
+    memory_type: str | None = None
+
+
+class PersonAssertion(BaseModel):
+    """Structural assertion about stored person records."""
+
+    name_contains: str
+
+
+class Assertions(BaseModel):
+    """Structural assertions to check after eval execution."""
+
+    memories: list[MemoryAssertion] = Field(default_factory=list)
+    people: list[PersonAssertion] = Field(default_factory=list)
+
+
+class SuiteDefaults(BaseModel):
+    """Default configuration for all cases in a suite."""
+
+    agent: str = "default"
+    drain_extraction: bool = False
+    session: SessionConfig = Field(default_factory=SessionConfig)
+
+
 class EvalCase(BaseModel):
     """A single evaluation case."""
 
     id: str = Field(description="Unique identifier for the case")
-    description: str = Field(description="Human-readable description of the test")
-    prompt: str = Field(description="User message to send to the agent")
+    description: str = Field(
+        default="", description="Human-readable description of the test"
+    )
+    prompt: str = Field(default="", description="User message to send to the agent")
     expected_behavior: str = Field(
         default="",
         description="Description of what the agent should do",
@@ -87,6 +160,32 @@ class EvalCase(BaseModel):
         description="Optional input data to pass to the agent context",
     )
 
+    # v2.0 fields
+    session: SessionConfig | None = Field(
+        default=None,
+        description="Per-case session config (merges with suite defaults)",
+    )
+    setup: list[SetupStep] | None = Field(
+        default=None,
+        description="Per-case setup steps (replaces suite setup when present)",
+    )
+    skip_suite_setup: bool = Field(
+        default=False,
+        description="Skip suite-level setup for this case",
+    )
+    turns: list[EvalTurn] | None = Field(
+        default=None,
+        description="Multi-turn conversation (mutually exclusive with prompt)",
+    )
+    assertions: Assertions | None = Field(
+        default=None,
+        description="Structural assertions to check after execution",
+    )
+    agent: str | None = Field(
+        default=None,
+        description="Per-case agent override (default | memory)",
+    )
+
 
 class EvalSuite(BaseModel):
     """A suite of evaluation cases."""
@@ -105,6 +204,16 @@ class EvalSuite(BaseModel):
     )
     cases: list[EvalCase] = Field(
         default_factory=list, description="List of eval cases"
+    )
+
+    # v2.0 fields
+    defaults: SuiteDefaults = Field(
+        default_factory=SuiteDefaults,
+        description="Default configuration for all cases",
+    )
+    setup: list[SetupStep] | None = Field(
+        default=None,
+        description="Suite-level setup steps (run before each case)",
     )
 
 

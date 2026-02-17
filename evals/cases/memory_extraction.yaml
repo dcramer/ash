@@ -1,5 +1,16 @@
+schema_version: "2.0"
 name: Memory Extraction
 description: Tests that explicit "remember" requests store facts with proper classification via the extraction pipeline
+
+defaults:
+  agent: memory
+  drain_extraction: true
+  session:
+    provider: telegram
+    user_id: eval-user
+    username: david
+    display_name: "David Cramer"
+    chat_type: private
 
 cases:
   - id: extraction_relationship_stored
@@ -16,6 +27,12 @@ cases:
       - A person record for Sarah exists
     expected_tools:
       - bash
+    assertions:
+      memories:
+        - content_contains: [sarah, sister]
+          memory_type: relationship
+      people:
+        - name_contains: sarah
     tags:
       - memory
       - extraction
@@ -32,12 +49,25 @@ cases:
       - The memory has preference type
     expected_tools:
       - bash
+    assertions:
+      memories:
+        - content_contains: [dark mode]
+          memory_type: preference
     tags:
       - memory
       - extraction
 
   - id: extraction_recall_after_store
     description: A fact stored via explicit remember is recallable in a new session
+    skip_suite_setup: true
+    setup:
+      - user_id: eval-user
+        username: david
+        display_name: "David Cramer"
+        chat_type: private
+        messages:
+          - "Remember that Sarah is my sister"
+        drain_extraction: true
     prompt: "What do you know about my sister?"
     expected_behavior: |
       The agent should recall that the user's sister is Sarah, based on the

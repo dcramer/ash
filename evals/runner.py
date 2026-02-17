@@ -1,5 +1,6 @@
 """Eval execution utilities."""
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,12 +12,22 @@ from ash.core.agent import Agent
 from ash.core.session import SessionState
 from ash.llm.base import LLMProvider
 from evals.judge import LLMJudge, check_forbidden_tools
-from evals.types import EvalCase, EvalConfig, EvalSuite, JudgeResult
+from evals.types import (
+    Assertions,
+    EvalCase,
+    EvalConfig,
+    EvalSuite,
+    JudgeResult,
+    SessionConfig,
+    SetupStep,
+    SuiteDefaults,
+)
 
 if TYPE_CHECKING:
     from ash.agents.base import Agent as SubAgent
     from ash.agents.base import AgentContext, AgentResult
     from ash.agents.executor import AgentExecutor
+    from ash.core.types import AgentComponents
 
 logger = logging.getLogger(__name__)
 
@@ -303,6 +314,383 @@ async def run_eval_suite(
         )
 
     return report
+
+
+# --- v2.0 YAML-driven orchestration ---
+
+
+def build_session_state(
+    config: SessionConfig,
+    defaults: SuiteDefaults,
+    *,
+    case_id: str = "eval",
+) -> SessionState:
+    """Build a SessionState by merging case config with suite defaults.
+
+    Args:
+        config: Per-case session configuration.
+        defaults: Suite-level defaults.
+        case_id: Case ID for generating fallback session_id.
+
+    Returns:
+        Configured SessionState.
+    """
+    default_session = defaults.session
+
+    import uuid
+
+    session_id = f"eval-{case_id}-{uuid.uuid4().hex[:8]}"
+    provider = config.provider or default_session.provider or "eval"
+    chat_id = config.chat_id or default_session.chat_id or "eval-chat"
+    user_id = config.user_id or default_session.user_id or "eval-user"
+
+    session = SessionState(
+        session_id=session_id,
+        provider=provider,
+        chat_id=chat_id,
+        user_id=user_id,
+    )
+
+    # Apply context fields
+    username = config.username or default_session.username
+    display_name = config.display_name or default_session.display_name
+    chat_type = config.chat_type or default_session.chat_type
+    chat_title = config.chat_title or default_session.chat_title
+
+    if username:
+        session.context.username = username
+    if display_name:
+        session.context.display_name = display_name
+    if chat_type:
+        session.context.chat_type = chat_type
+    if chat_title:
+        session.context.chat_title = chat_title
+
+    return session
+
+
+def _build_setup_session(
+    step: SetupStep,
+    defaults: SuiteDefaults,
+) -> SessionState:
+    """Build a SessionState from a setup step, merging with defaults."""
+    config = SessionConfig(
+        provider=step.provider,
+        chat_id=step.chat_id,
+        user_id=step.user_id,
+        username=step.username,
+        display_name=step.display_name,
+        chat_type=step.chat_type,
+        chat_title=step.chat_title,
+    )
+    return build_session_state(config, defaults, case_id="setup")
+
+
+async def drain_extraction_tasks() -> None:
+    """Wait for all background memory extraction tasks to complete."""
+    await asyncio.sleep(0)
+    for task in asyncio.all_tasks():
+        if task.get_name() == "memory_extraction":
+            await task
+
+
+async def dump_state(components: "AgentComponents") -> None:
+    """Log extracted memories and people for eval debugging."""
+    if components.memory_manager:
+        store = components.memory_manager
+        memories = await store.get_all_memories()
+        logger.info("=== Extracted memories (%d) ===", len(memories))
+        for m in memories:
+            from ash.graph.edges import get_subject_person_ids
+
+            subjects = get_subject_person_ids(store.graph, m.id)
+            logger.info(
+                "  [%s] %s (type=%s, owner=%s, subjects=%s, source=%s)",
+                m.id[:8],
+                m.content[:80],
+                m.memory_type.value,
+                m.owner_user_id,
+                subjects,
+                m.source_username,
+            )
+
+    if components.person_manager:
+        people = await components.person_manager.list_people()
+        logger.info("=== People records (%d) ===", len(people))
+        for p in people:
+            alias_strs = [a.value if hasattr(a, "value") else str(a) for a in p.aliases]
+            rel_strs = [
+                f"{r.term}(by={r.stated_by})" if hasattr(r, "term") else str(r)
+                for r in p.relationships
+            ]
+            logger.info(
+                "  [%s] %s (aliases=%s, relationships=%s)",
+                p.id[:8],
+                p.name,
+                alias_strs,
+                rel_strs,
+            )
+
+
+async def run_setup_steps(
+    components: "AgentComponents",
+    steps: list[SetupStep],
+    defaults: SuiteDefaults,
+) -> None:
+    """Execute setup steps: send seeding messages and optionally drain extraction.
+
+    Args:
+        components: Agent components to use.
+        steps: Setup steps to execute.
+        defaults: Suite defaults for session config.
+    """
+    agent = components.agent
+    for step in steps:
+        session = _build_setup_session(step, defaults)
+        user_id = step.user_id or defaults.session.user_id or "eval-user"
+        for message in step.messages:
+            await agent.process_message(
+                user_message=message,
+                session=session,
+                user_id=user_id,
+            )
+        if step.drain_extraction:
+            await drain_extraction_tasks()
+
+    await dump_state(components)
+
+
+async def check_structural_assertions(
+    components: "AgentComponents",
+    assertions: Assertions,
+) -> list[str]:
+    """Check structural assertions against the memory/people store.
+
+    Args:
+        components: Agent components with memory/person managers.
+        assertions: Structural assertions to check.
+
+    Returns:
+        List of failure messages (empty if all passed).
+    """
+    failures: list[str] = []
+
+    if assertions.memories and components.memory_manager:
+        store = components.memory_manager
+        memories = await store.get_all_memories()
+
+        for ma in assertions.memories:
+            # Find memories matching content_contains
+            matching = memories
+            for keyword in ma.content_contains:
+                matching = [m for m in matching if keyword.lower() in m.content.lower()]
+
+            if not matching:
+                failures.append(
+                    f"No memory found containing {ma.content_contains}. "
+                    f"All memories: {[m.content for m in memories]}"
+                )
+                continue
+
+            if ma.memory_type:
+                typed = [m for m in matching if m.memory_type.value == ma.memory_type]
+                if not typed:
+                    failures.append(
+                        f"Memory matching {ma.content_contains} found but type "
+                        f"is {matching[0].memory_type.value}, expected {ma.memory_type}"
+                    )
+
+    if assertions.people:
+        if not components.memory_manager:
+            failures.append("No memory manager available for people assertions")
+        else:
+            people = await components.memory_manager.list_people()
+
+            for pa in assertions.people:
+                matching = [
+                    p for p in people if pa.name_contains.lower() in p.name.lower()
+                ]
+                if not matching:
+                    failures.append(
+                        f"No person record found containing '{pa.name_contains}'. "
+                        f"People: {[p.name for p in people]}"
+                    )
+
+    return failures
+
+
+async def run_yaml_eval_case(
+    components: "AgentComponents",
+    suite: EvalSuite,
+    case: EvalCase,
+    judge_llm: LLMProvider,
+    *,
+    config: EvalConfig | None = None,
+) -> list[EvalResult]:
+    """Run a single YAML-defined eval case through the full orchestration.
+
+    Handles setup, session building, single/multi-turn execution,
+    extraction draining, structural assertions, and judging.
+
+    Args:
+        components: Agent components (from fixture).
+        suite: The eval suite containing defaults and setup.
+        case: The eval case to run.
+        judge_llm: LLM provider for judging.
+        config: Eval configuration.
+
+    Returns:
+        List of EvalResult (one per turn).
+    """
+    if config is None:
+        config = EvalConfig()
+
+    defaults = suite.defaults
+    agent = components.agent
+
+    # 1. Run setup steps
+    if case.setup is not None:
+        # Per-case setup replaces suite setup
+        await run_setup_steps(components, case.setup, defaults)
+    elif suite.setup and not case.skip_suite_setup:
+        await run_setup_steps(components, suite.setup, defaults)
+
+    # 2. Build eval session from merged config
+    case_session_config = case.session or SessionConfig()
+    session = build_session_state(case_session_config, defaults, case_id=case.id)
+
+    # 3. Determine user_id for message sending
+    user_id = case_session_config.user_id or defaults.session.user_id or "eval-user"
+
+    # 4. Determine if we should drain extraction
+    should_drain = defaults.drain_extraction
+
+    results: list[EvalResult] = []
+
+    if case.turns:
+        # Multi-turn case
+        for turn in case.turns:
+            turn_case = EvalCase(
+                id=f"{case.id}_turn{len(results) + 1}",
+                description=case.description,
+                prompt=turn.prompt,
+                expected_behavior=turn.expected_behavior,
+                criteria=turn.criteria,
+            )
+
+            result = await _execute_and_judge(
+                agent, turn_case, session, user_id, judge_llm, config
+            )
+            results.append(result)
+
+        if should_drain:
+            await drain_extraction_tasks()
+    else:
+        # Single-turn case
+        result = await _execute_and_judge(
+            agent, case, session, user_id, judge_llm, config
+        )
+        results.append(result)
+
+        if should_drain:
+            await drain_extraction_tasks()
+
+    # 5. Structural assertions
+    if case.assertions:
+        assertion_failures = await check_structural_assertions(
+            components, case.assertions
+        )
+        if assertion_failures:
+            # Create a failing result for structural assertion failures
+            results.append(
+                EvalResult(
+                    case=EvalCase(
+                        id=f"{case.id}_assertions",
+                        description="Structural assertions",
+                        prompt=case.prompt,
+                    ),
+                    response_text="",
+                    tool_calls=[],
+                    judge_result=JudgeResult(
+                        passed=False,
+                        score=0.0,
+                        reasoning="Structural assertion failures: "
+                        + "; ".join(assertion_failures),
+                        criteria_scores={},
+                    ),
+                    error="; ".join(assertion_failures),
+                )
+            )
+
+    return results
+
+
+async def _execute_and_judge(
+    agent: Agent,
+    case: EvalCase,
+    session: SessionState,
+    user_id: str,
+    judge_llm: LLMProvider,
+    config: EvalConfig,
+) -> EvalResult:
+    """Execute a single prompt and judge the response."""
+    try:
+        response = await agent.process_message(
+            user_message=case.prompt,
+            session=session,
+            user_id=user_id,
+        )
+
+        # Pre-judge: forbidden tools check
+        forbidden_result = check_forbidden_tools(case, response.tool_calls)
+        if forbidden_result:
+            return EvalResult(
+                case=case,
+                response_text=response.text,
+                tool_calls=response.tool_calls,
+                judge_result=forbidden_result,
+            )
+
+        # LLM judge
+        judge = LLMJudge(judge_llm, config)
+        judge_result = await judge.evaluate(
+            case=case,
+            response_text=response.text,
+            tool_calls=response.tool_calls,
+        )
+
+        logger.info("[%s] Response: %s", case.id, response.text)
+        logger.info(
+            "[%s] Judge: passed=%s, score=%s",
+            case.id,
+            judge_result.passed,
+            judge_result.score,
+        )
+        logger.info("[%s] Reasoning: %s", case.id, judge_result.reasoning)
+        if judge_result.criteria_scores:
+            logger.info("[%s] Criteria: %s", case.id, judge_result.criteria_scores)
+
+        return EvalResult(
+            case=case,
+            response_text=response.text,
+            tool_calls=response.tool_calls,
+            judge_result=judge_result,
+        )
+
+    except Exception as e:
+        logger.error(f"Eval case {case.id} failed with error: {e}")
+        return EvalResult(
+            case=case,
+            response_text="",
+            tool_calls=[],
+            judge_result=JudgeResult(
+                passed=False,
+                score=0.0,
+                reasoning=f"Execution error: {e}",
+                criteria_scores={},
+            ),
+            error=str(e),
+        )
 
 
 # Multi-turn evaluation support for agents with checkpoints
