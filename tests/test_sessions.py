@@ -11,6 +11,8 @@ from ash.sessions.manager import SessionManager
 from ash.sessions.reader import SessionReader
 from ash.sessions.types import (
     MessageEntry,
+    ToolResultEntry,
+    ToolUseEntry,
     parse_entry,
     session_key,
 )
@@ -90,7 +92,6 @@ class TestSessionWriter:
     @pytest.mark.asyncio
     async def test_tool_entries_context_only(self, writer, session_dir):
         """Tool use/results only go to context, not history."""
-        from ash.sessions.types import ToolResultEntry, ToolUseEntry
 
         await writer.write_tool_use(
             ToolUseEntry.create(
@@ -122,8 +123,6 @@ class TestSessionReader:
         from ash.sessions.types import (
             MessageEntry,
             SessionHeader,
-            ToolResultEntry,
-            ToolUseEntry,
         )
 
         session_dir.mkdir(parents=True)
@@ -488,3 +487,356 @@ class TestSessionBranching:
         # m1 should not have parent_id (None = omitted)
         m1_data = json.loads(lines[1])
         assert "parent_id" not in m1_data
+
+
+class TestSubagentIsolation:
+    """Tests for subagent session isolation — entries route to subagents/ dir."""
+
+    @pytest.fixture
+    def sessions_path(self, tmp_path):
+        return tmp_path / "sessions"
+
+    @pytest.fixture
+    def manager(self, sessions_path):
+        return SessionManager(provider="cli", sessions_path=sessions_path)
+
+    @pytest.mark.asyncio
+    async def test_subagent_messages_go_to_subagent_file(self, manager):
+        """Messages with agent_session_id write to subagents/{id}.jsonl, not context.jsonl."""
+        await manager.ensure_session()
+
+        # Main agent message — goes to context.jsonl
+        await manager.add_user_message("Main message")
+
+        # Subagent message — goes to subagents/sub1.jsonl
+        await manager.add_user_message("Subagent msg", agent_session_id="sub1")
+
+        # context.jsonl has only the main message (+ header)
+        context_lines = (
+            (manager._session_dir / "context.jsonl").read_text().strip().split("\n")
+        )
+        context_entries = [json.loads(line) for line in context_lines]
+        messages = [e for e in context_entries if e["type"] == "message"]
+        assert len(messages) == 1
+        assert messages[0]["content"] == "Main message"
+
+        # subagents/sub1.jsonl has the subagent message
+        subagent_file = manager._session_dir / "subagents" / "sub1.jsonl"
+        assert subagent_file.exists()
+        sub_lines = subagent_file.read_text().strip().split("\n")
+        sub_entries = [json.loads(line) for line in sub_lines]
+        assert len(sub_entries) == 1
+        assert sub_entries[0]["content"] == "Subagent msg"
+
+    @pytest.mark.asyncio
+    async def test_subagent_tool_use_goes_to_subagent_file(self, manager):
+        """Tool use with agent_session_id routes to subagent file."""
+        await manager.ensure_session()
+
+        await manager.add_tool_use(
+            tool_use_id="t1",
+            name="bash",
+            input_data={"command": "ls"},
+            agent_session_id="sub1",
+        )
+
+        # Not in context.jsonl
+        context = (manager._session_dir / "context.jsonl").read_text()
+        assert "tool_use" not in context or '"type":"session"' in context
+
+        # In subagent file
+        subagent_file = manager._session_dir / "subagents" / "sub1.jsonl"
+        assert subagent_file.exists()
+        entry = json.loads(subagent_file.read_text().strip())
+        assert entry["type"] == "tool_use"
+        assert entry["name"] == "bash"
+
+    @pytest.mark.asyncio
+    async def test_subagent_tool_result_goes_to_subagent_file(self, manager):
+        """Tool result with agent_session_id routes to subagent file."""
+        await manager.ensure_session()
+
+        await manager.add_tool_result(
+            tool_use_id="t1",
+            output="file1.txt",
+            success=True,
+            agent_session_id="sub1",
+        )
+
+        # In subagent file
+        subagent_file = manager._session_dir / "subagents" / "sub1.jsonl"
+        assert subagent_file.exists()
+        entry = json.loads(subagent_file.read_text().strip())
+        assert entry["type"] == "tool_result"
+        assert entry["output"] == "file1.txt"
+
+    @pytest.mark.asyncio
+    async def test_subagent_assistant_with_tool_use_content(self, manager):
+        """Assistant message with ContentBlock tool uses routes to subagent file."""
+        await manager.ensure_session()
+
+        await manager.add_assistant_message(
+            [
+                TextContent(text="Checking..."),
+                ToolUse(id="t1", name="bash", input={"command": "ls"}),
+            ],
+            agent_session_id="sub1",
+        )
+
+        # subagent file should have both the message and the auto-extracted tool_use
+        subagent_file = manager._session_dir / "subagents" / "sub1.jsonl"
+        lines = subagent_file.read_text().strip().split("\n")
+        entries = [json.loads(line) for line in lines]
+
+        types = [e["type"] for e in entries]
+        assert "message" in types
+        assert "tool_use" in types
+
+    @pytest.mark.asyncio
+    async def test_agent_session_marker_stays_in_context(self, manager):
+        """AgentSessionEntry marker always goes to context.jsonl (parent timeline)."""
+        await manager.ensure_session()
+
+        agent_session_id = await manager.start_agent_session(
+            parent_tool_use_id="tu1",
+            agent_type="skill",
+            agent_name="debug-self",
+        )
+
+        # Marker in context.jsonl
+        context_lines = (
+            (manager._session_dir / "context.jsonl").read_text().strip().split("\n")
+        )
+        context_entries = [json.loads(line) for line in context_lines]
+        agent_entries = [e for e in context_entries if e["type"] == "agent_session"]
+        assert len(agent_entries) == 1
+        assert agent_entries[0]["id"] == agent_session_id
+
+
+class TestSubagentBackwardCompat:
+    """Tests for backward compat: _build_messages filters legacy subagent entries."""
+
+    @pytest.mark.asyncio
+    async def test_build_messages_filters_legacy_subagent_messages(self, tmp_path):
+        """Messages with agent_session_id in old context.jsonl are filtered out."""
+        session_dir = tmp_path / "test_session"
+        session_dir.mkdir(parents=True)
+
+        lines = [
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00"}',
+            '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00"}',
+            # Legacy subagent entries that shouldn't appear in main context
+            '{"type":"message","id":"m3","role":"user","content":"subagent prompt","created_at":"2026-01-11T10:00:03+00:00","agent_session_id":"sub1"}',
+            '{"type":"message","id":"m4","role":"assistant","content":"subagent response","created_at":"2026-01-11T10:00:04+00:00","agent_session_id":"sub1"}',
+            '{"type":"message","id":"m5","role":"user","content":"Follow up","created_at":"2026-01-11T10:00:05+00:00"}',
+        ]
+        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
+
+        reader = SessionReader(session_dir)
+        messages, ids = await reader.load_messages_for_llm()
+
+        # Should see m1, m2, m5 — not m3, m4
+        assert len(messages) == 3
+        contents = [
+            m.content if isinstance(m.content, str) else str(m.content)
+            for m in messages
+        ]
+        assert contents == ["Hello", "Hi!", "Follow up"]
+        assert ids == ["m1", "m2", "m5"]
+
+    @pytest.mark.asyncio
+    async def test_build_messages_filters_legacy_subagent_tool_results(self, tmp_path):
+        """Tool results with agent_session_id in old context.jsonl are filtered out."""
+        session_dir = tmp_path / "test_session"
+        session_dir.mkdir(parents=True)
+
+        lines = [
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"message","id":"m1","role":"user","content":"Do something","created_at":"2026-01-11T10:00:01+00:00"}',
+            '{"type":"message","id":"m2","role":"assistant","content":[{"type":"text","text":"Checking"},{"type":"tool_use","id":"t1","name":"bash","input":{}}],"created_at":"2026-01-11T10:00:02+00:00"}',
+            '{"type":"tool_use","id":"t1","message_id":"m2","name":"bash","input":{}}',
+            '{"type":"tool_result","tool_use_id":"t1","output":"main result","success":true}',
+            # Legacy subagent tool entries
+            '{"type":"tool_use","id":"t2","message_id":"m2","name":"bash","input":{},"agent_session_id":"sub1"}',
+            '{"type":"tool_result","tool_use_id":"t2","output":"subagent result","success":true,"agent_session_id":"sub1"}',
+        ]
+        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
+
+        reader = SessionReader(session_dir)
+        messages, _ = await reader.load_messages_for_llm()
+
+        # Find tool results in the messages
+        from ash.llm.types import ToolResult
+
+        tool_results = []
+        for msg in messages:
+            if isinstance(msg.content, list):
+                for block in msg.content:
+                    if isinstance(block, ToolResult):
+                        tool_results.append(block)
+
+        # Should only have t1 result, not t2 (subagent)
+        assert len(tool_results) == 1
+        assert tool_results[0].tool_use_id == "t1"
+        assert tool_results[0].content == "main result"
+
+    @pytest.mark.asyncio
+    async def test_collect_tool_use_ids_filters_subagent(self, tmp_path):
+        """_collect_tool_use_ids skips entries with agent_session_id."""
+        session_dir = tmp_path / "test_session"
+        session_dir.mkdir(parents=True)
+
+        reader = SessionReader(session_dir)
+
+        from ash.sessions.types import parse_entry
+
+        entries = [
+            parse_entry(
+                {
+                    "type": "tool_use",
+                    "id": "t1",
+                    "message_id": "m1",
+                    "name": "bash",
+                    "input": {},
+                }
+            ),
+            parse_entry(
+                {
+                    "type": "tool_use",
+                    "id": "t2",
+                    "message_id": "m2",
+                    "name": "bash",
+                    "input": {},
+                    "agent_session_id": "sub1",
+                }
+            ),
+        ]
+
+        tool_ids = reader._collect_tool_use_ids(entries)
+        assert "t1" in tool_ids
+        assert "t2" not in tool_ids
+
+
+class TestDMThreading:
+    """Tests for DM threading via resolve_reply_chain_thread."""
+
+    @pytest.fixture
+    def handler(self, tmp_path):
+        from ash.config.models import ConversationConfig
+        from ash.providers.telegram.handlers.session_handler import SessionHandler
+
+        return SessionHandler(
+            provider_name="telegram",
+            config=None,
+            conversation_config=ConversationConfig(),
+        )
+
+    def _make_message(
+        self,
+        msg_id: str,
+        chat_id: str = "user123",
+        chat_type: str = "private",
+        reply_to: str | None = None,
+    ):
+        from ash.providers.base import IncomingMessage
+
+        return IncomingMessage(
+            id=msg_id,
+            chat_id=chat_id,
+            user_id="user123",
+            text="test",
+            reply_to_message_id=reply_to,
+            metadata={"chat_type": chat_type},
+        )
+
+    @pytest.mark.asyncio
+    async def test_standalone_dm_creates_new_thread(self, handler):
+        """A standalone DM (no reply) gets a new thread_id."""
+        msg = self._make_message("100", chat_type="private")
+        thread_id = await handler.resolve_reply_chain_thread(msg)
+        assert thread_id is not None
+
+    @pytest.mark.asyncio
+    async def test_dm_reply_joins_parent_thread(self, handler):
+        """A DM reply to a known message joins the parent's thread."""
+        # First message establishes a thread
+        msg1 = self._make_message("100", chat_type="private")
+        thread1 = await handler.resolve_reply_chain_thread(msg1)
+
+        # Reply to first message should join same thread
+        msg2 = self._make_message("101", chat_type="private", reply_to="100")
+        thread2 = await handler.resolve_reply_chain_thread(msg2)
+
+        assert thread2 == thread1
+
+    @pytest.mark.asyncio
+    async def test_group_message_still_gets_thread(self, handler):
+        """Group messages continue to get thread IDs (existing behavior)."""
+        msg = self._make_message("100", chat_type="group")
+        thread_id = await handler.resolve_reply_chain_thread(msg)
+        assert thread_id is not None
+
+    @pytest.mark.asyncio
+    async def test_legacy_dm_reply_returns_none(self, handler, tmp_path):
+        """Reply to a legacy session message (pre-threading) returns None."""
+        from ash.sessions.manager import SessionManager
+
+        # Set up a legacy session with an existing message
+        legacy_manager = SessionManager(
+            provider="telegram",
+            chat_id="user123",
+            user_id="user123",
+            sessions_path=tmp_path / "sessions",
+        )
+        await legacy_manager.ensure_session()
+        await legacy_manager.add_user_message("old msg", metadata={"external_id": "50"})
+
+        # Inject the legacy manager into the handler
+        handler._session_managers[legacy_manager.session_key] = legacy_manager
+
+        msg = self._make_message("101", chat_type="private", reply_to="50")
+        thread_id = await handler.resolve_reply_chain_thread(msg)
+
+        # Should return None to continue using legacy session
+        assert thread_id is None
+
+
+class TestChatHistoryInjection:
+    """Tests for removal of cross-thread chat history injection."""
+
+    @pytest.mark.asyncio
+    async def test_session_has_no_chat_history(self, tmp_path):
+        """get_or_create_session should not inject chat_history into context."""
+        from ash.config.models import ConversationConfig
+        from ash.providers.base import IncomingMessage
+        from ash.providers.telegram.handlers.session_handler import SessionHandler
+        from ash.sessions.manager import SessionManager
+
+        handler = SessionHandler(
+            provider_name="telegram",
+            config=None,
+            conversation_config=ConversationConfig(),
+        )
+
+        msg = IncomingMessage(
+            id="100",
+            chat_id="chat1",
+            user_id="user1",
+            text="hello",
+            metadata={"chat_type": "private"},
+        )
+
+        # Set up a session manager to avoid filesystem issues
+        sm = SessionManager(
+            provider="telegram",
+            chat_id="chat1",
+            user_id="user1",
+            sessions_path=tmp_path / "sessions",
+        )
+        handler._session_managers[sm.session_key] = sm
+
+        session = await handler.get_or_create_session(msg)
+
+        # chat_history should not be populated (injection removed)
+        assert not getattr(session.context, "chat_history", None)

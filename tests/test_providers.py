@@ -324,34 +324,31 @@ class TestTelegramMessageHandler:
 
     async def test_message_persistence(self, handler, incoming_message, tmp_path):
         """Test messages are persisted to JSONL files."""
-        from ash.sessions import SessionManager, SessionReader
+        from ash.sessions import SessionReader
 
-        # Set up handler to use temp path for sessions
-        session_manager = SessionManager(
-            provider="telegram",
-            chat_id="456",
-            user_id="789",
-            sessions_path=tmp_path,
-        )
-        handler._session_handler._session_managers[session_manager.session_key] = (
-            session_manager
-        )
+        # Patch sessions path so any session manager created by the handler
+        # writes to tmp_path (DM threading now assigns a thread_id, creating
+        # a new session manager we can't pre-register)
+        with patch("ash.sessions.manager.get_sessions_path", return_value=tmp_path):
+            await handler.handle_message(incoming_message)
 
-        # Handle the message
-        await handler.handle_message(incoming_message)
-
-        # Check JSONL files for stored messages
-        reader = SessionReader(session_manager.session_dir)
-        entries = await reader.load_entries()
-
-        # Filter to just messages
+        # Find the session directory that was created
         from ash.sessions.types import MessageEntry
 
-        messages = [e for e in entries if isinstance(e, MessageEntry)]
+        session_dirs = [d for d in tmp_path.iterdir() if d.is_dir()]
+        assert len(session_dirs) >= 1
 
-        # Should have at least the user message persisted
-        assert len(messages) >= 1
-        assert any(m.role == "user" and m.content == "Hello!" for m in messages)
+        # Check at least one session has the user message
+        found = False
+        for session_dir in session_dirs:
+            reader = SessionReader(session_dir)
+            entries = await reader.load_entries()
+            messages = [e for e in entries if isinstance(e, MessageEntry)]
+            if any(m.role == "user" and m.content == "Hello!" for m in messages):
+                found = True
+                break
+
+        assert found, "User message 'Hello!' not found in any session"
 
     async def test_handle_message_error_sends_error_message(
         self, handler, mock_provider, mock_agent, incoming_message

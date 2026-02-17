@@ -128,6 +128,10 @@ class SessionReader:
                 continue
 
             if isinstance(entry, MessageEntry):
+                # Backward compat: skip subagent messages from legacy sessions
+                # that wrote them into the parent's context.jsonl
+                if entry.agent_session_id is not None:
+                    continue
                 flush_pending_results()
                 content = self._convert_content(entry.content)
                 if not content:
@@ -144,7 +148,9 @@ class SessionReader:
                 )
 
             elif (
-                isinstance(entry, ToolResultEntry) and entry.tool_use_id in tool_use_ids
+                isinstance(entry, ToolResultEntry)
+                and entry.tool_use_id in tool_use_ids
+                and entry.agent_session_id is None  # Skip legacy subagent results
             ):
                 pending_results.append(
                     ToolResult(
@@ -160,9 +166,13 @@ class SessionReader:
     def _collect_tool_use_ids(self, entries: list[Entry]) -> set[str]:
         tool_use_ids: set[str] = set()
         for entry in entries:
-            if isinstance(entry, ToolUseEntry):
+            if isinstance(entry, ToolUseEntry) and entry.agent_session_id is None:
                 tool_use_ids.add(entry.id)
-            elif isinstance(entry, MessageEntry) and isinstance(entry.content, list):
+            elif (
+                isinstance(entry, MessageEntry)
+                and entry.agent_session_id is None
+                and isinstance(entry.content, list)
+            ):
                 for block in entry.content:
                     if isinstance(block, dict) and block.get("type") == "tool_use":
                         tool_use_ids.add(block["id"])

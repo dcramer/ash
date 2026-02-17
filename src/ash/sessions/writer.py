@@ -91,6 +91,19 @@ class SessionWriter:
         """Write an agent session entry to context.jsonl only."""
         await self._write_context_entry(entry)
 
+    async def write_subagent_entry(self, agent_session_id: str, data: dict) -> None:
+        """Write an entry to a subagent-specific JSONL file.
+
+        Subagent traces are stored separately from the main context to prevent
+        tool use noise from polluting the parent agent's recency window.
+        """
+        subagent_dir = self.session_dir / "subagents"
+        subagent_dir.mkdir(parents=True, exist_ok=True)
+        path = subagent_dir / f"{agent_session_id}.jsonl"
+        line = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        async with aiofiles.open(path, "a", encoding="utf-8") as f:
+            await f.write(line + "\n")
+
     async def _append_context(self, data: dict) -> None:
         """Append a JSON line to context.jsonl.
 

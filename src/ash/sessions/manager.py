@@ -131,7 +131,10 @@ class SessionManager:
             agent_session_id=agent_session_id,
             parent_id=parent_id or self._current_message_id,
         )
-        await self._writer.write_message(entry)
+        if agent_session_id is not None:
+            await self._writer.write_subagent_entry(agent_session_id, entry.to_dict())
+        else:
+            await self._writer.write_message(entry)
         self._current_message_id = entry.id
         return entry.id
 
@@ -162,7 +165,10 @@ class SessionManager:
             agent_session_id=agent_session_id,
             parent_id=parent_id or self._current_message_id,
         )
-        await self._writer.write_message(entry)
+        if agent_session_id is not None:
+            await self._writer.write_subagent_entry(agent_session_id, entry.to_dict())
+        else:
+            await self._writer.write_message(entry)
         self._current_message_id = entry.id
 
         # Auto-extract tool uses from ContentBlock content
@@ -180,7 +186,12 @@ class SessionManager:
                         input_data=block.input,
                         agent_session_id=agent_session_id,
                     )
-                    await self._writer.write_tool_use(tool_entry)
+                    if agent_session_id is not None:
+                        await self._writer.write_subagent_entry(
+                            agent_session_id, tool_entry.to_dict()
+                        )
+                    else:
+                        await self._writer.write_tool_use(tool_entry)
 
         return entry.id
 
@@ -199,7 +210,10 @@ class SessionManager:
             input_data=input_data,
             agent_session_id=agent_session_id,
         )
-        await self._writer.write_tool_use(entry)
+        if agent_session_id is not None:
+            await self._writer.write_subagent_entry(agent_session_id, entry.to_dict())
+        else:
+            await self._writer.write_tool_use(entry)
 
     async def add_tool_result(
         self,
@@ -219,7 +233,10 @@ class SessionManager:
             metadata=metadata,
             agent_session_id=agent_session_id,
         )
-        await self._writer.write_tool_result(entry)
+        if agent_session_id is not None:
+            await self._writer.write_subagent_entry(agent_session_id, entry.to_dict())
+        else:
+            await self._writer.write_tool_result(entry)
 
     async def add_compaction(
         self,

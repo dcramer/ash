@@ -141,16 +141,6 @@ class SessionHandler:
         if session_mode != "fresh":
             await self._load_persistent_session(session, session_manager, message)
 
-        # Load recent chat-level history for cross-session context
-        from ash.chats.history import read_recent_chat_history
-
-        history_limit = self._conversation_config.chat_history_limit
-        entries = read_recent_chat_history(
-            self._provider_name, message.chat_id, limit=history_limit
-        )
-        if entries:
-            session.context.chat_history = [e.model_dump(mode="json") for e in entries]
-
         # Upsert user via Store
         if self._store:
             try:
@@ -304,15 +294,15 @@ class SessionHandler:
             )
 
     async def resolve_reply_chain_thread(self, message: IncomingMessage) -> str | None:
-        """For group messages, determine thread_id from reply chain.
+        """Determine thread_id from reply chain for any chat type.
+
+        Works for both DMs and groups. In DMs, standalone messages start new
+        threads while replies join the parent thread — preventing context bleed
+        between unrelated conversations.
 
         Returns:
-            thread_id for session key, or None for DMs or legacy sessions
+            thread_id for session key, or None for legacy sessions
         """
-        chat_type = message.metadata.get("chat_type")
-        if chat_type not in ("group", "supergroup"):
-            return None  # DMs don't use reply threading
-
         # If Telegram already provides a thread_id (forum topics), use it
         if thread_id := message.metadata.get("thread_id"):
             return thread_id
