@@ -77,7 +77,7 @@ class NumpyVectorIndex:
         vec = np.array(embedding, dtype=np.float32)
         norm = np.linalg.norm(vec)
         if norm == 0:
-            logger.warning("zero_norm_embedding", extra={"node_id": node_id})
+            logger.warning("zero_norm_embedding", extra={"vector.node_id": node_id})
             return
         vec /= norm
 

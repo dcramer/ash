@@ -104,17 +104,52 @@ Use dot-namespaced, snake_case attribute names. Prefer OTel semantic conventions
 | Attribute | Usage |
 |-----------|-------|
 | `duration_ms` | Execution duration in milliseconds |
+| `count` | Generic count for items loaded/registered/etc. |
+| `memory.id` | Memory identifier |
+| `memory.ids` | List of memory identifiers |
+| `memory.count` | Number of memories affected |
+| `memory.type` | Memory type (fact, preference, etc.) |
+| `memory.content` | Truncated memory content |
+| `person.id` | Person node identifier |
+| `person.ids` | List of person identifiers |
+| `person.name` | Person display name |
+| `person.alias` | Person alias value |
+| `person.relationship` | Relationship term |
+| `person.seed_ids` | Seed person IDs for graph traversal |
+| `user.username` | Username being queried/referenced |
+| `fact.speaker` | Speaker of extracted fact |
+| `fact.subject` | Subject of extracted fact |
+| `fact.content` | Truncated fact content |
+| `fact.confidence` | Extraction confidence score |
+| `fact.type` | Fact memory type |
+| `fact.subjects` | List of fact subjects |
+| `source.username` | Source username for attribution |
 | `skill.name` | Skill identifier |
 | `skill.source` | Skill source (repo URL or path) |
+| `skill.ref` | Skill source git ref |
 | `session.key` | Session key |
-| `output.preview` | Truncated output for context |
-| `memory.id` | Memory identifier |
-| `memory.count` | Number of memories affected |
+| `schedule.entry_id` | Schedule entry identifier |
 | `schedule.cron` | Cron expression |
-| `schedule.task_id` | Scheduled task identifier |
+| `schedule.timezone` | Schedule timezone |
+| `schedule.message_preview` | Truncated scheduled message |
+| `messaging.provider` | Messaging platform (telegram, etc.) |
+| `messaging.chat_id` | Chat/conversation identifier |
+| `messaging.chat_title` | Chat display title |
+| `messaging.provider_id` | Provider-specific identifier |
+| `telegram.bot_username` | Bot username |
+| `telegram.bot_name` | Bot display name |
+| `telegram.parse_mode` | Message parse mode |
+| `checkpoint.id` | Checkpoint identifier |
+| `output.preview` | Truncated output for context |
+| `input.preview` | Truncated input for context |
 | `sandbox.image` | Container image name |
+| `socket.path` | Unix socket path |
 | `file.path` | File path |
-| `count` | Generic count for items loaded/registered/etc. |
+| `file.line_no` | Line number in file |
+| `config.reason` | Configuration-related reason |
+| `operation.timeout` | Operation timeout value |
+| `gc.reason` | GC archive reason |
+| `vector.node_id` | Vector index node identifier |
 
 ### Rules
 

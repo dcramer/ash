@@ -86,9 +86,9 @@ class UserChatOpsMixin:
         logger.debug(
             "user_created",
             extra={
-                "user_id": entry.id,
-                "provider": provider,
-                "provider_id": provider_id,
+                "user.id": entry.id,
+                "messaging.provider": provider,
+                "messaging.provider_id": provider_id,
             },
         )
         return entry
@@ -191,9 +191,9 @@ class UserChatOpsMixin:
         logger.debug(
             "chat_created",
             extra={
-                "chat_id": entry.id,
-                "provider": provider,
-                "provider_id": provider_id,
+                "chat.id": entry.id,
+                "messaging.provider": provider,
+                "messaging.provider_id": provider_id,
             },
         )
         return entry

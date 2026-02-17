@@ -362,7 +362,9 @@ class SandboxManager:
                 timeout=timeout,
             )
         except TimeoutError:
-            logger.warning("sandbox_command_timeout", extra={"timeout": timeout})
+            logger.warning(
+                "sandbox_command_timeout", extra={"operation.timeout": timeout}
+            )
             return -1, "", f"Command timed out after {timeout} seconds"
 
         inspect_result = await asyncio.to_thread(

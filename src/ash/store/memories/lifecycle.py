@@ -38,7 +38,7 @@ class MemoryLifecycleMixin:
         for mid in archived_ids:
             logger.info(
                 "gc_archive_memory",
-                extra={"memory.id": mid, "reason": reasons[mid]},
+                extra={"memory.id": mid, "gc.reason": reasons[mid]},
             )
 
         logger.info("gc_complete", extra={"count": len(archived_ids)})

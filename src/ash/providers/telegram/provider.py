@@ -48,7 +48,7 @@ def _get_parse_mode(mode: str | None) -> ParseMode:
     try:
         return ParseMode[normalized]
     except KeyError:
-        logger.warning("unknown_parse_mode", extra={"parse_mode": mode})
+        logger.warning("unknown_parse_mode", extra={"telegram.parse_mode": mode})
         return ParseMode.MARKDOWN
 
 
@@ -451,7 +451,8 @@ class TelegramProvider(Provider):
             bot_info = await self._bot.get_me()
             self._bot_username = bot_info.username
             logger.info(
-                "bot_username_resolved", extra={"bot_username": self._bot_username}
+                "bot_username_resolved",
+                extra={"telegram.bot_username": self._bot_username},
             )
         except Exception as e:
             logger.warning("bot_info_failed", extra={"error.message": str(e)})

@@ -175,8 +175,8 @@ class TelegramMessageHandler:
         logger.info(
             "bot_response",
             extra={
-                "bot_name": bot_name,
-                "output_len": len(text) if text else 0,
+                "telegram.bot_name": bot_name,
+                "output.length": len(text) if text else 0,
                 "output.preview": (text or "")[:500],
             },
         )
@@ -600,7 +600,7 @@ class TelegramMessageHandler:
         bot_name = self._provider.bot_username or "bot"
         logger.info(
             "bot_response_sent",
-            extra={"bot_name": bot_name, "output.preview": _truncate(text)},
+            extra={"telegram.bot_name": bot_name, "output.preview": _truncate(text)},
         )
 
         from ash.providers.telegram.provider import MAX_SEND_LENGTH

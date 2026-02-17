@@ -187,7 +187,7 @@ async def sync_participates_in_edges(
         except Exception:
             logger.debug(
                 "person_resolve_failed",
-                extra={"username": participant.username},
+                extra={"user.username": participant.username},
             )
             continue
 

@@ -141,7 +141,7 @@ def _read_jsonl(path: Path) -> list[dict]:
             except json.JSONDecodeError:
                 logger.warning(
                     "corrupt_jsonl_line",
-                    extra={"line_no": line_no, "file.path": str(path)},
+                    extra={"file.line_no": line_no, "file.path": str(path)},
                 )
     return results
 

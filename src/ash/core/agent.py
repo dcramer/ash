@@ -459,7 +459,7 @@ class Agent:
                 "facts_extracted",
                 extra={
                     "count": len(facts),
-                    "speaker": speaker_info.username if speaker_info else None,
+                    "fact.speaker": speaker_info.username if speaker_info else None,
                 },
             )
             for fact in facts:
@@ -788,7 +788,7 @@ class Agent:
 
             logger.warning(
                 "max_tool_iterations",
-                extra={"max_iterations": self._config.max_tool_iterations},
+                extra={"agent.max_iterations": self._config.max_tool_iterations},
             )
             self._maybe_spawn_memory_extraction(
                 user_message, setup.effective_user_id, session
@@ -985,10 +985,13 @@ async def create_agent(
     # Create unified graph store (replaces separate memory_manager + person_manager)
     graph_store: Store | None = None
     if not graph_dir:
-        logger.info("memory_tools_disabled", extra={"reason": "no_graph_directory"})
+        logger.info(
+            "memory_tools_disabled", extra={"config.reason": "no_graph_directory"}
+        )
     elif not config.embeddings:
         logger.info(
-            "memory_tools_disabled", extra={"reason": "embeddings_not_configured"}
+            "memory_tools_disabled",
+            extra={"config.reason": "embeddings_not_configured"},
         )
     else:
         try:
@@ -997,8 +1000,8 @@ async def create_agent(
                 logger.info(
                     "memory_tools_disabled",
                     extra={
-                        "reason": "no_api_key",
-                        "provider": config.embeddings.provider,
+                        "config.reason": "no_api_key",
+                        "embeddings.provider": config.embeddings.provider,
                     },
                 )
                 raise ValueError("Embeddings API key required for memory")

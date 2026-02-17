@@ -39,7 +39,7 @@ class MemoryEvictionMixin:
         if len(evicted) < excess:
             logger.warning(
                 "eviction_insufficient",
-                extra={"excess": excess, "evicted_count": len(evicted)},
+                extra={"memory.excess": excess, "memory.evicted_count": len(evicted)},
             )
 
         return len(evicted)

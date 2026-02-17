@@ -159,7 +159,7 @@ class ScheduleWatcher:
                     "schedule.message_preview": entry.message[:50],
                     "messaging.chat_id": entry.chat_id,
                     "messaging.chat_title": entry.chat_title,
-                    "provider": entry.provider,
+                    "messaging.provider": entry.provider,
                 },
             )
             try:

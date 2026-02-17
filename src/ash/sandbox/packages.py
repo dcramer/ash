@@ -26,7 +26,7 @@ def _validate_package_names(packages: list[str]) -> list[str]:
         if _SAFE_PACKAGE_NAME.match(pkg):
             valid.append(pkg)
         else:
-            logger.warning("invalid_package_name", extra={"package_name": pkg})
+            logger.warning("invalid_package_name", extra={"package.name": pkg})
     return valid
 
 

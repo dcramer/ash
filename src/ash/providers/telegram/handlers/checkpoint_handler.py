@@ -145,7 +145,7 @@ class CheckpointHandler:
                         }
                         logger.info(
                             "checkpoint_recovered_from_log",
-                            extra={"checkpoint_id": truncated_id[:20]},
+                            extra={"checkpoint.id": truncated_id[:20]},
                         )
                         return routing, checkpoint
 
@@ -165,7 +165,7 @@ class CheckpointHandler:
                 }
                 logger.info(
                     "checkpoint_recovered_from_disk",
-                    extra={"checkpoint_id": truncated_id[:20]},
+                    extra={"checkpoint.id": truncated_id[:20]},
                 )
                 return routing, checkpoint
 
@@ -202,7 +202,7 @@ class CheckpointHandler:
         )
         if checkpoint is None or routing is None:
             logger.warning(
-                "checkpoint_not_found", extra={"checkpoint_id": context.truncated_id}
+                "checkpoint_not_found", extra={"checkpoint.id": context.truncated_id}
             )
             await callback_query.answer(
                 "Checkpoint not found. It may have expired or the session was lost.",
@@ -293,7 +293,7 @@ class CheckpointHandler:
             reason = "agent context" if not has_agent_context else "tool registry"
             logger.warning(
                 "checkpoint_fallback_to_message_flow",
-                extra={"missing": reason, "checkpoint_id": truncated_id},
+                extra={"checkpoint.missing": reason, "checkpoint.id": truncated_id},
             )
             # Clear checkpoint before fallback (fallback will create new session context)
             self.clear_checkpoint(truncated_id)
@@ -306,7 +306,7 @@ class CheckpointHandler:
             "checkpoint_resuming",
             extra={
                 "agent_name": agent_name,
-                "checkpoint_id": truncated_id[:20],
+                "checkpoint.id": truncated_id[:20],
                 "selected_option": selected_option,
             },
         )
@@ -339,7 +339,7 @@ class CheckpointHandler:
             await use_agent_tool.store_checkpoint(checkpoint_state)
             logger.info(
                 "checkpoint_restored_to_cache",
-                extra={"checkpoint_id": truncated_id},
+                extra={"checkpoint.id": truncated_id},
             )
 
         # Create tracker for resume flow (reply to checkpoint message)
@@ -439,7 +439,7 @@ class CheckpointHandler:
 
         metadata: dict[str, Any] = {
             "is_checkpoint_response": True,
-            "checkpoint_id": checkpoint.get("checkpoint_id"),
+            "checkpoint.id": checkpoint.get("checkpoint_id"),
         }
         for key in ("thread_id", "chat_type", "chat_title"):
             if value := routing.get(key):

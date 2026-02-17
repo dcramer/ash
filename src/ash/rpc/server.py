@@ -61,7 +61,7 @@ class RPCServer:
         self._socket_path.chmod(0o600)
 
         self._running = True
-        logger.info("rpc_server_started", extra={"socket": str(self._socket_path)})
+        logger.info("rpc_server_started", extra={"socket.path": str(self._socket_path)})
 
     async def stop(self) -> None:
         """Stop the RPC server."""

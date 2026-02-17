@@ -82,7 +82,7 @@ class TypedJSONL[T: Serializable]:
         if error_count > 0:
             logger.warning(
                 "jsonl_file_corrupted",
-                extra={"file.name": self.path.name, "error_count": error_count},
+                extra={"file.name": self.path.name, "error.count": error_count},
             )
 
         return entries

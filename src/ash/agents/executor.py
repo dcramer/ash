@@ -173,7 +173,10 @@ class AgentExecutor:
             except TimeoutError:
                 logger.error(
                     "agent_timed_out",
-                    extra={"gen_ai.agent.name": agent.config.name, "timeout": timeout},
+                    extra={
+                        "gen_ai.agent.name": agent.config.name,
+                        "operation.timeout": timeout,
+                    },
                 )
                 return AgentResult.error(f"Agent timed out after {timeout} seconds")
 

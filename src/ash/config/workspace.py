@@ -393,7 +393,7 @@ class WorkspaceLoader:
         else:
             workspace.soul = PERSONALITIES["zoomer"]
             workspace.soul_config = SoulConfig(extends="zoomer")
-            logger.info("soul_default_applied", extra={"personality": "zoomer"})
+            logger.info("soul_default_applied", extra={"soul.personality": "zoomer"})
 
         return workspace
 

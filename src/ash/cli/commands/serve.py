@@ -168,7 +168,7 @@ async def _run_server(
     register_log_methods(rpc_server, get_logs_path())
     register_schedule_methods(rpc_server, schedule_store)
     await rpc_server.start()
-    logger.info("rpc_server_started", extra={"socket_path": str(rpc_socket_path)})
+    logger.info("rpc_server_started", extra={"socket.path": str(rpc_socket_path)})
 
     logger.debug(f"Tools: {', '.join(components.tool_registry.names)}")
     if components.skill_registry:
@@ -354,11 +354,15 @@ async def _cleanup_server(
             except TimeoutError:
                 logger.warning(
                     "cleanup_timed_out",
-                    extra={"method": method, "timeout": cleanup_timeout},
+                    extra={
+                        "cleanup.method": method,
+                        "operation.timeout": cleanup_timeout,
+                    },
                 )
             except Exception as e:
                 logger.warning(
-                    "cleanup_error", extra={"method": method, "error.message": str(e)}
+                    "cleanup_error",
+                    extra={"cleanup.method": method, "error.message": str(e)},
                 )
 
     remove_pid_file(pid_path)

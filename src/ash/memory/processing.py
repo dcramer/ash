@@ -36,7 +36,7 @@ def validate_speaker(speaker: str | None) -> str | None:
     if not speaker:
         return None
     if speaker.lower() in _INVALID_SPEAKERS:
-        logger.debug("invalid_speaker_filtered", extra={"speaker": speaker})
+        logger.debug("invalid_speaker_filtered", extra={"fact.speaker": speaker})
         return None
     return speaker
 
@@ -117,9 +117,8 @@ async def ensure_self_person(
                 "self_person_created",
                 extra={
                     "person.id": new_person.id,
-                    "user_id": user_id,
-                    "person_name": display_name,
-                    "username": username,
+                    "person.name": display_name,
+                    "user.username": username,
                 },
             )
 
@@ -224,7 +223,8 @@ async def process_extracted_facts(
                         # Pure self-fact: owner is only subject, skip
                         # (self-fact injection handles it below)
                         logger.debug(
-                            "owner_sole_subject_skipped", extra={"subject": subject}
+                            "owner_sole_subject_skipped",
+                            extra={"fact.subject": subject},
                         )
                         continue
                     # Joint fact or non-owner subject: resolve normally
@@ -242,7 +242,7 @@ async def process_extracted_facts(
                     except Exception:
                         logger.warning(
                             "subject_resolution_failed",
-                            extra={"subject": subject},
+                            extra={"fact.subject": subject},
                             exc_info=True,
                         )
 
@@ -263,7 +263,7 @@ async def process_extracted_facts(
                                 "relationship_add_failed",
                                 extra={
                                     "person.id": pid,
-                                    "relationship": rel_term,
+                                    "person.relationship": rel_term,
                                 },
                             )
 
@@ -285,7 +285,7 @@ async def process_extracted_facts(
                                 "alias_add_failed",
                                 extra={
                                     "person.id": pid,
-                                    "alias": alias_val,
+                                    "person.alias": alias_val,
                                 },
                             )
 
@@ -322,7 +322,7 @@ async def process_extracted_facts(
                 except Exception:
                     logger.debug(
                         "stated_by_resolve_failed",
-                        extra={"source_username": source_username},
+                        extra={"source.username": source_username},
                     )
 
             new_memory = await store.add_memory(
@@ -349,8 +349,8 @@ async def process_extracted_facts(
                     "memory.type": fact.memory_type.value,
                     "memory.content": fact.content[:80],
                     "fact.confidence": fact.confidence,
-                    "source_username": source_username,
-                    "subject_person_ids": subject_person_ids,
+                    "source.username": source_username,
+                    "memory.subject_person_ids": subject_person_ids,
                 },
             )
             stored_ids.append(new_memory.id)

@@ -187,7 +187,8 @@ class ConfigWriter:
                     del source["ref"]
                 self._save()
                 logger.info(
-                    "skill_source_ref_updated", extra={"skill.source": repo, "ref": ref}
+                    "skill_source_ref_updated",
+                    extra={"skill.source": repo, "skill.ref": ref},
                 )
                 return True
 

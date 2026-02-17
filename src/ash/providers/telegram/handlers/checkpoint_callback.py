@@ -93,7 +93,9 @@ class CallbackValidator:
     def validate_options(option_index: int, options: list[str]) -> ValidationResult:
         """Validate that option index is within bounds."""
         if option_index < 0 or option_index >= len(options):
-            logger.warning("invalid_option_index", extra={"option_index": option_index})
+            logger.warning(
+                "invalid_option_index", extra={"checkpoint.option_index": option_index}
+            )
             return ValidationResult(
                 success=False, error_message="Invalid option selected"
             )
@@ -197,7 +199,7 @@ class ResponseFinalizer:
             response_text = format_checkpoint_message(new_checkpoint)
             logger.info(
                 "nested_checkpoint_detected",
-                extra={"checkpoint_id": new_truncated_id},
+                extra={"checkpoint.id": new_truncated_id},
             )
 
         sent_message_id: str | None = None
@@ -283,7 +285,7 @@ class ResponseFinalizer:
             token_count=estimate_tokens(selected_option),
             metadata={
                 "is_checkpoint_response": True,
-                "checkpoint_id": checkpoint_id,
+                "checkpoint.id": checkpoint_id,
             },
             user_id=user_id,
             username=self._routing.get("username"),

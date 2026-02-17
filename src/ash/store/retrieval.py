@@ -125,7 +125,7 @@ class RetrievalPipeline:
                 logger.warning(
                     "cross_context_retrieval_failed",
                     extra={
-                        "username": username,
+                        "user.username": username,
                         "person.ids": list(person_ids),
                     },
                 )

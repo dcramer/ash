@@ -150,7 +150,7 @@ class ScheduledTaskHandler:
                 "scheduled_task_missing_routing",
                 extra={
                     "schedule.entry_id": entry.id,
-                    "provider": entry.provider,
+                    "messaging.provider": entry.provider,
                     "messaging.chat_id": entry.chat_id,
                 },
             )
@@ -161,7 +161,7 @@ class ScheduledTaskHandler:
             extra={
                 "schedule.entry_id": entry.id,
                 "schedule.message_preview": entry.message[:50],
-                "provider": entry.provider,
+                "messaging.provider": entry.provider,
                 "messaging.chat_id": entry.chat_id,
                 "messaging.chat_title": entry.chat_title,
             },
@@ -270,7 +270,7 @@ class ScheduledTaskHandler:
         logger.info(
             "scheduled_response_sent",
             extra={
-                "provider": entry.provider,
+                "messaging.provider": entry.provider,
                 "messaging.chat_id": entry.chat_id,
                 "response.preview": response_text[:50],
             },
@@ -433,7 +433,7 @@ class ScheduledTaskHandler:
                 logger.error(
                     "subagent_error_scheduled_mode",
                     extra={
-                        "action": result.action.name,
+                        "agent.action": result.action.name,
                         "error.message": result.text,
                     },
                 )

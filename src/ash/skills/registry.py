@@ -245,7 +245,10 @@ class SkillRegistry:
         if unknown:
             logger.warning(
                 "skill_unknown_frontmatter_fields",
-                extra={"skill.name": name, "fields": ", ".join(sorted(unknown))},
+                extra={
+                    "skill.name": name,
+                    "skill.unknown_fields": ", ".join(sorted(unknown)),
+                },
             )
 
         return SkillDefinition(
