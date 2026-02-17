@@ -12,7 +12,7 @@ Use **uv**: `uv sync --all-groups`
 uv run ruff check --fix .  # Lint
 uv run ruff format .       # Format
 uv run ty check            # Type check
-uv run pytest              # Tests
+uv run pytest tests/       # Tests (unit only — never run evals here)
 ```
 
 ## Commit Attribution
@@ -68,27 +68,10 @@ Use `/dex-plan` to create tasks from planning docs (specs, roadmaps).
 
 ## Evals
 
-Evals are **end-to-end behavioral tests** that use real LLM calls. They're slow and expensive — use them to verify pure agent behavior, not unit logic. Keep the number of evals small.
+Evals are **end-to-end behavioral tests** using real LLM calls — they're slow and expensive. **Do not run evals unless explicitly asked.** They are never part of the normal "after changes" workflow. Use `/eval` to run or write them.
 
-**Structure:**
-- Cases defined in `evals/cases/*.yaml` (prompt, expected_behavior, criteria)
-- Test files in `evals/test_*.py` use `@pytest.mark.eval`
-- Responses judged by `LLMJudge` (in `evals/judge.py`) using criteria scoring
-- Fixtures in `evals/conftest.py` provide isolated agents with real LLM providers
-
-**Running evals:**
-```bash
-uv run pytest evals/ -v -s -m eval                   # All evals
-uv run pytest evals/test_memory.py -v -s -m eval      # Single suite
-uv run pytest evals/test_identity.py::TestIdentityEvals::test_identity_group_chat_recall -v -s -m eval  # Single case
-```
-
-**Requirements:** `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` environment variables (or `.env.local`).
-
-**Writing evals:**
-1. Add cases to `evals/cases/<suite>.yaml` with `id`, `prompt`, `expected_behavior`, `criteria`
-2. Write a test in `evals/test_<suite>.py` that sends messages, drains extraction, then judges
-3. Use `eval_memory_agent` fixture for memory/people tests, `eval_agent` for tool-only tests
+- Cases: `evals/cases/*.yaml` — Tests: `evals/test_*.py` (`@pytest.mark.eval`)
+- Run: `uv run pytest evals/ -v -s -m eval` (requires `ANTHROPIC_API_KEY` + `OPENAI_API_KEY`)
 
 ## Plan Mode
 
