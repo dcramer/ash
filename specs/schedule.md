@@ -109,11 +109,17 @@ When timezone is UTC, a hint is shown:
 
 ### `ash-sb schedule list`
 
+By default, only shows tasks for the current room (`ASH_CHAT_ID`). Use `--all` to see tasks across all rooms.
+
 ```bash
+# List tasks in current room (default)
 ash-sb schedule list
+
+# List tasks across all rooms
+ash-sb schedule list --all
 ```
 
-**Output:**
+**Default output (current room):**
 ```
 Scheduled tasks (times shown in America/Los_Angeles):
 
@@ -126,6 +132,24 @@ Scheduled tasks (times shown in America/Los_Angeles):
 
 Total: 2 task(s)
 ```
+
+**`--all` output (all rooms):**
+```
+Scheduled tasks (times shown in America/Los_Angeles):
+
+  a1b2c3d4  one-shot   Sat 2026-02-21 14:00 (America/Los_Angeles)
+           Room: Work Chat
+           Task: Check the build
+
+  e5f6a7b8  periodic   0 10 * * 1-5 (America/New_York)
+           Room: Personal
+           Next: Mon 2026-02-23 10:00
+           Task: Standup
+
+Total: 2 task(s)
+```
+
+If `ASH_CHAT_ID` is not set (non-provider context), all tasks are shown regardless — matching the `--all` behavior.
 
 ### `ash-sb schedule cancel`
 
@@ -165,23 +189,23 @@ Updated reminder (id=a1b2c3d4)
 ## Behavior
 
 ### One-Shot
-1. Agent runs `ash schedule create "msg" --at TIME`
-2. Command writes entry with context to `schedule.jsonl`
+1. Agent runs `ash-sb schedule create "msg" --at TIME`
+2. Command calls `schedule.create` RPC; host writes entry to `schedule.jsonl`
 3. Watcher detects entry is due
 4. Handler creates ephemeral session, runs agent with message
 5. Response sent back to original chat
 6. Entry deleted from file
 
 ### Periodic
-1. Agent runs `ash schedule create "msg" --cron "EXPR"`
-2. Command writes entry with context to `schedule.jsonl`
+1. Agent runs `ash-sb schedule create "msg" --cron "EXPR"`
+2. Command calls `schedule.create` RPC; host writes entry to `schedule.jsonl`
 3. Watcher calculates next run from cron (and `last_run` if present)
 4. Handler creates ephemeral session, runs agent with message
 5. Response sent back to original chat
 6. `last_run` updated in file, entry preserved for next run
 
 ### Update
-1. Agent runs `ash schedule update --id ID --message "new text"`
+1. Agent runs `ash-sb schedule update --id ID --message "new text"`
 2. RPC validates ownership (user_id must match) and applies changes
 3. Cannot switch entry types (one-shot ↔ periodic)
 4. `trigger_at` updates must be in the future; `cron` updates must be valid expressions
@@ -287,7 +311,8 @@ cat ~/.ash/schedule.jsonl
 5. **Provider required** - Requires provider with persistent chat for response routing
 6. **Fresh context per task** - Each task runs in ephemeral session
 7. **UTC times** - Avoids timezone confusion
-8. **Ownership filtering** - Users can only see/cancel their own tasks (RPC layer)
+8. **Ownership filtering** - Users can only cancel/update their own tasks (RPC layer); listing is scoped by room + user
 9. **Time-aware execution** - Agent can skip stale time-sensitive tasks
 10. **Timing context** - Handler provides current time, fire time, and delay
 11. **No retry** - Failed tasks are marked processed to prevent infinite loops
+12. **Room-scoped listing** - `schedule list` defaults to current room's tasks to prevent cross-room data leakage; `--all` shows all rooms with labels

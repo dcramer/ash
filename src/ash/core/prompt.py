@@ -751,6 +751,7 @@ class SystemPromptBuilder:
                 "",
                 "You were NOT directly mentioned, but the message seems relevant to you.",
                 "",
+                "- If it's a follow-up or correction to your previous response, treat it as directed at you",
                 "- Respond naturally and concisely",
                 "- Don't insert yourself into personal conversations between others",
             ]

@@ -81,11 +81,15 @@ def register_schedule_methods(
 
         Params:
             user_id: Filter to this user's entries (optional)
+            chat_id: Filter to this chat's entries (optional)
         """
         entries = store.get_entries()
         user_id = params.get("user_id")
         if user_id:
             entries = [e for e in entries if e.user_id == user_id]
+        chat_id = params.get("chat_id")
+        if chat_id:
+            entries = [e for e in entries if e.chat_id == chat_id]
         return [_entry_to_dict(e) for e in entries]
 
     async def schedule_cancel(params: dict[str, Any]) -> dict[str, Any]:

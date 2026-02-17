@@ -238,7 +238,16 @@ def create(
 
 
 @app.command("list")
-def list_tasks() -> None:
+def list_tasks(
+    all_rooms: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            "-a",
+            help="Show tasks from all rooms (default: current room only)",
+        ),
+    ] = False,
+) -> None:
     """List scheduled tasks for the current user."""
     ctx = _get_context()
     timezone = ctx["timezone"]
@@ -247,6 +256,8 @@ def list_tasks() -> None:
         params: dict[str, str | None] = {}
         if ctx["user_id"]:
             params["user_id"] = ctx["user_id"]
+        if not all_rooms and ctx["chat_id"]:
+            params["chat_id"] = ctx["chat_id"]
         entries = rpc_call("schedule.list", params)
     except ConnectionError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -279,6 +290,9 @@ def list_tasks() -> None:
             next_fire = None
 
         typer.echo(f"  {entry_id}  {task_type:<10} {schedule}")
+        if all_rooms:
+            room_label = entry.get("chat_title") or entry.get("chat_id") or "unknown"
+            typer.echo(f"           Room: {room_label}")
         if next_fire:
             typer.echo(f"           Next: {next_fire}")
         typer.echo(f"           Task: {message_preview}")

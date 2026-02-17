@@ -531,6 +531,67 @@ class TestScheduleStore:
         store.remove_and_update(remove_ids={"x"}, updates={})  # Should not raise
 
 
+class TestScheduleListRPC:
+    """Tests for schedule.list RPC method chat_id filtering."""
+
+    @pytest.fixture
+    def store(self, tmp_path: Path) -> ScheduleStore:
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "t1", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1", "user_id": "alice", "chat_id": "room_a"}\n'
+            '{"id": "t2", "cron": "0 8 * * *", "message": "Task 2", "user_id": "alice", "chat_id": "room_b"}\n'
+            '{"id": "t3", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 3", "user_id": "bob", "chat_id": "room_a"}\n'
+        )
+        return ScheduleStore(schedule_file)
+
+    @pytest.fixture
+    def schedule_list(self, store: ScheduleStore, tmp_path: Path):
+        """Create and return the schedule_list RPC handler."""
+        from ash.rpc.server import RPCServer
+
+        server = RPCServer(tmp_path / "test.sock")
+
+        from ash.rpc.methods.schedule import register_schedule_methods
+
+        register_schedule_methods(server, store)
+        return server._methods["schedule.list"]
+
+    @pytest.mark.asyncio
+    async def test_list_no_filters(self, schedule_list):
+        """List without filters returns all entries."""
+        result = await schedule_list({})
+        assert len(result) == 3
+
+    @pytest.mark.asyncio
+    async def test_list_filter_by_chat_id(self, schedule_list):
+        """List with chat_id returns only that room's entries."""
+        result = await schedule_list({"chat_id": "room_a"})
+        assert len(result) == 2
+        ids = {e["id"] for e in result}
+        assert ids == {"t1", "t3"}
+
+    @pytest.mark.asyncio
+    async def test_list_filter_by_user_id(self, schedule_list):
+        """List with user_id returns only that user's entries."""
+        result = await schedule_list({"user_id": "alice"})
+        assert len(result) == 2
+        ids = {e["id"] for e in result}
+        assert ids == {"t1", "t2"}
+
+    @pytest.mark.asyncio
+    async def test_list_filter_by_both(self, schedule_list):
+        """List with both user_id and chat_id applies both filters."""
+        result = await schedule_list({"user_id": "alice", "chat_id": "room_a"})
+        assert len(result) == 1
+        assert result[0]["id"] == "t1"
+
+    @pytest.mark.asyncio
+    async def test_list_filter_no_match(self, schedule_list):
+        """List with non-matching chat_id returns empty."""
+        result = await schedule_list({"chat_id": "nonexistent"})
+        assert len(result) == 0
+
+
 class TestScheduleWatcher:
     """Tests for ScheduleWatcher (polling/handler behavior)."""
 
