@@ -18,6 +18,7 @@ from ash.sessions.types import (
     MessageEntry,
     PersistedSessionState,
     SessionHeader,
+    StackFrameMeta,
     ToolResultEntry,
     ToolUseEntry,
     generate_id,
@@ -401,6 +402,26 @@ class SessionManager:
             if branch.head_message_id == message_id:
                 return branch
         return None
+
+    def save_active_stack(self, frames: list[StackFrameMeta] | None) -> None:
+        """Persist the active agent stack to state.json."""
+        state = self._load_state()
+        if state is None:
+            state = PersistedSessionState(
+                provider=self.provider,
+                chat_id=self.chat_id,
+                user_id=self.user_id,
+                thread_id=self.thread_id,
+            )
+        state.active_stack = frames if frames else None
+        self._save_state(state)
+
+    def load_active_stack(self) -> list[StackFrameMeta] | None:
+        """Load the persisted active agent stack from state.json."""
+        state = self._load_state()
+        if state is None:
+            return None
+        return state.active_stack
 
     def _load_state(self) -> PersistedSessionState | None:
         """Load the session state from state.json."""

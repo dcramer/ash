@@ -321,6 +321,14 @@ class TelegramMessageHandler:
                 await self._provider.clear_reaction(message.chat_id, message.id)
             return
 
+        # Try to restore a persisted stack from state.json (survives process restart)
+        if self._agent_executor and await self._try_restore_stack(message, session_key):
+            try:
+                await self._handle_stack_message(message, session_key)
+            finally:
+                await self._provider.clear_reaction(message.chat_id, message.id)
+            return
+
         session = await self._session_handler.get_or_create_session(message)
 
         if session.has_incomplete_tool_use():
@@ -364,6 +372,12 @@ class TelegramMessageHandler:
                         "child_agent": ca.child_frame.agent_name,
                     },
                 )
+                # Persist stack after initial push
+                thread_id_for_sm = message.metadata.get("thread_id")
+                sm = self._session_handler.get_session_manager(
+                    message.chat_id, message.user_id, thread_id_for_sm
+                )
+                self._persist_stack(session_key, sm)
                 bot_response_id = await self._run_orchestration_loop(
                     message,
                     session_key,
@@ -402,6 +416,184 @@ class TelegramMessageHandler:
                 await self._session_handler.persist_steered_messages(steered, thread_id)
             for msg in steered:
                 await self._provider.clear_reaction(msg.chat_id, msg.id)
+
+    def _persist_stack(self, session_key: str, sm: Any) -> None:
+        """Persist the current agent stack to state.json."""
+        stack = self._stack_manager._stacks.get(session_key)
+        if stack and not stack.is_empty:
+            metas = [f.to_meta() for f in stack.frames]
+            sm.save_active_stack(metas)
+        else:
+            sm.save_active_stack(None)
+
+    async def _try_restore_stack(
+        self, message: IncomingMessage, session_key: str
+    ) -> bool:
+        """Try to restore a persisted agent stack from state.json.
+
+        Returns True if the stack was successfully restored and loaded
+        into the AgentStackManager, False otherwise.
+        """
+        thread_id = message.metadata.get("thread_id")
+        sm = self._session_handler.get_session_manager(
+            message.chat_id, message.user_id, thread_id
+        )
+        persisted = sm.load_active_stack()
+        if not persisted:
+            return False
+
+        logger.info(
+            "stack_restore_attempt",
+            extra={"stack_depth": len(persisted)},
+        )
+
+        # Stale detection: if the top frame's agent_session_id has a matching
+        # AgentSessionCompleteEntry, the stack finished before restart — discard it
+        top_meta = persisted[-1]
+        if top_meta.agent_session_id:
+            from ash.sessions.types import AgentSessionCompleteEntry
+
+            entries = await sm._reader.load_entries()
+            for entry in entries:
+                if (
+                    isinstance(entry, AgentSessionCompleteEntry)
+                    and entry.agent_session_id == top_meta.agent_session_id
+                ):
+                    logger.info(
+                        "stack_restore_stale",
+                        extra={
+                            "agent_session_id": top_meta.agent_session_id,
+                        },
+                    )
+                    sm.save_active_stack(None)
+                    return False
+
+        frames = await self._reconstruct_frames(persisted, message, sm)
+        if frames is None:
+            logger.warning("stack_restore_failed")
+            sm.save_active_stack(None)
+            return False
+
+        # Load into AgentStackManager
+        stack = self._stack_manager.get_or_create(session_key)
+        for frame in frames:
+            stack.push(frame)
+
+        logger.info(
+            "stack_restored",
+            extra={"stack_depth": stack.depth},
+        )
+        return True
+
+    async def _reconstruct_frames(
+        self,
+        persisted: list[Any],
+        message: IncomingMessage,
+        sm: Any,
+    ) -> list[Any] | None:
+        """Reconstruct full StackFrame objects from persisted StackFrameMeta list."""
+        from ash.agents.types import AgentContext, StackFrame
+        from ash.core.session import SessionState
+
+        frames: list[StackFrame] = []
+
+        for meta in persisted:
+            # Build AgentContext from message metadata
+            agent_context = AgentContext(
+                session_id=sm.session_key,
+                user_id=message.user_id,
+                chat_id=message.chat_id,
+                thread_id=message.metadata.get("thread_id"),
+                provider=self._provider.name,
+                voice=meta.voice,
+            )
+
+            # Rebuild session
+            if meta.agent_type == "main":
+                # Main frame: load from context.jsonl via get_or_create_session
+                session = await self._session_handler.get_or_create_session(message)
+            else:
+                # Child frame: load from subagent JSONL
+                if not meta.agent_session_id:
+                    logger.warning(
+                        "stack_restore_no_agent_session_id",
+                        extra={"agent_name": meta.agent_name},
+                    )
+                    return None
+
+                subagent_entries = await sm._reader.load_subagent_entries(
+                    meta.agent_session_id
+                )
+                messages_list, _, _ = sm._reader.build_subagent_messages(
+                    subagent_entries
+                )
+
+                session = SessionState(
+                    session_id=f"agent-{meta.agent_name}-{sm.session_key}",
+                    provider=self._provider.name,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                )
+                session.messages.extend(messages_list)
+
+            # Rebuild system_prompt
+            system_prompt = self._rebuild_system_prompt(meta, agent_context)
+            if system_prompt is None:
+                logger.warning(
+                    "stack_restore_prompt_failed",
+                    extra={"agent_name": meta.agent_name},
+                )
+                return None
+
+            frame = StackFrame(
+                frame_id=meta.frame_id,
+                agent_name=meta.agent_name,
+                agent_type=meta.agent_type,
+                session=session,
+                system_prompt=system_prompt,
+                context=agent_context,
+                model=meta.model,
+                environment=meta.environment or None,
+                iteration=meta.iteration,
+                max_iterations=meta.max_iterations,
+                effective_tools=list(meta.effective_tools),
+                is_skill_agent=meta.is_skill_agent,
+                voice=meta.voice,
+                parent_tool_use_id=meta.parent_tool_use_id,
+                agent_session_id=meta.agent_session_id,
+            )
+            frames.append(frame)
+
+        return frames
+
+    def _rebuild_system_prompt(self, meta: Any, context: Any) -> str | None:
+        """Rebuild the system prompt for a stack frame from registry lookup."""
+        if meta.agent_type == "main":
+            # Use a simplified main agent prompt (no memory/people context)
+            return self._agent._build_system_prompt()
+
+        agent_name = meta.agent_name
+
+        # Try skill registry first (skill names start with "skill:")
+        if agent_name.startswith("skill:") and self._skill_registry:
+            skill_name = agent_name[len("skill:") :]
+            if self._skill_registry.has(skill_name):
+                from ash.tools.builtin.skills import SkillAgent
+
+                skill = self._skill_registry.get(skill_name)
+                agent = SkillAgent(skill)
+                return agent.build_system_prompt(context)
+
+        # Try agent registry
+        if self._agent_registry and agent_name in self._agent_registry:
+            agent = self._agent_registry.get(agent_name)
+            return agent.build_system_prompt(context)
+
+        logger.warning(
+            "stack_restore_agent_not_found",
+            extra={"agent_name": agent_name},
+        )
+        return None
 
     async def _handle_stack_message(
         self, message: IncomingMessage, session_key: str
@@ -483,6 +675,9 @@ class TelegramMessageHandler:
                             main_frame.session,
                         )
                         self._stack_manager.clear(session_key)
+                        self._persist_stack(session_key, sm)
+                    else:
+                        self._persist_stack(session_key, sm)
                     return bot_response_id  # Wait for next user message
 
                 case TurnAction.COMPLETE:
@@ -504,7 +699,9 @@ class TelegramMessageHandler:
                             )
                             thinking_msg_id = None
                         self._stack_manager.clear(session_key)
+                        self._persist_stack(session_key, sm)
                         return bot_response_id
+                    self._persist_stack(session_key, sm)
                     # Inject result into parent's pending tool_use
                     assert completed.parent_tool_use_id is not None
                     entry_tool_result = (
@@ -524,6 +721,7 @@ class TelegramMessageHandler:
                             "stack_depth": stack.depth,
                         },
                     )
+                    self._persist_stack(session_key, sm)
                     continue  # Run child's first turn
 
                 case TurnAction.INTERRUPT:
@@ -548,7 +746,9 @@ class TelegramMessageHandler:
                         )
                         thinking_msg_id = None
                         self._stack_manager.clear(session_key)
+                        self._persist_stack(session_key, sm)
                         return bot_response_id
+                    self._persist_stack(session_key, sm)
                     assert failed.parent_tool_use_id is not None
                     entry_tool_result = (
                         failed.parent_tool_use_id,
@@ -574,7 +774,9 @@ class TelegramMessageHandler:
                         )
                         thinking_msg_id = None
                         self._stack_manager.clear(session_key)
+                        self._persist_stack(session_key, sm)
                         return bot_response_id
+                    self._persist_stack(session_key, sm)
                     assert failed.parent_tool_use_id is not None
                     entry_tool_result = (
                         failed.parent_tool_use_id,

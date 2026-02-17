@@ -496,9 +496,9 @@ class StackFrameMeta(BaseModel):
     """Serializable metadata for one stack frame (stored in state.json)."""
 
     frame_id: str
-    agent_session_id: str  # Links to AgentSessionEntry in context.jsonl
+    agent_session_id: str | None = None  # Links to AgentSessionEntry in context.jsonl
     agent_name: str
-    agent_type: str  # "skill" | "agent"
+    agent_type: str  # "skill" | "agent" | "main"
     model: str | None = None
     iteration: int = 0
     max_iterations: int = 25
@@ -506,6 +506,7 @@ class StackFrameMeta(BaseModel):
     effective_tools: list[str] = []
     is_skill_agent: bool = False
     environment: dict[str, str] = {}
+    voice: str | None = None
 
 
 class BranchHead(BaseModel):

@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
+from ash.sessions.types import StackFrameMeta
+
 if TYPE_CHECKING:
     from ash.core.session import SessionState
     from ash.tools.base import ToolContext
@@ -218,6 +220,23 @@ class StackFrame:
     parent_tool_use_id: str | None = None  # tool_use_id waiting for our result
     # Session logging:
     agent_session_id: str | None = None  # For context.jsonl logging
+
+    def to_meta(self) -> StackFrameMeta:
+        """Convert to serializable metadata for persistence in state.json."""
+        return StackFrameMeta(
+            frame_id=self.frame_id,
+            agent_session_id=self.agent_session_id,
+            agent_name=self.agent_name,
+            agent_type=self.agent_type,
+            model=self.model,
+            iteration=self.iteration,
+            max_iterations=self.max_iterations,
+            parent_tool_use_id=self.parent_tool_use_id,
+            effective_tools=list(self.effective_tools),
+            is_skill_agent=self.is_skill_agent,
+            environment=dict(self.environment) if self.environment else {},
+            voice=self.voice,
+        )
 
 
 @dataclass

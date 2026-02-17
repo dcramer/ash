@@ -308,6 +308,104 @@ class SessionReader:
             message_ids,
         )
 
+    async def load_subagent_entries(self, agent_session_id: str) -> list[Entry]:
+        """Load entries from a subagent JSONL file."""
+        path = self.session_dir / "subagents" / f"{agent_session_id}.jsonl"
+        if not path.exists():
+            return []
+
+        entries: list[Entry] = []
+        async with aiofiles.open(path, encoding="utf-8") as f:
+            line_num = 0
+            async for line in f:
+                line_num += 1
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(parse_entry(json.loads(line)))
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.warning(
+                        "subagent_parse_error",
+                        extra={
+                            "line_num": line_num,
+                            "file": str(path),
+                            "error.message": str(e),
+                        },
+                    )
+        return entries
+
+    def build_subagent_messages(
+        self, entries: list[Entry]
+    ) -> tuple[list[Message], list[str], list[int]]:
+        """Build LLM messages from subagent entries.
+
+        Unlike _build_messages(), this includes entries with agent_session_id
+        set since all subagent entries have one.
+        """
+        from ash.core.tokens import estimate_message_tokens
+
+        tool_use_ids: set[str] = set()
+        for entry in entries:
+            if isinstance(entry, ToolUseEntry):
+                tool_use_ids.add(entry.id)
+            elif isinstance(entry, MessageEntry) and isinstance(entry.content, list):
+                for block in entry.content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        tool_use_ids.add(block["id"])
+
+        messages: list[Message] = []
+        message_ids: list[str] = []
+        token_counts: list[int] = []
+        pending_results: list[ToolResult] = []
+
+        def flush_pending_results() -> None:
+            if not pending_results:
+                return
+            messages.append(Message(role=Role.USER, content=list(pending_results)))
+            message_ids.append("")
+            token_counts.append(
+                estimate_message_tokens(
+                    "user",
+                    [
+                        {"type": "tool_result", "content": r.content}
+                        for r in pending_results
+                    ],
+                )
+            )
+            pending_results.clear()
+
+        for entry in entries:
+            if isinstance(entry, (SessionHeader, ToolUseEntry, CompactionEntry)):
+                continue
+
+            if isinstance(entry, MessageEntry):
+                flush_pending_results()
+                content = self._convert_content(entry.content)
+                if not content:
+                    continue
+                messages.append(Message(role=Role(entry.role), content=content))
+                message_ids.append(entry.id)
+                token_counts.append(
+                    entry.token_count
+                    if entry.token_count is not None
+                    else estimate_message_tokens(entry.role, entry.content)
+                )
+
+            elif (
+                isinstance(entry, ToolResultEntry) and entry.tool_use_id in tool_use_ids
+            ):
+                pending_results.append(
+                    ToolResult(
+                        tool_use_id=entry.tool_use_id,
+                        content=entry.output,
+                        is_error=not entry.success,
+                    )
+                )
+
+        flush_pending_results()
+        return messages, message_ids, token_counts
+
     def _resolve_branch(
         self,
         entries: list[Entry],
