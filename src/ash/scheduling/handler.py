@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from ash.agents.types import ChildActivated
 from ash.core.session import SessionState
+from ash.core.signals import is_no_reply
 from ash.scheduling.types import ScheduleEntry
 
 if TYPE_CHECKING:
@@ -64,9 +65,8 @@ If EXECUTING:
 - Do NOT mention the delay unless it affects the task content
 
 If SKIPPING:
-- Briefly explain why (one sentence)
-- If recurring, mention it will run at the next scheduled time
-- Example: "Skipping morning greeting - it's now 3:45 PM. This runs daily at 8 AM."
+- Respond with exactly: [NO_REPLY]
+- Do NOT send a message explaining the skip
 
 Do NOT apologize for delays or explain scheduling mechanics.
 </decision-guidance>
@@ -171,6 +171,12 @@ class ScheduledTaskHandler:
         current_time_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
         fire_time_str = fire_time.astimezone(tz).strftime("%Y-%m-%d %H:%M")
 
+        logger.info(
+            f"Scheduled task timing: entry={entry.id}, "
+            f"fire_time={fire_time_str}, current={current_time_str}, "
+            f"delay={format_delay(delay_seconds)}"
+        )
+
         # Build schedule line
         if entry.cron:
             schedule_line = f"Schedule: {entry.cron} (recurring)"
@@ -210,10 +216,10 @@ class ScheduledTaskHandler:
                 user_id=entry.user_id,
             )
 
-            if response.text:
+            if response.text and not is_no_reply(response.text):
                 await self._send_response(entry, session, response.text)
             else:
-                logger.info("Scheduled task completed with no response to send")
+                logger.info("Scheduled task produced no sendable response")
 
         except ChildActivated as ca:
             # A skill was invoked — run the subagent loop to completion
@@ -221,7 +227,7 @@ class ScheduledTaskHandler:
                 result_text = await self._run_skill_loop(
                     ca.main_frame, ca.child_frame, session
                 )
-                if result_text:
+                if result_text and not is_no_reply(result_text):
                     await self._send_response(entry, session, result_text)
             else:
                 logger.error("ChildActivated raised but agent_executor not available")

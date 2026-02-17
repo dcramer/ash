@@ -13,6 +13,10 @@ from ash.scheduling.types import ScheduleEntry, ScheduleHandler
 
 logger = logging.getLogger(__name__)
 
+# Periodic tasks delayed beyond this threshold are silently skipped.
+# One-shot tasks always fire regardless of delay.
+MAX_STALENESS_SECONDS = 7200  # 2 hours
+
 
 class ScheduleWatcher:
     """Watches schedule entries and triggers handlers when due.
@@ -120,6 +124,25 @@ class ScheduleWatcher:
         updates: dict[str, ScheduleEntry] = {}
 
         for entry in due:
+            entry_id = entry.id or ""
+
+            # Staleness guard: skip periodic tasks that are too far past their
+            # intended fire time (e.g. server was down). One-shot tasks always fire.
+            # Uses next_fire_time() which is the actual scheduled time for this
+            # execution (computed from last_run), not the most recent cron occurrence.
+            if entry.is_periodic:
+                fire_time = entry.next_fire_time(self._timezone)
+                if fire_time:
+                    delay = (datetime.now(UTC) - fire_time).total_seconds()
+                    if delay > MAX_STALENESS_SECONDS:
+                        logger.warning(
+                            f"Skipping stale periodic task {entry_id}: "
+                            f"fire_time was {delay / 3600:.1f}h ago"
+                        )
+                        entry.last_run = datetime.now(UTC)
+                        updates[entry_id] = entry
+                        continue
+
             chat_display = (
                 f"{entry.chat_title} ({entry.chat_id})"
                 if entry.chat_title
@@ -137,7 +160,6 @@ class ScheduleWatcher:
                 # Mark entry as processed even on failure to prevent infinite retries
 
             # Always mark entry as processed (success or failure)
-            entry_id = entry.id or ""
             if entry.is_periodic:
                 entry.last_run = datetime.now(UTC)
                 updates[entry_id] = entry

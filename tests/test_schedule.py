@@ -1390,3 +1390,151 @@ class TestScheduledTaskWrapper:
         # Times should be formatted in LA timezone
         # The previous 8 AM LA should show as 08:00, not UTC equivalent
         assert "08:00" in wrapped_message
+
+
+class TestStalenessGuard:
+    """Tests for the staleness guard in ScheduleWatcher."""
+
+    @pytest.mark.asyncio
+    async def test_stale_periodic_task_skipped_silently(self, tmp_path: Path):
+        """Periodic task overdue by >2h should be skipped without invoking handler."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        # Entry for every minute, last ran 3 hours ago — will be very stale
+        old_time = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+        schedule_file.write_text(
+            f'{{"id": "stale1", "cron": "* * * * *", "message": "Stale task", "last_run": "{old_time}"}}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        watcher = ScheduleWatcher(store)
+        triggered: list[ScheduleEntry] = []
+
+        @watcher.on_due
+        async def handler(entry: ScheduleEntry):
+            triggered.append(entry)
+
+        await watcher._check_schedule()
+
+        # Handler should NOT have been called
+        assert len(triggered) == 0
+        # Entry should still exist with updated last_run
+        content = schedule_file.read_text()
+        assert "Stale task" in content
+        assert old_time not in content  # last_run advanced
+
+    @pytest.mark.asyncio
+    async def test_fresh_periodic_task_fires_normally(self, tmp_path: Path):
+        """Periodic task overdue by <2h should fire normally."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        # Entry for every minute, last ran 30 minutes ago — fresh enough
+        old_time = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+        schedule_file.write_text(
+            f'{{"id": "fresh1", "cron": "* * * * *", "message": "Fresh task", "last_run": "{old_time}"}}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        watcher = ScheduleWatcher(store)
+        triggered: list[ScheduleEntry] = []
+
+        @watcher.on_due
+        async def handler(entry: ScheduleEntry):
+            triggered.append(entry)
+
+        await watcher._check_schedule()
+
+        # Handler SHOULD have been called
+        assert len(triggered) == 1
+        assert triggered[0].message == "Fresh task"
+
+    @pytest.mark.asyncio
+    async def test_stale_one_shot_still_fires(self, tmp_path: Path):
+        """One-shot tasks always fire regardless of staleness."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        # One-shot task from 5 hours ago
+        past = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
+        schedule_file.write_text(
+            f'{{"id": "oneshot_stale", "trigger_at": "{past}", "message": "Old one-shot"}}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        watcher = ScheduleWatcher(store)
+        triggered: list[ScheduleEntry] = []
+
+        @watcher.on_due
+        async def handler(entry: ScheduleEntry):
+            triggered.append(entry)
+
+        await watcher._check_schedule()
+
+        # One-shot entries always fire
+        assert len(triggered) == 1
+        assert triggered[0].message == "Old one-shot"
+        # And get removed
+        assert "Old one-shot" not in schedule_file.read_text()
+
+
+class TestHandlerNoReply:
+    """Tests for [NO_REPLY] suppression in ScheduledTaskHandler."""
+
+    @pytest.mark.asyncio
+    async def test_no_reply_suppresses_message(self):
+        """Handler should not send message when agent responds with [NO_REPLY]."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.scheduling import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "[NO_REPLY]"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        handler = ScheduledTaskHandler(
+            agent=mock_agent, senders={"telegram": mock_sender}
+        )
+
+        entry = ScheduleEntry(
+            message="Good morning!",
+            trigger_at=datetime.now(UTC) - timedelta(hours=5),
+            provider="telegram",
+            chat_id="123",
+            user_id="456",
+        )
+
+        await handler.handle(entry)
+
+        # Agent was called
+        mock_agent.process_message.assert_called_once()
+        # But sender was NOT called
+        mock_sender.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_normal_response_still_sent(self):
+        """Handler should still send normal (non-NO_REPLY) responses."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.scheduling import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Good morning! Here's your weather..."
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        handler = ScheduledTaskHandler(
+            agent=mock_agent, senders={"telegram": mock_sender}
+        )
+
+        entry = ScheduleEntry(
+            message="Good morning!",
+            trigger_at=datetime.now(UTC) - timedelta(minutes=2),
+            provider="telegram",
+            chat_id="123",
+            user_id="456",
+        )
+
+        await handler.handle(entry)
+
+        # Both agent and sender should be called
+        mock_agent.process_message.assert_called_once()
+        mock_sender.assert_called_once()
