@@ -1,11 +1,11 @@
-"""Tests for file-based schedule watcher."""
+"""Tests for scheduling subsystem."""
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from ash.events.schedule import ScheduleEntry, ScheduleWatcher
+from ash.scheduling import ScheduleEntry, ScheduleStore, ScheduleWatcher
 
 
 class TestScheduleEntry:
@@ -110,21 +110,13 @@ class TestScheduleEntry:
         assert '"last_run"' in line
 
 
-class TestScheduleWatcher:
-    """Tests for ScheduleWatcher."""
-
-    def test_init(self, tmp_path: Path):
-        """Test watcher initialization."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        watcher = ScheduleWatcher(schedule_file)
-
-        assert watcher.schedule_file == schedule_file
-        assert watcher._running is False
+class TestScheduleStore:
+    """Tests for ScheduleStore CRUD operations."""
 
     def test_get_entries_empty(self, tmp_path: Path):
         """Test getting entries from missing file."""
-        watcher = ScheduleWatcher(tmp_path / "schedule.jsonl")
-        assert watcher.get_entries() == []
+        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        assert store.get_entries() == []
 
     def test_get_entries_parses_file(self, tmp_path: Path):
         """Test getting entries from JSONL file."""
@@ -134,32 +126,437 @@ class TestScheduleWatcher:
             '{"cron": "0 8 * * *", "message": "Task 2"}\n'
         )
 
-        watcher = ScheduleWatcher(schedule_file)
-        entries = watcher.get_entries()
+        store = ScheduleStore(schedule_file)
+        entries = store.get_entries()
 
         assert len(entries) == 2
         assert not entries[0].is_periodic
         assert entries[1].is_periodic
 
+    def test_get_entry_found(self, tmp_path: Path):
+        """Test getting a single entry by ID."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        entry = store.get_entry("task0002")
+
+        assert entry is not None
+        assert entry.message == "Task 2"
+
+    def test_get_entry_not_found(self, tmp_path: Path):
+        """Test getting a non-existent entry returns None."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        assert store.get_entry("nonexistent") is None
+
     def test_get_stats(self, tmp_path: Path):
-        """Test getting watcher statistics."""
+        """Test getting store statistics."""
         schedule_file = tmp_path / "schedule.jsonl"
         schedule_file.write_text(
             '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "One-shot"}\n'
             '{"cron": "0 8 * * *", "message": "Periodic"}\n'
         )
 
-        watcher = ScheduleWatcher(schedule_file)
-        stats = watcher.get_stats()
+        store = ScheduleStore(schedule_file)
+        stats = store.get_stats()
 
         assert stats["total"] == 2
         assert stats["one_shot"] == 1
         assert stats["periodic"] == 1
+        assert "running" not in stats  # Store doesn't track running state
+
+    def test_add_entry(self, tmp_path: Path):
+        """Test adding an entry to the file."""
+        schedule_file = tmp_path / "schedule.jsonl"
+
+        store = ScheduleStore(schedule_file)
+        entry = ScheduleEntry(
+            id="newtask1",
+            message="New task",
+            trigger_at=datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        store.add_entry(entry)
+
+        # Verify file was written
+        entries = store.get_entries()
+        assert len(entries) == 1
+        assert entries[0].id == "newtask1"
+        assert entries[0].message == "New task"
+
+    def test_add_entry_creates_parent_dirs(self, tmp_path: Path):
+        """Test add_entry creates parent directories if needed."""
+        schedule_file = tmp_path / "subdir" / "schedule.jsonl"
+        store = ScheduleStore(schedule_file)
+
+        entry = ScheduleEntry(
+            id="task1",
+            message="Test",
+            trigger_at=datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        store.add_entry(entry)
+        assert schedule_file.exists()
+
+    def test_add_entry_appends(self, tmp_path: Path):
+        """Test add_entry appends to existing file."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Existing"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        entry = ScheduleEntry(
+            id="task0002",
+            message="New",
+            trigger_at=datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        store.add_entry(entry)
+
+        entries = store.get_entries()
+        assert len(entries) == 2
+
+    def test_remove_entry_success(self, tmp_path: Path):
+        """Test removing an entry by ID."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+            '{"id": "task0003", "trigger_at": "2026-01-14T09:00:00+00:00", "message": "Task 3"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        result = store.remove_entry("task0002")  # Remove middle entry
+
+        assert result is True
+        content = schedule_file.read_text()
+        assert "Task 1" in content
+        assert "Task 2" not in content
+        assert "Task 3" in content
+
+    def test_remove_entry_first(self, tmp_path: Path):
+        """Test removing the first entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        result = store.remove_entry("task0001")
+
+        assert result is True
+        content = schedule_file.read_text()
+        assert "Task 1" not in content
+        assert "Task 2" in content
+
+    def test_remove_entry_last(self, tmp_path: Path):
+        """Test removing the last entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        result = store.remove_entry("task0002")
+
+        assert result is True
+        content = schedule_file.read_text()
+        assert "Task 1" in content
+        assert "Task 2" not in content
+
+    def test_remove_entry_invalid_id(self, tmp_path: Path):
+        """Test removing with invalid ID."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+
+        assert store.remove_entry("nonexistent") is False
+        assert store.remove_entry("") is False
+        assert store.remove_entry("task9999") is False
+
+    def test_remove_entry_missing_file(self, tmp_path: Path):
+        """Test removing from non-existent file."""
+        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        assert store.remove_entry("nonexistent") is False
+
+    def test_clear_all_success(self, tmp_path: Path):
+        """Test clearing all entries."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+            '{"cron": "0 8 * * *", "message": "Task 3"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        count = store.clear_all()
+
+        assert count == 3
+        assert schedule_file.read_text() == ""
+
+    def test_clear_all_empty_file(self, tmp_path: Path):
+        """Test clearing an empty file."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text("")
+
+        store = ScheduleStore(schedule_file)
+        count = store.clear_all()
+
+        assert count == 0
+
+    def test_clear_all_missing_file(self, tmp_path: Path):
+        """Test clearing a non-existent file."""
+        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        count = store.clear_all()
+
+        assert count == 0
+
+    def test_update_entry_message_only(self, tmp_path: Path):
+        """Test updating only the message of an entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Original"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        result = store.update_entry("task0001", message="Updated message")
+
+        assert result is not None
+        assert result.message == "Updated message"
+        assert result.id == "task0001"
+
+        # Verify file was updated
+        content = schedule_file.read_text()
+        assert "Updated message" in content
+        assert "Original" not in content
+
+    def test_update_entry_trigger_at(self, tmp_path: Path):
+        """Test updating trigger_at for a one-shot entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        new_time = datetime.now(UTC) + timedelta(hours=2)
+        result = store.update_entry("task0001", trigger_at=new_time)
+
+        assert result is not None
+        assert result.trigger_at == new_time
+
+    def test_update_entry_cron(self, tmp_path: Path):
+        """Test updating cron expression for a periodic entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        result = store.update_entry("task0001", cron="0 9 * * *")
+
+        assert result is not None
+        assert result.cron == "0 9 * * *"
+
+        # Verify file was updated
+        content = schedule_file.read_text()
+        assert "0 9 * * *" in content
+
+    def test_update_entry_timezone(self, tmp_path: Path):
+        """Test updating timezone of an entry."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily", "timezone": "UTC"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        result = store.update_entry("task0001", timezone="America/Los_Angeles")
+
+        assert result is not None
+        assert result.timezone == "America/Los_Angeles"
+
+    def test_update_entry_not_found(self, tmp_path: Path):
+        """Test updating non-existent entry returns None."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        result = store.update_entry("nonexistent", message="Updated")
+
+        assert result is None
+
+    def test_update_entry_switch_oneshot_to_periodic_fails(self, tmp_path: Path):
+        """Test that switching from one-shot to periodic fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+
+        with pytest.raises(
+            ValueError, match="Cannot change one-shot entry to periodic"
+        ):
+            store.update_entry("task0001", cron="0 8 * * *")
+
+    def test_update_entry_switch_periodic_to_oneshot_fails(self, tmp_path: Path):
+        """Test that switching from periodic to one-shot fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        future_time = datetime.now(UTC) + timedelta(hours=2)
+
+        with pytest.raises(
+            ValueError, match="Cannot change periodic entry to one-shot"
+        ):
+            store.update_entry("task0001", trigger_at=future_time)
+
+    def test_update_entry_trigger_at_in_past_fails(self, tmp_path: Path):
+        """Test that setting trigger_at to past time fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        past_time = datetime.now(UTC) - timedelta(hours=1)
+
+        with pytest.raises(ValueError, match="trigger_at must be in the future"):
+            store.update_entry("task0001", trigger_at=past_time)
+
+    def test_update_entry_invalid_cron_fails(self, tmp_path: Path):
+        """Test that invalid cron expression fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+
+        with pytest.raises(ValueError, match="Invalid cron expression"):
+            store.update_entry("task0001", cron="invalid cron")
+
+    def test_update_entry_no_fields_fails(self, tmp_path: Path):
+        """Test that updating with no fields fails."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+
+        with pytest.raises(ValueError, match="At least one updatable field"):
+            store.update_entry("task0001")
+
+    def test_update_entry_missing_file(self, tmp_path: Path):
+        """Test updating from non-existent file returns None."""
+        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        result = store.update_entry("task0001", message="Updated")
+
+        assert result is None
+
+    def test_update_entry_preserves_other_entries(self, tmp_path: Path):
+        """Test that updating one entry doesn't affect others."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Task 1"}\n'
+            '{"id": "task0002", "trigger_at": "2026-12-13T09:00:00+00:00", "message": "Original message"}\n'
+            '{"id": "task0003", "trigger_at": "2026-12-14T09:00:00+00:00", "message": "Task 3"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+        result = store.update_entry("task0002", message="Updated message")
+
+        assert result is not None
+        assert result.message == "Updated message"
+
+        # Verify all entries are still present
+        content = schedule_file.read_text()
+        assert "Task 1" in content
+        assert "Updated message" in content
+        assert "Task 3" in content
+        assert "Original message" not in content  # Old message should be gone
+
+    def test_remove_and_update(self, tmp_path: Path):
+        """Test atomic remove + update operation."""
+        schedule_file = tmp_path / "schedule.jsonl"
+        old_time = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+        schedule_file.write_text(
+            '{"id": "oneshot1", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "One-shot"}\n'
+            f'{{"id": "periodic1", "cron": "* * * * *", "message": "Periodic", "last_run": "{old_time}"}}\n'
+            '{"id": "keep1", "trigger_at": "2027-01-12T09:00:00+00:00", "message": "Keep"}\n'
+        )
+
+        store = ScheduleStore(schedule_file)
+
+        # Build updated periodic entry
+        periodic = store.get_entry("periodic1")
+        assert periodic is not None
+        periodic.last_run = datetime.now(UTC)
+
+        store.remove_and_update(
+            remove_ids={"oneshot1"},
+            updates={"periodic1": periodic},
+        )
+
+        entries = store.get_entries()
+        assert len(entries) == 2
+        # One-shot removed
+        assert not any(e.id == "oneshot1" for e in entries)
+        # Periodic updated
+        periodic_entry = next(e for e in entries if e.id == "periodic1")
+        assert periodic_entry.last_run is not None
+        assert old_time not in schedule_file.read_text()
+        # Other entry preserved
+        assert any(e.id == "keep1" for e in entries)
+
+    def test_remove_and_update_no_file(self, tmp_path: Path):
+        """Test remove_and_update with missing file is a no-op."""
+        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        store.remove_and_update(remove_ids={"x"}, updates={})  # Should not raise
+
+
+class TestScheduleWatcher:
+    """Tests for ScheduleWatcher (polling/handler behavior)."""
+
+    def _make_watcher(
+        self, tmp_path: Path, content: str = ""
+    ) -> tuple[ScheduleStore, ScheduleWatcher]:
+        schedule_file = tmp_path / "schedule.jsonl"
+        if content:
+            schedule_file.write_text(content)
+        store = ScheduleStore(schedule_file)
+        watcher = ScheduleWatcher(store)
+        return store, watcher
+
+    def test_init(self, tmp_path: Path):
+        """Test watcher initialization."""
+        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        watcher = ScheduleWatcher(store)
+
+        assert watcher.store is store
+        assert watcher._running is False
 
     @pytest.mark.asyncio
     async def test_start_stop(self, tmp_path: Path):
         """Test starting and stopping watcher."""
-        watcher = ScheduleWatcher(tmp_path / "schedule.jsonl", poll_interval=0.1)
+        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        watcher = ScheduleWatcher(store, poll_interval=0.1)
 
         await watcher.start()
         assert watcher._running is True
@@ -170,11 +567,10 @@ class TestScheduleWatcher:
     @pytest.mark.asyncio
     async def test_triggers_due_one_shot(self, tmp_path: Path):
         """Test that due one-shot entries trigger handlers."""
-        schedule_file = tmp_path / "schedule.jsonl"
         past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-        schedule_file.write_text(f'{{"trigger_at": "{past}", "message": "Due"}}\n')
-
-        watcher = ScheduleWatcher(schedule_file)
+        _, watcher = self._make_watcher(
+            tmp_path, f'{{"trigger_at": "{past}", "message": "Due"}}\n'
+        )
         triggered: list[ScheduleEntry] = []
 
         @watcher.on_due
@@ -193,11 +589,12 @@ class TestScheduleWatcher:
         past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
         schedule_file.write_text(
-            f'{{"trigger_at": "{past}", "message": "Due"}}\n'
-            f'{{"trigger_at": "{future}", "message": "Not due"}}\n'
+            f'{{"id": "due1", "trigger_at": "{past}", "message": "Due"}}\n'
+            f'{{"id": "notdue1", "trigger_at": "{future}", "message": "Not due"}}\n'
         )
 
-        watcher = ScheduleWatcher(schedule_file)
+        store = ScheduleStore(schedule_file)
+        watcher = ScheduleWatcher(store)
 
         @watcher.on_due
         async def handler(entry: ScheduleEntry):
@@ -213,13 +610,13 @@ class TestScheduleWatcher:
     async def test_updates_periodic_last_run(self, tmp_path: Path):
         """Test that periodic entries get last_run updated."""
         schedule_file = tmp_path / "schedule.jsonl"
-        # Create a periodic entry that's due (last_run far in past)
         old_time = (datetime.now(UTC) - timedelta(days=2)).isoformat()
         schedule_file.write_text(
-            f'{{"cron": "* * * * *", "message": "Every minute", "last_run": "{old_time}"}}\n'
+            f'{{"id": "p1", "cron": "* * * * *", "message": "Every minute", "last_run": "{old_time}"}}\n'
         )
 
-        watcher = ScheduleWatcher(schedule_file)
+        store = ScheduleStore(schedule_file)
+        watcher = ScheduleWatcher(store)
 
         @watcher.on_due
         async def handler(entry: ScheduleEntry):
@@ -239,7 +636,8 @@ class TestScheduleWatcher:
         future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
         schedule_file.write_text(f'{{"trigger_at": "{future}", "message": "Future"}}\n')
 
-        watcher = ScheduleWatcher(schedule_file)
+        store = ScheduleStore(schedule_file)
+        watcher = ScheduleWatcher(store)
         triggered: list[ScheduleEntry] = []
 
         @watcher.on_due
@@ -251,284 +649,17 @@ class TestScheduleWatcher:
         assert triggered == []
         assert "Future" in schedule_file.read_text()
 
-    def test_remove_entry_success(self, tmp_path: Path):
-        """Test removing an entry by line number."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
-            '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
-            '{"id": "task0003", "trigger_at": "2026-01-14T09:00:00+00:00", "message": "Task 3"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        result = watcher.remove_entry("task0002")  # Remove middle entry
-
-        assert result is True
-        content = schedule_file.read_text()
-        assert "Task 1" in content
-        assert "Task 2" not in content
-        assert "Task 3" in content
-
-    def test_remove_entry_first(self, tmp_path: Path):
-        """Test removing the first entry."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
-            '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        result = watcher.remove_entry("task0001")
-
-        assert result is True
-        content = schedule_file.read_text()
-        assert "Task 1" not in content
-        assert "Task 2" in content
-
-    def test_remove_entry_last(self, tmp_path: Path):
-        """Test removing the last entry."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
-            '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        result = watcher.remove_entry("task0002")
-
-        assert result is True
-        content = schedule_file.read_text()
-        assert "Task 1" in content
-        assert "Task 2" not in content
-
-    def test_remove_entry_invalid_id(self, tmp_path: Path):
-        """Test removing with invalid ID."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-
-        assert watcher.remove_entry("nonexistent") is False
-        assert watcher.remove_entry("") is False
-        assert watcher.remove_entry("task9999") is False
-
-    def test_remove_entry_missing_file(self, tmp_path: Path):
-        """Test removing from non-existent file."""
-        watcher = ScheduleWatcher(tmp_path / "schedule.jsonl")
-        assert watcher.remove_entry("nonexistent") is False
-
-    def test_clear_all_success(self, tmp_path: Path):
-        """Test clearing all entries."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
-            '{"trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
-            '{"cron": "0 8 * * *", "message": "Task 3"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        count = watcher.clear_all()
-
-        assert count == 3
-        assert schedule_file.read_text() == ""
-
-    def test_clear_all_empty_file(self, tmp_path: Path):
-        """Test clearing an empty file."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text("")
-
-        watcher = ScheduleWatcher(schedule_file)
-        count = watcher.clear_all()
-
-        assert count == 0
-
-    def test_clear_all_missing_file(self, tmp_path: Path):
-        """Test clearing a non-existent file."""
-        watcher = ScheduleWatcher(tmp_path / "schedule.jsonl")
-        count = watcher.clear_all()
-
-        assert count == 0
-
-    def test_update_entry_message_only(self, tmp_path: Path):
-        """Test updating only the message of an entry."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Original"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        result = watcher.update_entry("task0001", message="Updated message")
-
-        assert result is not None
-        assert result.message == "Updated message"
-        assert result.id == "task0001"
-
-        # Verify file was updated
-        content = schedule_file.read_text()
-        assert "Updated message" in content
-        assert "Original" not in content
-
-    def test_update_entry_trigger_at(self, tmp_path: Path):
-        """Test updating trigger_at for a one-shot entry."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        new_time = datetime.now(UTC) + timedelta(hours=2)
-        result = watcher.update_entry("task0001", trigger_at=new_time)
-
-        assert result is not None
-        assert result.trigger_at == new_time
-
-    def test_update_entry_cron(self, tmp_path: Path):
-        """Test updating cron expression for a periodic entry."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        result = watcher.update_entry("task0001", cron="0 9 * * *")
-
-        assert result is not None
-        assert result.cron == "0 9 * * *"
-
-        # Verify file was updated
-        content = schedule_file.read_text()
-        assert "0 9 * * *" in content
-
-    def test_update_entry_timezone(self, tmp_path: Path):
-        """Test updating timezone of an entry."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily", "timezone": "UTC"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        result = watcher.update_entry("task0001", timezone="America/Los_Angeles")
-
-        assert result is not None
-        assert result.timezone == "America/Los_Angeles"
-
-    def test_update_entry_not_found(self, tmp_path: Path):
-        """Test updating non-existent entry returns None."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        result = watcher.update_entry("nonexistent", message="Updated")
-
-        assert result is None
-
-    def test_update_entry_switch_oneshot_to_periodic_fails(self, tmp_path: Path):
-        """Test that switching from one-shot to periodic fails."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-
-        with pytest.raises(
-            ValueError, match="Cannot change one-shot entry to periodic"
-        ):
-            watcher.update_entry("task0001", cron="0 8 * * *")
-
-    def test_update_entry_switch_periodic_to_oneshot_fails(self, tmp_path: Path):
-        """Test that switching from periodic to one-shot fails."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        future_time = datetime.now(UTC) + timedelta(hours=2)
-
-        with pytest.raises(
-            ValueError, match="Cannot change periodic entry to one-shot"
-        ):
-            watcher.update_entry("task0001", trigger_at=future_time)
-
-    def test_update_entry_trigger_at_in_past_fails(self, tmp_path: Path):
-        """Test that setting trigger_at to past time fails."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        past_time = datetime.now(UTC) - timedelta(hours=1)
-
-        with pytest.raises(ValueError, match="trigger_at must be in the future"):
-            watcher.update_entry("task0001", trigger_at=past_time)
-
-    def test_update_entry_invalid_cron_fails(self, tmp_path: Path):
-        """Test that invalid cron expression fails."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-
-        with pytest.raises(ValueError, match="Invalid cron expression"):
-            watcher.update_entry("task0001", cron="invalid cron")
-
-    def test_update_entry_no_fields_fails(self, tmp_path: Path):
-        """Test that updating with no fields fails."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-
-        with pytest.raises(ValueError, match="At least one updatable field"):
-            watcher.update_entry("task0001")
-
-    def test_update_entry_missing_file(self, tmp_path: Path):
-        """Test updating from non-existent file returns None."""
-        watcher = ScheduleWatcher(tmp_path / "schedule.jsonl")
-        result = watcher.update_entry("task0001", message="Updated")
-
-        assert result is None
-
-    def test_update_entry_preserves_other_entries(self, tmp_path: Path):
-        """Test that updating one entry doesn't affect others."""
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Task 1"}\n'
-            '{"id": "task0002", "trigger_at": "2026-12-13T09:00:00+00:00", "message": "Original message"}\n'
-            '{"id": "task0003", "trigger_at": "2026-12-14T09:00:00+00:00", "message": "Task 3"}\n'
-        )
-
-        watcher = ScheduleWatcher(schedule_file)
-        result = watcher.update_entry("task0002", message="Updated message")
-
-        assert result is not None
-        assert result.message == "Updated message"
-
-        # Verify all entries are still present
-        content = schedule_file.read_text()
-        assert "Task 1" in content
-        assert "Updated message" in content
-        assert "Task 3" in content
-        assert "Original message" not in content  # Old message should be gone
-
     @pytest.mark.asyncio
     async def test_failed_one_shot_removed(self, tmp_path: Path):
         """Test that failed one-shot entries are removed (not retried forever)."""
         schedule_file = tmp_path / "schedule.jsonl"
         past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-        schedule_file.write_text(f'{{"trigger_at": "{past}", "message": "Fail me"}}\n')
+        schedule_file.write_text(
+            f'{{"id": "fail1", "trigger_at": "{past}", "message": "Fail me"}}\n'
+        )
 
-        watcher = ScheduleWatcher(schedule_file)
+        store = ScheduleStore(schedule_file)
+        watcher = ScheduleWatcher(store)
 
         @watcher.on_due
         async def handler(entry: ScheduleEntry):
@@ -545,10 +676,11 @@ class TestScheduleWatcher:
         schedule_file = tmp_path / "schedule.jsonl"
         old_time = (datetime.now(UTC) - timedelta(days=2)).isoformat()
         schedule_file.write_text(
-            f'{{"cron": "* * * * *", "message": "Fail periodic", "last_run": "{old_time}"}}\n'
+            f'{{"id": "pfail1", "cron": "* * * * *", "message": "Fail periodic", "last_run": "{old_time}"}}\n'
         )
 
-        watcher = ScheduleWatcher(schedule_file)
+        store = ScheduleStore(schedule_file)
+        watcher = ScheduleWatcher(store)
 
         @watcher.on_due
         async def handler(entry: ScheduleEntry):
@@ -570,7 +702,7 @@ class TestScheduledTaskHandler:
         """Test handler rejects entries without routing context."""
         from unittest.mock import MagicMock
 
-        from ash.events.handler import ScheduledTaskHandler
+        from ash.scheduling import ScheduledTaskHandler
 
         mock_agent = MagicMock()
         handler = ScheduledTaskHandler(agent=mock_agent, senders={})
@@ -586,7 +718,7 @@ class TestScheduledTaskHandler:
         """Test handler accepts entries with valid routing context."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from ash.events.handler import ScheduledTaskHandler
+        from ash.scheduling import ScheduledTaskHandler
 
         mock_agent = MagicMock()
         mock_response = MagicMock()
@@ -620,7 +752,7 @@ class TestScheduledTaskHandler:
         """Test handler calls registrar after sending message."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from ash.events.handler import ScheduledTaskHandler
+        from ash.scheduling import ScheduledTaskHandler
 
         mock_agent = MagicMock()
         mock_response = MagicMock()
@@ -1059,7 +1191,7 @@ class TestFormatDelay:
 
     def test_just_now(self):
         """Delays under 1 minute show as 'just now'."""
-        from ash.events.handler import format_delay
+        from ash.scheduling import format_delay
 
         assert format_delay(0) == "just now"
         assert format_delay(30) == "just now"
@@ -1067,7 +1199,7 @@ class TestFormatDelay:
 
     def test_minutes(self):
         """Delays between 1-60 minutes show as '~N minutes'."""
-        from ash.events.handler import format_delay
+        from ash.scheduling import format_delay
 
         assert format_delay(60) == "~1 minutes"
         assert format_delay(120) == "~2 minutes"
@@ -1076,7 +1208,7 @@ class TestFormatDelay:
 
     def test_hours(self):
         """Delays between 1-24 hours show as '~N.N hours'."""
-        from ash.events.handler import format_delay
+        from ash.scheduling import format_delay
 
         assert format_delay(60 * 60) == "~1.0 hours"
         assert format_delay(90 * 60) == "~1.5 hours"
@@ -1085,7 +1217,7 @@ class TestFormatDelay:
 
     def test_days(self):
         """Delays over 24 hours show as '~N.N days'."""
-        from ash.events.handler import format_delay
+        from ash.scheduling import format_delay
 
         assert format_delay(24 * 60 * 60) == "~1.0 days"
         assert format_delay(36 * 60 * 60) == "~1.5 days"
@@ -1100,7 +1232,7 @@ class TestScheduledTaskWrapper:
         """Handler wraps message with timing context."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from ash.events.handler import ScheduledTaskHandler
+        from ash.scheduling import ScheduledTaskHandler
 
         mock_agent = MagicMock()
         mock_response = MagicMock()
@@ -1155,7 +1287,7 @@ class TestScheduledTaskWrapper:
         """Wrapper shows cron expression for periodic entries."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from ash.events.handler import ScheduledTaskHandler
+        from ash.scheduling import ScheduledTaskHandler
 
         mock_agent = MagicMock()
         mock_response = MagicMock()
@@ -1189,7 +1321,7 @@ class TestScheduledTaskWrapper:
         """Wrapper shows trigger time for one-shot entries."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from ash.events.handler import ScheduledTaskHandler
+        from ash.scheduling import ScheduledTaskHandler
 
         mock_agent = MagicMock()
         mock_response = MagicMock()
@@ -1226,7 +1358,7 @@ class TestScheduledTaskWrapper:
         """Handler formats times in its configured timezone."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from ash.events.handler import ScheduledTaskHandler
+        from ash.scheduling import ScheduledTaskHandler
 
         mock_agent = MagicMock()
         mock_response = MagicMock()

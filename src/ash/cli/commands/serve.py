@@ -142,6 +142,9 @@ async def _run_server(
 
     # Start RPC server for sandbox communication
     from ash.rpc.methods.schedule import register_schedule_methods
+    from ash.scheduling import ScheduleStore
+
+    schedule_store = ScheduleStore(get_schedule_file())
 
     rpc_socket_path = get_rpc_socket_path()
     rpc_server = RPCServer(rpc_socket_path)
@@ -155,7 +158,7 @@ async def _run_server(
         )
     register_config_methods(rpc_server, ash_config, components.skill_registry)
     register_log_methods(rpc_server, get_logs_path())
-    register_schedule_methods(rpc_server, get_schedule_file())
+    register_schedule_methods(rpc_server, schedule_store)
     await rpc_server.start()
     logger.info(f"RPC server started at {rpc_socket_path}")
 
@@ -176,10 +179,9 @@ async def _run_server(
         )
 
     # Set up schedule watcher
-    from ash.events import ScheduledTaskHandler, ScheduleWatcher
+    from ash.scheduling import ScheduledTaskHandler, ScheduleWatcher
 
-    schedule_file = get_schedule_file()
-    schedule_watcher = ScheduleWatcher(schedule_file, timezone=ash_config.timezone)
+    schedule_watcher = ScheduleWatcher(schedule_store, timezone=ash_config.timezone)
 
     # Build sender map from available providers
     senders: dict[str, Any] = {}
@@ -209,7 +211,7 @@ async def _run_server(
             agent_executor=components.agent_executor,
         )
         schedule_watcher.add_handler(schedule_handler.handle)
-        logger.debug(f"Schedule watcher: {schedule_file}")
+        logger.debug(f"Schedule watcher: {schedule_store.schedule_file}")
     else:
         logger.debug("Schedule watcher disabled (no providers)")
 

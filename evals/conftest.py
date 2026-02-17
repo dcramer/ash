@@ -187,6 +187,7 @@ async def eval_agent(
     from ash.config.paths import get_rpc_socket_path, get_schedule_file
     from ash.rpc.methods.schedule import register_schedule_methods
     from ash.rpc.server import RPCServer
+    from ash.scheduling import ScheduleStore
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -200,7 +201,7 @@ async def eval_agent(
 
     # Start RPC server so sandbox CLI can call schedule methods
     rpc_server = RPCServer(get_rpc_socket_path())
-    register_schedule_methods(rpc_server, get_schedule_file())
+    register_schedule_methods(rpc_server, ScheduleStore(get_schedule_file()))
     await rpc_server.start()
 
     yield components
@@ -267,6 +268,7 @@ async def eval_memory_agent(
     from ash.rpc.methods.memory import register_memory_methods
     from ash.rpc.methods.schedule import register_schedule_methods
     from ash.rpc.server import RPCServer
+    from ash.scheduling import ScheduleStore
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -288,7 +290,7 @@ async def eval_memory_agent(
         memory_extractor=components.memory_extractor,
         sessions_path=get_sessions_path(),
     )
-    register_schedule_methods(rpc_server, get_schedule_file())
+    register_schedule_methods(rpc_server, ScheduleStore(get_schedule_file()))
     await rpc_server.start()
 
     yield components

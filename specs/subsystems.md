@@ -127,7 +127,7 @@ Public types live in one place, not scattered across implementation files:
 | memory | Complete | [specs/memory.md](memory.md) |
 | people | Complete | [specs/people.md](people.md) |
 | sessions | Needs refactor | - |
-| scheduling | Needs refactor | - |
+| scheduling | Complete | [specs/schedule.md](schedule.md) |
 
 ## Verification
 

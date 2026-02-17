@@ -145,11 +145,11 @@ def _schedule_list(schedule_file) -> None:
     from rich.table import Table
 
     from ash.config import load_config
-    from ash.events.schedule import ScheduleWatcher
+    from ash.scheduling import ScheduleStore
 
     config = load_config()
-    watcher = ScheduleWatcher(schedule_file, timezone=config.timezone)
-    entries = watcher.get_entries()
+    store = ScheduleStore(schedule_file)
+    entries = store.get_entries()
 
     if not entries:
         warning("No scheduled tasks found")
@@ -206,18 +206,16 @@ def _schedule_list(schedule_file) -> None:
 
 def _schedule_cancel(schedule_file, entry_id: str) -> None:
     """Cancel a scheduled task by ID."""
-    from ash.events.schedule import ScheduleWatcher
+    from ash.scheduling import ScheduleStore
 
-    watcher = ScheduleWatcher(schedule_file)
-    entries = watcher.get_entries()
+    store = ScheduleStore(schedule_file)
+    entry = store.get_entry(entry_id)
 
-    # Find the entry to show what we're removing
-    entry = next((e for e in entries if e.id == entry_id), None)
     if not entry:
         error(f"No task found with ID {entry_id}")
         raise typer.Exit(1)
 
-    if watcher.remove_entry(entry_id):
+    if store.remove_entry(entry_id):
         success(f"Cancelled: {entry.message[:50]}...")
     else:
         error(f"Failed to cancel task {entry_id}")
@@ -234,10 +232,10 @@ def _schedule_update(
 ) -> None:
     """Update a scheduled task by ID."""
     from ash.config import load_config
-    from ash.events.schedule import ScheduleWatcher
+    from ash.scheduling import ScheduleStore
 
     config = load_config()
-    watcher = ScheduleWatcher(schedule_file, timezone=config.timezone)
+    store = ScheduleStore(schedule_file)
 
     # Parse --at time if provided
     trigger_at: datetime | None = None
@@ -248,7 +246,7 @@ def _schedule_update(
             raise typer.Exit(1)
 
     try:
-        updated = watcher.update_entry(
+        updated = store.update_entry(
             entry_id,
             message=message,
             trigger_at=trigger_at,
@@ -304,10 +302,10 @@ def _parse_time(time_str: str, timezone: str) -> datetime | None:
 
 def _schedule_clear(schedule_file, force: bool) -> None:
     """Clear all scheduled tasks."""
-    from ash.events.schedule import ScheduleWatcher
+    from ash.scheduling import ScheduleStore
 
-    watcher = ScheduleWatcher(schedule_file)
-    stats = watcher.get_stats()
+    store = ScheduleStore(schedule_file)
+    stats = store.get_stats()
 
     if stats["total"] == 0:
         warning("No scheduled tasks to clear")
@@ -321,5 +319,5 @@ def _schedule_clear(schedule_file, force: bool) -> None:
             console.print("[dim]Cancelled[/dim]")
             return
 
-    count = watcher.clear_all()
+    count = store.clear_all()
     success(f"Cleared {count} scheduled task(s)")

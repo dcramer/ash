@@ -6,13 +6,13 @@ File-based task scheduling following the "filesystem first" principle.
 
 ## Overview
 
-The schedule system allows the agent to schedule future tasks using sandbox CLI commands (`ash schedule create`). The commands write entries to a JSONL file with routing context. A background watcher triggers entries when due, processes them through the agent, and routes responses back.
+The schedule system allows the agent to schedule future tasks using sandbox CLI commands (`ash schedule create`). The commands go through RPC to the host process, which writes entries to a JSONL file with routing context. A background watcher triggers entries when due, processes them through the agent, and routes responses back.
 
 **Key principle:** All state lives in the file. `cat schedule.jsonl` shows the truth.
 
 ## File Format
 
-Location: `workspace/schedule.jsonl`
+Location: `~/.ash/schedule.jsonl`
 
 ### One-Shot Entries
 
@@ -64,7 +64,7 @@ Examples:
 
 ## Agent Usage
 
-The agent uses sandbox CLI commands to create entries:
+The agent uses sandbox CLI commands to manage entries. These commands communicate with the host process via RPC (`schedule.create`, `schedule.list`, `schedule.cancel`, `schedule.update`):
 
 ```bash
 # One-time task
@@ -78,6 +78,11 @@ ash schedule list
 
 # Cancel a task by ID
 ash schedule cancel --id abc12345
+
+# Update a task
+ash schedule update --id abc12345 --message "New task text"
+ash schedule update --id abc12345 --at 2026-01-15T10:00:00Z
+ash schedule update --id abc12345 --cron "0 9 * * *" --tz America/Los_Angeles
 ```
 
 The commands automatically inject `chat_id`, `user_id`, and `provider` from environment variables (`ASH_CHAT_ID`, `ASH_USER_ID`, `ASH_PROVIDER`).
@@ -101,6 +106,21 @@ The commands automatically inject `chat_id`, `user_id`, and `provider` from envi
 4. Handler creates ephemeral session, runs agent with message
 5. Response sent back to original chat
 6. `last_run` updated in file, entry preserved for next run
+
+### Update
+1. Agent runs `ash schedule update --id ID --message "new text"`
+2. RPC validates ownership (user_id must match) and applies changes
+3. Cannot switch entry types (one-shot ↔ periodic)
+4. `trigger_at` updates must be in the future; `cron` updates must be valid expressions
+
+### No-Retry Semantics
+
+Failed tasks are still marked as processed — one-shot entries are deleted, periodic entries get `last_run` updated. There is no automatic retry. This prevents infinite retry loops for tasks that consistently fail.
+
+### Ownership Rules
+
+- **RPC layer** (sandbox commands): `cancel` and `update` check that the requesting `user_id` matches the entry's `user_id`. Users can only modify their own tasks.
+- **CLI commands** (host-side): `ash schedule cancel`, `ash schedule update`, `ash schedule clear` do not check ownership — they are admin commands for the host operator.
 
 ## Task Execution Wrapper
 
@@ -146,18 +166,24 @@ Example: "Skipping morning greeting - it's now 3:45 PM. This runs daily at 8 AM.
 ## Integration
 
 ```python
-from ash.events import ScheduledTaskHandler, ScheduleWatcher
-from pathlib import Path
+from ash.scheduling import ScheduleStore, ScheduleWatcher, ScheduledTaskHandler
 
-# Create watcher
-watcher = ScheduleWatcher(Path("workspace/schedule.jsonl"))
+# Create store and watcher
+store = ScheduleStore(get_schedule_file())
+watcher = ScheduleWatcher(store, timezone="America/Los_Angeles")
 
-# Create handler with agent and sender map
+# Create handler with agent, senders, registrars, and executor
 handler = ScheduledTaskHandler(
     agent=agent,
-    senders={"telegram": telegram_provider.send_message}
+    senders={"telegram": telegram_provider.send_message},
+    registrars={"telegram": telegram_registrar},
+    timezone="America/Los_Angeles",
+    agent_executor=agent_executor,
 )
 watcher.add_handler(handler.handle)
+
+# Wire store into RPC for sandbox commands
+register_schedule_methods(rpc_server, store)
 
 # Start watching
 await watcher.start()
@@ -173,7 +199,7 @@ uv run ash serve
 "remind me in 2 minutes to check the build"
 
 # Verify entry was created:
-cat workspace/schedule.jsonl
+cat ~/.ash/schedule.jsonl
 
 # After 2 minutes, bot sends response to the same chat
 # Entry is removed from schedule.jsonl
@@ -188,6 +214,7 @@ cat workspace/schedule.jsonl
 5. **Provider required** - Requires provider with persistent chat for response routing
 6. **Fresh context per task** - Each task runs in ephemeral session
 7. **UTC times** - Avoids timezone confusion
-8. **Ownership filtering** - Users can only see/cancel their own tasks
+8. **Ownership filtering** - Users can only see/cancel their own tasks (RPC layer)
 9. **Time-aware execution** - Agent can skip stale time-sensitive tasks
 10. **Timing context** - Handler provides current time, fire time, and delay
+11. **No retry** - Failed tasks are marked processed to prevent infinite loops
