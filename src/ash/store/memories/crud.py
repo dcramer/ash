@@ -155,6 +155,7 @@ class MemoryCrudMixin:
                 logger.warning("Failed to index memory, continuing", exc_info=True)
             memory.embedding = embedding_base64
 
+        superseded_count = 0
         try:
             superseded_count = await self._supersede_conflicting_batched(
                 new_memory=memory,
@@ -185,7 +186,7 @@ class MemoryCrudMixin:
         await self._persistence.flush(self._graph)
 
         # Save vector index after flush (separate file)
-        if embedding_floats:
+        if embedding_floats or superseded_count > 0:
             await self._save_vector_index()
 
         logger.debug(
@@ -275,12 +276,7 @@ class MemoryCrudMixin:
             if not (is_owner or is_group_member):
                 return False
 
-        memory.archived_at = datetime.now(UTC)
-        memory.archive_reason = "user_deleted"
-        self._persistence.mark_dirty("memories")
-        await self._persistence.flush(self._graph)
-
-        await self._remove_from_vector_index([full_id])
+        await self.archive_memories({full_id}, reason="user_deleted")
 
         logger.info("memory_deleted", extra={"memory_id": full_id})
         return True

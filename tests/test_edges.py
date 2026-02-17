@@ -409,7 +409,7 @@ class TestDualWriteEdges:
         old_mem = await graph_store.add_memory(content="Bob likes blue")
         new_mem = await graph_store.add_memory(content="Bob likes red")
 
-        await graph_store._mark_superseded(old_mem.id, new_mem.id)
+        await graph_store.batch_mark_superseded([(old_mem.id, new_mem.id)])
 
         # Verify SUPERSEDES edge
         targets = get_supersession_targets(graph_store.graph, new_mem.id)
@@ -570,8 +570,8 @@ class TestEdgeBasedReads:
         mem2 = await graph_store.add_memory(content="Version 2")
         mem3 = await graph_store.add_memory(content="Version 3")
 
-        await graph_store._mark_superseded(mem1.id, mem2.id)
-        await graph_store._mark_superseded(mem2.id, mem3.id)
+        await graph_store.batch_mark_superseded([(mem1.id, mem2.id)])
+        await graph_store.batch_mark_superseded([(mem2.id, mem3.id)])
 
         chain = await graph_store.get_supersession_chain(mem3.id)
         chain_ids = [m.id for m in chain]

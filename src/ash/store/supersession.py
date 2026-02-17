@@ -136,7 +136,7 @@ class SupersessionMixin:
             subject_person_ids=new_subjects or None,
         )
 
-        count = 0
+        pairs: list[tuple[str, str]] = []
         for memory, similarity in conflicts:
             if memory.id == new_memory.id:
                 continue
@@ -147,10 +147,14 @@ class SupersessionMixin:
                     old_content=memory.content, new_content=new_memory.content
                 ):
                     continue
-            if await self._mark_superseded(memory.id, new_memory.id):
-                count += 1
+            pairs.append((memory.id, new_memory.id))
 
-        return count
+        marked = self._supersede_batch(pairs)
+        if marked:
+            await self._persistence.flush(self._graph)
+            await self._save_vector_index()
+
+        return len(marked)
 
     async def _is_protected_by_subject_authority(
         self: Store,
@@ -189,46 +193,41 @@ class SupersessionMixin:
             )
             return True
 
-    async def _mark_superseded(
-        self: Store,
-        old_memory_id: str,
-        new_memory_id: str,
-    ) -> bool:
-        memory = self._graph.memories.get(old_memory_id)
-        if not memory or memory.superseded_at is not None:
-            return False
+    def _supersede_batch(self: Store, pairs: list[tuple[str, str]]) -> list[str]:
+        """Mark pairs as superseded in-memory. Caller must flush + save vector index.
 
-        memory.superseded_at = datetime.now(UTC)
-        self._graph.add_edge(create_supersedes_edge(new_memory_id, old_memory_id))
-        self._persistence.mark_dirty("memories", "edges")
-        await self._persistence.flush(self._graph)
+        Args:
+            pairs: List of (old_memory_id, new_memory_id) tuples.
 
-        await self._remove_from_vector_index([old_memory_id])
-        return True
+        Returns:
+            List of old memory IDs that were actually marked.
+        """
+        if not pairs:
+            return []
 
-    def _mark_superseded_batched(
-        self: Store,
-        old_memory_id: str,
-        new_memory_id: str,
-    ) -> bool:
-        """Mark superseded in-memory and mark dirty. Caller must flush."""
-        memory = self._graph.memories.get(old_memory_id)
-        if not memory or memory.superseded_at is not None:
-            return False
+        now = datetime.now(UTC)
+        marked: list[str] = []
 
-        memory.superseded_at = datetime.now(UTC)
-        self._graph.add_edge(create_supersedes_edge(new_memory_id, old_memory_id))
-        self._persistence.mark_dirty("memories", "edges")
+        for old_id, new_id in pairs:
+            memory = self._graph.memories.get(old_id)
+            if not memory or memory.superseded_at is not None:
+                continue
+            memory.superseded_at = now
+            self._graph.add_edge(create_supersedes_edge(new_id, old_id))
+            try:
+                self._index.remove(old_id)
+            except Exception:
+                logger.warning(
+                    "Failed to delete superseded memory embedding",
+                    extra={"memory_id": old_id},
+                    exc_info=True,
+                )
+            marked.append(old_id)
 
-        try:
-            self._index.remove(old_memory_id)
-        except Exception:
-            logger.warning(
-                "Failed to delete superseded memory embedding",
-                extra={"memory_id": old_memory_id},
-                exc_info=True,
-            )
-        return True
+        if marked:
+            self._persistence.mark_dirty("memories", "edges")
+
+        return marked
 
     async def _supersede_conflicting_batched(
         self: Store,
@@ -245,7 +244,7 @@ class SupersessionMixin:
             subject_person_ids=new_subjects or None,
         )
 
-        count = 0
+        pairs: list[tuple[str, str]] = []
         for memory, similarity in conflicts:
             if memory.id == new_memory.id:
                 continue
@@ -256,40 +255,18 @@ class SupersessionMixin:
                     old_content=memory.content, new_content=new_memory.content
                 ):
                     continue
-            if self._mark_superseded_batched(memory.id, new_memory.id):
-                count += 1
+            pairs.append((memory.id, new_memory.id))
 
-        return count
-
-    async def mark_superseded(
-        self: Store, old_memory_id: str, new_memory_id: str
-    ) -> bool:
-        """Mark a memory as superseded (public API for doctor/dedup)."""
-        return await self._mark_superseded(old_memory_id, new_memory_id)
+        return len(self._supersede_batch(pairs))
 
     async def batch_mark_superseded(
         self: Store, pairs: list[tuple[str, str]]
     ) -> list[str]:
         """Mark multiple memories as superseded in a single batch."""
-        if not pairs:
-            return []
-
-        now = datetime.now(UTC)
-        marked: list[str] = []
-
-        for old_id, new_id in pairs:
-            memory = self._graph.memories.get(old_id)
-            if memory and memory.superseded_at is None:
-                memory.superseded_at = now
-                self._graph.add_edge(create_supersedes_edge(new_id, old_id))
-                marked.append(old_id)
-
+        marked = self._supersede_batch(pairs)
         if marked:
-            self._persistence.mark_dirty("memories", "edges")
             await self._persistence.flush(self._graph)
-
-            await self._remove_from_vector_index(marked)
-
+            await self._save_vector_index()
         return marked
 
     async def supersede_confirmed_hearsay(
@@ -357,7 +334,8 @@ class SupersessionMixin:
 
         similarity_by_id: dict[str, float] = {mid: sim for mid, sim in similar}
 
-        count = 0
+        pairs: list[tuple[str, str]] = []
+        pair_similarities: dict[str, float] = {}
         for hearsay in hearsay_candidates:
             if hearsay.id == new_memory.id:
                 continue
@@ -371,16 +349,8 @@ class SupersessionMixin:
                         new_content=new_memory.content,
                     ):
                         continue
-                if self._mark_superseded_batched(hearsay.id, new_memory.id):
-                    count += 1
-                    logger.info(
-                        "Hearsay superseded by fact",
-                        extra={
-                            "hearsay_id": hearsay.id,
-                            "fact_id": new_memory.id,
-                            "similarity": similarity,
-                        },
-                    )
+                pairs.append((hearsay.id, new_memory.id))
+                pair_similarities[hearsay.id] = similarity
             except Exception:
                 logger.warning(
                     "Failed to check hearsay similarity",
@@ -388,8 +358,19 @@ class SupersessionMixin:
                     exc_info=True,
                 )
 
-        if count > 0:
+        marked = self._supersede_batch(pairs)
+        for mid in marked:
+            logger.info(
+                "Hearsay superseded by fact",
+                extra={
+                    "hearsay_id": mid,
+                    "fact_id": new_memory.id,
+                    "similarity": pair_similarities.get(mid, 0.0),
+                },
+            )
+
+        if marked:
             await self._persistence.flush(self._graph)
             await self._save_vector_index()
 
-        return count
+        return len(marked)

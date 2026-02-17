@@ -25,24 +25,21 @@ class MemoryLifecycleMixin:
     async def gc(self: Store) -> GCResult:
         now = datetime.now(UTC)
 
-        archived_ids: list[str] = []
+        reasons: dict[str, str] = {}
         for memory in self._graph.memories.values():
             if memory.archived_at is not None:
                 continue
             reason = self._should_archive(memory, now)
             if reason:
-                memory.archived_at = now
-                memory.archive_reason = reason
-                archived_ids.append(memory.id)
-                logger.info(
-                    "gc_archive_memory",
-                    extra={"memory_id": memory.id, "reason": reason},
-                )
+                reasons[memory.id] = reason
 
-        if archived_ids:
-            self._persistence.mark_dirty("memories")
-            await self._persistence.flush(self._graph)
-            await self._remove_from_vector_index(archived_ids)
+        archived_ids = await self.archive_memories(set(reasons), reasons)
+
+        for mid in archived_ids:
+            logger.info(
+                "gc_archive_memory",
+                extra={"memory_id": mid, "reason": reasons[mid]},
+            )
 
         logger.info("gc_complete", extra={"removed_count": len(archived_ids)})
         return GCResult(removed_count=len(archived_ids), archived_ids=archived_ids)
@@ -70,29 +67,18 @@ class MemoryLifecycleMixin:
     ) -> int:
         from ash.graph.edges import get_memories_about_person
 
-        now = datetime.now(UTC)
-
-        to_archive: list[str] = []
+        to_archive: set[str] = set()
         for mid in get_memories_about_person(self._graph, person_id):
             memory = self._graph.memories.get(mid)
             if memory and memory.archived_at is None:
-                to_archive.append(mid)
+                to_archive.add(mid)
 
         if not to_archive:
             if delete_person_record:
                 await self.delete_person(person_id)
             return 0
 
-        for mid in to_archive:
-            memory = self._graph.memories.get(mid)
-            if memory:
-                memory.archived_at = now
-                memory.archive_reason = "forgotten"
-
-        self._persistence.mark_dirty("memories")
-        await self._persistence.flush(self._graph)
-
-        await self._remove_from_vector_index(to_archive)
+        archived = await self.archive_memories(to_archive, reason="forgotten")
 
         if delete_person_record:
             await self.delete_person(person_id)
@@ -101,11 +87,11 @@ class MemoryLifecycleMixin:
             "forget_person_complete",
             extra={
                 "person_id": person_id,
-                "archived_count": len(to_archive),
+                "archived_count": len(archived),
                 "deleted_person": delete_person_record,
             },
         )
-        return len(to_archive)
+        return len(archived)
 
     async def get_supersession_chain(self: Store, memory_id: str) -> list[MemoryEntry]:
         """Build chain: find all memories that were superseded leading to this one."""
@@ -130,9 +116,15 @@ class MemoryLifecycleMixin:
         return result
 
     async def archive_memories(
-        self: Store, memory_ids: set[str], reason: str
+        self: Store, memory_ids: set[str], reason: str | dict[str, str]
     ) -> list[str]:
-        """Archive memories and clean up vector index."""
+        """Archive memories and clean up vector index.
+
+        Args:
+            memory_ids: IDs of memories to archive.
+            reason: A single reason string applied to all memories, or a
+                dict mapping memory_id → reason for per-memory reasons.
+        """
         if not memory_ids:
             return []
 
@@ -143,7 +135,9 @@ class MemoryLifecycleMixin:
             memory = self._graph.memories.get(mid)
             if memory and memory.archived_at is None:
                 memory.archived_at = now
-                memory.archive_reason = reason
+                memory.archive_reason = (
+                    reason.get(mid, "unknown") if isinstance(reason, dict) else reason
+                )
                 archived.append(mid)
 
         if archived:

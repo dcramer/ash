@@ -32,27 +32,17 @@ class MemoryEvictionMixin:
             [m for m in active if m.created_at and m.created_at < seven_days_ago],
             key=lambda m: m.created_at or datetime.min.replace(tzinfo=UTC),
         )
-        ids_to_evict = [m.id for m in candidates[:excess]]
+        ids_to_evict = {m.id for m in candidates[:excess]}
 
-        for mid in ids_to_evict:
-            memory = self._graph.memories.get(mid)
-            if memory:
-                memory.archived_at = now
-                memory.archive_reason = "evicted"
+        evicted = await self.archive_memories(ids_to_evict, reason="evicted")
 
-        if ids_to_evict:
-            self._persistence.mark_dirty("memories")
-            await self._persistence.flush(self._graph)
-
-        await self._remove_from_vector_index(ids_to_evict)
-
-        if len(ids_to_evict) < excess:
+        if len(evicted) < excess:
             logger.warning(
                 "Could not evict enough memories - all remaining are recent",
-                extra={"excess": excess, "evicted": len(ids_to_evict)},
+                extra={"excess": excess, "evicted": len(evicted)},
             )
 
-        return len(ids_to_evict)
+        return len(evicted)
 
     async def compact(self: Store, older_than_days: int = 90) -> int:
         """Permanently remove old archived entries."""
