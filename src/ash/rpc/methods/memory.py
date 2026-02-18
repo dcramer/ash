@@ -112,6 +112,31 @@ def register_memory_methods(
 
         return speaker_person_id, owner_names
 
+    def _is_dm_sourced(memory_id: str) -> bool | None:
+        """Check if a memory was learned in a private (DM) chat.
+
+        Returns True if DM-sourced, False if not, None if no LEARNED_IN edge.
+        """
+        from ash.graph.edges import get_learned_in_chat
+
+        chat_node_id = get_learned_in_chat(memory_manager.graph, memory_id)
+        if not chat_node_id:
+            return None
+        chat = memory_manager.graph.chats.get(chat_node_id)
+        return chat.chat_type == "private" if chat else None
+
+    def _resolve_chat_type(
+        chat_type: str | None, provider: str | None, chat_id: str | None
+    ) -> str | None:
+        """Resolve chat_type from params or graph lookup."""
+        if chat_type:
+            return chat_type
+        if provider and chat_id:
+            chat_entry = memory_manager.graph.find_chat_by_provider(provider, chat_id)
+            if chat_entry:
+                return chat_entry.chat_type
+        return None
+
     async def memory_search(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Search memories using semantic search.
 
@@ -120,6 +145,7 @@ def register_memory_methods(
             limit: Maximum results (default 10)
             user_id: Filter to user's personal memories
             chat_id: Include group memories for this chat
+            chat_type: Current chat type (for privacy filtering)
         """
         query = params.get("query")
         if not query:
@@ -128,6 +154,9 @@ def register_memory_methods(
         limit = params.get("limit", 10)
         user_id = params.get("user_id")
         chat_id = params.get("chat_id")
+        chat_type = _resolve_chat_type(
+            params.get("chat_type"), params.get("provider"), chat_id
+        )
 
         results = await memory_manager.search(
             query=query,
@@ -135,6 +164,10 @@ def register_memory_methods(
             owner_user_id=user_id,
             chat_id=chat_id,
         )
+
+        # Filter DM-sourced memories in group chats
+        if chat_type in ("group", "supergroup"):
+            results = [r for r in results if not _is_dm_sourced(r.id)]
 
         lookup = await _build_username_lookup()
 
@@ -216,6 +249,15 @@ def register_memory_methods(
             portable=(classified.portable if classified else True),
         )
 
+        # Resolve graph_chat_id for LEARNED_IN edges
+        provider = params.get("provider")
+        chat_type = params.get("chat_type")
+        graph_chat_id: str | None = None
+        if provider and chat_id:
+            chat_entry = memory_manager.graph.find_chat_by_provider(provider, chat_id)
+            if chat_entry:
+                graph_chat_id = chat_entry.id
+
         stored_ids = await process_extracted_facts(
             facts=[fact],
             store=memory_manager,
@@ -227,6 +269,8 @@ def register_memory_methods(
             owner_names=owner_names,
             source=source,
             confidence_threshold=0.0,  # Always store agent-provided facts
+            graph_chat_id=graph_chat_id,
+            chat_type=chat_type,
         )
 
         if stored_ids:
@@ -240,6 +284,7 @@ def register_memory_methods(
             chat_id=chat_id if shared else None,
             source_username=source_username,
             source_display_name=source_display_name,
+            graph_chat_id=graph_chat_id,
         )
         return {"id": memory.id}
 
@@ -353,6 +398,15 @@ def register_memory_methods(
                 fact.shared = True
 
         effective_user_id = msg_user_id or user_id or ""
+
+        # Resolve graph_chat_id for LEARNED_IN edges
+        chat_type = params.get("chat_type")
+        graph_chat_id: str | None = None
+        if provider and chat_id:
+            chat_entry = memory_manager.graph.find_chat_by_provider(provider, chat_id)
+            if chat_entry:
+                graph_chat_id = chat_entry.id
+
         stored_ids = await process_extracted_facts(
             facts=facts,
             store=memory_manager,
@@ -364,6 +418,8 @@ def register_memory_methods(
             owner_names=owner_names,
             source="agent",
             confidence_threshold=0.0,  # Trust extraction from explicit request
+            graph_chat_id=graph_chat_id,
+            chat_type=chat_type,
         )
 
         return {"stored": len(stored_ids)}
@@ -376,11 +432,13 @@ def register_memory_methods(
             include_expired: Include expired entries (default False)
             user_id: Filter to user's personal memories
             chat_id: Include group memories for this chat
+            chat_type: Current chat type (for privacy filtering)
         """
         limit = params.get("limit", 20)
         include_expired = params.get("include_expired", False)
         user_id = params.get("user_id")
         chat_id = params.get("chat_id")
+        chat_type = params.get("chat_type")
 
         memories = await memory_manager.list_memories(
             limit=limit,
@@ -388,6 +446,10 @@ def register_memory_methods(
             owner_user_id=user_id,
             chat_id=chat_id,
         )
+
+        # Filter DM-sourced memories in group chats
+        if chat_type in ("group", "supergroup"):
+            memories = [m for m in memories if not _is_dm_sourced(m.id)]
 
         lookup = await _build_username_lookup()
 

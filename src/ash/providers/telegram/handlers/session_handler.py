@@ -249,6 +249,18 @@ class SessionHandler:
         if chat_type or chat_title:
             chat_state.update_chat_info(chat_type=chat_type, title=chat_title)
 
+        # Ensure graph ChatEntry exists for LEARNED_IN edge tracking
+        if self._store:
+            try:
+                await self._store.ensure_chat(
+                    provider=self._provider_name,
+                    provider_id=message.chat_id,
+                    chat_type=chat_type,
+                    title=chat_title,
+                )
+            except Exception:
+                logger.debug("chat_upsert_failed", exc_info=True)
+
         # Use chat-level session ID for participant reference
         chat_session_id = make_session_key(
             self._provider_name, message.chat_id, message.user_id, None

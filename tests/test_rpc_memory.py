@@ -501,3 +501,144 @@ class TestRPCMemoryExtract:
         assert speaker_info is not None
         assert speaker_info.username == "bob"
         assert speaker_info.display_name == "Bob Smith"
+
+
+class TestRPCDMSourceFiltering:
+    """Tests for DM-sourced memory filtering in group chat RPC calls."""
+
+    def _link_to_dm(self, graph, memory_id: str, chat_node_id: str = "dm-chat-1"):
+        """Create a LEARNED_IN edge from memory to chat."""
+        from ash.graph.edges import create_learned_in_edge
+
+        edge = create_learned_in_edge(memory_id, chat_node_id)
+        graph.add_edge(edge)
+
+    async def test_search_filters_dm_sourced_in_group(self, rpc_server, memory_manager):
+        """DM-sourced memories should be filtered out when searching in a group chat."""
+        from ash.store.types import ChatEntry
+
+        # Create a private chat node
+        memory_manager.graph.chats["dm-chat-1"] = ChatEntry(
+            id="dm-chat-1",
+            provider="telegram",
+            provider_id="dm-123",
+            chat_type="private",
+        )
+
+        # Add a memory and link it to the DM chat via LEARNED_IN edge
+        mem = await memory_manager.add_memory(
+            content="Secret plan from DM",
+            owner_user_id="user-1",
+        )
+        self._link_to_dm(memory_manager.graph, mem.id)
+
+        # Mock vector search to return this memory
+        memory_manager._index.search = MagicMock(return_value=[(mem.id, 0.95)])
+
+        handler = rpc_server.methods["memory.search"]
+
+        # In a group chat, the DM-sourced memory should be filtered out
+        results = await handler(
+            {
+                "query": "secret plan",
+                "user_id": "user-1",
+                "chat_type": "group",
+            }
+        )
+        assert len(results) == 0
+
+    async def test_search_allows_dm_sourced_in_dm(self, rpc_server, memory_manager):
+        """DM-sourced memories should NOT be filtered when searching in a DM."""
+        from ash.store.types import ChatEntry
+
+        memory_manager.graph.chats["dm-chat-1"] = ChatEntry(
+            id="dm-chat-1",
+            provider="telegram",
+            provider_id="dm-123",
+            chat_type="private",
+        )
+
+        mem = await memory_manager.add_memory(
+            content="Secret plan from DM",
+            owner_user_id="user-1",
+        )
+        self._link_to_dm(memory_manager.graph, mem.id)
+
+        memory_manager._index.search = MagicMock(return_value=[(mem.id, 0.95)])
+
+        handler = rpc_server.methods["memory.search"]
+
+        # In a private chat, the DM-sourced memory should be visible
+        results = await handler(
+            {
+                "query": "secret plan",
+                "user_id": "user-1",
+                "chat_type": "private",
+            }
+        )
+        assert len(results) == 1
+        assert results[0]["content"] == "Secret plan from DM"
+
+    async def test_search_no_chat_type_passes_through(self, rpc_server, memory_manager):
+        """Without chat_type, no DM filtering is applied."""
+        from ash.store.types import ChatEntry
+
+        memory_manager.graph.chats["dm-chat-1"] = ChatEntry(
+            id="dm-chat-1",
+            provider="telegram",
+            provider_id="dm-123",
+            chat_type="private",
+        )
+
+        mem = await memory_manager.add_memory(
+            content="Secret plan from DM",
+            owner_user_id="user-1",
+        )
+        self._link_to_dm(memory_manager.graph, mem.id)
+
+        memory_manager._index.search = MagicMock(return_value=[(mem.id, 0.95)])
+
+        handler = rpc_server.methods["memory.search"]
+
+        # Without chat_type, memories should pass through
+        results = await handler(
+            {
+                "query": "secret plan",
+                "user_id": "user-1",
+            }
+        )
+        assert len(results) == 1
+
+    async def test_list_filters_dm_sourced_in_group(self, rpc_server, memory_manager):
+        """DM-sourced memories should be filtered from list in group chats."""
+        from ash.store.types import ChatEntry
+
+        memory_manager.graph.chats["dm-chat-1"] = ChatEntry(
+            id="dm-chat-1",
+            provider="telegram",
+            provider_id="dm-123",
+            chat_type="private",
+        )
+
+        mem = await memory_manager.add_memory(
+            content="Secret from DM",
+            owner_user_id="user-1",
+        )
+        self._link_to_dm(memory_manager.graph, mem.id)
+
+        # Add a non-DM memory
+        await memory_manager.add_memory(
+            content="Public knowledge",
+            owner_user_id="user-1",
+        )
+
+        handler = rpc_server.methods["memory.list"]
+
+        results = await handler(
+            {
+                "user_id": "user-1",
+                "chat_type": "group",
+            }
+        )
+        assert len(results) == 1
+        assert results[0]["content"] == "Public knowledge"

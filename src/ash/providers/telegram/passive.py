@@ -519,6 +519,7 @@ class PassiveMemoryExtractor:
                 owner_names=owner_names,
                 source="passive",
                 graph_chat_id=graph_chat_id,
+                chat_type=message.metadata.get("chat_type"),
             )
 
             stored = len(stored_ids)

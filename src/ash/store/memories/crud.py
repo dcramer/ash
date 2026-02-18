@@ -150,13 +150,23 @@ class MemoryCrudMixin:
             self._persistence.mark_dirty("edges")
 
         # Create LEARNED_IN edge to track source chat
+        logger.debug(
+            "add_memory_graph_chat_id: memory=%s graph_chat_id=%s",
+            memory_id[:8],
+            graph_chat_id,
+        )
         if graph_chat_id:
             from ash.graph.edges import create_learned_in_edge
 
-            self._graph.add_edge(
-                create_learned_in_edge(memory_id, graph_chat_id, created_by=source)
-            )
+            edge = create_learned_in_edge(memory_id, graph_chat_id, created_by=source)
+            self._graph.add_edge(edge)
             self._persistence.mark_dirty("edges")
+            logger.debug(
+                "learned_in_edge_created: memory=%s chat=%s edge=%s",
+                memory_id[:8],
+                graph_chat_id[:8],
+                edge.id[:8],
+            )
 
         if embedding_floats:
             embedding_base64 = MemoryEntry.encode_embedding(embedding_floats)

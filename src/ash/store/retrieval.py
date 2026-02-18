@@ -14,7 +14,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from ash.graph.edges import get_memories_about_person
+from ash.graph.edges import (
+    get_learned_in_chat,
+    get_memories_about_person,
+    get_stated_by_person,
+)
 from ash.graph.traversal import bfs_traverse
 from ash.store.types import (
     MemoryEntry,
@@ -106,6 +110,12 @@ class RetrievalPipeline:
                 )
                 for memory in cross_memories:
                     from ash.graph.edges import get_subject_person_ids
+
+                    # Block DM-sourced memories in group chats —
+                    # cross-context has no semantic relevance signal
+                    if context.chat_type in ("group", "supergroup"):
+                        if self._is_dm_sourced(memory.id):
+                            continue
 
                     mem_subjects = get_subject_person_ids(self._store.graph, memory.id)
                     if self._passes_privacy_filter(
@@ -209,6 +219,12 @@ class RetrievalPipeline:
                 continue
             if not memory.portable:
                 continue
+
+            # Block DM-sourced memories in group chats —
+            # BFS traversal has no semantic relevance signal
+            if context.chat_type in ("group", "supergroup"):
+                if self._is_dm_sourced(memory.id):
+                    continue
 
             # Privacy filter
             from ash.graph.edges import get_subject_person_ids
@@ -378,8 +394,6 @@ class RetrievalPipeline:
         - It has no LEARNED_IN edge (legacy data, fail-open)
         """
         from ash.graph.edges import (
-            get_learned_in_chat,
-            get_stated_by_person,
             person_participates_in_chat,
         )
 
@@ -432,6 +446,24 @@ class RetrievalPipeline:
 
         return filtered
 
+    def _get_source_chat_type(self, memory_id: str) -> str | None:
+        """Get the chat_type of the chat where a memory was learned."""
+        chat_id = get_learned_in_chat(self._store.graph, memory_id)
+        if not chat_id:
+            return None
+        chat = self._store.graph.chats.get(chat_id)
+        return chat.chat_type if chat else None
+
+    def _is_dm_sourced(self, memory_id: str) -> bool | None:
+        """Check if a memory was learned in a private (DM) chat.
+
+        Returns True if DM-sourced, False if not, None if no LEARNED_IN edge (legacy).
+        """
+        source_type = self._get_source_chat_type(memory_id)
+        if source_type is None:
+            return None  # No LEARNED_IN edge — legacy data
+        return source_type == "private"
+
     def _filter_group_privacy(
         self,
         results: list[SearchResult],
@@ -439,6 +471,7 @@ class RetrievalPipeline:
     ) -> list[SearchResult]:
         """Group chat privacy filter.
 
+        - DM-sourced memories: always blocked (everyone in the group sees the response)
         - PUBLIC: always included
         - PERSONAL about non-participants: excluded
         - PERSONAL about participants: included
@@ -454,6 +487,13 @@ class RetrievalPipeline:
         for result in results:
             meta = result.metadata or {}
             subject_person_ids = meta.get("subject_person_ids", [])
+
+            # Block all DM-sourced memories in group chats — everyone in the
+            # group sees the response, so DM-private info must not leak.
+            # Memories without LEARNED_IN edges (legacy) pass through.
+            dm_sourced = self._is_dm_sourced(result.id)
+            if dm_sourced:
+                continue
 
             # Self-memories (no subjects) always visible to the owner
             if not subject_person_ids:

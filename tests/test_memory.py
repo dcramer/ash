@@ -1030,3 +1030,124 @@ class TestOwnerFilteringInProcessing:
 
         subject_pids = get_subject_person_ids(graph_store.graph, stored_ids[0])
         assert bob.id in subject_pids
+
+
+class TestDMSensitivityFloor:
+    """Tests for DM sensitivity floor on ephemeral memory types."""
+
+    @pytest.mark.asyncio
+    async def test_dm_event_gets_personal_sensitivity(self, graph_store: Store):
+        """Ephemeral event memory extracted in DM gets minimum PERSONAL sensitivity."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
+        facts = [
+            ExtractedFact(
+                content="Planning a baby moon trip",
+                subjects=[],
+                shared=False,
+                confidence=0.9,
+                memory_type=MemoryType.EVENT,
+                sensitivity=None,  # Would be PUBLIC by default
+            ),
+        ]
+
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=graph_store,
+            user_id="user-1",
+            chat_type="private",
+        )
+
+        assert len(stored_ids) == 1
+        mem = await graph_store.get_memory(stored_ids[0])
+        assert mem is not None
+        assert mem.sensitivity == Sensitivity.PERSONAL
+
+    @pytest.mark.asyncio
+    async def test_dm_preference_keeps_original_sensitivity(self, graph_store: Store):
+        """Non-ephemeral preference type keeps original sensitivity in DM."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
+        facts = [
+            ExtractedFact(
+                content="Likes Italian food",
+                subjects=[],
+                shared=False,
+                confidence=0.9,
+                memory_type=MemoryType.PREFERENCE,
+                sensitivity=None,
+            ),
+        ]
+
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=graph_store,
+            user_id="user-1",
+            chat_type="private",
+        )
+
+        assert len(stored_ids) == 1
+        mem = await graph_store.get_memory(stored_ids[0])
+        assert mem is not None
+        # PREFERENCE is not ephemeral, so no floor applied
+        assert mem.sensitivity is None
+
+    @pytest.mark.asyncio
+    async def test_group_event_keeps_original_sensitivity(self, graph_store: Store):
+        """Event memory in group chat keeps original sensitivity (floor only for DMs)."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
+        facts = [
+            ExtractedFact(
+                content="Team offsite next week",
+                subjects=[],
+                shared=False,
+                confidence=0.9,
+                memory_type=MemoryType.EVENT,
+                sensitivity=None,
+            ),
+        ]
+
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=graph_store,
+            user_id="user-1",
+            chat_type="group",
+        )
+
+        assert len(stored_ids) == 1
+        mem = await graph_store.get_memory(stored_ids[0])
+        assert mem is not None
+        assert mem.sensitivity is None
+
+    @pytest.mark.asyncio
+    async def test_dm_sensitive_memory_not_downgraded(self, graph_store: Store):
+        """SENSITIVE memory in DM stays SENSITIVE (floor doesn't downgrade)."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
+        facts = [
+            ExtractedFact(
+                content="Medical appointment scheduled",
+                subjects=[],
+                shared=False,
+                confidence=0.9,
+                memory_type=MemoryType.EVENT,
+                sensitivity=Sensitivity.SENSITIVE,
+            ),
+        ]
+
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=graph_store,
+            user_id="user-1",
+            chat_type="private",
+        )
+
+        assert len(stored_ids) == 1
+        mem = await graph_store.get_memory(stored_ids[0])
+        assert mem is not None
+        assert mem.sensitivity == Sensitivity.SENSITIVE

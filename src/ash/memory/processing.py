@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from ash.core.filters import build_owner_matchers, is_owner_name
-from ash.store.types import MemoryType
+from ash.store.types import EPHEMERAL_TYPES, MemoryType, Sensitivity
 
 if TYPE_CHECKING:
     from ash.store.store import Store
@@ -189,6 +189,7 @@ async def process_extracted_facts(
     source: str = "background_extraction",
     confidence_threshold: float = 0.7,
     graph_chat_id: str | None = None,
+    chat_type: str | None = None,
 ) -> list[str]:
     """Process extracted facts through the full post-extraction pipeline.
 
@@ -200,6 +201,13 @@ async def process_extracted_facts(
     Returns:
         List of stored memory IDs.
     """
+    logger.debug(
+        "process_extracted_facts: facts=%d graph_chat_id=%s chat_type=%s source=%s",
+        len(facts),
+        graph_chat_id,
+        chat_type,
+        source,
+    )
     owner_matchers = build_owner_matchers(owner_names)
     newly_created_person_ids: list[str] = []
     stored_ids: list[str] = []
@@ -325,6 +333,17 @@ async def process_extracted_facts(
                         extra={"source.username": source_username},
                     )
 
+            # DM sensitivity floor: ephemeral types get minimum PERSONAL
+            # in private chats as defense-in-depth against cross-context leakage
+            effective_sensitivity = fact.sensitivity
+            if (
+                chat_type == "private"
+                and fact.memory_type in EPHEMERAL_TYPES
+                and effective_sensitivity
+                not in (Sensitivity.PERSONAL, Sensitivity.SENSITIVE)
+            ):
+                effective_sensitivity = Sensitivity.PERSONAL
+
             new_memory = await store.add_memory(
                 content=fact.content,
                 source=source,
@@ -336,7 +355,7 @@ async def process_extracted_facts(
                 source_username=source_username,
                 source_display_name=source_display_name,
                 extraction_confidence=fact.confidence,
-                sensitivity=fact.sensitivity,
+                sensitivity=effective_sensitivity,
                 portable=fact.portable,
                 stated_by_person_id=stated_by_pid,
                 graph_chat_id=graph_chat_id,

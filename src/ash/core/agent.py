@@ -82,6 +82,7 @@ def _build_routing_env(
         "ASH_SESSION_ID": session.session_id or "",
         "ASH_USER_ID": effective_user_id or "",
         "ASH_CHAT_ID": session.chat_id or "",
+        "ASH_CHAT_TYPE": session.context.chat_type or "",
         "ASH_CHAT_TITLE": session.context.chat_title or "",
         "ASH_PROVIDER": session.provider or "",
         "ASH_USERNAME": session.context.username or "",
@@ -484,6 +485,13 @@ class Agent:
                 )
                 if chat_entry:
                     graph_chat_id = chat_entry.id
+                logger.debug(
+                    "memory_extraction_chat_lookup: provider=%s chat_id=%s graph_chat_id=%s chat_count=%d",
+                    session.provider,
+                    session.chat_id,
+                    graph_chat_id,
+                    len(self._memory.graph.chats),
+                )
 
             await process_extracted_facts(
                 facts=facts,
@@ -497,6 +505,7 @@ class Agent:
                 source="background_extraction",
                 confidence_threshold=self._config.extraction_confidence_threshold,
                 graph_chat_id=graph_chat_id,
+                chat_type=session.context.chat_type,
             )
 
         except Exception:

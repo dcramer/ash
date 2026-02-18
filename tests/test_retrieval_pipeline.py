@@ -15,7 +15,7 @@ from ash.store.retrieval import (
     RetrievalPipeline,
 )
 from ash.store.store import Store
-from ash.store.types import SearchResult, Sensitivity
+from ash.store.types import ChatEntry, SearchResult, Sensitivity
 
 
 @pytest.fixture
@@ -833,7 +833,6 @@ class TestDMContextualFilter:
     def pipeline(self, mock_store):
         """Create a pipeline with a real graph for edge queries."""
         from ash.graph.graph import KnowledgeGraph
-        from ash.store.types import ChatEntry
 
         graph = KnowledgeGraph()
         # Register chat and people nodes
@@ -1077,3 +1076,284 @@ class TestGroupPersonalFilter:
 
         result = await pipeline.retrieve(context)
         assert len(result.memories) == 1
+
+
+class TestGroupDMSourceFilter:
+    """Tests for DM-sourced memory filtering in group chats.
+
+    DM-sourced memories should not leak into group chats unless the
+    original stater is the current sender (Stage 1 only).
+    """
+
+    @pytest.fixture
+    def pipeline(self, mock_store):
+        """Create a pipeline with a real graph for edge queries."""
+        from ash.graph.graph import KnowledgeGraph
+
+        graph = KnowledgeGraph()
+        # DM chat and group chat
+        graph.add_chat(
+            ChatEntry(
+                id="chat-dm",
+                provider="telegram",
+                provider_id="dm-100",
+                chat_type="private",
+            )
+        )
+        graph.add_chat(
+            ChatEntry(
+                id="chat-group",
+                provider="telegram",
+                provider_id="grp-200",
+                chat_type="group",
+            )
+        )
+        mock_store.graph = graph
+        mock_store._graph = graph
+        return RetrievalPipeline(mock_store)
+
+    def _make_result(
+        self,
+        id: str,
+        subject_person_ids: list[str] | None = None,
+        sensitivity: str | None = None,
+    ) -> SearchResult:
+        return SearchResult(
+            id=id,
+            content=f"Content of {id}",
+            similarity=0.9,
+            metadata={
+                "subject_person_ids": subject_person_ids or [],
+                "sensitivity": sensitivity,
+            },
+            source_type="memory",
+        )
+
+    def test_dm_sourced_memory_blocked_in_group(self, pipeline):
+        """DM-sourced PUBLIC memory is blocked in group chat."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = pipeline._store.graph
+        graph.add_edge(create_learned_in_edge("mem-dm", "chat-dm"))
+
+        results = [
+            self._make_result(
+                "mem-dm", subject_person_ids=["person-alice"], sensitivity="public"
+            )
+        ]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="group",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_group_privacy(results, context)
+        assert len(filtered) == 0
+
+    def test_dm_sourced_self_fact_blocked_in_group(self, pipeline):
+        """DM-sourced self-fact is blocked in group chats (others see the response)."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = pipeline._store.graph
+        graph.add_edge(create_learned_in_edge("mem-dm", "chat-dm"))
+
+        results = [
+            self._make_result(
+                "mem-dm", subject_person_ids=["person-alice"], sensitivity="public"
+            )
+        ]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="group",
+            # Alice is the sender and the only subject, but still blocked
+            # because everyone in the group can read the response
+            participant_person_ids={"alice": {"person-alice"}},
+        )
+        filtered = pipeline._filter_group_privacy(results, context)
+        assert len(filtered) == 0
+
+    def test_dm_sourced_about_third_party_blocked_even_if_stater_is_sender(
+        self, pipeline
+    ):
+        """DM-sourced memory about a third party is blocked even if stater is sender."""
+        from ash.graph.edges import create_learned_in_edge, create_stated_by_edge
+
+        graph = pipeline._store.graph
+        graph.add_edge(create_learned_in_edge("mem-dm-tp", "chat-dm"))
+        graph.add_edge(create_stated_by_edge("mem-dm-tp", "person-bob"))
+
+        results = [
+            self._make_result(
+                # Memory about Jamie, stated by Bob
+                "mem-dm-tp",
+                subject_person_ids=["person-jamie"],
+                sensitivity="public",
+            )
+        ]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="group",
+            # Bob is the sender but Jamie is the subject -> not a self-fact
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_group_privacy(results, context)
+        assert len(filtered) == 0
+
+    def test_dm_sourced_memory_blocked_when_different_sender(self, pipeline):
+        """DM-sourced memory blocked when a different person sends the message."""
+        from ash.graph.edges import create_learned_in_edge, create_stated_by_edge
+
+        graph = pipeline._store.graph
+        graph.add_edge(create_learned_in_edge("mem-dm2", "chat-dm"))
+        graph.add_edge(create_stated_by_edge("mem-dm2", "person-alice"))
+
+        results = [
+            self._make_result(
+                "mem-dm2", subject_person_ids=["person-alice"], sensitivity="public"
+            )
+        ]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="group",
+            # Bob is the sender, not Alice
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_group_privacy(results, context)
+        assert len(filtered) == 0
+
+    def test_no_learned_in_edge_passes(self, pipeline):
+        """Legacy memory without LEARNED_IN edge passes (fail-open)."""
+        results = [
+            self._make_result(
+                "mem-legacy", subject_person_ids=["person-alice"], sensitivity="public"
+            )
+        ]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="group",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_group_privacy(results, context)
+        assert len(filtered) == 1
+
+    def test_group_sourced_memory_passes(self, pipeline):
+        """Memory from a group chat passes in other group chats."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = pipeline._store.graph
+        graph.add_edge(create_learned_in_edge("mem-grp", "chat-group"))
+
+        results = [
+            self._make_result(
+                "mem-grp", subject_person_ids=["person-alice"], sensitivity="public"
+            )
+        ]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_type="group",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_group_privacy(results, context)
+        assert len(filtered) == 1
+
+    @pytest.mark.asyncio
+    async def test_dm_sourced_blocked_in_cross_context(self, mock_store):
+        """DM-sourced memory never appears via Stage 2 cross-context in groups."""
+        from ash.graph.edges import (
+            create_about_edge,
+            create_learned_in_edge,
+        )
+        from ash.graph.graph import KnowledgeGraph
+        from ash.store.types import MemoryEntry
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-dm",
+                provider="telegram",
+                provider_id="dm-100",
+                chat_type="private",
+            )
+        )
+
+        # Create a memory about person-alice, learned in DM
+        mem = MemoryEntry(
+            id="mem-dm-cross",
+            content="Alice plans a surprise party",
+            owner_user_id="user-2",
+            sensitivity=Sensitivity.PUBLIC,
+            portable=True,
+        )
+        graph.memories["mem-dm-cross"] = mem
+        graph.add_edge(create_about_edge("mem-dm-cross", "person-alice"))
+        graph.add_edge(create_learned_in_edge("mem-dm-cross", "chat-dm"))
+
+        mock_store.graph = graph
+        mock_store._graph = graph
+        mock_store.search = AsyncMock(return_value=[])
+        mock_store._resolve_subject_name = AsyncMock(return_value=None)
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="Alice",
+            chat_type="group",
+            participant_person_ids={"alice": {"person-alice"}},
+        )
+
+        stage2 = await pipeline._cross_context(context)
+        assert len(stage2) == 0
+
+    @pytest.mark.asyncio
+    async def test_dm_sourced_blocked_in_graph_traversal(self, mock_store):
+        """DM-sourced memory never appears via Stage 3 BFS in groups."""
+        from ash.graph.edges import (
+            create_about_edge,
+            create_learned_in_edge,
+        )
+        from ash.graph.graph import KnowledgeGraph
+        from ash.store.types import MemoryEntry, PersonEntry
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-dm",
+                provider="telegram",
+                provider_id="dm-100",
+                chat_type="private",
+            )
+        )
+        graph.add_person(PersonEntry(id="person-alice", name="Alice"))
+
+        # Create a memory about person-alice, learned in DM
+        mem = MemoryEntry(
+            id="mem-dm-bfs",
+            content="Alice's baby moon plan",
+            owner_user_id="user-2",
+            sensitivity=Sensitivity.PUBLIC,
+            portable=True,
+        )
+        graph.memories["mem-dm-bfs"] = mem
+        graph.add_edge(create_about_edge("mem-dm-bfs", "person-alice"))
+        graph.add_edge(create_learned_in_edge("mem-dm-bfs", "chat-dm"))
+
+        mock_store.graph = graph
+        mock_store._graph = graph
+        mock_store.search = AsyncMock(return_value=[])
+        mock_store._resolve_subject_name = AsyncMock(return_value=None)
+
+        pipeline = RetrievalPipeline(mock_store)
+        context = RetrievalContext(
+            user_id="user-1",
+            query="plans",
+            chat_type="group",
+            participant_person_ids={"alice": {"person-alice"}},
+        )
+
+        stage3 = await pipeline._multi_hop_traversal(context, [], [])
+        assert len(stage3) == 0

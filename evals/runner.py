@@ -451,17 +451,36 @@ async def dump_state(components: "AgentComponents") -> None:
         memories = await store.get_all_memories()
         logger.info("=== Extracted memories (%d) ===", len(memories))
         for m in memories:
-            from ash.graph.edges import get_subject_person_ids
+            from ash.graph.edges import get_learned_in_chat, get_subject_person_ids
 
             subjects = get_subject_person_ids(store.graph, m.id)
+            learned_in = get_learned_in_chat(store.graph, m.id)
+            learned_chat = store.graph.chats.get(learned_in) if learned_in else None
+            learned_info = (
+                f"learned_in={learned_chat.chat_type}({learned_chat.provider_id})"
+                if learned_chat
+                else "learned_in=None"
+            )
             logger.info(
-                "  [%s] %s (type=%s, owner=%s, subjects=%s, source=%s)",
+                "  [%s] %s (type=%s, owner=%s, subjects=%s, source=%s, %s)",
                 m.id[:8],
                 m.content[:80],
                 m.memory_type.value,
                 m.owner_user_id,
                 subjects,
                 m.source_username,
+                learned_info,
+            )
+
+        # Log chat entries
+        logger.info("=== Chat entries (%d) ===", len(store.graph.chats))
+        for cid, chat in store.graph.chats.items():
+            logger.info(
+                "  [%s] provider=%s, provider_id=%s, chat_type=%s",
+                cid[:8],
+                chat.provider,
+                chat.provider_id,
+                chat.chat_type,
             )
 
     if components.person_manager:
@@ -498,6 +517,20 @@ async def run_setup_steps(
     for step in steps:
         session = _build_setup_session(step, defaults)
         user_id = step.user_id or defaults.session.user_id or "eval-user"
+
+        # Ensure ChatEntry graph node exists so LEARNED_IN edges can be created
+        # during memory extraction (mirrors what the Telegram session handler does)
+        if components.memory_manager and session.chat_id and session.provider:
+            try:
+                await components.memory_manager.ensure_chat(
+                    provider=session.provider,
+                    provider_id=session.chat_id,
+                    chat_type=session.context.chat_type,
+                    title=session.context.chat_title,
+                )
+            except Exception:
+                logger.debug("eval_chat_upsert_failed", exc_info=True)
+
         for message in step.messages:
             await _persist_user_message(session, message, user_id)
             await agent.process_message(
@@ -609,6 +642,19 @@ async def run_yaml_eval_case(
     # 2. Build eval session from merged config
     case_session_config = case.session or SessionConfig()
     session = build_session_state(case_session_config, defaults, case_id=case.id)
+
+    # Ensure ChatEntry exists for the test case chat so RPC handlers can
+    # resolve chat_type (needed for DM-source privacy filtering)
+    if components.memory_manager and session.chat_id and session.provider:
+        try:
+            await components.memory_manager.ensure_chat(
+                provider=session.provider,
+                provider_id=session.chat_id,
+                chat_type=session.context.chat_type,
+                title=session.context.chat_title,
+            )
+        except Exception:
+            logger.debug("eval_case_chat_upsert_failed", exc_info=True)
 
     # 3. Determine user_id for message sending
     user_id = case_session_config.user_id or defaults.session.user_id or "eval-user"
