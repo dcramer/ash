@@ -733,6 +733,15 @@ class SystemPromptBuilder:
                     f"Thread participants: `cat {thread_state_path}/state.json`"
                 )
 
+        lines.extend(
+            [
+                "",
+                "This is a group chat. Write like a participant in a conversation — "
+                "use short, natural prose. Avoid bullet points, numbered lists, headers, "
+                "and structured formatting unless the user explicitly asks for organized information.",
+            ]
+        )
+
         return "\n".join(lines)
 
     def _build_passive_engagement_section(self, context: PromptContext) -> str:

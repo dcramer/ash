@@ -283,6 +283,130 @@ class TestMentionDetection:
         assert result == "tell @alice hello"
 
 
+class TestReplyDetection:
+    """Test _is_reply() targeting — only replies to bot's own messages count."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create provider with bot ID set."""
+        with patch("ash.providers.telegram.provider.Bot"):
+            provider = TelegramProvider(bot_token="test")
+            provider._bot_username = "testbot"
+            provider._bot_id = 999
+            yield provider
+
+    def _make_message(self, reply_from_id: int | None = None) -> MagicMock:
+        """Create a mock TelegramMessage with optional reply target."""
+        msg = MagicMock()
+        if reply_from_id is not None:
+            msg.reply_to_message = MagicMock()
+            msg.reply_to_message.from_user = MagicMock()
+            msg.reply_to_message.from_user.id = reply_from_id
+        else:
+            msg.reply_to_message = None
+        return msg
+
+    def test_reply_to_bot_message(self, provider):
+        """Reply to the bot's own message → True (active mode)."""
+        msg = self._make_message(reply_from_id=999)
+        assert provider._is_reply(msg) is True
+
+    def test_reply_to_other_user(self, provider):
+        """Reply to another user's message → False (passive or skip)."""
+        msg = self._make_message(reply_from_id=123)
+        assert provider._is_reply(msg) is False
+
+    def test_no_reply(self, provider):
+        """Not a reply at all → False."""
+        msg = self._make_message(reply_from_id=None)
+        assert provider._is_reply(msg) is False
+
+    def test_bot_id_none_falls_back(self, provider):
+        """When _bot_id is None, fall back to old behavior (any reply → True)."""
+        provider._bot_id = None
+        msg = self._make_message(reply_from_id=123)
+        assert provider._is_reply(msg) is True
+
+    def test_reply_to_message_without_from_user(self, provider):
+        """Reply to a message with no from_user (e.g. channel post) → False."""
+        msg = MagicMock()
+        msg.reply_to_message = MagicMock()
+        msg.reply_to_message.from_user = None
+        assert provider._is_reply(msg) is False
+
+
+class TestGroupProcessingMode:
+    """Test that reply targeting integrates correctly with _should_process_message."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create provider configured for group mention mode."""
+        with patch("ash.providers.telegram.provider.Bot"):
+            provider = TelegramProvider(
+                bot_token="test",
+                allowed_groups=["-100"],
+                group_mode="mention",
+            )
+            provider._bot_username = "testbot"
+            provider._bot_id = 999
+            yield provider
+
+    def _make_group_message(
+        self,
+        *,
+        text: str = "hello",
+        reply_from_id: int | None = None,
+        user_id: int = 1,
+        username: str = "alice",
+    ) -> MagicMock:
+        msg = MagicMock()
+        msg.chat.id = -100
+        msg.chat.type = "group"
+        msg.chat.title = "Test Group"
+        msg.message_id = 42
+        msg.from_user.id = user_id
+        msg.from_user.username = username
+        msg.from_user.full_name = username.title()
+        msg.text = text
+        msg.caption = None
+        msg.entities = []
+        msg.caption_entities = []
+        msg.date = None
+        msg.message_thread_id = None
+        if reply_from_id is not None:
+            msg.reply_to_message = MagicMock()
+            msg.reply_to_message.from_user = MagicMock()
+            msg.reply_to_message.from_user.id = reply_from_id
+        else:
+            msg.reply_to_message = None
+        return msg
+
+    @patch("ash.chats.ChatHistoryWriter")
+    def test_reply_to_bot_is_active(self, _mock_writer, provider):
+        """Reply to bot's message in group → active processing."""
+        msg = self._make_group_message(reply_from_id=999)
+        result = provider._should_process_message(msg)
+        assert result is not None
+        assert result[0] == "active"
+
+    @patch("ash.chats.ChatHistoryWriter")
+    def test_reply_to_other_user_is_skipped(self, _mock_writer, provider):
+        """Reply to another user in group → skipped (no passive handler)."""
+        msg = self._make_group_message(reply_from_id=123)
+        result = provider._should_process_message(msg)
+        assert result is None
+
+    @patch("ash.chats.ChatHistoryWriter")
+    def test_mention_plus_reply_to_other_is_active(self, _mock_writer, provider):
+        """@mention + reply to another user → active (mention takes priority)."""
+        msg = self._make_group_message(
+            text="@testbot what do you think?", reply_from_id=123
+        )
+        result = provider._should_process_message(msg)
+        assert result is not None
+        assert result[0] == "active"
+
+
 class TestToolTracker:
     """Test ToolTracker for thinking message management."""
 

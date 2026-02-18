@@ -156,6 +156,7 @@ class TelegramProvider(Provider):
         self._callback_handler: CallbackHandler | None = None
         self._running = False
         self._bot_username: str | None = None
+        self._bot_id: int | None = None
 
     @property
     def name(self) -> str:
@@ -172,6 +173,10 @@ class TelegramProvider(Provider):
     @property
     def bot_username(self) -> str | None:
         return self._bot_username
+
+    @property
+    def bot_id(self) -> int | None:
+        return self._bot_id
 
     @property
     def passive_config(self) -> PassiveListeningConfig | None:
@@ -218,7 +223,13 @@ class TelegramProvider(Provider):
         return False
 
     def _is_reply(self, message: TelegramMessage) -> bool:
-        return message.reply_to_message is not None
+        """Check if this message is a reply to the bot's own message."""
+        if message.reply_to_message is None:
+            return False
+        if not self._bot_id:
+            return True  # Can't determine — fall back to old behavior
+        from_user = message.reply_to_message.from_user
+        return from_user is not None and from_user.id == self._bot_id
 
     def _strip_mention(self, text: str) -> str:
         if not self._bot_username:
@@ -450,6 +461,7 @@ class TelegramProvider(Provider):
         try:
             bot_info = await self._bot.get_me()
             self._bot_username = bot_info.username
+            self._bot_id = bot_info.id
             logger.info(
                 "bot_username_resolved",
                 extra={"telegram.bot_username": self._bot_username},
