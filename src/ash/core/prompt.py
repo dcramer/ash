@@ -118,6 +118,9 @@ class PromptContext:
     sender: SenderInfo | None = None
     chat: ChatInfo | None = None
 
+    # Behavior flags
+    allow_no_reply: bool = False
+
     # Conversation state
     conversation_gap_minutes: float | None = None
     has_reply_context: bool = False
@@ -220,7 +223,7 @@ class SystemPromptBuilder:
         # PromptMode.FULL
         sections = [
             self._build_core_principles_section(),
-            self._build_silent_replies_section(),
+            self._build_silent_replies_section(context),
             self._build_safety_section(),
             self._build_tools_section(),
             self._build_tool_call_style_section(),
@@ -261,12 +264,14 @@ class SystemPromptBuilder:
                 "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
                 "- Report failures with actual error messages. If output is empty, say so.",
                 "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice",
-                "- In group chats, stay silent when you have nothing to add (see Silent Replies).",
                 "- For deep research, delegate to the `research` skill.",
             ]
         )
 
-    def _build_silent_replies_section(self) -> str:
+    def _build_silent_replies_section(self, context: PromptContext) -> str:
+        if not context.allow_no_reply:
+            return ""
+
         return "\n".join(
             [
                 "## Silent Replies",

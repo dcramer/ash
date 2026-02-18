@@ -209,6 +209,8 @@ class Agent:
                 is_passive_engagement=is_passive_engagement,
                 is_name_mentioned=is_name_mentioned,
             ),
+            allow_no_reply=(is_passive_engagement and not is_name_mentioned)
+            or is_scheduled_task,
             conversation_gap_minutes=conversation_gap_minutes,
             has_reply_context=has_reply_context,
             chat_history=chat_history,

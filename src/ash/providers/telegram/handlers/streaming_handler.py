@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ash.core.signals import is_no_reply
+from ash.core.signals import contains_no_reply, is_no_reply
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.handlers.utils import (
     MIN_EDIT_INTERVAL,
@@ -95,6 +95,7 @@ class StreamingHandler:
                     elapsed > STREAM_DELAY
                     and response_content.strip()
                     and since_last_edit >= MIN_EDIT_INTERVAL
+                    and not contains_no_reply(response_content)
                 ):
                     if tracker.thinking_msg_id and response_msg_id is None:
                         await self._provider.edit(
