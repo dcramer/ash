@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from ash.tools.base import Tool, ToolContext, ToolResult
 
 if TYPE_CHECKING:
+    from ash.chats.thread_index import ThreadIndex
     from ash.providers.base import Provider
     from ash.sessions import SessionManager
 
@@ -25,6 +26,7 @@ class SendMessageTool(Tool):
         self,
         provider: "Provider",
         session_manager_factory: "Callable[[str, str, str | None], SessionManager]",
+        thread_index_factory: "Callable[[str], ThreadIndex] | None" = None,
     ) -> None:
         """Initialize the tool.
 
@@ -32,9 +34,13 @@ class SendMessageTool(Tool):
             provider: Provider to send messages through.
             session_manager_factory: Factory to create session managers.
                 Called with (chat_id, user_id, thread_id) -> SessionManager.
+            thread_index_factory: Optional factory to get thread indexes.
+                Called with (chat_id) -> ThreadIndex. Used to register sent
+                messages so replies to them get routed correctly.
         """
         self._provider = provider
         self._get_session_manager = session_manager_factory
+        self._get_thread_index = thread_index_factory
 
     @property
     def name(self) -> str:
@@ -121,6 +127,16 @@ class SendMessageTool(Tool):
         except Exception as e:
             # Log but don't fail - message was sent successfully
             logger.warning("message_persist_failed", extra={"error.message": str(e)})
+
+        # Register in thread index so replies to this message get routed correctly
+        if sent_id and context.thread_id and self._get_thread_index:
+            try:
+                thread_index = self._get_thread_index(context.chat_id)
+                thread_index.register_message(sent_id, context.thread_id)
+            except Exception as e:
+                logger.warning(
+                    "thread_index_register_failed", extra={"error.message": str(e)}
+                )
 
         return ToolResult.success(
             f"Message sent successfully (id: {sent_id})",

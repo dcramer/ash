@@ -149,6 +149,7 @@ class TelegramMessageHandler:
             send_message_tool = SendMessageTool(
                 provider=self._provider,
                 session_manager_factory=self._session_handler.get_session_manager,
+                thread_index_factory=self._session_handler.get_thread_index,
             )
             self._tool_registry.register(send_message_tool)
             logger.debug("Registered send_message tool for Telegram provider")
