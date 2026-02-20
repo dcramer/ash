@@ -84,6 +84,7 @@ class TelegramMessageHandler:
             config=config,
             conversation_config=self._conversation_config,
             store=store,
+            bot_username=provider.bot_username,
         )
 
         # Checkpoint handler for inline keyboard callbacks
@@ -385,6 +386,7 @@ class TelegramMessageHandler:
                     thinking_msg_id=tracker.thinking_msg_id,
                 )
                 # Persist messages so thread_index registers the bot response
+                # (user message already early-persisted by sync/streaming handler)
                 thread_id = message.metadata.get("thread_id")
                 await self._session_handler.persist_messages(
                     message.chat_id,
@@ -396,6 +398,7 @@ class TelegramMessageHandler:
                     thread_id=thread_id,
                     username=message.username,
                     display_name=message.display_name,
+                    skip_user_message=True,
                 )
                 # Clean up orphaned thinking message if no response sent
                 if not bot_response_id and tracker.thinking_msg_id:

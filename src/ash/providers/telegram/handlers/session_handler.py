@@ -63,11 +63,13 @@ class SessionHandler:
         config: AshConfig | None,
         conversation_config: ConversationConfig,
         store: Store | None = None,
+        bot_username: str | None = None,
     ):
         self._provider_name = provider_name
         self._config = config
         self._conversation_config = conversation_config
         self._store = store
+        self._bot_username = bot_username
 
         # Session caches
         self._session_managers: dict[str, SessionManager] = {}
@@ -104,6 +106,15 @@ class SessionHandler:
             self._thread_indexes[chat_id] = ThreadIndex(manager)
         return self._thread_indexes[chat_id]
 
+    def _get_bot_display_name(self) -> str | None:
+        """Extract display name from bot username.
+
+        Converts "ash_bot" or "miso_noe_bot" -> "Ash" / "Miso".
+        """
+        if self._bot_username:
+            return self._bot_username.split("_")[0].title()
+        return None
+
     async def get_or_create_session(self, message: IncomingMessage) -> SessionState:
         """Get existing session or create a new one."""
         thread_id = message.metadata.get("thread_id")
@@ -133,6 +144,8 @@ class SessionHandler:
             session.context.passive_engagement = True
         if message.metadata.get("name_mentioned"):
             session.context.name_mentioned = True
+        if bot_display_name := self._get_bot_display_name():
+            session.context.bot_name = bot_display_name
 
         if thread_id:
             session.context.thread_id = thread_id
@@ -410,28 +423,30 @@ class SessionHandler:
         display_name: str | None = None,
         thread_id: str | None = None,
         branch_id: str | None = None,
+        skip_user_message: bool = False,
     ) -> None:
         """Persist messages to JSONL session files."""
         session_manager = self.get_session_manager(chat_id, user_id, thread_id)
 
-        user_metadata: dict[str, Any] = {}
-        if external_id:
-            user_metadata["external_id"] = external_id
-        if reply_to_external_id:
-            user_metadata["reply_to_external_id"] = reply_to_external_id
-        if bot_response_id:
-            user_metadata["bot_response_id"] = bot_response_id
+        last_msg_id: str | None = None
 
-        user_msg_id = await session_manager.add_user_message(
-            content=user_message,
-            token_count=estimate_tokens(user_message),
-            metadata=user_metadata or None,
-            user_id=user_id,
-            username=username,
-            display_name=display_name,
-        )
+        if not skip_user_message:
+            user_metadata: dict[str, Any] = {}
+            if external_id:
+                user_metadata["external_id"] = external_id
+            if reply_to_external_id:
+                user_metadata["reply_to_external_id"] = reply_to_external_id
+            if bot_response_id:
+                user_metadata["bot_response_id"] = bot_response_id
 
-        last_msg_id = user_msg_id
+            last_msg_id = await session_manager.add_user_message(
+                content=user_message,
+                token_count=estimate_tokens(user_message),
+                metadata=user_metadata or None,
+                user_id=user_id,
+                username=username,
+                display_name=display_name,
+            )
 
         if assistant_message:
             assistant_metadata = (
@@ -458,7 +473,7 @@ class SessionHandler:
             )
 
         # Update branch head after writing messages
-        if branch_id:
+        if branch_id and last_msg_id:
             session_manager.update_branch_head(branch_id, last_msg_id)
 
         # Register bot response in thread index so replies to bot get routed correctly

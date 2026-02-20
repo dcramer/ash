@@ -36,6 +36,7 @@ class SessionContext:
     reply_to_message_id: str | None = None
     current_message_id: str | None = None
     has_reply_context: bool = False
+    bot_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict for ToolContext/AgentContext metadata propagation."""
@@ -68,6 +69,8 @@ class SessionContext:
             d["current_message_id"] = self.current_message_id
         if self.has_reply_context:
             d["has_reply_context"] = True
+        if self.bot_name is not None:
+            d["bot_name"] = self.bot_name
         return d
 
     @classmethod
@@ -88,6 +91,7 @@ class SessionContext:
             reply_to_message_id=data.get("reply_to_message_id"),
             current_message_id=data.get("current_message_id"),
             has_reply_context=data.get("has_reply_context", False),
+            bot_name=data.get("bot_name"),
         )
 
 

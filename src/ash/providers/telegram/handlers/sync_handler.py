@@ -81,6 +81,24 @@ class SyncHandler:
                 )
             return pending
 
+        # Persist user message BEFORE agent runs so sandbox tools can read it
+        thread_id = message.metadata.get("thread_id")
+        session_manager = self._session_handler.get_session_manager(
+            message.chat_id, message.user_id, thread_id
+        )
+        user_metadata: dict[str, str] = {}
+        if message.id:
+            user_metadata["external_id"] = message.id
+        if message.reply_to_message_id:
+            user_metadata["reply_to_external_id"] = message.reply_to_message_id
+        await session_manager.add_user_message(
+            content=message.text,
+            metadata=user_metadata or None,
+            username=message.username,
+            display_name=message.display_name,
+            user_id=message.user_id,
+        )
+
         typing_task = asyncio.create_task(self._typing_loop(message.chat_id))
         try:
             response = await self._agent.process_message(
@@ -109,7 +127,6 @@ class SyncHandler:
                     )
                 except Exception:
                     logger.debug("Failed to delete thinking message for NO_REPLY")
-            thread_id = message.metadata.get("thread_id")
             await self._session_handler.persist_messages(
                 message.chat_id,
                 message.user_id,
@@ -121,6 +138,7 @@ class SyncHandler:
                 display_name=message.display_name,
                 thread_id=thread_id,
                 branch_id=session.context.branch_id,
+                skip_user_message=True,
             )
             self._log_response("[NO_REPLY]")
             return response
@@ -242,7 +260,6 @@ class SyncHandler:
         else:
             sent_message_id = None
 
-        thread_id = message.metadata.get("thread_id")
         await self._session_handler.persist_messages(
             message.chat_id,
             message.user_id,
@@ -256,12 +273,9 @@ class SyncHandler:
             display_name=message.display_name,
             thread_id=thread_id,
             branch_id=session.context.branch_id,
+            skip_user_message=True,
         )
         self._log_response(response.text)
-
-        session_manager = self._session_handler.get_session_manager(
-            message.chat_id, message.user_id, thread_id
-        )
         for tool_call in response.tool_calls:
             await session_manager.add_tool_use(
                 tool_use_id=tool_call["id"],

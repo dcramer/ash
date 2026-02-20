@@ -61,6 +61,24 @@ class StreamingHandler:
         session.context.current_message_id = message.id
         await self._provider.send_typing(message.chat_id)
 
+        # Persist user message BEFORE agent runs so sandbox tools can read it
+        thread_id = message.metadata.get("thread_id")
+        session_manager = self._session_handler.get_session_manager(
+            message.chat_id, message.user_id, thread_id
+        )
+        user_metadata: dict[str, str] = {}
+        if message.id:
+            user_metadata["external_id"] = message.id
+        if message.reply_to_message_id:
+            user_metadata["reply_to_external_id"] = message.reply_to_message_id
+        await session_manager.add_user_message(
+            content=message.text,
+            metadata=user_metadata or None,
+            username=message.username,
+            display_name=message.display_name,
+            user_id=message.user_id,
+        )
+
         if tracker is None:
             tracker = self._create_tool_tracker(message)
         progress_tool = ProgressMessageTool(tracker)
@@ -153,8 +171,9 @@ class StreamingHandler:
                 reply_to_external_id=message.reply_to_message_id,
                 username=message.username,
                 display_name=message.display_name,
-                thread_id=message.metadata.get("thread_id"),
+                thread_id=thread_id,
                 branch_id=session.context.branch_id,
+                skip_user_message=True,
             )
             self._log_response("[NO_REPLY]")
             return
@@ -216,7 +235,8 @@ class StreamingHandler:
             bot_response_id=sent_message_id,
             username=message.username,
             display_name=message.display_name,
-            thread_id=message.metadata.get("thread_id"),
+            thread_id=thread_id,
             branch_id=session.context.branch_id,
+            skip_user_message=True,
         )
         self._log_response(response_content)

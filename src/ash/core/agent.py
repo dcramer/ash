@@ -89,6 +89,7 @@ def _build_routing_env(
         "ASH_DISPLAY_NAME": session.context.display_name or "",
         "ASH_TIMEZONE": timezone,
         "ASH_MESSAGE_ID": session.context.current_message_id or "",
+        "ASH_BOT_NAME": session.context.bot_name or "",
     }
 
     # Provide chat state paths for sandbox access
@@ -189,6 +190,7 @@ class Agent:
         is_passive_engagement: bool = False,
         is_name_mentioned: bool = False,
         chat_history: list[dict[str, Any]] | None = None,
+        bot_name: str | None = None,
     ) -> str:
         """Build system prompt with optional memory context."""
         from ash.core.prompt import ChatInfo, SenderInfo
@@ -209,6 +211,7 @@ class Agent:
                 is_scheduled_task=is_scheduled_task,
                 is_passive_engagement=is_passive_engagement,
                 is_name_mentioned=is_name_mentioned,
+                bot_name=bot_name,
             ),
             allow_no_reply=(is_passive_engagement and not is_name_mentioned)
             or is_scheduled_task,
@@ -331,6 +334,7 @@ class Agent:
             is_passive_engagement=ctx.passive_engagement,
             is_name_mentioned=ctx.name_mentioned,
             chat_history=None,
+            bot_name=ctx.bot_name,
         )
 
         system_tokens = estimate_tokens(system_prompt)

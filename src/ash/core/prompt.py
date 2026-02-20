@@ -97,6 +97,7 @@ class ChatInfo:
     is_scheduled_task: bool = False  # True when executing a scheduled task
     is_passive_engagement: bool = False  # True when engaging via passive listening
     is_name_mentioned: bool = False  # True when bot was addressed by name
+    bot_name: str | None = None  # Bot's display name (e.g. "Miso")
 
 
 @dataclass
@@ -198,6 +199,10 @@ class SystemPromptBuilder:
                     "Follow its guidance unless higher-priority instructions override it. "
                     "If it defines a tone or personality, use it consistently."
                 )
+
+        # Bot identity — tell the LLM its chat-facing name
+        if context.chat and context.chat.bot_name:
+            parts.append(f"\n\nYour name is {context.chat.bot_name}.")
 
         if mode == PromptMode.NONE:
             return "".join(parts)
@@ -761,11 +766,16 @@ class SystemPromptBuilder:
             return ""
 
         if context.get_is_name_mentioned():
+            bot_name = context.chat.bot_name if context.chat else None
+            if bot_name:
+                addressed_line = f"You are {bot_name}. You were addressed by name in a group chat. Respond naturally and conversationally."
+            else:
+                addressed_line = "You were addressed by name in a group chat. Respond naturally and conversationally."
             return "\n".join(
                 [
                     "## Passive Engagement",
                     "",
-                    "You were addressed by name in a group chat. Respond naturally and conversationally.",
+                    addressed_line,
                     "Treat this like a direct message — no need to justify your presence.",
                 ]
             )

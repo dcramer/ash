@@ -267,6 +267,16 @@ class SessionReader:
         target_idx = next(
             (i for i, msg in enumerate(messages) if msg.id == message_id), None
         )
+        # Fallback: search by external_id in metadata
+        if target_idx is None:
+            target_idx = next(
+                (
+                    i
+                    for i, msg in enumerate(messages)
+                    if msg.metadata and msg.metadata.get("external_id") == message_id
+                ),
+                None,
+            )
         if target_idx is None:
             return []
 
