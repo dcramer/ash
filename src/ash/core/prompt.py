@@ -619,7 +619,9 @@ class SystemPromptBuilder:
     @staticmethod
     def _is_self_person(person: PersonEntry, username: str) -> bool:
         """Check if a person is the self-record for the given username."""
-        return any(r.relationship == "self" for r in person.relationships)
+        if not any(r.relationship == "self" for r in person.relationships):
+            return False
+        return person.matches_username(username)
 
     @staticmethod
     def _get_relationship_label(

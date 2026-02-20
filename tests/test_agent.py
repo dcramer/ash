@@ -663,3 +663,36 @@ class TestSystemPromptBuilder:
 
         assert "hearsay" in prompt
         assert "hedging language" in prompt
+
+    def test_is_self_person_only_matches_sender_username(self):
+        """_is_self_person should only filter the sender's own record, not all 'self' people."""
+        from ash.core.prompt import SystemPromptBuilder
+        from ash.store.types import AliasEntry, PersonEntry, RelationshipClaim
+
+        # David is the sender — should be filtered
+        david = PersonEntry(
+            id="p1",
+            name="David Cramer",
+            aliases=[AliasEntry(value="notzeeg")],
+            relationships=[RelationshipClaim(relationship="self")],
+        )
+        # Sukhpreet has "self" (from her own messages) + "wife" — should NOT be filtered
+        sukhpreet = PersonEntry(
+            id="p2",
+            name="Sukhpreet Sembhi",
+            aliases=[AliasEntry(value="sksembhi")],
+            relationships=[
+                RelationshipClaim(relationship="self"),
+                RelationshipClaim(relationship="wife"),
+            ],
+        )
+        # Person with no "self" relationship — should NOT be filtered
+        stranger = PersonEntry(
+            id="p3",
+            name="Some Person",
+            relationships=[RelationshipClaim(relationship="friend")],
+        )
+
+        assert SystemPromptBuilder._is_self_person(david, "notzeeg") is True
+        assert SystemPromptBuilder._is_self_person(sukhpreet, "notzeeg") is False
+        assert SystemPromptBuilder._is_self_person(stranger, "notzeeg") is False
