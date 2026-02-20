@@ -41,6 +41,7 @@ def mock_index():
     index.add = MagicMock()
     index.remove = MagicMock()
     index.save = AsyncMock()
+    index.get_ids = MagicMock(return_value=set())
     return index
 
 
@@ -1276,8 +1277,8 @@ class TestGroupDMSourceFilter:
         filtered = pipeline._filter_group_privacy(results, context)
         assert len(filtered) == 0
 
-    def test_no_learned_in_edge_passes(self, pipeline):
-        """Legacy memory without LEARNED_IN edge passes (fail-open)."""
+    def test_no_learned_in_edge_blocked(self, pipeline):
+        """Legacy memory without LEARNED_IN edge is blocked (fail-closed)."""
         results = [
             self._make_result(
                 "mem-legacy", subject_person_ids=["person-alice"], sensitivity="public"
@@ -1290,7 +1291,7 @@ class TestGroupDMSourceFilter:
             participant_person_ids={"bob": {"person-bob"}},
         )
         filtered = pipeline._filter_group_privacy(results, context)
-        assert len(filtered) == 1
+        assert len(filtered) == 0
 
     def test_group_sourced_memory_passes(self, pipeline):
         """Memory from a group chat passes in other group chats."""

@@ -45,6 +45,7 @@ def mock_index():
     index.add = MagicMock()
     index.remove = MagicMock()
     index.save = AsyncMock()
+    index.get_ids = MagicMock(return_value=set())
     return index
 
 
@@ -636,11 +637,23 @@ class TestOwnMemoryPrivacy:
         self, graph_store: Store, mock_index
     ):
         """SENSITIVE self-memory (no subjects) visible in group chat."""
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
         memory = await graph_store.add_memory(
             content="I have been dealing with anxiety",
             owner_user_id="user-1",
             sensitivity=Sensitivity.SENSITIVE,
         )
+        graph_store.graph.add_chat(
+            ChatEntry(
+                id="group-chat-1",
+                provider="telegram",
+                provider_id="group-1",
+                chat_type="group",
+            )
+        )
+        graph_store.graph.add_edge(create_learned_in_edge(memory.id, "group-chat-1"))
 
         # Wire mock index to return this memory
         mock_index.search.return_value = [(memory.id, 0.9)]
@@ -659,12 +672,24 @@ class TestOwnMemoryPrivacy:
         self, graph_store: Store, mock_index
     ):
         """PERSONAL memory about a non-participant excluded in group chat."""
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
         memory = await graph_store.add_memory(
             content="Sarah is going through a hard time",
             owner_user_id="user-1",
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["sarah-person-id"],
         )
+        graph_store.graph.add_chat(
+            ChatEntry(
+                id="group-chat-1",
+                provider="telegram",
+                provider_id="group-1",
+                chat_type="group",
+            )
+        )
+        graph_store.graph.add_edge(create_learned_in_edge(memory.id, "group-chat-1"))
 
         mock_index.search.return_value = [(memory.id, 0.9)]
 
@@ -681,12 +706,24 @@ class TestOwnMemoryPrivacy:
         self, graph_store: Store, mock_index
     ):
         """PERSONAL memory about a participant shown in group chat."""
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
         memory = await graph_store.add_memory(
             content="Sarah is going through a hard time",
             owner_user_id="user-1",
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["sarah-person-id"],
         )
+        graph_store.graph.add_chat(
+            ChatEntry(
+                id="group-chat-1",
+                provider="telegram",
+                provider_id="group-1",
+                chat_type="group",
+            )
+        )
+        graph_store.graph.add_edge(create_learned_in_edge(memory.id, "group-chat-1"))
 
         mock_index.search.return_value = [(memory.id, 0.9)]
 

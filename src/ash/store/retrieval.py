@@ -15,9 +15,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ash.graph.edges import (
-    get_learned_in_chat,
     get_memories_about_person,
-    get_stated_by_person,
 )
 from ash.graph.traversal import bfs_traverse
 from ash.store.types import (
@@ -26,6 +24,12 @@ from ash.store.types import (
     SearchResult,
     Sensitivity,
     assertion_metadata_summary,
+)
+from ash.store.visibility import (
+    is_dm_contextually_disclosable,
+    is_group_disclosable,
+    is_private_sourced_outside_current_chat,
+    passes_sensitivity_policy,
 )
 
 if TYPE_CHECKING:
@@ -83,26 +87,6 @@ class RetrievalPipeline:
         # Stage 4: RRF fusion
         return self._rrf_finalize([stage1, stage2, stage3], context.max_memories)
 
-    def _is_private_sourced_outside_current_chat(
-        self,
-        memory_id: str,
-        current_chat_provider_id: str | None,
-    ) -> bool:
-        """True if memory came from a DM and current context is a different/unknown DM."""
-        source_chat_id = get_learned_in_chat(self._store.graph, memory_id)
-        if not source_chat_id:
-            return False
-
-        source_chat = self._store.graph.chats.get(source_chat_id)
-        if not source_chat or source_chat.chat_type != "private":
-            return False
-
-        # Fail closed when we cannot prove this is the same DM.
-        if not current_chat_provider_id:
-            return True
-
-        return source_chat.provider_id != current_chat_provider_id
-
     async def _primary_search(self, context: RetrievalContext) -> list[SearchResult]:
         """Stage 1: Vector search scoped to user/chat."""
         try:
@@ -133,32 +117,39 @@ class RetrievalPipeline:
                     from ash.graph.edges import get_subject_person_ids
 
                     # DM-sourced memories are locked to their originating DM chat.
-                    if self._is_private_sourced_outside_current_chat(
+                    if is_private_sourced_outside_current_chat(
+                        self._store.graph,
                         memory.id,
                         context.chat_id,
                     ):
                         continue
 
-                    # Block DM-sourced memories in group chats —
-                    # cross-context has no semantic relevance signal
-                    if context.chat_type in ("group", "supergroup"):
-                        if self._is_dm_sourced(memory.id):
-                            continue
-
                     mem_subjects = get_subject_person_ids(self._store.graph, memory.id)
-                    if self._passes_privacy_filter(
+                    if context.chat_type in (
+                        "group",
+                        "supergroup",
+                    ) and not is_group_disclosable(
+                        self._store.graph,
+                        memory.id,
+                        mem_subjects,
+                        memory.sensitivity,
+                        person_ids,
+                    ):
+                        continue
+                    if not passes_sensitivity_policy(
                         sensitivity=memory.sensitivity,
                         subject_person_ids=mem_subjects,
                         chat_type=context.chat_type,
                         querying_person_ids=person_ids,
                     ):
-                        results.append(
-                            await self._make_result(
-                                memory,
-                                CROSS_CONTEXT_SIMILARITY,
-                                discovery_stage="cross_context",
-                            )
+                        continue
+                    results.append(
+                        await self._make_result(
+                            memory,
+                            CROSS_CONTEXT_SIMILARITY,
+                            discovery_stage="cross_context",
                         )
+                    )
             except Exception:
                 logger.warning(
                     "cross_context_retrieval_failed",
@@ -255,23 +246,29 @@ class RetrievalPipeline:
             if not memory.portable:
                 continue
 
-            if self._is_private_sourced_outside_current_chat(
+            if is_private_sourced_outside_current_chat(
+                graph,
                 memory.id,
                 context.chat_id,
             ):
                 continue
 
-            # Block DM-sourced memories in group chats —
-            # BFS traversal has no semantic relevance signal
-            if context.chat_type in ("group", "supergroup"):
-                if self._is_dm_sourced(memory.id):
-                    continue
-
             # Privacy filter
             from ash.graph.edges import get_subject_person_ids
 
             mem_subjects = get_subject_person_ids(graph, memory.id)
-            if not self._passes_privacy_filter(
+            if context.chat_type in (
+                "group",
+                "supergroup",
+            ) and not is_group_disclosable(
+                graph,
+                memory.id,
+                mem_subjects,
+                memory.sensitivity,
+                all_participant_ids,
+            ):
+                continue
+            if not passes_sensitivity_policy(
                 sensitivity=memory.sensitivity,
                 subject_person_ids=mem_subjects,
                 chat_type=context.chat_type,
@@ -435,10 +432,6 @@ class RetrievalPipeline:
         - It's a self-memory (no subjects)
         - It has no LEARNED_IN edge (legacy data, fail-open)
         """
-        from ash.graph.edges import (
-            person_participates_in_chat,
-        )
-
         # Collect DM partner person IDs
         partner_person_ids: set[str] = set()
         for pids in context.participant_person_ids.values():
@@ -450,67 +443,18 @@ class RetrievalPipeline:
         graph = self._store.graph
         filtered = []
         for result in results:
-            if self._is_private_sourced_outside_current_chat(
+            meta = result.metadata or {}
+            subject_person_ids = meta.get("subject_person_ids", []) or []
+            if is_dm_contextually_disclosable(
+                graph,
                 result.id,
+                subject_person_ids,
+                partner_person_ids,
                 context.chat_id,
             ):
-                continue
-
-            meta = result.metadata or {}
-            subject_person_ids = meta.get("subject_person_ids", [])
-
-            # Self-memories (no subjects) always pass
-            if not subject_person_ids:
                 filtered.append(result)
-                continue
-
-            # Memory is ABOUT the DM partner
-            if set(subject_person_ids) & partner_person_ids:
-                filtered.append(result)
-                continue
-
-            # Memory was STATED_BY the DM partner
-            stated_by = get_stated_by_person(graph, result.id)
-            if stated_by and stated_by in partner_person_ids:
-                filtered.append(result)
-                continue
-
-            # Check LEARNED_IN → partner was present in that chat
-            learned_in_chat = get_learned_in_chat(graph, result.id)
-            if learned_in_chat is None:
-                # Legacy memory without LEARNED_IN — fail-open
-                filtered.append(result)
-                continue
-
-            # Partner participated in the source chat
-            if any(
-                person_participates_in_chat(graph, pid, learned_in_chat)
-                for pid in partner_person_ids
-            ):
-                filtered.append(result)
-                continue
-
-            # Memory about a third party, partner not present — exclude
 
         return filtered
-
-    def _get_source_chat_type(self, memory_id: str) -> str | None:
-        """Get the chat_type of the chat where a memory was learned."""
-        chat_id = get_learned_in_chat(self._store.graph, memory_id)
-        if not chat_id:
-            return None
-        chat = self._store.graph.chats.get(chat_id)
-        return chat.chat_type if chat else None
-
-    def _is_dm_sourced(self, memory_id: str) -> bool | None:
-        """Check if a memory was learned in a private (DM) chat.
-
-        Returns True if DM-sourced, False if not, None if no LEARNED_IN edge (legacy).
-        """
-        source_type = self._get_source_chat_type(memory_id)
-        if source_type is None:
-            return None  # No LEARNED_IN edge — legacy data
-        return source_type == "private"
 
     def _filter_group_privacy(
         self,
@@ -534,33 +478,23 @@ class RetrievalPipeline:
         filtered = []
         for result in results:
             meta = result.metadata or {}
-            subject_person_ids = meta.get("subject_person_ids", [])
+            subject_person_ids = meta.get("subject_person_ids", []) or []
+            sensitivity_raw = meta.get("sensitivity")
+            sensitivity = None
+            if isinstance(sensitivity_raw, str):
+                try:
+                    sensitivity = Sensitivity(sensitivity_raw)
+                except ValueError:
+                    sensitivity = None
 
-            # Block all DM-sourced memories in group chats — everyone in the
-            # group sees the response, so DM-private info must not leak.
-            # Memories without LEARNED_IN edges (legacy) pass through.
-            dm_sourced = self._is_dm_sourced(result.id)
-            if dm_sourced:
-                continue
-
-            # Self-memories (no subjects) always visible to the owner
-            if not subject_person_ids:
-                filtered.append(result)
-                continue
-
-            sensitivity_str = meta.get("sensitivity")
-            if sensitivity_str not in (
-                Sensitivity.SENSITIVE.value,
-                Sensitivity.PERSONAL.value,
+            if is_group_disclosable(
+                self._store.graph,
+                result.id,
+                subject_person_ids,
+                sensitivity,
+                all_participant_ids,
             ):
                 filtered.append(result)
-                continue
-
-            # SENSITIVE/PERSONAL memory about others: only pass if a subject
-            # is among the chat participants
-            if set(subject_person_ids) & all_participant_ids:
-                filtered.append(result)
-            # else: filtered out
         return filtered
 
     def _passes_privacy_filter(
@@ -570,15 +504,13 @@ class RetrievalPipeline:
         chat_type: str | None,
         querying_person_ids: set[str],
     ) -> bool:
-        """Check if a memory passes privacy filter."""
-        if sensitivity is None or sensitivity == Sensitivity.PUBLIC:
-            return True
-        is_subject = bool(set(subject_person_ids) & querying_person_ids)
-        if sensitivity == Sensitivity.PERSONAL:
-            return is_subject
-        if sensitivity == Sensitivity.SENSITIVE:
-            return chat_type == "private" and is_subject
-        return False
+        """Backward-compatible wrapper for sensitivity policy checks."""
+        return passes_sensitivity_policy(
+            sensitivity=sensitivity,
+            subject_person_ids=subject_person_ids,
+            chat_type=chat_type,
+            querying_person_ids=querying_person_ids,
+        )
 
     async def _make_result(
         self,

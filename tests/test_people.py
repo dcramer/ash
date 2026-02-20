@@ -35,9 +35,11 @@ def _make_mock_llm(response_text: str = "YES") -> AsyncMock:
 @pytest.fixture
 def mock_index():
     index = MagicMock()
-    index.search = AsyncMock(return_value=[])
-    index.add = AsyncMock()
-    index.remove = AsyncMock()
+    index.search = MagicMock(return_value=[])
+    index.add = MagicMock()
+    index.remove = MagicMock()
+    index.save = AsyncMock()
+    index.get_ids = MagicMock(return_value=set())
     return index
 
 

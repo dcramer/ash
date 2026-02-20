@@ -32,56 +32,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def _persist_user_message(
-    session: SessionState,
-    user_message: str,
-    user_id: str,
-) -> str:
-    """Write a user message to disk so RPC ``memory.extract`` can read it.
-
-    The sandbox CLI calls ``memory.extract`` which reads messages from the
-    session JSONL via ``SessionReader``.  Eval sessions are normally in-memory
-    only, so we persist the message here and set ``current_message_id`` on the
-    session so the ``ASH_MESSAGE_ID`` env var is populated in the container.
-
-    Returns:
-        The generated message_id.
-    """
-    from ash.config.paths import get_sessions_path
-    from ash.sessions.types import MessageEntry, SessionHeader, generate_id, session_key
-    from ash.sessions.writer import SessionWriter
-
-    message_id = generate_id()
-
-    key = session_key(session.provider, session.chat_id, session.user_id)
-    session_dir = get_sessions_path() / key
-    writer = SessionWriter(session_dir)
-
-    # Write header if this is the first message for this session dir
-    if not writer.exists():
-        header = SessionHeader.create(
-            provider=session.provider,
-            user_id=session.user_id,
-            chat_id=session.chat_id,
-        )
-        await writer.write_header(header)
-
-    entry = MessageEntry.create(
-        role="user",
-        content=user_message,
-        user_id=user_id,
-        username=session.context.username,
-        display_name=session.context.display_name,
-    )
-    # Override the generated id so we can reference it
-    entry.id = message_id
-    await writer.write_message(entry)
-
-    # Set current_message_id so ASH_MESSAGE_ID is populated in the sandbox
-    session.context.current_message_id = message_id
-    return message_id
-
-
 def load_eval_suite(path: Path) -> EvalSuite:
     """Load an eval suite from a YAML file.
 
@@ -532,7 +482,6 @@ async def run_setup_steps(
                 logger.debug("eval_chat_upsert_failed", exc_info=True)
 
         for message in step.messages:
-            await _persist_user_message(session, message, user_id)
             await agent.send_message(
                 user_message=message,
                 session=session,
@@ -747,7 +696,6 @@ async def _execute_and_judge(
 ) -> EvalResult:
     """Execute a single prompt and judge the response."""
     try:
-        await _persist_user_message(session, case.prompt, user_id)
         response = await agent.send_message(
             user_message=case.prompt,
             session=session,

@@ -14,7 +14,11 @@ Implementation is split across focused mixin modules:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import os
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -91,6 +95,10 @@ class Store(
         """Save the vector index to disk."""
         try:
             await self._index.save(self._vector_index_path)
+            await self._persistence.update_state(
+                vector_commit_id=f"v-{uuid.uuid4().hex}",
+                vector_id_hash=self._vector_id_hash(),
+            )
         except Exception:
             logger.warning("vector_index_save_failed", exc_info=True)
 
@@ -103,6 +111,67 @@ class Store(
                 logger.warning("embedding_removal_failed", extra={"memory.id": mid})
         if memory_ids:
             await self._save_vector_index()
+
+    def _vector_id_hash(self) -> str:
+        """Stable hash of vector index IDs."""
+        ids = sorted(self._index.get_ids())
+        payload = "\n".join(ids).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    def _active_memory_id_hash(self) -> str:
+        """Stable hash of active memory IDs in the graph."""
+        now = datetime.now(UTC)
+        active = sorted(
+            mid for mid, memory in self._graph.memories.items() if memory.is_active(now)
+        )
+        payload = "\n".join(active).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    async def ensure_vector_consistency(
+        self,
+        *,
+        auto_rebuild_missing: bool = False,
+    ) -> tuple[int, int]:
+        """Repair index drift and report (removed_extra, missing_after_repair)."""
+        now = datetime.now(UTC)
+        active_ids = {
+            mid for mid, memory in self._graph.memories.items() if memory.is_active(now)
+        }
+        index_ids = self._index.get_ids()
+
+        extra_ids = sorted(index_ids - active_ids)
+        if extra_ids:
+            for mid in extra_ids:
+                try:
+                    self._index.remove(mid)
+                except Exception:
+                    logger.warning(
+                        "vector_index_extra_remove_failed",
+                        extra={"memory.id": mid},
+                        exc_info=True,
+                    )
+            await self._save_vector_index()
+
+        missing_ids = sorted(active_ids - self._index.get_ids())
+        if missing_ids:
+            logger.warning(
+                "vector_index_missing_active_memories",
+                extra={"count": len(missing_ids), "memory.ids": missing_ids[:20]},
+            )
+            if auto_rebuild_missing:
+                generated = await self.rebuild_index()
+                logger.info(
+                    "vector_index_rebuild_startup",
+                    extra={"generated_count": generated},
+                )
+                missing_ids = sorted(active_ids - self._index.get_ids())
+
+        await self._persistence.update_state(
+            active_memory_id_hash=self._active_memory_id_hash(),
+            vector_id_hash=self._vector_id_hash(),
+            vector_missing_count=len(missing_ids),
+        )
+        return len(extra_ids), len(missing_ids)
 
 
 async def create_store(
@@ -166,5 +235,26 @@ async def create_store(
         llm=llm,
         max_entries=max_entries,
     )
+
+    # Repair index drift caused by partial writes or external edits.
+    auto_rebuild_missing = os.getenv("ASH_MEMORY_AUTO_REBUILD_INDEX", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    removed, missing = await store.ensure_vector_consistency(
+        auto_rebuild_missing=auto_rebuild_missing
+    )
+    if removed or missing:
+        logger.warning(
+            "vector_index_consistency_check",
+            extra={
+                "removed_extra": removed,
+                "missing_after_repair": missing,
+                "auto_rebuild_missing": auto_rebuild_missing,
+            },
+        )
+    else:
+        logger.debug("vector_index_consistency_ok")
 
     return store

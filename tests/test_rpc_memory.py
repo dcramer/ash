@@ -44,9 +44,11 @@ def mock_embedding_generator():
 def mock_index():
     """Create a mock vector index."""
     index = MagicMock()
-    index.search = AsyncMock(return_value=[])
-    index.add = AsyncMock()
-    index.remove = AsyncMock()
+    index.search = MagicMock(return_value=[])
+    index.add = MagicMock()
+    index.remove = MagicMock()
+    index.save = AsyncMock()
+    index.get_ids = MagicMock(return_value=set())
     return index
 
 
@@ -531,6 +533,67 @@ class TestRPCMemoryExtract:
         assert speaker_info is not None
         assert speaker_info.username == "bob"
         assert speaker_info.display_name == "Bob Smith"
+
+    async def test_extract_from_messages_requires_provider(self, rpc_server):
+        """Explicit-message extraction requires provider for chat provenance."""
+        handler = rpc_server.methods["memory.extract_from_messages"]
+
+        with pytest.raises(ValueError, match="provider is required"):
+            await handler(
+                {
+                    "messages": [{"role": "user", "content": "Remember this"}],
+                }
+            )
+
+    async def test_extract_from_messages_requires_messages(self, rpc_server):
+        """Explicit-message extraction requires a non-empty messages list."""
+        handler = rpc_server.methods["memory.extract_from_messages"]
+
+        with pytest.raises(ValueError, match="messages must be a non-empty list"):
+            await handler({"provider": "telegram", "messages": []})
+
+    async def test_extract_from_messages_runs_pipeline(
+        self, rpc_server, memory_manager, mock_extractor
+    ):
+        """Explicit-message extraction stores facts without session file lookups."""
+        mock_extractor.extract_from_conversation.return_value = [
+            ExtractedFact(
+                content="Sarah is David's sister",
+                subjects=["Sarah"],
+                shared=False,
+                confidence=0.95,
+                memory_type=MemoryType.RELATIONSHIP,
+                sensitivity=Sensitivity.PUBLIC,
+                portable=True,
+                speaker="david",
+            )
+        ]
+
+        handler = rpc_server.methods["memory.extract_from_messages"]
+        result = await handler(
+            {
+                "provider": "telegram",
+                "user_id": "user-1",
+                "chat_id": "chat-1",
+                "messages": [
+                    {
+                        "id": "m-1",
+                        "role": "user",
+                        "content": "Remember that Sarah is my sister",
+                        "user_id": "user-1",
+                        "username": "david",
+                        "display_name": "David Cramer",
+                    }
+                ],
+            }
+        )
+
+        assert result["stored"] == 1
+        mock_extractor.extract_from_conversation.assert_awaited_once()
+
+        memories = await memory_manager.list_memories(owner_user_id="user-1")
+        assert len(memories) >= 1
+        assert any("Sarah" in m.content for m in memories)
 
 
 class TestRPCDMSourceFiltering:

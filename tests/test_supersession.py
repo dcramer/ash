@@ -28,6 +28,7 @@ def mock_index():
     index.add = MagicMock()
     index.remove = MagicMock()
     index.save = AsyncMock()
+    index.get_ids = MagicMock(return_value=set())
     return index
 
 

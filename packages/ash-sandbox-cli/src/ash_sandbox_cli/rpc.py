@@ -108,5 +108,6 @@ def get_context_params() -> dict[str, str | None]:
         "source_username": os.environ.get("ASH_USERNAME"),
         "source_display_name": os.environ.get("ASH_DISPLAY_NAME"),
         "message_id": os.environ.get("ASH_MESSAGE_ID"),
+        "current_user_message": os.environ.get("ASH_CURRENT_USER_MESSAGE"),
         "provider": os.environ.get("ASH_PROVIDER"),
     }

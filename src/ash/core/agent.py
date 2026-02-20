@@ -78,6 +78,14 @@ def _build_routing_env(
     access routing context for operations that need to send responses back.
     Also includes skill env vars set by inline skills.
     """
+    current_user_text = ""
+    for message in reversed(session.messages):
+        if message.role.value != "user":
+            continue
+        if isinstance(message.content, str):
+            current_user_text = message.content
+            break
+
     env = {
         "ASH_SESSION_ID": session.session_id or "",
         "ASH_USER_ID": effective_user_id or "",
@@ -89,6 +97,7 @@ def _build_routing_env(
         "ASH_DISPLAY_NAME": session.context.display_name or "",
         "ASH_TIMEZONE": timezone,
         "ASH_MESSAGE_ID": session.context.current_message_id or "",
+        "ASH_CURRENT_USER_MESSAGE": current_user_text,
         "ASH_BOT_NAME": session.context.bot_name or "",
     }
 

@@ -167,8 +167,38 @@ def extract_memories(
     and runs full extraction (subject linking, type classification, etc.).
     """
     try:
-        params = {"shared": shared, **get_context_params()}
-        result = rpc_call("memory.extract", params)
+        context = get_context_params()
+        current_user_message = context.get("current_user_message")
+        params = {"shared": shared, **context}
+
+        # Prefer session-backed extraction when message_id is available.
+        # Fall back to deterministic explicit-message extraction for harnesses.
+        if context.get("message_id"):
+            result = rpc_call("memory.extract", params)
+        elif current_user_message:
+            result = rpc_call(
+                "memory.extract_from_messages",
+                {
+                    "shared": shared,
+                    "provider": context.get("provider"),
+                    "user_id": context.get("user_id"),
+                    "chat_id": context.get("chat_id"),
+                    "chat_type": context.get("chat_type"),
+                    "source_username": context.get("source_username"),
+                    "source_display_name": context.get("source_display_name"),
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": current_user_message,
+                            "user_id": context.get("user_id"),
+                            "username": context.get("source_username"),
+                            "display_name": context.get("source_display_name"),
+                        }
+                    ],
+                },
+            )
+        else:
+            result = rpc_call("memory.extract", params)
     except ConnectionError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None

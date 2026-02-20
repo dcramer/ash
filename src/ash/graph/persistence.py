@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,11 @@ class GraphPersistence:
     @property
     def graph_dir(self) -> Path:
         return self._dir
+
+    @property
+    def state_path(self) -> Path:
+        """Path to graph/vector state metadata."""
+        return self._dir / "state.json"
 
     def mark_dirty(self, *collections: str) -> None:
         """Mark collections as needing persistence.
@@ -62,10 +68,18 @@ class GraphPersistence:
             return
         dirty = self._dirty.copy()
         self._dirty.clear()
+        commit_id = f"g-{uuid.uuid4().hex}"
 
         # Snapshot on the event-loop thread to avoid concurrent dict iteration
         snapshot = _snapshot_dirty(graph, dirty)
         await asyncio.to_thread(_write_snapshot, self._dir, snapshot)
+        if "memories" in dirty:
+            await self.update_state(
+                graph_commit_id=commit_id,
+                active_memory_id_hash=_hash_active_memory_ids(graph),
+            )
+        else:
+            await self.update_state(graph_commit_id=commit_id)
 
     async def load_raw(self) -> dict[str, list[dict[str, Any]]]:
         """Load raw JSONL data from disk.
@@ -77,6 +91,18 @@ class GraphPersistence:
         import asyncio
 
         return await asyncio.to_thread(_load_raw_jsonl, self._dir)
+
+    async def load_state(self) -> dict[str, Any]:
+        """Load graph/vector state metadata."""
+        import asyncio
+
+        return await asyncio.to_thread(_load_state_sync, self.state_path)
+
+    async def update_state(self, **fields: Any) -> None:
+        """Merge and persist state metadata atomically."""
+        import asyncio
+
+        await asyncio.to_thread(_update_state_sync, self.state_path, fields)
 
 
 def _snapshot_dirty(graph: KnowledgeGraph, dirty: set[str]) -> dict[str, list[dict]]:
@@ -106,6 +132,17 @@ def _write_snapshot(graph_dir: Path, snapshot: dict[str, list[dict]]) -> None:
         _write_jsonl_atomic(graph_dir / f"{collection}.jsonl", records)
 
 
+def _hash_active_memory_ids(graph: KnowledgeGraph) -> str:
+    """Stable hash for active memory IDs in the current graph."""
+    import hashlib
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    active = sorted(mid for mid, m in graph.memories.items() if m.is_active(now))
+    payload = "\n".join(active).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _load_raw_jsonl(graph_dir: Path) -> dict[str, list[dict[str, Any]]]:
     """Read all JSONL files from disk synchronously (runs in thread)."""
     raw: dict[str, list[dict[str, Any]]] = {
@@ -126,6 +163,24 @@ def _load_raw_jsonl(graph_dir: Path) -> dict[str, list[dict[str, Any]]]:
         if path.exists():
             raw[key] = _read_jsonl(path)
     return raw
+
+
+def _load_state_sync(path: Path) -> dict[str, Any]:
+    """Load state metadata (synchronous)."""
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        logger.warning("state_metadata_read_failed", extra={"file.path": str(path)})
+        return {}
+
+
+def _update_state_sync(path: Path, fields: dict[str, Any]) -> None:
+    """Merge-write state metadata atomically."""
+    current = _load_state_sync(path)
+    merged = {**current, **fields}
+    _write_json_atomic(path, merged)
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -155,6 +210,25 @@ def _write_jsonl_atomic(path: Path, records: list[dict]) -> None:
             for record in records:
                 f.write(json.dumps(record, separators=(",", ":")))
                 f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        Path(tmp).replace(path)
+    except BaseException:
+        try:
+            Path(tmp).unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
+    """Write JSON atomically via tempfile + fsync + os.replace()."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(data, separators=(",", ":")))
+            f.write("\n")
             f.flush()
             os.fsync(f.fileno())
         Path(tmp).replace(path)

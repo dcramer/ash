@@ -4,6 +4,11 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ash.store.visibility import (
+    is_dm_sourced_or_legacy,
+    is_private_sourced_outside_current_chat,
+)
+
 if TYPE_CHECKING:
     from ash.memory.extractor import MemoryExtractor
     from ash.rpc.server import RPCServer
@@ -112,42 +117,6 @@ def register_memory_methods(
 
         return speaker_person_id, owner_names
 
-    def _is_dm_sourced_or_legacy(memory_id: str) -> bool:
-        """Check if a memory should be excluded from group chats.
-
-        Returns True if the memory was learned in a DM or has no LEARNED_IN
-        edge (legacy memory with unknown origin — treated as potentially private).
-        """
-        from ash.graph.edges import get_learned_in_chat
-
-        chat_node_id = get_learned_in_chat(memory_manager.graph, memory_id)
-        if not chat_node_id:
-            # Legacy memory: no provenance, exclude from groups
-            return True
-        chat = memory_manager.graph.chats.get(chat_node_id)
-        return chat.chat_type == "private" if chat else True
-
-    def _is_private_sourced_outside_current_chat(
-        memory_id: str,
-        current_chat_provider_id: str | None,
-    ) -> bool:
-        """True if memory came from a DM and current context is a different/unknown DM."""
-        from ash.graph.edges import get_learned_in_chat
-
-        chat_node_id = get_learned_in_chat(memory_manager.graph, memory_id)
-        if not chat_node_id:
-            return False
-
-        chat = memory_manager.graph.chats.get(chat_node_id)
-        if not chat or chat.chat_type != "private":
-            return False
-
-        # Fail closed when we cannot prove this is the same DM.
-        if not current_chat_provider_id:
-            return True
-
-        return chat.provider_id != current_chat_provider_id
-
     def _resolve_chat_type(
         chat_type: str | None, provider: str | None, chat_id: str | None
     ) -> str | None:
@@ -159,6 +128,30 @@ def register_memory_methods(
             if chat_entry:
                 return chat_entry.chat_type
         return None
+
+    def _resolve_graph_chat_id(provider: str | None, chat_id: str | None) -> str | None:
+        """Resolve provider chat ID to graph chat node ID."""
+        if not provider or not chat_id:
+            return None
+        chat_entry = memory_manager.graph.find_chat_by_provider(provider, chat_id)
+        return chat_entry.id if chat_entry else None
+
+    def _visible_in_chat_context(
+        memory_id: str,
+        chat_type: str | None,
+        chat_provider_id: str | None,
+    ) -> bool:
+        """Chat context visibility gate shared by list/search RPCs."""
+        graph = memory_manager.graph
+        if chat_type in ("group", "supergroup"):
+            return not is_dm_sourced_or_legacy(graph, memory_id)
+        if chat_type == "private":
+            return not is_private_sourced_outside_current_chat(
+                graph,
+                memory_id,
+                chat_provider_id,
+            )
+        return True
 
     async def memory_search(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Search memories using semantic search.
@@ -207,14 +200,9 @@ def register_memory_methods(
         )
 
         # Filter DM-sourced memories in group chats
-        if chat_type in ("group", "supergroup"):
-            results = [r for r in results if not _is_dm_sourced_or_legacy(r.id)]
-        elif chat_type == "private":
-            results = [
-                r
-                for r in results
-                if not _is_private_sourced_outside_current_chat(r.id, chat_id)
-            ]
+        results = [
+            r for r in results if _visible_in_chat_context(r.id, chat_type, chat_id)
+        ]
 
         lookup = await _build_username_lookup()
 
@@ -336,12 +324,12 @@ def register_memory_methods(
 
         # Resolve graph_chat_id for LEARNED_IN edges
         provider = params.get("provider")
-        chat_type = params.get("chat_type")
-        graph_chat_id: str | None = None
-        if provider and chat_id:
-            chat_entry = memory_manager.graph.find_chat_by_provider(provider, chat_id)
-            if chat_entry:
-                graph_chat_id = chat_entry.id
+        chat_type = _resolve_chat_type(
+            params.get("chat_type"),
+            params.get("provider"),
+            chat_id,
+        )
+        graph_chat_id = _resolve_graph_chat_id(provider, chat_id)
 
         stored_ids = await process_extracted_facts(
             facts=[fact],
@@ -374,6 +362,177 @@ def register_memory_methods(
         )
         return {"id": memory.id}
 
+    async def _extract_and_store_from_messages(
+        *,
+        llm_messages: list[Any],
+        user_id: str | None,
+        provider: str | None,
+        chat_id: str | None,
+        chat_type: str | None,
+        shared: bool,
+        source_username: str | None,
+        source_display_name: str | None,
+        source_user_id: str | None,
+    ) -> dict[str, Any]:
+        """Run extraction and persistence from an explicit message payload."""
+        from datetime import UTC, datetime
+
+        from ash.memory.extractor import SpeakerInfo
+        from ash.memory.processing import process_extracted_facts
+
+        if not memory_extractor:
+            raise ValueError("Memory extractor not available")
+
+        if not llm_messages:
+            return {"stored": 0}
+
+        effective_user_id = source_user_id or user_id or ""
+
+        # Ensure self-person and build owner names
+        speaker_person_id, owner_names = await _ensure_speaker(
+            source_user_id or user_id,
+            source_username,
+            source_display_name,
+        )
+
+        speaker_info = SpeakerInfo(
+            user_id=source_user_id or user_id,
+            username=source_username,
+            display_name=source_display_name,
+        )
+
+        facts = await memory_extractor.extract_from_conversation(
+            messages=llm_messages,
+            owner_names=owner_names if owner_names else None,
+            speaker_info=speaker_info,
+            current_datetime=datetime.now(UTC),
+        )
+
+        if not facts:
+            return {"stored": 0}
+
+        if shared:
+            for fact in facts:
+                fact.shared = True
+
+        graph_chat_id = _resolve_graph_chat_id(provider, chat_id)
+
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=memory_manager,
+            user_id=effective_user_id,
+            chat_id=chat_id,
+            speaker_username=source_username,
+            speaker_display_name=source_display_name,
+            speaker_person_id=speaker_person_id,
+            owner_names=owner_names,
+            source="agent",
+            confidence_threshold=0.0,  # Explicit remember request path
+            graph_chat_id=graph_chat_id,
+            chat_type=chat_type,
+        )
+
+        return {"stored": len(stored_ids)}
+
+    async def memory_extract_from_messages(params: dict[str, Any]) -> dict[str, Any]:
+        """Extract memories from explicit in-request messages.
+
+        This avoids session-file coupling and provides deterministic harness behavior.
+
+        Params:
+            messages: List[{role, content, id?, user_id?, username?, display_name?}]
+            provider: Provider name (required)
+            user_id: Owner user ID
+            chat_id: Chat ID
+            chat_type: Current chat type
+            message_id: Optional target message id to resolve speaker metadata
+            shared: If True, force group memories
+            source_username/source_display_name: Optional speaker overrides
+        """
+        from ash.llm.types import Message, Role
+
+        if not memory_extractor:
+            raise ValueError("Memory extractor not available")
+
+        provider = params.get("provider")
+        if not provider:
+            raise ValueError("provider is required")
+
+        raw_messages = params.get("messages")
+        if not isinstance(raw_messages, list) or not raw_messages:
+            raise ValueError("messages must be a non-empty list")
+
+        target_message_id = params.get("message_id")
+
+        target_raw: dict[str, Any] | None = None
+        if target_message_id:
+            target_raw = next(
+                (
+                    m
+                    for m in raw_messages
+                    if isinstance(m, dict) and m.get("id") == target_message_id
+                ),
+                None,
+            )
+
+        if target_raw is None:
+            user_rows = [
+                m
+                for m in raw_messages
+                if isinstance(m, dict) and m.get("role") == "user"
+            ]
+            if user_rows:
+                target_raw = user_rows[-1]
+            elif raw_messages and isinstance(raw_messages[-1], dict):
+                target_raw = raw_messages[-1]
+            else:
+                target_raw = {}
+
+        llm_messages: list[Message] = []
+        for item in raw_messages:
+            if not isinstance(item, dict):
+                raise ValueError("each message must be an object")
+
+            role_raw = item.get("role")
+            if role_raw not in ("user", "assistant"):
+                raise ValueError("message role must be 'user' or 'assistant'")
+
+            content = item.get("content")
+            if not isinstance(content, str):
+                raise ValueError("message content must be a string")
+            if not content.strip():
+                continue
+
+            role = Role.USER if role_raw == "user" else Role.ASSISTANT
+            llm_messages.append(Message(role=role, content=content))
+
+        source_username = (
+            params.get("source_username")
+            or params.get("source_user_id")
+            or target_raw.get("username")
+        )
+        source_display_name = (
+            params.get("source_display_name")
+            or params.get("source_user_name")
+            or target_raw.get("display_name")
+        )
+        source_user_id = target_raw.get("user_id") or params.get("user_id")
+
+        chat_id = params.get("chat_id")
+        chat_type = _resolve_chat_type(params.get("chat_type"), provider, chat_id)
+
+        return await _extract_and_store_from_messages(
+            llm_messages=llm_messages,
+            user_id=params.get("user_id"),
+            provider=provider,
+            chat_id=chat_id,
+            chat_type=chat_type,
+            shared=params.get("shared", False),
+            source_username=source_username,
+            source_display_name=source_display_name,
+            source_user_id=source_user_id,
+        )
+
     async def memory_extract(params: dict[str, Any]) -> dict[str, Any]:
         """Extract memories from the triggering message using the full pipeline.
 
@@ -390,10 +549,6 @@ def register_memory_methods(
             source_username: Speaker's username
             source_display_name: Speaker's display name
         """
-        from datetime import UTC, datetime
-
-        from ash.memory.extractor import SpeakerInfo
-        from ash.memory.processing import process_extracted_facts
         from ash.sessions.reader import SessionReader
         from ash.sessions.types import MessageEntry, session_key
 
@@ -453,62 +608,17 @@ def register_memory_methods(
         if not llm_messages:
             return {"stored": 0}
 
-        # Build speaker info from message author
-        speaker_info = SpeakerInfo(
-            user_id=msg_user_id,
-            username=msg_username,
-            display_name=msg_display_name,
-        )
-
-        # Ensure self-person and build owner names
-        speaker_person_id, owner_names = await _ensure_speaker(
-            msg_user_id or user_id,
-            msg_username or source_username,
-            msg_display_name or source_display_name,
-        )
-
-        # Run full extraction
-        facts = await memory_extractor.extract_from_conversation(
-            messages=llm_messages,
-            owner_names=owner_names if owner_names else None,
-            speaker_info=speaker_info,
-            current_datetime=datetime.now(UTC),
-        )
-
-        if not facts:
-            return {"stored": 0}
-
-        # Override shared flag if requested
-        if shared:
-            for fact in facts:
-                fact.shared = True
-
-        effective_user_id = msg_user_id or user_id or ""
-
-        # Resolve graph_chat_id for LEARNED_IN edges
-        chat_type = params.get("chat_type")
-        graph_chat_id: str | None = None
-        if provider and chat_id:
-            chat_entry = memory_manager.graph.find_chat_by_provider(provider, chat_id)
-            if chat_entry:
-                graph_chat_id = chat_entry.id
-
-        stored_ids = await process_extracted_facts(
-            facts=facts,
-            store=memory_manager,
-            user_id=effective_user_id,
+        return await _extract_and_store_from_messages(
+            llm_messages=llm_messages,
+            user_id=user_id,
+            provider=provider,
             chat_id=chat_id,
-            speaker_username=msg_username or source_username,
-            speaker_display_name=msg_display_name or source_display_name,
-            speaker_person_id=speaker_person_id,
-            owner_names=owner_names,
-            source="agent",
-            confidence_threshold=0.0,  # Trust extraction from explicit request
-            graph_chat_id=graph_chat_id,
-            chat_type=chat_type,
+            chat_type=_resolve_chat_type(params.get("chat_type"), provider, chat_id),
+            shared=shared,
+            source_username=msg_username or source_username,
+            source_display_name=msg_display_name or source_display_name,
+            source_user_id=msg_user_id,
         )
-
-        return {"stored": len(stored_ids)}
 
     async def memory_list(params: dict[str, Any]) -> list[dict[str, Any]]:
         """List memory entries.
@@ -548,15 +658,9 @@ def register_memory_methods(
             learned_in_chat_id=learned_in_chat_id,
         )
 
-        # Filter DM-sourced memories in group chats
-        if chat_type in ("group", "supergroup"):
-            memories = [m for m in memories if not _is_dm_sourced_or_legacy(m.id)]
-        elif chat_type == "private":
-            memories = [
-                m
-                for m in memories
-                if not _is_private_sourced_outside_current_chat(m.id, chat_id)
-            ]
+        memories = [
+            m for m in memories if _visible_in_chat_context(m.id, chat_type, chat_id)
+        ]
 
         lookup = await _build_username_lookup()
 
@@ -636,6 +740,7 @@ def register_memory_methods(
     # Register handlers
     server.register("memory.search", memory_search)
     server.register("memory.add", memory_add)
+    server.register("memory.extract_from_messages", memory_extract_from_messages)
     server.register("memory.extract", memory_extract)
     server.register("memory.list", memory_list)
     server.register("memory.delete", memory_delete)
