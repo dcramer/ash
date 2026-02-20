@@ -260,48 +260,41 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         pass
 
 
-async def _start_callback_server(
-    state: str,
-) -> tuple[HTTPServer | None, str | None]:
-    """Start local callback server and wait for the authorization code.
+def _parse_callback_url(callback_url: str, expected_state: str) -> str:
+    """Extract authorization code from a pasted callback URL.
+
+    Args:
+        callback_url: The full callback URL from the browser address bar.
+        expected_state: The state parameter to validate against.
 
     Returns:
-        Tuple of (server, authorization_code). Server may be None if bind fails.
+        The authorization code.
+
+    Raises:
+        RuntimeError: If state doesn't match or code is missing.
     """
-    code_event = asyncio.Event()
-    loop = asyncio.get_running_loop()
+    from urllib.parse import parse_qs, urlparse
 
-    _CallbackHandler.expected_state = state
-    _CallbackHandler.received_code = None
-    _CallbackHandler.code_event = code_event
-    _CallbackHandler._loop = loop
+    parsed = urlparse(callback_url.strip())
+    params = parse_qs(parsed.query)
 
-    try:
-        server = HTTPServer(("127.0.0.1", 1455), _CallbackHandler)
-    except OSError as e:
-        logger.warning("Failed to bind callback server on port 1455: %s", e)
-        return None, None
+    state = params.get("state", [None])[0]
+    if state != expected_state:
+        raise RuntimeError("State mismatch in callback URL — please try again.")
 
-    thread = Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    code = params.get("code", [None])[0]
+    if not code:
+        raise RuntimeError("No authorization code found in callback URL.")
 
-    try:
-        await asyncio.wait_for(code_event.wait(), timeout=CALLBACK_TIMEOUT_SECONDS)
-    except TimeoutError:
-        logger.warning("OAuth callback timed out after %ds", CALLBACK_TIMEOUT_SECONDS)
-        return server, None
-    finally:
-        server.shutdown()
-        thread.join(timeout=2)
-
-    return server, _CallbackHandler.received_code
+    return code
 
 
 async def login_openai_codex() -> dict[str, str | float]:
     """Run the full OpenAI Codex OAuth login flow.
 
-    Opens the browser for authentication, starts a local callback server,
-    and exchanges the authorization code for tokens.
+    Starts a local callback server for browser redirects and also accepts
+    a manually pasted callback URL (for headless/remote machines). Whichever
+    completes first is used.
 
     Returns:
         Dict with keys: access (str), refresh (str), expires (float), account_id (str).
@@ -314,19 +307,83 @@ async def login_openai_codex() -> dict[str, str | float]:
 
     url = build_authorization_url(challenge, state)
 
-    # Start callback server and open browser
-    print(
-        f"\nOpening browser for authentication...\nIf it doesn't open, visit:\n{url}\n"
-    )
-    webbrowser.open(url)
+    # Try to start local callback server (best-effort)
+    code_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
 
-    _, code = await _start_callback_server(state)
+    _CallbackHandler.expected_state = state
+    _CallbackHandler.received_code = None
+    _CallbackHandler.code_event = code_event
+    _CallbackHandler._loop = loop
+
+    server: HTTPServer | None = None
+    server_thread: Thread | None = None
+    try:
+        server = HTTPServer(("127.0.0.1", 1455), _CallbackHandler)
+        server_thread = Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+    except OSError:
+        logger.debug("Failed to bind callback server on port 1455")
+
+    # Show auth URL
+    print(f"\nVisit this URL to authenticate:\n\n  {url}\n")
+
+    if server:
+        webbrowser.open(url)
+        print(
+            "Waiting for browser redirect...\n"
+            "On a headless machine, paste the callback URL instead.\n"
+        )
+    else:
+        print("Paste the callback URL from your browser after authenticating.\n")
+
+    # Race: server callback vs. manual paste from stdin
+    code: str | None = None
+
+    async def _wait_server() -> str | None:
+        await code_event.wait()
+        return _CallbackHandler.received_code
+
+    async def _wait_paste() -> str | None:
+        try:
+            raw = await asyncio.to_thread(input, "Callback URL: ")
+        except EOFError:
+            # Non-interactive stdin — wait indefinitely for server callback
+            await asyncio.Event().wait()
+            return None
+        raw = raw.strip()
+        if not raw:
+            return None
+        return _parse_callback_url(raw, state)
+
+    tasks: list[asyncio.Task[str | None]] = []
+    if server:
+        tasks.append(asyncio.create_task(_wait_server()))
+    tasks.append(asyncio.create_task(_wait_paste()))
+
+    try:
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=CALLBACK_TIMEOUT_SECONDS,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+
+        for task in done:
+            result = task.result()
+            if result:
+                code = result
+                break
+    finally:
+        if server:
+            server.shutdown()
+        if server_thread:
+            server_thread.join(timeout=2)
 
     if not code:
-        raise RuntimeError(
-            "Did not receive authorization code. "
-            "Please try again or check your browser."
-        )
+        raise RuntimeError("Did not receive authorization code. Please try again.")
 
     tokens = await exchange_authorization_code(code, verifier)
 

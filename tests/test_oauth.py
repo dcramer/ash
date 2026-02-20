@@ -4,11 +4,34 @@ import base64
 import hashlib
 import json
 
+import pytest
+
 from ash.auth.oauth import (
+    _parse_callback_url,
     build_authorization_url,
     extract_account_id,
     generate_pkce,
 )
+
+
+class TestParseCallbackURL:
+    def test_extracts_code(self):
+        url = "http://localhost:1455/auth/callback?code=abc123&state=mystate"
+        assert _parse_callback_url(url, "mystate") == "abc123"
+
+    def test_strips_whitespace(self):
+        url = "  http://localhost:1455/auth/callback?code=abc&state=s  \n"
+        assert _parse_callback_url(url, "s") == "abc"
+
+    def test_state_mismatch_raises(self):
+        url = "http://localhost:1455/auth/callback?code=abc&state=wrong"
+        with pytest.raises(RuntimeError, match="State mismatch"):
+            _parse_callback_url(url, "expected")
+
+    def test_missing_code_raises(self):
+        url = "http://localhost:1455/auth/callback?state=s"
+        with pytest.raises(RuntimeError, match="No authorization code"):
+            _parse_callback_url(url, "s")
 
 
 class TestGeneratePKCE:
