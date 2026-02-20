@@ -64,14 +64,33 @@ class OpenAIOAuthProvider(OpenAIProvider):
     def name(self) -> str:
         return "openai-oauth"
 
+    # Parameters the Codex Responses API accepts (from reference impl).
+    _CODEX_ALLOWED_PARAMS = {
+        "model",
+        "store",
+        "stream",
+        "instructions",
+        "input",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "temperature",
+        "reasoning",
+        "text",
+        "include",
+        "prompt_cache_key",
+    }
+
     def _build_request_kwargs(
         self, *args: object, **kwargs: object
     ) -> dict[str, object]:
         result = super()._build_request_kwargs(*args, **kwargs)  # type: ignore[arg-type]
-        # Codex endpoint requires store=false, stream=true,
-        # and does not support max_output_tokens.
+        # Whitelist to Codex-supported params only, then force store=false.
+        result = {k: v for k, v in result.items() if k in self._CODEX_ALLOWED_PARAMS}
         result["store"] = False
-        result.pop("max_output_tokens", None)
+        # Reasoning models don't accept temperature on the Codex endpoint.
+        if "reasoning" in result and "temperature" in result:
+            del result["temperature"]
         return result
 
     async def _maybe_refresh_token(self) -> None:
