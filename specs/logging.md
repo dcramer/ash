@@ -207,7 +207,7 @@ The `ComponentFormatter` appends extra fields as `key=value` pairs:
 
 - Extra fields extracted from LogRecord (same logic as JSONLHandler)
 - Space-separated `key=value` pairs after the message
-- Long string values truncated to 60 chars
+- Long string values truncated to 200 chars
 - Complex values (dicts/lists) skipped in console (available in JSONL)
 
 ## Verification

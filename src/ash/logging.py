@@ -469,8 +469,8 @@ class ComponentFormatter(logging.Formatter):
             if isinstance(value, dict | list):
                 continue
             display = str(value)
-            if len(display) > 60:
-                display = display[:57] + "..."
+            if len(display) > 200:
+                display = display[:197] + "..."
             extra_parts.append(f"{key}={display}")
 
         if extra_parts:
