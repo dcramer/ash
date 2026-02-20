@@ -1,5 +1,6 @@
 """OpenAI OAuth LLM provider (ChatGPT OAuth, Codex Responses API)."""
 
+import json
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -10,9 +11,14 @@ import openai
 from ash.llm.openai import OpenAIProvider
 from ash.llm.types import (
     CompletionResponse,
+    ContentBlock,
     Message,
+    Role,
     StreamChunk,
+    StreamEventType,
+    TextContent,
     ToolDefinition,
+    ToolUse,
 )
 
 if TYPE_CHECKING:
@@ -124,8 +130,15 @@ class OpenAIOAuthProvider(OpenAIProvider):
         thinking: "ThinkingConfig | None" = None,
         reasoning: str | None = None,
     ) -> CompletionResponse:
+        # Codex endpoint requires stream=true for all requests.
+        # Collect the stream into a CompletionResponse.
         await self._maybe_refresh_token()
-        return await super().complete(
+
+        text_parts: list[str] = []
+        tool_calls: dict[str, tuple[str, str]] = {}  # call_id -> (name, args)
+        current_tool_args: dict[str, str] = {}  # call_id -> accumulated args
+
+        async for chunk in self.stream(
             messages,
             model=model,
             tools=tools,
@@ -134,6 +147,34 @@ class OpenAIOAuthProvider(OpenAIProvider):
             temperature=temperature,
             thinking=thinking,
             reasoning=reasoning,
+        ):
+            if chunk.type == StreamEventType.TEXT_DELTA and chunk.content:
+                text_parts.append(str(chunk.content))
+            elif chunk.type == StreamEventType.TOOL_USE_START and chunk.tool_use_id:
+                current_tool_args[chunk.tool_use_id] = ""
+                tool_calls[chunk.tool_use_id] = (chunk.tool_name or "", "")
+            elif chunk.type == StreamEventType.TOOL_USE_DELTA and chunk.tool_use_id:
+                current_tool_args[chunk.tool_use_id] += str(chunk.content or "")
+            elif chunk.type == StreamEventType.TOOL_USE_END and chunk.tool_use_id:
+                name = tool_calls[chunk.tool_use_id][0]
+                args = current_tool_args.get(chunk.tool_use_id, "")
+                tool_calls[chunk.tool_use_id] = (name, args)
+
+        content: list[ContentBlock] = []
+        if text_parts:
+            content.append(TextContent(text="".join(text_parts)))
+        for call_id, (name, args) in tool_calls.items():
+            content.append(
+                ToolUse(id=call_id, name=name, input=json.loads(args) if args else {})
+            )
+
+        stop_reason = "tool_use" if tool_calls else "end_turn"
+
+        return CompletionResponse(
+            message=Message(role=Role.ASSISTANT, content=content if content else ""),
+            usage=None,
+            stop_reason=stop_reason,
+            model=model,
         )
 
     async def stream(
