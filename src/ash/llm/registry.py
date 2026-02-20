@@ -1,31 +1,44 @@
 """LLM provider registry."""
 
-from typing import Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import SecretStr
 
 from ash.llm.anthropic import AnthropicProvider
 from ash.llm.base import LLMProvider
 from ash.llm.openai import OpenAIProvider
+from ash.llm.openai_codex import OpenAICodexProvider
 
-ProviderName = Literal["anthropic", "openai"]
+if TYPE_CHECKING:
+    from ash.auth.storage import AuthStorage
+
+ProviderName = Literal["anthropic", "openai", "openai-codex"]
 
 
 def create_llm_provider(
     provider: ProviderName,
     api_key: str | SecretStr | None = None,
+    *,
+    access_token: str | None = None,
+    account_id: str | None = None,
+    auth_storage: AuthStorage | None = None,
 ) -> LLMProvider:
     """Create a single LLM provider instance.
 
     Args:
-        provider: Provider name ("anthropic" or "openai").
-        api_key: API key (or uses env var if not provided).
+        provider: Provider name.
+        api_key: API key (for anthropic/openai providers).
+        access_token: OAuth access token (for openai-codex).
+        account_id: ChatGPT account ID (for openai-codex).
+        auth_storage: Auth storage for token refresh (for openai-codex).
 
     Returns:
         LLM provider instance.
 
     Raises:
-        ValueError: If provider name is unknown.
+        ValueError: If provider name is unknown or required args missing.
     """
     key = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
 
@@ -33,6 +46,17 @@ def create_llm_provider(
         return AnthropicProvider(api_key=key)
     if provider == "openai":
         return OpenAIProvider(api_key=key)
+    if provider == "openai-codex":
+        if not access_token or not account_id:
+            raise ValueError(
+                "openai-codex provider requires access_token and account_id. "
+                "Run 'ash auth login' first."
+            )
+        return OpenAICodexProvider(
+            access_token=access_token,
+            account_id=account_id,
+            auth_storage=auth_storage,
+        )
 
     raise ValueError(f"Unknown LLM provider: {provider}")
 

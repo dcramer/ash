@@ -32,7 +32,7 @@ class ModelConfig(BaseModel):
     Only supported by Anthropic Claude models.
     """
 
-    provider: Literal["anthropic", "openai"]
+    provider: Literal["anthropic", "openai", "openai-codex"]
     model: str
     temperature: float | None = None  # None = use provider default
     max_tokens: int = 4096
@@ -49,7 +49,7 @@ class ProviderConfig(BaseModel):
 class LLMConfig(BaseModel):
     """Configuration for an LLM provider (backward compatibility)."""
 
-    provider: Literal["anthropic", "openai"]
+    provider: Literal["anthropic", "openai", "openai-codex"]
     model: str
     api_key: SecretStr | None = None
     temperature: float = 0.7
@@ -457,8 +457,11 @@ class AshConfig(BaseModel):
         return self.get_model("default")
 
     def _resolve_provider_api_key(
-        self, provider: Literal["anthropic", "openai"]
+        self, provider: Literal["anthropic", "openai", "openai-codex"]
     ) -> SecretStr | None:
+        if provider == "openai-codex":
+            # OAuth-based provider — API key comes from auth.json, not config
+            return self._resolve_oauth_api_key(provider)
         provider_config = getattr(self, provider, None)
         if provider_config and provider_config.api_key:
             return provider_config.api_key
@@ -467,8 +470,66 @@ class AshConfig(BaseModel):
             return SecretStr(env_value)
         return None
 
+    def _resolve_oauth_api_key(self, provider: str) -> SecretStr | None:
+        """Resolve an API key from OAuth credentials in auth.json."""
+        from ash.auth.storage import AuthStorage
+
+        storage = AuthStorage()
+        creds = storage.load(provider)
+        if creds:
+            return SecretStr(creds.access)
+        return None
+
+    def resolve_oauth_credentials(self, provider: str):  # noqa: ANN201
+        """Load OAuth credentials for a provider from auth.json.
+
+        Returns:
+            OAuthCredentials | None
+        """
+        from ash.auth.storage import AuthStorage
+
+        return AuthStorage().load(provider)
+
     def resolve_api_key(self, alias: str) -> SecretStr | None:
         return self._resolve_provider_api_key(self.get_model(alias).provider)
+
+    def create_llm_provider_for_model(self, alias: str):  # noqa: ANN201
+        """Create an LLM provider instance for a model alias.
+
+        Handles both API key-based providers and OAuth-based providers
+        (openai-codex). This is the preferred way to create providers —
+        callers should use this instead of manually resolving credentials.
+
+        Returns:
+            LLMProvider instance.
+
+        Raises:
+            ValueError: If credentials are missing.
+        """
+        from ash.llm.registry import create_llm_provider
+
+        model_config = self.get_model(alias)
+
+        if model_config.provider == "openai-codex":
+            from ash.auth.storage import AuthStorage
+
+            oauth_creds = self.resolve_oauth_credentials("openai-codex")
+            if not oauth_creds:
+                raise ValueError(
+                    "No OAuth credentials for openai-codex. Run 'ash auth login' first."
+                )
+            return create_llm_provider(
+                "openai-codex",
+                access_token=oauth_creds.access,
+                account_id=oauth_creds.account_id,
+                auth_storage=AuthStorage(),
+            )
+
+        api_key = self._resolve_provider_api_key(model_config.provider)
+        return create_llm_provider(
+            model_config.provider,
+            api_key=api_key.get_secret_value() if api_key else None,
+        )
 
     def resolve_embeddings_api_key(self) -> SecretStr | None:
         return (

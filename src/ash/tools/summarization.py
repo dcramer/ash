@@ -210,22 +210,9 @@ def create_summarizer_from_config(
         Configured summarizer, or None if summarization is disabled or
         the required model/API key is not configured.
     """
-    from ash.llm import create_llm_provider
-
     try:
         model_config = config.get_model(model_alias)
-        api_key = config.resolve_api_key(model_alias)
-
-        if not api_key:
-            logger.debug(
-                f"No API key for model '{model_alias}', summarization disabled"
-            )
-            return None
-
-        llm = create_llm_provider(
-            model_config.provider,
-            api_key=api_key.get_secret_value(),
-        )
+        llm = config.create_llm_provider_for_model(model_alias)
 
         return ToolResultSummarizer(
             llm=llm,

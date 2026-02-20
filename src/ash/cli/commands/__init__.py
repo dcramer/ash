@@ -1,6 +1,7 @@
 """CLI command modules."""
 
 from ash.cli.commands import (
+    auth,
     chat,
     config,
     graph,
@@ -17,6 +18,7 @@ from ash.cli.commands import (
 )
 
 __all__ = [
+    "auth",
     "chat",
     "config",
     "graph",

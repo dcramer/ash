@@ -987,7 +987,7 @@ async def create_agent(
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.agents.builtin import register_builtin_agents
     from ash.core.prompt import RuntimeInfo
-    from ash.llm import create_llm_provider, create_registry
+    from ash.llm import create_registry
     from ash.memory import MemoryExtractor
     from ash.sandbox import SandboxExecutor
     from ash.sandbox.packages import build_setup_command, collect_skill_packages
@@ -1001,12 +1001,7 @@ async def create_agent(
     from ash.tools.builtin.skills import UseSkillTool
 
     model_config = config.get_model(model_alias)
-    api_key = config.resolve_api_key(model_alias)
-
-    llm = create_llm_provider(
-        model_config.provider,
-        api_key=api_key.get_secret_value() if api_key else None,
-    )
+    llm = config.create_llm_provider_for_model(model_alias)
 
     tool_registry = ToolRegistry()
 
@@ -1108,12 +1103,8 @@ async def create_agent(
         extraction_model_alias = config.memory.extraction_model or model_alias
         try:
             extraction_model_config = config.get_model(extraction_model_alias)
-            extraction_api_key = config.resolve_api_key(extraction_model_alias)
-            extraction_llm = create_llm_provider(
-                extraction_model_config.provider,
-                api_key=extraction_api_key.get_secret_value()
-                if extraction_api_key
-                else None,
+            extraction_llm = config.create_llm_provider_for_model(
+                extraction_model_alias
             )
             memory_extractor = MemoryExtractor(
                 llm=extraction_llm,

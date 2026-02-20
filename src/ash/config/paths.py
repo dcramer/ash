@@ -153,6 +153,11 @@ def get_installed_skills_path() -> Path:
     return get_ash_home() / "skills.installed"
 
 
+def get_auth_path() -> Path:
+    """Get the auth credentials file path."""
+    return get_ash_home() / "auth.json"
+
+
 def get_schedule_file() -> Path:
     """Get the schedule file path."""
     return get_ash_home() / "schedule.jsonl"

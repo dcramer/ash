@@ -120,16 +120,24 @@ async def _run_chat(
         error(str(e))
         raise typer.Exit(1) from None
 
-    # Check API key early
-    api_key = ash_config.resolve_api_key(resolved_alias)
-    if api_key is None:
-        model_config = ash_config.get_model(resolved_alias)
-        provider = model_config.provider
-        env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
-        error(
-            f"No API key for provider '{provider}'. Set {env_var} or api_key in config"
-        )
-        raise typer.Exit(1) from None
+    # Check credentials early
+    model_config = ash_config.get_model(resolved_alias)
+    if model_config.provider == "openai-codex":
+        oauth_creds = ash_config.resolve_oauth_credentials("openai-codex")
+        if oauth_creds is None:
+            error("No OAuth credentials for openai-codex. Run 'ash auth login' first.")
+            raise typer.Exit(1) from None
+    else:
+        api_key = ash_config.resolve_api_key(resolved_alias)
+        if api_key is None:
+            provider = model_config.provider
+            env_var = (
+                "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+            )
+            error(
+                f"No API key for provider '{provider}'. Set {env_var} or api_key in config"
+            )
+            raise typer.Exit(1) from None
 
     # Load workspace
     workspace_loader = WorkspaceLoader(ash_config.workspace)

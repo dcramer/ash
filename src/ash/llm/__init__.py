@@ -3,6 +3,7 @@
 from ash.llm.anthropic import AnthropicProvider
 from ash.llm.base import LLMProvider
 from ash.llm.openai import OpenAIProvider
+from ash.llm.openai_codex import OpenAICodexProvider
 from ash.llm.registry import (
     LLMRegistry,
     ProviderName,
@@ -35,6 +36,7 @@ __all__ = [
     "LLMProvider",
     # Providers
     "AnthropicProvider",
+    "OpenAICodexProvider",
     "OpenAIProvider",
     # Registry
     "LLMRegistry",

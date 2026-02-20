@@ -3,6 +3,7 @@
 import typer
 
 from ash.cli.commands import (
+    auth,
     chat,
     config,
     graph,
@@ -34,6 +35,7 @@ def help(ctx: typer.Context) -> None:
 
 
 # Register commands from modules
+auth.register(app)
 init.register(app)
 serve.register(app)
 chat.register(app)

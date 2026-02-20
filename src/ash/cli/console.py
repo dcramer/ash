@@ -121,13 +121,7 @@ def create_llm(
     config: AshConfig, model_alias: str | None = None
 ) -> tuple[LLMProvider, str]:
     """Create an LLM provider from config. Returns (provider, model_name)."""
-    from ash.llm import create_llm_provider
-
     alias = model_alias or "default"
     model_config = config.get_model(alias)
-    api_key = config.resolve_api_key(alias)
-    llm = create_llm_provider(
-        model_config.provider,
-        api_key=api_key.get_secret_value() if api_key else None,
-    )
+    llm = config.create_llm_provider_for_model(alias)
     return llm, model_config.model
