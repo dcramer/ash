@@ -279,6 +279,12 @@ def get_learned_in_chat(graph: KnowledgeGraph, memory_id: str) -> str | None:
     return edges[0].target_id if edges else None
 
 
+def get_memories_learned_in_chat(graph: KnowledgeGraph, chat_id: str) -> set[str]:
+    """Get memory IDs that were learned in a specific chat (via incoming LEARNED_IN edges)."""
+    edges = graph.get_incoming(chat_id, edge_type=LEARNED_IN)
+    return {e.source_id for e in edges}
+
+
 # -- PARTICIPATES_IN helpers --
 
 

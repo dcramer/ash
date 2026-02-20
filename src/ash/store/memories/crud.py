@@ -261,7 +261,17 @@ class MemoryCrudMixin:
         include_superseded: bool = False,
         owner_user_id: str | None = None,
         chat_id: str | None = None,
+        learned_in_chat_id: str | None = None,
     ) -> list[MemoryEntry]:
+        from ash.graph.edges import get_memories_learned_in_chat
+
+        # Pre-compute learned-in filter set
+        learned_in_ids: set[str] | None = None
+        if learned_in_chat_id:
+            learned_in_ids = get_memories_learned_in_chat(
+                self._graph, learned_in_chat_id
+            )
+
         now = datetime.now(UTC)
         results: list[MemoryEntry] = []
 
@@ -275,6 +285,8 @@ class MemoryCrudMixin:
                 if memory.superseded_at:
                     continue
             if not matches_scope(memory, owner_user_id, chat_id):
+                continue
+            if learned_in_ids is not None and memory.id not in learned_in_ids:
                 continue
             results.append(memory)
 

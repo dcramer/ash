@@ -1182,6 +1182,37 @@ class TestNodeOperations:
 # =============================================================================
 
 
+class TestLearnedInHelpers:
+    """Tests for LEARNED_IN query helpers."""
+
+    def test_get_memories_learned_in_chat(self):
+        from ash.graph.edges import (
+            create_learned_in_edge,
+            get_memories_learned_in_chat,
+        )
+
+        graph = KnowledgeGraph()
+        for mid in ["mem-1", "mem-2", "mem-3"]:
+            graph.add_memory(
+                MemoryEntry(
+                    id=mid, content=f"test {mid}", memory_type=MemoryType.KNOWLEDGE
+                )
+            )
+        graph.add_edge(create_learned_in_edge("mem-1", "chat-A"))
+        graph.add_edge(create_learned_in_edge("mem-2", "chat-A"))
+        graph.add_edge(create_learned_in_edge("mem-3", "chat-B"))
+
+        result = get_memories_learned_in_chat(graph, "chat-A")
+        assert result == {"mem-1", "mem-2"}
+
+    def test_get_memories_learned_in_chat_empty(self):
+        from ash.graph.edges import get_memories_learned_in_chat
+
+        graph = KnowledgeGraph()
+        result = get_memories_learned_in_chat(graph, "nonexistent")
+        assert result == set()
+
+
 class TestEdgeIdFormat:
     """Tests that edge IDs use full UUID hex."""
 

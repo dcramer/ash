@@ -17,12 +17,16 @@ app = typer.Typer(
 def search_memories(
     query: Annotated[str, typer.Argument(help="Search query")],
     limit: Annotated[int, typer.Option("--limit", "-n", help="Maximum results")] = 10,
+    this_chat: Annotated[
+        bool, typer.Option("--this-chat", help="Only memories learned in this chat")
+    ] = False,
 ) -> None:
     """Search memories using semantic search."""
     try:
         params = {
             "query": query,
             "limit": limit,
+            "this_chat": this_chat,
             **get_context_params(),
         }
         results = rpc_call("memory.search", params)
@@ -55,11 +59,15 @@ def search_memories(
 @app.command("list")
 def list_memories(
     limit: Annotated[int, typer.Option("--limit", "-n", help="Maximum results")] = 20,
+    this_chat: Annotated[
+        bool, typer.Option("--this-chat", help="Only memories learned in this chat")
+    ] = False,
 ) -> None:
     """List recent memories."""
     try:
         params = {
             "limit": limit,
+            "this_chat": this_chat,
             **get_context_params(),
         }
         memories = rpc_call("memory.list", params)

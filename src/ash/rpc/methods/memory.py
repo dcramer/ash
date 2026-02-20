@@ -112,18 +112,20 @@ def register_memory_methods(
 
         return speaker_person_id, owner_names
 
-    def _is_dm_sourced(memory_id: str) -> bool | None:
-        """Check if a memory was learned in a private (DM) chat.
+    def _is_dm_sourced_or_legacy(memory_id: str) -> bool:
+        """Check if a memory should be excluded from group chats.
 
-        Returns True if DM-sourced, False if not, None if no LEARNED_IN edge.
+        Returns True if the memory was learned in a DM or has no LEARNED_IN
+        edge (legacy memory with unknown origin — treated as potentially private).
         """
         from ash.graph.edges import get_learned_in_chat
 
         chat_node_id = get_learned_in_chat(memory_manager.graph, memory_id)
         if not chat_node_id:
-            return None
+            # Legacy memory: no provenance, exclude from groups
+            return True
         chat = memory_manager.graph.chats.get(chat_node_id)
-        return chat.chat_type == "private" if chat else None
+        return chat.chat_type == "private" if chat else True
 
     def _resolve_chat_type(
         chat_type: str | None, provider: str | None, chat_id: str | None
@@ -146,6 +148,7 @@ def register_memory_methods(
             user_id: Filter to user's personal memories
             chat_id: Include group memories for this chat
             chat_type: Current chat type (for privacy filtering)
+            this_chat: If True, only return memories learned in the current chat
         """
         query = params.get("query")
         if not query:
@@ -158,16 +161,28 @@ def register_memory_methods(
             params.get("chat_type"), params.get("provider"), chat_id
         )
 
+        # Resolve graph_chat_id for --this-chat filtering
+        learned_in_chat_id: str | None = None
+        if params.get("this_chat"):
+            provider = params.get("provider")
+            if provider and chat_id:
+                chat_entry = memory_manager.graph.find_chat_by_provider(
+                    provider, chat_id
+                )
+                if chat_entry:
+                    learned_in_chat_id = chat_entry.id
+
         results = await memory_manager.search(
             query=query,
             limit=limit,
             owner_user_id=user_id,
             chat_id=chat_id,
+            learned_in_chat_id=learned_in_chat_id,
         )
 
         # Filter DM-sourced memories in group chats
         if chat_type in ("group", "supergroup"):
-            results = [r for r in results if not _is_dm_sourced(r.id)]
+            results = [r for r in results if not _is_dm_sourced_or_legacy(r.id)]
 
         lookup = await _build_username_lookup()
 
@@ -433,6 +448,7 @@ def register_memory_methods(
             user_id: Filter to user's personal memories
             chat_id: Include group memories for this chat
             chat_type: Current chat type (for privacy filtering)
+            this_chat: If True, only return memories learned in the current chat
         """
         limit = params.get("limit", 20)
         include_expired = params.get("include_expired", False)
@@ -440,16 +456,28 @@ def register_memory_methods(
         chat_id = params.get("chat_id")
         chat_type = params.get("chat_type")
 
+        # Resolve graph_chat_id for --this-chat filtering
+        learned_in_chat_id: str | None = None
+        if params.get("this_chat"):
+            provider = params.get("provider")
+            if provider and chat_id:
+                chat_entry = memory_manager.graph.find_chat_by_provider(
+                    provider, chat_id
+                )
+                if chat_entry:
+                    learned_in_chat_id = chat_entry.id
+
         memories = await memory_manager.list_memories(
             limit=limit,
             include_expired=include_expired,
             owner_user_id=user_id,
             chat_id=chat_id,
+            learned_in_chat_id=learned_in_chat_id,
         )
 
         # Filter DM-sourced memories in group chats
         if chat_type in ("group", "supergroup"):
-            memories = [m for m in memories if not _is_dm_sourced(m.id)]
+            memories = [m for m in memories if not _is_dm_sourced_or_legacy(m.id)]
 
         lookup = await _build_username_lookup()
 

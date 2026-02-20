@@ -481,7 +481,9 @@ class SystemPromptBuilder:
             "",
             "- `ash-sb memory extract` - Extract and store memories from the current message",
             "- `ash-sb memory search 'query'` - Search memories",
+            "- `ash-sb memory search 'query' --this-chat` - Search only memories learned in this chat",
             "- `ash-sb memory list` - List recent memories with IDs",
+            "- `ash-sb memory list --this-chat` - List only memories learned in this chat",
             "- `ash-sb memory delete <id>` - Delete a memory by ID",
         ]
 
@@ -655,7 +657,9 @@ class SystemPromptBuilder:
             "Memory is automatic — facts are extracted after each exchange.\n"
             "When users explicitly ask to remember something, run `ash-sb memory extract` "
             "(no arguments needed — it processes the current message through the full pipeline).\n"
-            "Always use `ash-sb memory extract` — never use `ash-sb memory add`."
+            "Always use `ash-sb memory extract` — never use `ash-sb memory add`.\n"
+            'When users ask about "what you learned in this chat" or "from this conversation", '
+            "use `--this-chat` to filter to memories learned in the current chat."
         )
 
         if not memory.memories:
@@ -823,6 +827,8 @@ class SystemPromptBuilder:
             "**When to use what:**",
             "- Questions about people's opinions, preferences, facts about them:",
             "  Use `ash-sb memory search 'topic'` (NOT file grep)",
+            "- Facts learned in this chat specifically:",
+            "  Use `ash-sb memory search 'topic' --this-chat`",
             "- Questions about what was said in this chat:",
             f"  Search history: `grep -i 'term' {chat_history_path}`",
             "",

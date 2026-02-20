@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from ash.graph.edges import (
     get_memories_about_person,
+    get_memories_learned_in_chat,
     get_related_people,
     get_subject_person_ids,
 )
@@ -52,6 +53,7 @@ class SearchMixin:
         limit: int,
         owner_user_id: str | None = None,
         chat_id: str | None = None,
+        learned_in_ids: set[str] | None = None,
     ) -> list[SearchResult]:
         """Collect memories about persons via ABOUT edges and 1-hop relationships."""
         now = datetime.now(UTC)
@@ -72,6 +74,8 @@ class SearchMixin:
                 if memory.expires_at and memory.expires_at <= now:
                     continue
                 if not matches_scope(memory, owner_user_id, chat_id):
+                    continue
+                if learned_in_ids is not None and memory_id not in learned_in_ids:
                     continue
 
                 trust_level = classify_trust(self._graph, memory.id)
@@ -125,6 +129,8 @@ class SearchMixin:
                     continue
                 if not matches_scope(memory, owner_user_id, chat_id):
                     continue
+                if learned_in_ids is not None and memory_id not in learned_in_ids:
+                    continue
 
                 trust_level = classify_trust(self._graph, memory.id)
                 weighted = PERSON_GRAPH_RELATED_SIMILARITY * get_trust_weight(
@@ -168,7 +174,15 @@ class SearchMixin:
         subject_person_id: str | None = None,
         owner_user_id: str | None = None,
         chat_id: str | None = None,
+        learned_in_chat_id: str | None = None,
     ) -> list[SearchResult]:
+        # Pre-compute learned-in filter set
+        learned_in_ids: set[str] | None = None
+        if learned_in_chat_id:
+            learned_in_ids = get_memories_learned_in_chat(
+                self._graph, learned_in_chat_id
+            )
+
         # Vector search
         try:
             query_embedding = await self._embeddings.embed(query)
@@ -191,6 +205,8 @@ class SearchMixin:
             if memory.expires_at and memory.expires_at <= now:
                 continue
             if not matches_scope(memory, owner_user_id, chat_id):
+                continue
+            if learned_in_ids is not None and memory_id not in learned_in_ids:
                 continue
 
             mem_subjects = get_subject_person_ids(self._graph, memory.id)
@@ -234,6 +250,7 @@ class SearchMixin:
                     limit=limit,
                     owner_user_id=owner_user_id,
                     chat_id=chat_id,
+                    learned_in_ids=learned_in_ids,
                 )
                 for result in graph_results:
                     existing = results_by_id.get(result.id)

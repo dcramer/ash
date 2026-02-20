@@ -611,6 +611,7 @@ class TestRPCDMSourceFiltering:
 
     async def test_list_filters_dm_sourced_in_group(self, rpc_server, memory_manager):
         """DM-sourced memories should be filtered from list in group chats."""
+        from ash.graph.edges import create_learned_in_edge
         from ash.store.types import ChatEntry
 
         memory_manager.graph.chats["dm-chat-1"] = ChatEntry(
@@ -626,11 +627,19 @@ class TestRPCDMSourceFiltering:
         )
         self._link_to_dm(memory_manager.graph, mem.id)
 
-        # Add a non-DM memory
-        await memory_manager.add_memory(
+        # Add a memory with group chat provenance
+        group_chat = ChatEntry(
+            id="group-chat-1",
+            provider="telegram",
+            provider_id="group-456",
+            chat_type="group",
+        )
+        memory_manager.graph.add_chat(group_chat)
+        mem2 = await memory_manager.add_memory(
             content="Public knowledge",
             owner_user_id="user-1",
         )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem2.id, group_chat.id))
 
         handler = rpc_server.methods["memory.list"]
 
@@ -642,3 +651,234 @@ class TestRPCDMSourceFiltering:
         )
         assert len(results) == 1
         assert results[0]["content"] == "Public knowledge"
+
+    async def test_search_filters_legacy_memories_in_group(
+        self, rpc_server, memory_manager
+    ):
+        """Legacy memories (no LEARNED_IN edge) should be excluded in group chats."""
+        # Add a memory with no LEARNED_IN edge (legacy)
+        mem = await memory_manager.add_memory(
+            content="Legacy fact",
+            owner_user_id="user-1",
+        )
+
+        memory_manager._index.search = MagicMock(return_value=[(mem.id, 0.90)])
+
+        handler = rpc_server.methods["memory.search"]
+        results = await handler(
+            {
+                "query": "legacy",
+                "user_id": "user-1",
+                "chat_type": "group",
+            }
+        )
+        assert len(results) == 0
+
+    async def test_list_filters_legacy_memories_in_group(
+        self, rpc_server, memory_manager
+    ):
+        """Legacy memories (no LEARNED_IN edge) should be excluded from list in group chats."""
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
+        # Create a group chat node
+        group_chat = ChatEntry(
+            id="group-chat-1",
+            provider="telegram",
+            provider_id="group-456",
+            chat_type="group",
+        )
+        memory_manager.graph.add_chat(group_chat)
+
+        # Legacy memory (no LEARNED_IN edge)
+        await memory_manager.add_memory(
+            content="Legacy fact",
+            owner_user_id="user-1",
+        )
+
+        # Memory with LEARNED_IN edge to group chat
+        mem2 = await memory_manager.add_memory(
+            content="Group-sourced fact",
+            owner_user_id="user-1",
+        )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem2.id, group_chat.id))
+
+        handler = rpc_server.methods["memory.list"]
+        results = await handler(
+            {
+                "user_id": "user-1",
+                "chat_type": "group",
+            }
+        )
+        assert len(results) == 1
+        assert results[0]["content"] == "Group-sourced fact"
+
+
+class TestRPCThisChatFiltering:
+    """Tests for --this-chat filtering in search and list."""
+
+    async def test_search_this_chat_returns_only_chat_memories(
+        self, rpc_server, memory_manager
+    ):
+        """With this_chat=True, only memories learned in the current chat are returned."""
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
+        # Register the chat in graph
+        chat = ChatEntry(
+            id="graph-chat-1",
+            provider="telegram",
+            provider_id="chat-100",
+            chat_type="private",
+        )
+        memory_manager.graph.add_chat(chat)
+
+        # Memory learned in this chat
+        mem1 = await memory_manager.add_memory(
+            content="Learned here",
+            owner_user_id="user-1",
+        )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem1.id, chat.id))
+
+        # Memory from another chat
+        mem2 = await memory_manager.add_memory(
+            content="Learned elsewhere",
+            owner_user_id="user-1",
+        )
+
+        memory_manager._index.search = MagicMock(
+            return_value=[(mem1.id, 0.90), (mem2.id, 0.85)]
+        )
+
+        handler = rpc_server.methods["memory.search"]
+        results = await handler(
+            {
+                "query": "learned",
+                "user_id": "user-1",
+                "provider": "telegram",
+                "chat_id": "chat-100",
+                "this_chat": True,
+            }
+        )
+        assert len(results) == 1
+        assert results[0]["content"] == "Learned here"
+
+    async def test_search_without_this_chat_returns_all(
+        self, rpc_server, memory_manager
+    ):
+        """Without this_chat, default behavior returns all matching memories."""
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
+        chat = ChatEntry(
+            id="graph-chat-2",
+            provider="telegram",
+            provider_id="chat-200",
+            chat_type="private",
+        )
+        memory_manager.graph.add_chat(chat)
+
+        mem1 = await memory_manager.add_memory(
+            content="From this chat",
+            owner_user_id="user-1",
+        )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem1.id, chat.id))
+
+        mem2 = await memory_manager.add_memory(
+            content="From other chat",
+            owner_user_id="user-1",
+        )
+
+        memory_manager._index.search = MagicMock(
+            return_value=[(mem1.id, 0.90), (mem2.id, 0.85)]
+        )
+
+        handler = rpc_server.methods["memory.search"]
+        results = await handler(
+            {
+                "query": "chat",
+                "user_id": "user-1",
+                "provider": "telegram",
+                "chat_id": "chat-200",
+            }
+        )
+        assert len(results) == 2
+
+    async def test_list_this_chat_filters(self, rpc_server, memory_manager):
+        """memory.list with this_chat=True only returns memories learned in current chat."""
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
+        chat = ChatEntry(
+            id="graph-chat-3",
+            provider="telegram",
+            provider_id="chat-300",
+            chat_type="private",
+        )
+        memory_manager.graph.add_chat(chat)
+
+        mem1 = await memory_manager.add_memory(
+            content="This chat memory",
+            owner_user_id="user-1",
+        )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem1.id, chat.id))
+
+        await memory_manager.add_memory(
+            content="Other chat memory",
+            owner_user_id="user-1",
+        )
+
+        handler = rpc_server.methods["memory.list"]
+        results = await handler(
+            {
+                "user_id": "user-1",
+                "provider": "telegram",
+                "chat_id": "chat-300",
+                "this_chat": True,
+            }
+        )
+        assert len(results) == 1
+        assert results[0]["content"] == "This chat memory"
+
+    async def test_this_chat_excludes_legacy_memories(self, rpc_server, memory_manager):
+        """Memories without LEARNED_IN edges are excluded when this_chat is active."""
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
+        chat = ChatEntry(
+            id="graph-chat-4",
+            provider="telegram",
+            provider_id="chat-400",
+            chat_type="private",
+        )
+        memory_manager.graph.add_chat(chat)
+
+        # Legacy memory (no LEARNED_IN)
+        mem_legacy = await memory_manager.add_memory(
+            content="Legacy memory",
+            owner_user_id="user-1",
+        )
+
+        # Memory learned in this chat
+        mem_here = await memory_manager.add_memory(
+            content="Learned in this chat",
+            owner_user_id="user-1",
+        )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem_here.id, chat.id))
+
+        memory_manager._index.search = MagicMock(
+            return_value=[(mem_legacy.id, 0.90), (mem_here.id, 0.85)]
+        )
+
+        handler = rpc_server.methods["memory.search"]
+        results = await handler(
+            {
+                "query": "memory",
+                "user_id": "user-1",
+                "provider": "telegram",
+                "chat_id": "chat-400",
+                "this_chat": True,
+            }
+        )
+        assert len(results) == 1
+        assert results[0]["content"] == "Learned in this chat"
