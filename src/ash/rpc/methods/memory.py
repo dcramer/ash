@@ -127,6 +127,27 @@ def register_memory_methods(
         chat = memory_manager.graph.chats.get(chat_node_id)
         return chat.chat_type == "private" if chat else True
 
+    def _is_private_sourced_outside_current_chat(
+        memory_id: str,
+        current_chat_provider_id: str | None,
+    ) -> bool:
+        """True if memory came from a DM and current context is a different/unknown DM."""
+        from ash.graph.edges import get_learned_in_chat
+
+        chat_node_id = get_learned_in_chat(memory_manager.graph, memory_id)
+        if not chat_node_id:
+            return False
+
+        chat = memory_manager.graph.chats.get(chat_node_id)
+        if not chat or chat.chat_type != "private":
+            return False
+
+        # Fail closed when we cannot prove this is the same DM.
+        if not current_chat_provider_id:
+            return True
+
+        return chat.provider_id != current_chat_provider_id
+
     def _resolve_chat_type(
         chat_type: str | None, provider: str | None, chat_id: str | None
     ) -> str | None:
@@ -149,6 +170,11 @@ def register_memory_methods(
             chat_id: Include group memories for this chat
             chat_type: Current chat type (for privacy filtering)
             this_chat: If True, only return memories learned in the current chat
+
+        Privacy behavior:
+            - Group chats: DM-sourced and legacy memories are excluded
+            - Private chats: DM-sourced memories are only shown when sourced from
+              the same DM chat_id
         """
         query = params.get("query")
         if not query:
@@ -183,6 +209,12 @@ def register_memory_methods(
         # Filter DM-sourced memories in group chats
         if chat_type in ("group", "supergroup"):
             results = [r for r in results if not _is_dm_sourced_or_legacy(r.id)]
+        elif chat_type == "private":
+            results = [
+                r
+                for r in results
+                if not _is_private_sourced_outside_current_chat(r.id, chat_id)
+            ]
 
         lookup = await _build_username_lookup()
 
@@ -220,9 +252,19 @@ def register_memory_methods(
             subjects: List of subject person references
             source_username: Who provided this fact (username/handle)
             source_display_name: Display name of the source user
+            assertion_kind: Optional structured assertion kind
+            assertion_subject_ids: Optional canonical person IDs for assertion subjects
+            speaker_person_id: Optional canonical speaker person ID
+            predicates: Optional structured predicates for assertion metadata
         """
         from ash.memory.processing import process_extracted_facts
-        from ash.store.types import ExtractedFact, MemoryType
+        from ash.store.types import (
+            AssertionEnvelope,
+            AssertionKind,
+            AssertionPredicate,
+            ExtractedFact,
+            MemoryType,
+        )
 
         content = params.get("content")
         if not content:
@@ -237,6 +279,33 @@ def register_memory_methods(
         source_display_name = params.get("source_display_name") or params.get(
             "source_user_name"
         )
+
+        assertion: AssertionEnvelope | None = None
+        assertion_kind_raw = params.get("assertion_kind")
+        if assertion_kind_raw is not None:
+            try:
+                assertion_kind = AssertionKind(assertion_kind_raw)
+            except ValueError as exc:
+                raise ValueError(
+                    "assertion_kind must be one of: "
+                    "self_fact, person_fact, relationship_fact, group_fact, context_fact"
+                ) from exc
+
+            predicates_raw = params.get("predicates") or []
+            if not isinstance(predicates_raw, list):
+                raise ValueError("predicates must be a list of predicate objects")
+
+            predicates: list[AssertionPredicate] = []
+            for raw in predicates_raw:
+                predicates.append(AssertionPredicate.model_validate(raw))
+
+            assertion = AssertionEnvelope(
+                assertion_kind=assertion_kind,
+                subjects=params.get("assertion_subject_ids") or [],
+                speaker_person_id=params.get("speaker_person_id"),
+                predicates=predicates,
+                confidence=1.0,
+            )
 
         # Ensure self-person and build owner names
         speaker_person_id, owner_names = await _ensure_speaker(
@@ -262,6 +331,7 @@ def register_memory_methods(
             speaker=source_username,
             sensitivity=(classified.sensitivity if classified else None),
             portable=(classified.portable if classified else True),
+            assertion=assertion,
         )
 
         # Resolve graph_chat_id for LEARNED_IN edges
@@ -300,6 +370,7 @@ def register_memory_methods(
             source_username=source_username,
             source_display_name=source_display_name,
             graph_chat_id=graph_chat_id,
+            assertion=assertion,
         )
         return {"id": memory.id}
 
@@ -449,6 +520,8 @@ def register_memory_methods(
             chat_id: Include group memories for this chat
             chat_type: Current chat type (for privacy filtering)
             this_chat: If True, only return memories learned in the current chat
+
+        Privacy behavior mirrors memory.search.
         """
         limit = params.get("limit", 20)
         include_expired = params.get("include_expired", False)
@@ -478,6 +551,12 @@ def register_memory_methods(
         # Filter DM-sourced memories in group chats
         if chat_type in ("group", "supergroup"):
             memories = [m for m in memories if not _is_dm_sourced_or_legacy(m.id)]
+        elif chat_type == "private":
+            memories = [
+                m
+                for m in memories
+                if not _is_private_sourced_outside_current_chat(m.id, chat_id)
+            ]
 
         lookup = await _build_username_lookup()
 

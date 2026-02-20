@@ -19,7 +19,7 @@ from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.extractor import MemoryExtractor
 from ash.rpc.methods.memory import register_memory_methods
 from ash.store.store import Store
-from ash.store.types import ExtractedFact, MemoryType, Sensitivity
+from ash.store.types import ExtractedFact, MemoryType, Sensitivity, get_assertion
 
 
 class MockRPCServer:
@@ -282,6 +282,36 @@ class TestRPCMemoryAdd:
         memory = await memory_manager.get_memory(result["id"])
         assert memory is not None
         assert memory.content == "A simple fact"
+
+    async def test_add_accepts_structured_assertion(self, rpc_server, memory_manager):
+        """memory.add accepts assertion fields and persists assertion metadata."""
+        person = await memory_manager.create_person(created_by="user-1", name="Bob")
+
+        handler = rpc_server.methods["memory.add"]
+        result = await handler(
+            {
+                "content": "Bob likes mountain biking",
+                "user_id": "user-1",
+                "assertion_kind": "person_fact",
+                "assertion_subject_ids": [person.id],
+                "speaker_person_id": person.id,
+                "predicates": [
+                    {
+                        "name": "describes",
+                        "object_type": "text",
+                        "value": "Bob likes mountain biking",
+                    }
+                ],
+            }
+        )
+
+        memory = await memory_manager.get_memory(result["id"])
+        assert memory is not None
+        assertion = get_assertion(memory)
+        assert assertion is not None
+        assert assertion.assertion_kind.value == "person_fact"
+        assert assertion.subjects == [person.id]
+        assert assertion.speaker_person_id == person.id
 
     async def test_add_classification_failure_still_stores(
         self, rpc_server, memory_manager, mock_extractor
@@ -574,10 +604,43 @@ class TestRPCDMSourceFiltering:
                 "query": "secret plan",
                 "user_id": "user-1",
                 "chat_type": "private",
+                "chat_id": "dm-123",
             }
         )
         assert len(results) == 1
         assert results[0]["content"] == "Secret plan from DM"
+
+    async def test_search_filters_dm_sourced_in_other_dm(
+        self, rpc_server, memory_manager
+    ):
+        """DM-sourced memories should be excluded in a different DM chat."""
+        from ash.store.types import ChatEntry
+
+        memory_manager.graph.chats["dm-chat-1"] = ChatEntry(
+            id="dm-chat-1",
+            provider="telegram",
+            provider_id="dm-123",
+            chat_type="private",
+        )
+
+        mem = await memory_manager.add_memory(
+            content="Secret plan from DM",
+            owner_user_id="user-1",
+        )
+        self._link_to_dm(memory_manager.graph, mem.id)
+
+        memory_manager._index.search = MagicMock(return_value=[(mem.id, 0.95)])
+
+        handler = rpc_server.methods["memory.search"]
+        results = await handler(
+            {
+                "query": "secret plan",
+                "user_id": "user-1",
+                "chat_type": "private",
+                "chat_id": "dm-999",
+            }
+        )
+        assert len(results) == 0
 
     async def test_search_no_chat_type_passes_through(self, rpc_server, memory_manager):
         """Without chat_type, no DM filtering is applied."""
@@ -651,6 +714,35 @@ class TestRPCDMSourceFiltering:
         )
         assert len(results) == 1
         assert results[0]["content"] == "Public knowledge"
+
+    async def test_list_filters_dm_sourced_in_other_dm(
+        self, rpc_server, memory_manager
+    ):
+        """DM-sourced memories should be filtered from list in a different DM chat."""
+        from ash.store.types import ChatEntry
+
+        memory_manager.graph.chats["dm-chat-1"] = ChatEntry(
+            id="dm-chat-1",
+            provider="telegram",
+            provider_id="dm-123",
+            chat_type="private",
+        )
+
+        mem = await memory_manager.add_memory(
+            content="Secret from DM",
+            owner_user_id="user-1",
+        )
+        self._link_to_dm(memory_manager.graph, mem.id)
+
+        handler = rpc_server.methods["memory.list"]
+        results = await handler(
+            {
+                "user_id": "user-1",
+                "chat_type": "private",
+                "chat_id": "dm-999",
+            }
+        )
+        assert len(results) == 0
 
     async def test_search_filters_legacy_memories_in_group(
         self, rpc_server, memory_manager

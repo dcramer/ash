@@ -872,6 +872,58 @@ class TestDMContextualFilter:
         filtered = pipeline._filter_results_by_privacy(results, context)
         assert len(filtered) == 1
 
+    def test_dm_sourced_memory_from_other_dm_excluded(self, pipeline):
+        """DM-sourced memory is excluded when current DM chat_id differs."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = pipeline._store.graph
+        graph.add_chat(
+            ChatEntry(
+                id="chat-dm-1",
+                provider="telegram",
+                provider_id="dm-1",
+                chat_type="private",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-self", "chat-dm-1"))
+
+        results = [self._make_result("mem-self", subject_person_ids=[])]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_id="dm-2",
+            chat_type="private",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_results_by_privacy(results, context)
+        assert len(filtered) == 0
+
+    def test_dm_sourced_memory_from_same_dm_passes(self, pipeline):
+        """DM-sourced memory is allowed when current DM chat_id matches source DM."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = pipeline._store.graph
+        graph.add_chat(
+            ChatEntry(
+                id="chat-dm-1",
+                provider="telegram",
+                provider_id="dm-1",
+                chat_type="private",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-self", "chat-dm-1"))
+
+        results = [self._make_result("mem-self", subject_person_ids=[])]
+        context = RetrievalContext(
+            user_id="user-1",
+            query="test",
+            chat_id="dm-1",
+            chat_type="private",
+            participant_person_ids={"bob": {"person-bob"}},
+        )
+        filtered = pipeline._filter_results_by_privacy(results, context)
+        assert len(filtered) == 1
+
     def test_dm_memory_about_partner_passes(self, pipeline):
         """Memory ABOUT the DM partner passes."""
         from ash.graph.edges import create_about_edge

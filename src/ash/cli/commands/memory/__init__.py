@@ -297,6 +297,7 @@ async def _run_memory_action(
             memory_doctor_dedup,
             memory_doctor_embed_missing,
             memory_doctor_fix_names,
+            memory_doctor_normalize_semantics,
             memory_doctor_quality,
             memory_doctor_reclassify,
             memory_doctor_self_facts,
@@ -309,18 +310,24 @@ async def _run_memory_action(
         subcommand = entry_id  # positional arg: ash memory doctor <sub>
         if subcommand == "embed-missing":
             await memory_doctor_embed_missing(store, force)
+        elif subcommand == "normalize-semantics":
+            await memory_doctor_normalize_semantics(store, force)
         elif subcommand is None:
             await memory_doctor_self_facts(store, force)
             await memory_doctor_backfill_subjects(store, force)
             await memory_doctor_attribution(store, force)
             await memory_doctor_fix_names(store, force)
+            await memory_doctor_normalize_semantics(store, force)
             await memory_doctor_reclassify(store, config, force)
             await memory_doctor_quality(store, config, force)
             await memory_doctor_dedup(store, config, force)
             await memory_doctor_contradictions(store, config, force)
         else:
             error(f"Unknown doctor subcommand: {subcommand}")
-            console.print("Valid subcommands: embed-missing (or omit for full check)")
+            console.print(
+                "Valid subcommands: embed-missing, normalize-semantics "
+                "(or omit for full check)"
+            )
             raise typer.Exit(1)
     else:
         error(f"Unknown action: {action}")

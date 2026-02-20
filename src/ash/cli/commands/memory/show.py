@@ -18,6 +18,18 @@ async def memory_show(store: Store, memory_id: str) -> None:
     from rich.panel import Panel
     from rich.table import Table
 
+    from ash.graph.edges import (
+        ABOUT,
+        LEARNED_IN,
+        STATED_BY,
+        SUPERSEDES,
+        get_learned_in_chat,
+        get_stated_by_person,
+        get_subject_person_ids,
+        get_superseded_by,
+    )
+    from ash.store.types import get_assertion
+
     # Find the memory by prefix
     memory = await store.get_memory_by_prefix(memory_id)
     if not memory:
@@ -56,10 +68,8 @@ async def memory_show(store: Store, memory_id: str) -> None:
     else:
         table.add_row("Scope", "Global")
 
-    from ash.graph.edges import get_subject_person_ids
-
     # Subjects (who this memory is about)
-    subject_names = []
+    subject_names: list[str] = []
     subject_person_ids = get_subject_person_ids(store.graph, memory.id)
     if subject_person_ids:
         for person_id in subject_person_ids:
@@ -75,6 +85,53 @@ async def memory_show(store: Store, memory_id: str) -> None:
         table.add_row("About", f"@{memory.source_username} (self)")
     else:
         table.add_row("About", "-")
+
+    table.add_row(
+        "Sensitivity", memory.sensitivity.value if memory.sensitivity else "public"
+    )
+    table.add_row("Portable", "yes" if memory.portable else "no")
+
+    assertion = get_assertion(memory)
+    if assertion:
+        table.add_row("Assertion Kind", assertion.assertion_kind.value)
+        table.add_row(
+            "Assertion Subjects",
+            ", ".join(pid[:8] for pid in assertion.subjects) or "-",
+        )
+        table.add_row(
+            "Assertion Speaker",
+            assertion.speaker_person_id[:8] if assertion.speaker_person_id else "-",
+        )
+
+    source_chat_id = get_learned_in_chat(store.graph, memory.id)
+    source_chat = store.graph.chats.get(source_chat_id) if source_chat_id else None
+    if source_chat:
+        chat_label = (
+            f"{source_chat.chat_type or 'unknown'} "
+            f"({source_chat.provider}:{source_chat.provider_id})"
+        )
+        if source_chat.title:
+            chat_label = f'{chat_label} "{source_chat.title}"'
+        table.add_row("Learned In", f"{chat_label} [{source_chat.id[:8]}]")
+        if source_chat.chat_type == "private":
+            table.add_row(
+                "DM Isolation",
+                f"Locked to DM chat {source_chat.provider_id} for contextual retrieval",
+            )
+    else:
+        table.add_row("Learned In", "- (legacy/no provenance edge)")
+
+    stated_by_pid = get_stated_by_person(store.graph, memory.id)
+    if stated_by_pid:
+        stated_by_person = people_by_id.get(stated_by_pid)
+        if not stated_by_person:
+            stated_by_person = await store.get_person(stated_by_pid)
+        if stated_by_person:
+            table.add_row("Stated By", f"{stated_by_person.name} ({stated_by_pid[:8]})")
+        else:
+            table.add_row("Stated By", stated_by_pid)
+    else:
+        table.add_row("Stated By", "-")
 
     # Trust level
     is_self_ref = is_source_self_reference(
@@ -96,13 +153,24 @@ async def memory_show(store: Store, memory_id: str) -> None:
         table.add_row("Observed", memory.observed_at.isoformat())
     if memory.expires_at:
         table.add_row("Expires", memory.expires_at.isoformat())
-    from ash.graph.edges import get_superseded_by
 
     if memory.superseded_at:
         table.add_row("Superseded", memory.superseded_at.isoformat())
     superseded_by_id = get_superseded_by(store.graph, memory.id)
     if superseded_by_id:
         table.add_row("Superseded By", superseded_by_id)
+
+    outgoing = store.graph.get_outgoing(memory.id)
+    edge_counts: dict[str, int] = {}
+    for edge in outgoing:
+        edge_counts[edge.edge_type] = edge_counts.get(edge.edge_type, 0) + 1
+    table.add_row(
+        "Outgoing Edges",
+        ", ".join(
+            f"{edge_type}={edge_counts.get(edge_type, 0)}"
+            for edge_type in (ABOUT, STATED_BY, LEARNED_IN, SUPERSEDES)
+        ),
+    )
 
     # Source attribution
     if memory.source_session_id:

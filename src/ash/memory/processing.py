@@ -15,11 +15,20 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from ash.core.filters import build_owner_matchers, is_owner_name
-from ash.store.types import EPHEMERAL_TYPES, MemoryType, Sensitivity
+from ash.store.types import (
+    EPHEMERAL_TYPES,
+    AssertionEnvelope,
+    AssertionKind,
+    AssertionPredicate,
+    ExtractedFact,
+    MemoryType,
+    PredicateObjectType,
+    Sensitivity,
+)
 
 if TYPE_CHECKING:
     from ash.store.store import Store
-    from ash.store.types import ExtractedFact, PersonEntry
+    from ash.store.types import PersonEntry
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +65,115 @@ def extract_relationship_term(content: str) -> str | None:
         if term in content_lower:
             return term
     return None
+
+
+def _dedupe_person_ids(person_ids: list[str] | None) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for pid in person_ids or []:
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        deduped.append(pid)
+    return deduped
+
+
+def compile_assertion(
+    fact: ExtractedFact,
+    subject_person_ids: list[str] | None,
+    speaker_person_id: str | None,
+) -> AssertionEnvelope:
+    """Compile an extracted fact into a canonical assertion envelope."""
+    subjects = _dedupe_person_ids(subject_person_ids)
+
+    if (
+        not subjects
+        and speaker_person_id
+        and fact.memory_type != MemoryType.RELATIONSHIP
+    ):
+        subjects = [speaker_person_id]
+
+    if fact.memory_type == MemoryType.RELATIONSHIP:
+        assertion_kind = AssertionKind.RELATIONSHIP_FACT
+    elif subjects and speaker_person_id and set(subjects) == {speaker_person_id}:
+        assertion_kind = AssertionKind.SELF_FACT
+    elif subjects:
+        assertion_kind = AssertionKind.PERSON_FACT
+    elif fact.shared:
+        assertion_kind = AssertionKind.GROUP_FACT
+    else:
+        assertion_kind = AssertionKind.CONTEXT_FACT
+
+    predicates: list[AssertionPredicate] = [
+        AssertionPredicate(
+            name="describes",
+            object_type=PredicateObjectType.TEXT,
+            value=fact.content,
+        )
+    ]
+
+    if assertion_kind == AssertionKind.RELATIONSHIP_FACT:
+        relationship_term = extract_relationship_term(fact.content)
+        if relationship_term:
+            predicates.append(
+                AssertionPredicate(
+                    name="relationship",
+                    object_type=PredicateObjectType.ENUM,
+                    value=relationship_term,
+                )
+            )
+        if speaker_person_id and speaker_person_id not in subjects:
+            predicates.append(
+                AssertionPredicate(
+                    name="related_person",
+                    object_type=PredicateObjectType.PERSON,
+                    value=speaker_person_id,
+                )
+            )
+
+    return AssertionEnvelope(
+        semantic_version=1,
+        assertion_kind=assertion_kind,
+        subjects=subjects,
+        speaker_person_id=speaker_person_id,
+        predicates=predicates,
+        confidence=fact.confidence,
+    )
+
+
+def validate_assertion(assertion: AssertionEnvelope) -> list[str]:
+    """Validate assertion invariants and return a list of violations."""
+    violations: list[str] = []
+    subjects = set(assertion.subjects)
+
+    if (
+        assertion.assertion_kind
+        in (
+            AssertionKind.SELF_FACT,
+            AssertionKind.PERSON_FACT,
+            AssertionKind.RELATIONSHIP_FACT,
+        )
+        and not subjects
+    ):
+        violations.append("subject_required")
+
+    if assertion.assertion_kind == AssertionKind.SELF_FACT:
+        if assertion.speaker_person_id and assertion.speaker_person_id not in subjects:
+            violations.append("self_fact_missing_speaker_subject")
+
+    if assertion.assertion_kind == AssertionKind.RELATIONSHIP_FACT:
+        has_person_object = any(
+            p.object_type == PredicateObjectType.PERSON for p in assertion.predicates
+        )
+        if not has_person_object and len(subjects) < 2:
+            violations.append("relationship_missing_person_object")
+
+    return violations
+
+
+def downgrade_assertion_to_context(assertion: AssertionEnvelope) -> AssertionEnvelope:
+    """Downgrade invalid assertion to context_fact while preserving details."""
+    return assertion.model_copy(update={"assertion_kind": AssertionKind.CONTEXT_FACT})
 
 
 async def ensure_self_person(
@@ -333,6 +451,35 @@ async def process_extracted_facts(
                         extra={"source.username": source_username},
                     )
 
+            if fact.assertion is not None:
+                assertion = fact.assertion.model_copy(
+                    update={
+                        "subjects": _dedupe_person_ids(
+                            subject_person_ids or fact.assertion.subjects
+                        ),
+                        "speaker_person_id": stated_by_pid
+                        or fact.assertion.speaker_person_id,
+                        "confidence": fact.confidence,
+                    }
+                )
+            else:
+                assertion = compile_assertion(
+                    fact=fact,
+                    subject_person_ids=subject_person_ids,
+                    speaker_person_id=stated_by_pid,
+                )
+            violations = validate_assertion(assertion)
+            if violations:
+                logger.warning(
+                    "assertion_invalid",
+                    extra={
+                        "violations": violations,
+                        "fact.content": fact.content[:80],
+                        "assertion.kind": assertion.assertion_kind.value,
+                    },
+                )
+                assertion = downgrade_assertion_to_context(assertion)
+
             # DM sensitivity floor: ephemeral types get minimum PERSONAL
             # in private chats as defense-in-depth against cross-context leakage
             effective_sensitivity = fact.sensitivity
@@ -359,6 +506,7 @@ async def process_extracted_facts(
                 portable=fact.portable,
                 stated_by_person_id=stated_by_pid,
                 graph_chat_id=graph_chat_id,
+                assertion=assertion,
             )
 
             logger.info(
@@ -370,6 +518,7 @@ async def process_extracted_facts(
                     "fact.confidence": fact.confidence,
                     "source.username": source_username,
                     "memory.subject_person_ids": subject_person_ids,
+                    "assertion.kind": assertion.assertion_kind.value,
                 },
             )
             stored_ids.append(new_memory.id)

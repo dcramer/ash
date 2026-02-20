@@ -676,12 +676,28 @@ class SystemPromptBuilder:
 
         context_items = []
         for item in memory.memories:
-            trust = (item.metadata or {}).get("trust", "")
+            metadata = item.metadata or {}
+            trust = metadata.get("trust", "")
             trust_attr = ", hearsay" if trust == "hearsay" else ""
             subject_attr = ""
-            if item.metadata and item.metadata.get("subject_name"):
-                subject_attr = f" (about {item.metadata['subject_name']})"
-            context_items.append(f"- [Memory{trust_attr}{subject_attr}] {item.content}")
+            if metadata.get("subject_name"):
+                subject_attr = f" (about {metadata['subject_name']})"
+
+            semantic_parts: list[str] = []
+            assertion_kind = metadata.get("assertion_kind")
+            if assertion_kind:
+                semantic_parts.append(f"kind={assertion_kind}")
+            speaker_person_id = metadata.get("speaker_person_id")
+            if speaker_person_id:
+                semantic_parts.append(f"speaker={speaker_person_id[:8]}")
+
+            semantic_attr = ""
+            if semantic_parts:
+                semantic_attr = f" [{', '.join(semantic_parts)}]"
+
+            context_items.append(
+                f"- [Memory{trust_attr}{subject_attr}]{semantic_attr} {item.content}"
+            )
 
         retrieved_header = (
             "\n\n### Relevant Context from Memory\n\n"

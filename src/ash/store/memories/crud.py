@@ -10,10 +10,12 @@ from typing import TYPE_CHECKING, Any
 from ash.graph.edges import create_about_edge
 from ash.memory.secrets import contains_secret
 from ash.store.types import (
+    AssertionEnvelope,
     MemoryEntry,
     MemoryType,
     Sensitivity,
     matches_scope,
+    upsert_assertion_metadata,
 )
 
 if TYPE_CHECKING:
@@ -85,6 +87,7 @@ class MemoryCrudMixin:
         metadata: dict[str, Any] | None = None,
         stated_by_person_id: str | None = None,
         graph_chat_id: str | None = None,
+        assertion: AssertionEnvelope | None = None,
     ) -> MemoryEntry:
         """Add a memory entry."""
         if contains_secret(content):
@@ -106,7 +109,24 @@ class MemoryCrudMixin:
 
         now = datetime.now(UTC)
         memory_id = str(uuid.uuid4())
-        subject_pids = subject_person_ids or []
+        subject_pids = self._canonicalize_person_ids(subject_person_ids or [])
+        canonical_stated_by = self._canonicalize_person_id(stated_by_person_id)
+
+        if assertion is not None:
+            if assertion.subjects:
+                subject_pids = self._canonicalize_person_ids(assertion.subjects)
+            if assertion.speaker_person_id:
+                canonical_stated_by = self._canonicalize_person_id(
+                    assertion.speaker_person_id
+                )
+
+            assertion = assertion.model_copy(
+                update={
+                    "subjects": subject_pids,
+                    "speaker_person_id": canonical_stated_by,
+                }
+            )
+            metadata = upsert_assertion_metadata(metadata, assertion)
 
         memory = MemoryEntry(
             id=memory_id,
@@ -141,11 +161,11 @@ class MemoryCrudMixin:
             self._persistence.mark_dirty("edges")
 
         # Create STATED_BY edge for speaker attribution
-        if stated_by_person_id:
+        if canonical_stated_by:
             from ash.graph.edges import create_stated_by_edge
 
             self._graph.add_edge(
-                create_stated_by_edge(memory_id, stated_by_person_id, created_by=source)
+                create_stated_by_edge(memory_id, canonical_stated_by, created_by=source)
             )
             self._persistence.mark_dirty("edges")
 
@@ -230,6 +250,30 @@ class MemoryCrudMixin:
         )
 
         return memory
+
+    def _canonicalize_person_ids(self: Store, person_ids: list[str]) -> list[str]:
+        """Canonicalize person IDs through merge chains and dedupe."""
+        from ash.graph.edges import follow_merge_chain
+
+        canonical_ids: list[str] = []
+        seen: set[str] = set()
+        for pid in person_ids:
+            if not pid:
+                continue
+            canonical = pid
+            if pid in self._graph.people:
+                canonical = follow_merge_chain(self._graph, pid)
+            if canonical in seen:
+                continue
+            seen.add(canonical)
+            canonical_ids.append(canonical)
+        return canonical_ids
+
+    def _canonicalize_person_id(self: Store, person_id: str | None) -> str | None:
+        if not person_id:
+            return None
+        canonical = self._canonicalize_person_ids([person_id])
+        return canonical[0] if canonical else None
 
     async def get_memory(self: Store, memory_id: str) -> MemoryEntry | None:
         memory = self._graph.memories.get(memory_id)

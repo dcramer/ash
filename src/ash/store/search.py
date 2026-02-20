@@ -17,6 +17,7 @@ from ash.store.trust import classify_trust, get_trust_weight
 from ash.store.types import (
     RetrievedContext,
     SearchResult,
+    assertion_metadata_summary,
     matches_scope,
 )
 
@@ -94,6 +95,7 @@ class SearchMixin:
                     ),
                     "trust": trust_level,
                     "discovery_stage": "person_graph",
+                    **assertion_metadata_summary(memory),
                     **(memory.metadata or {}),
                 }
                 if subject_name:
@@ -148,6 +150,7 @@ class SearchMixin:
                     ),
                     "trust": trust_level,
                     "discovery_stage": "person_graph_related",
+                    **assertion_metadata_summary(memory),
                     **(memory.metadata or {}),
                 }
                 if subject_name:
@@ -226,6 +229,7 @@ class SearchMixin:
                 "source_username": memory.source_username,
                 "sensitivity": memory.sensitivity.value if memory.sensitivity else None,
                 "trust": trust_level,
+                **assertion_metadata_summary(memory),
                 **(memory.metadata or {}),
             }
             if subject_name:

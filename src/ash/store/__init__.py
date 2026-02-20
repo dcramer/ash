@@ -17,6 +17,9 @@ Types:
 from ash.store.store import Store, create_store
 from ash.store.types import (
     AliasEntry,
+    AssertionEnvelope,
+    AssertionKind,
+    AssertionPredicate,
     ChatEntry,
     EmbeddingRecord,
     ExtractedFact,
@@ -25,12 +28,16 @@ from ash.store.types import (
     MemoryType,
     PersonEntry,
     PersonResolutionResult,
+    PredicateObjectType,
     RelationshipClaim,
     RetrievedContext,
     SearchResult,
     Sensitivity,
     UserEntry,
+    assertion_metadata_summary,
+    get_assertion,
     matches_scope,
+    upsert_assertion_metadata,
 )
 
 __all__ = [
@@ -41,11 +48,18 @@ __all__ = [
     "MemoryEntry",
     "MemoryType",
     "Sensitivity",
+    "AssertionEnvelope",
+    "AssertionKind",
+    "AssertionPredicate",
+    "PredicateObjectType",
     "GCResult",
     "ExtractedFact",
     "RetrievedContext",
     "SearchResult",
     "EmbeddingRecord",
+    "get_assertion",
+    "upsert_assertion_metadata",
+    "assertion_metadata_summary",
     "matches_scope",
     # People types
     "PersonEntry",

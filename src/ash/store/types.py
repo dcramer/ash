@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # =============================================================================
 # Memory Types
@@ -55,6 +55,62 @@ class Sensitivity(Enum):
     PUBLIC = "public"
     PERSONAL = "personal"
     SENSITIVE = "sensitive"
+
+
+class AssertionKind(Enum):
+    """Semantic assertion class for a memory."""
+
+    SELF_FACT = "self_fact"
+    PERSON_FACT = "person_fact"
+    RELATIONSHIP_FACT = "relationship_fact"
+    GROUP_FACT = "group_fact"
+    CONTEXT_FACT = "context_fact"
+
+
+class PredicateObjectType(Enum):
+    """Object type for structured assertion predicates."""
+
+    TEXT = "text"
+    PERSON = "person"
+    TIME = "time"
+    ENUM = "enum"
+
+
+class AssertionPredicate(BaseModel):
+    """Structured predicate for assertion metadata."""
+
+    model_config = ConfigDict(frozen=False)
+
+    name: str
+    object_type: PredicateObjectType
+    value: str
+
+
+class AssertionEnvelope(BaseModel):
+    """Canonical semantic envelope for memory assertions."""
+
+    model_config = ConfigDict(frozen=False)
+
+    semantic_version: int = 1
+    assertion_kind: AssertionKind
+    subjects: list[str] = Field(default_factory=list)
+    speaker_person_id: str | None = None
+    predicates: list[AssertionPredicate] = Field(default_factory=list)
+    confidence: float = 1.0
+
+    @field_validator("subjects", mode="before")
+    @classmethod
+    def _coerce_subjects(cls, v: list[str] | None) -> list[str]:
+        return [s for s in (v or []) if s]
+
+    @field_validator("confidence")
+    @classmethod
+    def _clamp_confidence(cls, v: float) -> float:
+        if v < 0.0:
+            return 0.0
+        if v > 1.0:
+            return 1.0
+        return v
 
 
 # Types that decay over time without explicit expiration
@@ -172,6 +228,49 @@ class MemoryEntry(BaseModel):
         return base64.b64encode(data).decode("ascii")
 
 
+def get_assertion(memory: MemoryEntry) -> AssertionEnvelope | None:
+    """Read and parse assertion envelope from memory metadata."""
+    if not memory.metadata:
+        return None
+
+    raw = memory.metadata.get("assertion")
+    if not isinstance(raw, dict):
+        return None
+
+    try:
+        return AssertionEnvelope.model_validate(raw)
+    except Exception:
+        return None
+
+
+def upsert_assertion_metadata(
+    metadata: dict[str, Any] | None,
+    assertion: AssertionEnvelope,
+) -> dict[str, Any]:
+    """Write assertion envelope into metadata with semantic version."""
+    result = dict(metadata or {})
+    result["semantic_version"] = assertion.semantic_version
+    result["assertion"] = assertion.model_dump(mode="json", exclude_none=True)
+    return result
+
+
+def assertion_metadata_summary(memory: MemoryEntry) -> dict[str, Any]:
+    """Return compact assertion summary fields for retrieval metadata."""
+    assertion = get_assertion(memory)
+    if not assertion:
+        return {}
+
+    summary: dict[str, Any] = {
+        "semantic_version": assertion.semantic_version,
+        "assertion_kind": assertion.assertion_kind.value,
+    }
+    if assertion.subjects:
+        summary["assertion_subject_ids"] = assertion.subjects
+    if assertion.speaker_person_id:
+        summary["speaker_person_id"] = assertion.speaker_person_id
+    return summary
+
+
 class EmbeddingRecord(BaseModel):
     """Embedding storage record.
 
@@ -221,6 +320,7 @@ class ExtractedFact:
     speaker: str | None = None  # Who said this (username or identifier)
     sensitivity: Sensitivity | None = None  # Privacy classification
     portable: bool = True  # Whether this fact crosses chat boundaries
+    assertion: AssertionEnvelope | None = None  # Optional structured semantics override
     aliases: dict[str, list[str]] = field(
         default_factory=dict
     )  # subject name -> alias strings

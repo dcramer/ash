@@ -25,6 +25,7 @@ from ash.store.types import (
     RetrievedContext,
     SearchResult,
     Sensitivity,
+    assertion_metadata_summary,
 )
 
 if TYPE_CHECKING:
@@ -82,6 +83,26 @@ class RetrievalPipeline:
         # Stage 4: RRF fusion
         return self._rrf_finalize([stage1, stage2, stage3], context.max_memories)
 
+    def _is_private_sourced_outside_current_chat(
+        self,
+        memory_id: str,
+        current_chat_provider_id: str | None,
+    ) -> bool:
+        """True if memory came from a DM and current context is a different/unknown DM."""
+        source_chat_id = get_learned_in_chat(self._store.graph, memory_id)
+        if not source_chat_id:
+            return False
+
+        source_chat = self._store.graph.chats.get(source_chat_id)
+        if not source_chat or source_chat.chat_type != "private":
+            return False
+
+        # Fail closed when we cannot prove this is the same DM.
+        if not current_chat_provider_id:
+            return True
+
+        return source_chat.provider_id != current_chat_provider_id
+
     async def _primary_search(self, context: RetrievalContext) -> list[SearchResult]:
         """Stage 1: Vector search scoped to user/chat."""
         try:
@@ -110,6 +131,13 @@ class RetrievalPipeline:
                 )
                 for memory in cross_memories:
                     from ash.graph.edges import get_subject_person_ids
+
+                    # DM-sourced memories are locked to their originating DM chat.
+                    if self._is_private_sourced_outside_current_chat(
+                        memory.id,
+                        context.chat_id,
+                    ):
+                        continue
 
                     # Block DM-sourced memories in group chats —
                     # cross-context has no semantic relevance signal
@@ -190,6 +218,13 @@ class RetrievalPipeline:
                 graph,
                 seed_ids=seed_person_ids,
                 max_hops=2,
+                exclude_edge_types={
+                    "SUPERSEDES",
+                    "IS_PERSON",
+                    "MERGED_INTO",
+                    "LEARNED_IN",
+                    "PARTICIPATES_IN",
+                },
             )
         except Exception:
             logger.warning(
@@ -218,6 +253,12 @@ class RetrievalPipeline:
             if memory.expires_at and memory.expires_at <= now:
                 continue
             if not memory.portable:
+                continue
+
+            if self._is_private_sourced_outside_current_chat(
+                memory.id,
+                context.chat_id,
+            ):
                 continue
 
             # Block DM-sourced memories in group chats —
@@ -387,6 +428,7 @@ class RetrievalPipeline:
         """DM contextual disclosure filter.
 
         A memory is disclosable if:
+        - If it was learned in a DM, it must be from this same DM chat
         - It's about the DM partner (ABOUT edge)
         - It was stated by the DM partner (STATED_BY edge)
         - The DM partner was in the chat where it was learned (LEARNED_IN → PARTICIPATES_IN)
@@ -408,6 +450,12 @@ class RetrievalPipeline:
         graph = self._store.graph
         filtered = []
         for result in results:
+            if self._is_private_sourced_outside_current_chat(
+                result.id,
+                context.chat_id,
+            ):
+                continue
+
             meta = result.metadata or {}
             subject_person_ids = meta.get("subject_person_ids", [])
 
@@ -557,6 +605,7 @@ class RetrievalPipeline:
             "subject_person_ids": subject_pids,
             "discovery_stage": discovery_stage,
             "trust": trust_level,
+            **assertion_metadata_summary(memory),
         }
         if hops > 0:
             meta["hops"] = hops
