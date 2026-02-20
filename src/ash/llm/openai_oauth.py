@@ -68,8 +68,10 @@ class OpenAIOAuthProvider(OpenAIProvider):
         self, *args: object, **kwargs: object
     ) -> dict[str, object]:
         result = super()._build_request_kwargs(*args, **kwargs)  # type: ignore[arg-type]
-        # Codex endpoint requires store=false
+        # Codex endpoint requires store=false, stream=true,
+        # and does not support max_output_tokens.
         result["store"] = False
+        result.pop("max_output_tokens", None)
         return result
 
     async def _maybe_refresh_token(self) -> None:
