@@ -64,7 +64,7 @@ class OpenAIOAuthProvider(OpenAIProvider):
     def name(self) -> str:
         return "openai-oauth"
 
-    # Parameters the Codex Responses API accepts (from reference impl).
+    # Parameters the Codex Responses API accepts.
     _CODEX_ALLOWED_PARAMS = {
         "model",
         "store",
@@ -74,7 +74,6 @@ class OpenAIOAuthProvider(OpenAIProvider):
         "tools",
         "tool_choice",
         "parallel_tool_calls",
-        "temperature",
         "reasoning",
         "text",
         "include",
@@ -88,9 +87,6 @@ class OpenAIOAuthProvider(OpenAIProvider):
         # Whitelist to Codex-supported params only, then force store=false.
         result = {k: v for k, v in result.items() if k in self._CODEX_ALLOWED_PARAMS}
         result["store"] = False
-        # Reasoning models don't accept temperature on the Codex endpoint.
-        if "reasoning" in result and "temperature" in result:
-            del result["temperature"]
         return result
 
     async def _maybe_refresh_token(self) -> None:
