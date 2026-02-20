@@ -35,6 +35,186 @@ def is_cancel_message(message: str) -> bool:
     return message.lower().strip() in CANCEL_KEYWORDS
 
 
+async def run_to_completion(
+    executor: "AgentExecutor",
+    main_frame: "StackFrame",
+    child_frame: "StackFrame",
+    *,
+    max_turns: int = 50,
+) -> str | None:
+    """Run a subagent skill loop to completion without user interaction.
+
+    Pushes the main and child frames onto a temporary stack and drives
+    execute_turn until the stack unwinds back to the main agent producing
+    a final text response.
+
+    This is the headless orchestration loop used by the scheduler and
+    eval runner when ChildActivated is raised but there is no interactive
+    provider to drive the stack.
+
+    Args:
+        executor: AgentExecutor to drive turns.
+        main_frame: The main agent's stack frame.
+        child_frame: The child (skill/subagent) stack frame.
+        max_turns: Safety limit on total turns.
+
+    Returns:
+        Collected text output, or None if no output was produced.
+    """
+    from ash.agents.types import AgentStack, TurnAction
+
+    stack = AgentStack()
+    stack.push(main_frame)
+    stack.push(child_frame)
+
+    collected_text: list[str] = []
+
+    for _ in range(max_turns):
+        top = stack.top
+        if top is None:
+            break
+
+        is_main = stack.depth == 1
+
+        # First turn for a newly pushed child has no user_message/tool_result
+        result = await executor.execute_turn(top)
+
+        if result.action == TurnAction.COMPLETE:
+            # Subagent finished — pop it and feed result to parent
+            completed = stack.pop()
+            parent = stack.top
+            if parent and completed.parent_tool_use_id:
+                # Feed result back as tool_result for the parent's tool_use
+                result2 = await executor.execute_turn(
+                    parent,
+                    tool_result=(
+                        completed.parent_tool_use_id,
+                        result.text,
+                        False,
+                    ),
+                )
+                # Process the parent's response
+                if result2.action == TurnAction.SEND_TEXT:
+                    if stack.depth == 1:
+                        collected_text.append(result2.text)
+                        break
+                elif result2.action == TurnAction.COMPLETE:
+                    stack.pop()
+                    if result2.text:
+                        collected_text.append(result2.text)
+                    break
+                elif result2.action == TurnAction.CHILD_ACTIVATED:
+                    if result2.child_frame:
+                        stack.push(result2.child_frame)
+                elif result2.action in (
+                    TurnAction.ERROR,
+                    TurnAction.MAX_ITERATIONS,
+                ):
+                    logger.error(
+                        "parent_agent_error_after_skill",
+                        extra={"error.message": result2.text},
+                    )
+                    stack.pop()
+                    break
+                # INTERRUPT in headless mode — no user to interact with
+                elif result2.action == TurnAction.INTERRUPT:
+                    logger.warning("agent_interrupted_headless_mode")
+                    break
+            else:
+                # No parent or no tool_use_id — just collect text
+                if result.text:
+                    collected_text.append(result.text)
+                break
+
+        elif result.action == TurnAction.SEND_TEXT:
+            if is_main:
+                # Main agent produced text — final output
+                collected_text.append(result.text)
+                break
+            # Subagent "sent text" — in headless mode, treat as completion
+            # since there's no user to interact with
+            completed = stack.pop()
+            parent = stack.top
+            if parent and completed.parent_tool_use_id:
+                result2 = await executor.execute_turn(
+                    parent,
+                    tool_result=(
+                        completed.parent_tool_use_id,
+                        result.text,
+                        False,
+                    ),
+                )
+                if result2.action == TurnAction.SEND_TEXT:
+                    if stack.depth == 1:
+                        collected_text.append(result2.text)
+                        break
+                elif result2.action == TurnAction.COMPLETE:
+                    stack.pop()
+                    if result2.text:
+                        collected_text.append(result2.text)
+                    break
+                elif result2.action == TurnAction.CHILD_ACTIVATED:
+                    if result2.child_frame:
+                        stack.push(result2.child_frame)
+                elif result2.action in (
+                    TurnAction.ERROR,
+                    TurnAction.MAX_ITERATIONS,
+                ):
+                    logger.error(
+                        "parent_agent_error_after_subagent",
+                        extra={"error.message": result2.text},
+                    )
+                    stack.pop()
+                    break
+            else:
+                if result.text:
+                    collected_text.append(result.text)
+                break
+
+        elif result.action == TurnAction.CHILD_ACTIVATED:
+            if result.child_frame:
+                stack.push(result.child_frame)
+
+        elif result.action == TurnAction.INTERRUPT:
+            # No user in headless mode — feed error to parent
+            logger.warning("subagent_interrupted_headless_mode")
+            completed = stack.pop()
+            parent = stack.top
+            if parent and completed.parent_tool_use_id:
+                await executor.execute_turn(
+                    parent,
+                    tool_result=(
+                        completed.parent_tool_use_id,
+                        "Error: agent requires user interaction but running in headless mode",
+                        True,
+                    ),
+                )
+            break
+
+        elif result.action in (TurnAction.ERROR, TurnAction.MAX_ITERATIONS):
+            logger.error(
+                "subagent_error_headless_mode",
+                extra={
+                    "agent.action": result.action.name,
+                    "error.message": result.text,
+                },
+            )
+            completed = stack.pop()
+            parent = stack.top
+            if parent and completed.parent_tool_use_id:
+                await executor.execute_turn(
+                    parent,
+                    tool_result=(
+                        completed.parent_tool_use_id,
+                        f"Skill error: {result.text}",
+                        True,
+                    ),
+                )
+            break
+
+    return "\n\n".join(collected_text) if collected_text else None
+
+
 class AgentExecutor:
     """Execute agents in isolated subagent loops."""
 

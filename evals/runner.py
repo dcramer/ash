@@ -263,7 +263,7 @@ async def run_eval_case(
 
     try:
         # Run the agent
-        response = await agent.process_message(
+        response = await agent.send_message(
             user_message=case.prompt,
             session=session,
             user_id="eval-user",
@@ -533,10 +533,11 @@ async def run_setup_steps(
 
         for message in step.messages:
             await _persist_user_message(session, message, user_id)
-            await agent.process_message(
+            await agent.send_message(
                 user_message=message,
                 session=session,
                 user_id=user_id,
+                agent_executor=components.agent_executor,
             )
         if step.drain_extraction:
             await drain_extraction_tasks()
@@ -676,7 +677,13 @@ async def run_yaml_eval_case(
             )
 
             result = await _execute_and_judge(
-                agent, turn_case, session, user_id, judge_llm, config
+                agent,
+                turn_case,
+                session,
+                user_id,
+                judge_llm,
+                config,
+                agent_executor=components.agent_executor,
             )
             results.append(result)
 
@@ -685,7 +692,13 @@ async def run_yaml_eval_case(
     else:
         # Single-turn case
         result = await _execute_and_judge(
-            agent, case, session, user_id, judge_llm, config
+            agent,
+            case,
+            session,
+            user_id,
+            judge_llm,
+            config,
+            agent_executor=components.agent_executor,
         )
         results.append(result)
 
@@ -729,14 +742,17 @@ async def _execute_and_judge(
     user_id: str,
     judge_llm: LLMProvider,
     config: EvalConfig,
+    *,
+    agent_executor: "AgentExecutor | None" = None,
 ) -> EvalResult:
     """Execute a single prompt and judge the response."""
     try:
         await _persist_user_message(session, case.prompt, user_id)
-        response = await agent.process_message(
+        response = await agent.send_message(
             user_message=case.prompt,
             session=session,
             user_id=user_id,
+            agent_executor=agent_executor,
         )
 
         # Pre-judge: forbidden tools check

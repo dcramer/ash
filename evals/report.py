@@ -2,6 +2,7 @@
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.status import Status
 from rich.table import Table
 from rich.text import Text
 
@@ -153,3 +154,62 @@ def _print_failed_case(result: EvalResult, console: Console) -> None:
         console.print(f"  [dim]Criteria:[/dim] {scores_text}")
 
     console.print()
+
+
+# ---------------------------------------------------------------------------
+# Live CLI reporter
+# ---------------------------------------------------------------------------
+
+
+class LiveReporter:
+    """Real-time output for the standalone eval runner."""
+
+    def __init__(self, console: Console, *, verbose: bool = False) -> None:
+        self.console = console
+        self.verbose = verbose
+        self._passed = 0
+        self._failed = 0
+
+    def suite_header(self, suite_stem: str, case_count: int, agent_type: str) -> None:
+        self.console.print(
+            f"\n[bold]{suite_stem}[/bold] ({case_count} case{'s' if case_count != 1 else ''}, agent: {agent_type})"
+        )
+        self.console.print("  Setting up agent...")
+
+    def case_start(self, case_id: str) -> Status:
+        return self.console.status(f"  Running {case_id}...")
+
+    def case_result(
+        self, suite_stem: str, case_id: str, result: EvalResult, duration: float
+    ) -> None:
+        score = result.score
+        secs = f"{duration:.1f}s"
+
+        if result.is_judge_error:
+            tag = "[bold yellow]ERROR[/bold yellow]"
+            self._failed += 1
+        elif result.passed:
+            tag = "[bold green]PASS [/bold green]"
+            self._passed += 1
+        else:
+            tag = "[bold red]FAIL [/bold red]"
+            self._failed += 1
+
+        full_id = f"{suite_stem}::{case_id}"
+        self.console.print(f"  {tag}  {full_id:<40s} {score:.2f}  {secs}")
+
+        # Show failure reasoning inline
+        if not result.passed and result.judge_result.reasoning:
+            reason = _truncate(result.judge_result.reasoning, 72)
+            self.console.print(f"        [dim]{reason}[/dim]")
+
+    def summary(self, total_duration: float) -> None:
+        total = self._passed + self._failed
+        pct = (self._passed / total * 100) if total else 0
+        style = "bold green" if self._failed == 0 else "bold red"
+
+        self.console.print()
+        self.console.print(
+            f"[{style}]{self._passed} passed, {self._failed} failed[/{style}] "
+            f"| {pct:.1f}% | {total_duration:.1f}s"
+        )

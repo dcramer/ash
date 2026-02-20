@@ -687,6 +687,51 @@ class Agent:
 
         return tool_calls, []
 
+    async def send_message(
+        self,
+        user_message: str,
+        session: SessionState,
+        *,
+        user_id: str | None = None,
+        agent_executor: Any = None,  # Type: AgentExecutor | None
+    ) -> AgentResponse:
+        """High-level message send that handles ChildActivated automatically.
+
+        Wraps process_message() and, when a skill/subagent is spawned
+        (ChildActivated), drives the headless orchestration loop via
+        run_to_completion() if an agent_executor is provided.
+
+        Args:
+            user_message: The user message to process.
+            session: Current session state.
+            user_id: Optional user ID override.
+            agent_executor: Optional executor for handling ChildActivated.
+                If not provided and ChildActivated is raised, it is re-raised.
+
+        Returns:
+            AgentResponse with the final text.
+        """
+        try:
+            return await self.process_message(
+                user_message=user_message,
+                session=session,
+                user_id=user_id,
+            )
+        except ChildActivated as ca:
+            if agent_executor is None or not ca.main_frame or not ca.child_frame:
+                raise
+
+            from ash.agents.executor import run_to_completion
+
+            result_text = await run_to_completion(
+                agent_executor, ca.main_frame, ca.child_frame
+            )
+            return AgentResponse(
+                text=result_text or "",
+                tool_calls=[],
+                iterations=0,
+            )
+
     async def process_message(
         self,
         user_message: str,
