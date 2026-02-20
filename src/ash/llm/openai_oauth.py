@@ -58,6 +58,14 @@ class OpenAIOAuthProvider(OpenAIProvider):
     def name(self) -> str:
         return "openai-oauth"
 
+    def _build_request_kwargs(
+        self, *args: object, **kwargs: object
+    ) -> dict[str, object]:
+        result = super()._build_request_kwargs(*args, **kwargs)  # type: ignore[arg-type]
+        # Codex endpoint requires store=false
+        result["store"] = False
+        return result
+
     async def _maybe_refresh_token(self) -> None:
         """Check token expiry and refresh if needed."""
         if not self._auth_storage:
