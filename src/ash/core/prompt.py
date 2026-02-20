@@ -659,7 +659,9 @@ class SystemPromptBuilder:
             "(no arguments needed — it processes the current message through the full pipeline).\n"
             "Always use `ash-sb memory extract` — never use `ash-sb memory add`.\n"
             'When users ask about "what you learned in this chat" or "from this conversation", '
-            "use `--this-chat` to filter to memories learned in the current chat."
+            "use `--this-chat` to filter to memories learned in the current chat.\n"
+            "Memories marked [hearsay] were stated by someone other than the subject — "
+            'use hedging language ("according to...", "X mentioned that...") when citing them.'
         )
 
         if not memory.memories:
@@ -667,10 +669,12 @@ class SystemPromptBuilder:
 
         context_items = []
         for item in memory.memories:
+            trust = (item.metadata or {}).get("trust", "")
+            trust_attr = ", hearsay" if trust == "hearsay" else ""
             subject_attr = ""
             if item.metadata and item.metadata.get("subject_name"):
                 subject_attr = f" (about {item.metadata['subject_name']})"
-            context_items.append(f"- [Memory{subject_attr}] {item.content}")
+            context_items.append(f"- [Memory{trust_attr}{subject_attr}] {item.content}")
 
         retrieved_header = (
             "\n\n### Relevant Context from Memory\n\n"

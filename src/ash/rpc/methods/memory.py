@@ -493,9 +493,11 @@ def register_memory_methods(
         result = []
         for m in memories:
             from ash.graph.edges import get_subject_person_ids
+            from ash.store.trust import classify_trust
 
             subject_pids = get_subject_person_ids(memory_manager._graph, m.id)
             about = await _resolve_subject_names(subject_pids, people_by_id)
+            trust = classify_trust(memory_manager._graph, m.id)
             entry: dict[str, Any] = {
                 "id": m.id,
                 "content": m.content,
@@ -503,6 +505,7 @@ def register_memory_methods(
                 "memory_type": m.memory_type.value,
                 "subject_person_ids": subject_pids,
                 "about": about,
+                "trust": trust,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
                 "expires_at": m.expires_at.isoformat() if m.expires_at else None,
             }

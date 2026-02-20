@@ -714,6 +714,64 @@ class TestRPCDMSourceFiltering:
         assert results[0]["content"] == "Group-sourced fact"
 
 
+class TestRPCMemoryListTrust:
+    """Tests for trust field in memory.list response."""
+
+    async def test_list_includes_trust_field(self, rpc_server, memory_manager):
+        """memory.list response should include trust classification for each memory."""
+        await memory_manager.add_memory(
+            content="A simple fact",
+            owner_user_id="user-1",
+        )
+
+        handler = rpc_server.methods["memory.list"]
+        results = await handler({"user_id": "user-1"})
+
+        assert len(results) == 1
+        assert "trust" in results[0]
+        # No STATED_BY edge → unknown trust
+        assert results[0]["trust"] == "unknown"
+
+    async def test_list_trust_reflects_graph_edges(self, rpc_server, memory_manager):
+        """Trust should reflect STATED_BY/ABOUT graph edges."""
+        from ash.graph.edges import create_about_edge, create_stated_by_edge
+
+        # Create a person
+        person = await memory_manager.create_person(
+            created_by="alice", name="Alice", aliases=["alice"]
+        )
+
+        # Memory stated by Alice about Alice (fact)
+        mem_fact = await memory_manager.add_memory(
+            content="Alice likes hiking",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+        memory_manager.graph.add_edge(create_stated_by_edge(mem_fact.id, person.id))
+        memory_manager.graph.add_edge(create_about_edge(mem_fact.id, person.id))
+
+        # Create another person for hearsay
+        other = await memory_manager.create_person(
+            created_by="alice", name="Bob", aliases=["bob"]
+        )
+
+        # Memory stated by Bob about Alice (hearsay)
+        mem_hearsay = await memory_manager.add_memory(
+            content="Alice likes swimming",
+            owner_user_id="user-1",
+            subject_person_ids=[person.id],
+        )
+        memory_manager.graph.add_edge(create_stated_by_edge(mem_hearsay.id, other.id))
+        memory_manager.graph.add_edge(create_about_edge(mem_hearsay.id, person.id))
+
+        handler = rpc_server.methods["memory.list"]
+        results = await handler({"user_id": "user-1"})
+
+        trust_by_content = {r["content"]: r["trust"] for r in results}
+        assert trust_by_content["Alice likes hiking"] == "fact"
+        assert trust_by_content["Alice likes swimming"] == "hearsay"
+
+
 class TestRPCThisChatFiltering:
     """Tests for --this-chat filtering in search and list."""
 

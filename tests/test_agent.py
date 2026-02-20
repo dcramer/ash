@@ -615,3 +615,51 @@ class TestSystemPromptBuilder:
         prompt = prompt_builder.build(mode=PromptMode.FULL)
         assert "Be brief" in prompt
         assert "Skip filler" in prompt
+
+    def test_memory_hearsay_annotation(self, prompt_builder):
+        """Hearsay memories should be annotated in the prompt."""
+        from ash.core.prompt import PromptContext
+        from ash.store.types import RetrievedContext, SearchResult
+
+        memory = RetrievedContext(
+            memories=[
+                SearchResult(
+                    id="m1",
+                    content="Alice likes hiking",
+                    similarity=0.9,
+                    metadata={"trust": "fact", "subject_name": "Alice"},
+                ),
+                SearchResult(
+                    id="m2",
+                    content="Alice likes swimming",
+                    similarity=0.85,
+                    metadata={"trust": "hearsay", "subject_name": "Alice"},
+                ),
+                SearchResult(
+                    id="m3",
+                    content="Some old fact",
+                    similarity=0.8,
+                    metadata={"trust": "unknown"},
+                ),
+            ]
+        )
+        context = PromptContext(memory=memory)
+        prompt = prompt_builder.build(context)
+
+        # Hearsay memory should be annotated
+        assert "- [Memory, hearsay (about Alice)] Alice likes swimming" in prompt
+        # Fact memory should NOT have hearsay annotation
+        assert "- [Memory (about Alice)] Alice likes hiking" in prompt
+        # Unknown trust should NOT be annotated
+        assert "- [Memory] Some old fact" in prompt
+
+    def test_memory_hearsay_guidance(self, prompt_builder):
+        """Memory section should include hearsay citation guidance."""
+        from ash.core.prompt import PromptContext
+        from ash.store.types import RetrievedContext
+
+        context = PromptContext(memory=RetrievedContext(memories=[]))
+        prompt = prompt_builder.build(context)
+
+        assert "hearsay" in prompt
+        assert "hedging language" in prompt
