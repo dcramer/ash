@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from ash.graph.edges import (
     create_supersedes_edge,
     get_subject_person_ids,
+    get_supersession_targets,
 )
 from ash.store.types import MemoryEntry, matches_scope
 
@@ -191,6 +192,28 @@ class SupersessionMixin:
             )
             return True
 
+    def _would_create_supersession_cycle(
+        self: Store,
+        *,
+        old_id: str,
+        new_id: str,
+    ) -> bool:
+        """Return True if adding SUPERSEDES(new_id -> old_id) would cycle."""
+        if old_id == new_id:
+            return True
+
+        stack = [old_id]
+        visited: set[str] = set()
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            if current == new_id:
+                return True
+            stack.extend(get_supersession_targets(self._graph, current))
+        return False
+
     def _supersede_batch(self: Store, pairs: list[tuple[str, str]]) -> list[str]:
         """Mark pairs as superseded in-memory. Caller must flush + save vector index.
 
@@ -207,9 +230,23 @@ class SupersessionMixin:
         marked: list[str] = []
 
         for old_id, new_id in pairs:
-            memory = self._graph.memories.get(old_id)
-            if not memory or memory.superseded_at is not None:
+            if old_id == new_id:
                 continue
+
+            memory = self._graph.memories.get(old_id)
+            new_memory = self._graph.memories.get(new_id)
+            if not memory or not new_memory:
+                continue
+            if memory.superseded_at is not None or memory.archived_at is not None:
+                continue
+            if (
+                new_memory.superseded_at is not None
+                or new_memory.archived_at is not None
+            ):
+                continue
+            if self._would_create_supersession_cycle(old_id=old_id, new_id=new_id):
+                continue
+
             memory.superseded_at = now
             self._graph.add_edge(create_supersedes_edge(new_id, old_id))
             try:

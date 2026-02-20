@@ -10,6 +10,7 @@ from ash.cli.commands.memory.doctor._helpers import (
     llm_complete,
     resolve_short_ids,
     search_and_cluster,
+    validate_supersession_pair,
 )
 from ash.cli.console import console, create_table, dim, success, warning
 
@@ -56,7 +57,9 @@ async def memory_doctor_dedup(store: Store, config: AshConfig, force: bool) -> N
     )
 
     llm, model = create_llm(config)
-    confirmed: list[tuple[str, list[str]]] = []  # (canonical_id, duplicate_ids)
+    confirmed_map: dict[str, set[str]] = {}
+    rejected_count = 0
+    old_to_new: dict[str, str] = {}
 
     for cluster_ids in dup_clusters.values():
         cluster_mems = [mem_by_id[mid] for mid in cluster_ids if mid in mem_by_id]
@@ -84,9 +87,33 @@ async def memory_doctor_dedup(store: Store, config: AshConfig, force: bool) -> N
                     "duplicate_ids",
                 )
                 if canonical_full and dup_fulls:
-                    confirmed.append((canonical_full, dup_fulls))
+                    for dup_id in dup_fulls:
+                        if dup_id == canonical_full:
+                            rejected_count += 1
+                            continue
+                        existing_target = old_to_new.get(dup_id)
+                        if existing_target and existing_target != canonical_full:
+                            rejected_count += 1
+                            continue
+                        reason = validate_supersession_pair(
+                            store,
+                            old_id=dup_id,
+                            new_id=canonical_full,
+                            require_subject_compatibility=True,
+                        )
+                        if reason is not None:
+                            rejected_count += 1
+                            continue
+                        old_to_new[dup_id] = canonical_full
+                        confirmed_map.setdefault(canonical_full, set()).add(dup_id)
         except Exception as e:
             dim(f"Verification failed for cluster: {e}")
+
+    confirmed = [
+        (canonical_id, sorted(dup_ids))
+        for canonical_id, dup_ids in confirmed_map.items()
+        if dup_ids
+    ]
 
     if not confirmed:
         success("No confirmed duplicates after LLM verification")
@@ -129,6 +156,8 @@ async def memory_doctor_dedup(store: Store, config: AshConfig, force: bool) -> N
         f"\n[bold]{total_dups} duplicates to supersede across "
         f"{len(confirmed)} groups[/bold]"
     )
+    if rejected_count:
+        dim(f"Skipped {rejected_count} unsafe duplicate pair(s)")
 
     if not confirm_or_cancel("Supersede duplicate memories?", force):
         return
@@ -138,6 +167,11 @@ async def memory_doctor_dedup(store: Store, config: AshConfig, force: bool) -> N
         for canonical_id, dup_ids in confirmed
         for dup_id in dup_ids
     ]
-    await store.batch_mark_superseded(pairs)
+    marked = await store.batch_mark_superseded(pairs)
+    if len(marked) != len(pairs):
+        dim(
+            f"Requested {len(pairs)} supersessions; applied {len(marked)} "
+            "(some became invalid during execution)"
+        )
 
-    success(f"Superseded {total_dups} duplicate memories")
+    success(f"Superseded {len(marked)} duplicate memories")

@@ -180,13 +180,22 @@ async def search_and_cluster(
 
         for memory in memories:
             try:
-                results = await store.search(memory.content, limit=10)
+                owner_user_id, chat_id = memory_scope_key(memory)
+                results = await store.search(
+                    memory.content,
+                    limit=10,
+                    owner_user_id=owner_user_id,
+                    chat_id=chat_id,
+                )
                 for result in results:
                     if result.id == memory.id:
                         continue
                     if result.similarity < similarity_threshold:
                         continue
-                    if result.id not in mem_by_id:
+                    result_memory = mem_by_id.get(result.id)
+                    if result_memory is None:
+                        continue
+                    if memory_scope_key(result_memory) != memory_scope_key(memory):
                         continue
                     pair = frozenset({memory.id, result.id})
                     if pair in seen_pairs:
@@ -205,6 +214,96 @@ async def search_and_cluster(
         clusters.setdefault(root, []).append(mid)
 
     return {k: v for k, v in clusters.items() if len(v) > 1}
+
+
+def memory_scope_key(memory: MemoryEntry) -> tuple[str | None, str | None]:
+    """Return a normalized scope key following matches_scope semantics."""
+    if memory.owner_user_id:
+        return memory.owner_user_id, None
+    if memory.chat_id:
+        return None, memory.chat_id
+    return None, None
+
+
+def _subjects_compatible(store: Store, old_id: str, new_id: str) -> bool:
+    """Return True when old/new memories are plausibly about the same subject."""
+    from ash.graph.edges import get_subject_person_ids
+
+    old_subjects = set(get_subject_person_ids(store.graph, old_id))
+    new_subjects = set(get_subject_person_ids(store.graph, new_id))
+
+    if old_subjects and new_subjects:
+        return bool(old_subjects & new_subjects)
+
+    # One-sided subject attribution is only trusted when provenance matches.
+    if bool(old_subjects) != bool(new_subjects):
+        old_memory = store.graph.memories.get(old_id)
+        new_memory = store.graph.memories.get(new_id)
+        if not old_memory or not new_memory:
+            return False
+        return (
+            old_memory.source_username is not None
+            and old_memory.source_username == new_memory.source_username
+        )
+
+    return True
+
+
+def _would_create_supersession_cycle(store: Store, old_id: str, new_id: str) -> bool:
+    """Return True if adding SUPERSEDES(new_id -> old_id) would create a cycle."""
+    from ash.graph.edges import get_supersession_targets
+
+    if old_id == new_id:
+        return True
+
+    stack = [old_id]
+    visited: set[str] = set()
+    while stack:
+        current = stack.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        if current == new_id:
+            return True
+        stack.extend(get_supersession_targets(store.graph, current))
+    return False
+
+
+def validate_supersession_pair(
+    store: Store,
+    *,
+    old_id: str,
+    new_id: str,
+    require_subject_compatibility: bool = True,
+) -> str | None:
+    """Validate an old->new supersession pair.
+
+    Returns:
+        None when valid, otherwise a short rejection reason.
+    """
+    old_memory = store.graph.memories.get(old_id)
+    new_memory = store.graph.memories.get(new_id)
+    if not old_memory or not new_memory:
+        return "memory_missing"
+    if old_id == new_id:
+        return "self_supersession"
+    if old_memory.archived_at is not None:
+        return "old_archived"
+    if old_memory.superseded_at is not None:
+        return "old_already_superseded"
+    if new_memory.archived_at is not None:
+        return "new_archived"
+    if new_memory.superseded_at is not None:
+        return "new_already_superseded"
+    if memory_scope_key(old_memory) != memory_scope_key(new_memory):
+        return "scope_mismatch"
+    if require_subject_compatibility and not _subjects_compatible(
+        store, old_id, new_id
+    ):
+        return "subject_mismatch"
+    if _would_create_supersession_cycle(store, old_id, new_id):
+        return "cycle"
+    return None
 
 
 def resolve_short_ids(

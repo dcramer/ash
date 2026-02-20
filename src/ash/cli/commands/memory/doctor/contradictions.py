@@ -10,6 +10,7 @@ from ash.cli.commands.memory.doctor._helpers import (
     llm_complete,
     resolve_short_ids,
     search_and_cluster,
+    validate_supersession_pair,
 )
 from ash.cli.console import console, create_table, dim, success, warning
 
@@ -69,7 +70,9 @@ async def memory_doctor_contradictions(
     )
 
     llm, model = create_llm(config)
-    confirmed: list[tuple[str, list[str]]] = []  # (current_id, outdated_ids)
+    confirmed_map: dict[str, set[str]] = {}
+    rejected_count = 0
+    old_to_new: dict[str, str] = {}
 
     for cluster_ids in candidate_clusters.values():
         cluster_mems = [mem_by_id[mid] for mid in cluster_ids if mid in mem_by_id]
@@ -97,9 +100,33 @@ async def memory_doctor_contradictions(
                     "outdated_ids",
                 )
                 if current_full and outdated_fulls:
-                    confirmed.append((current_full, outdated_fulls))
+                    for outdated_id in outdated_fulls:
+                        if outdated_id == current_full:
+                            rejected_count += 1
+                            continue
+                        existing_target = old_to_new.get(outdated_id)
+                        if existing_target and existing_target != current_full:
+                            rejected_count += 1
+                            continue
+                        reason = validate_supersession_pair(
+                            store,
+                            old_id=outdated_id,
+                            new_id=current_full,
+                            require_subject_compatibility=True,
+                        )
+                        if reason is not None:
+                            rejected_count += 1
+                            continue
+                        old_to_new[outdated_id] = current_full
+                        confirmed_map.setdefault(current_full, set()).add(outdated_id)
         except Exception as e:
             dim(f"Verification failed for cluster: {e}")
+
+    confirmed = [
+        (current_id, sorted(outdated_ids))
+        for current_id, outdated_ids in confirmed_map.items()
+        if outdated_ids
+    ]
 
     if not confirmed:
         success("No contradictions found after LLM verification")
@@ -138,14 +165,25 @@ async def memory_doctor_contradictions(
 
     console.print(table)
     console.print(
-        f"\n[bold]{total_outdated} outdated memories to archive across "
+        f"\n[bold]{total_outdated} outdated memories to supersede across "
         f"{len(confirmed)} contradictions[/bold]"
     )
+    if rejected_count:
+        dim(f"Skipped {rejected_count} unsafe contradiction pair(s)")
 
-    if not confirm_or_cancel("Archive outdated contradicted memories?", force):
+    if not confirm_or_cancel("Supersede outdated contradicted memories?", force):
         return
 
-    all_outdated_ids = {oid for _, outdated_ids in confirmed for oid in outdated_ids}
-    await store.archive_memories(all_outdated_ids, "quality_contradicted")
+    pairs = [
+        (outdated_id, current_id)
+        for current_id, outdated_ids in confirmed
+        for outdated_id in outdated_ids
+    ]
+    marked = await store.batch_mark_superseded(pairs)
+    if len(marked) != len(pairs):
+        dim(
+            f"Requested {len(pairs)} supersessions; applied {len(marked)} "
+            "(some became invalid during execution)"
+        )
 
-    success(f"Archived {total_outdated} contradicted memories")
+    success(f"Superseded {len(marked)} contradicted memories")

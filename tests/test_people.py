@@ -1107,6 +1107,32 @@ class TestContentAwareFuzzyFind:
         prompt = call_args.kwargs["messages"][0].content
         assert 'Speaker: "user-42"' in prompt
 
+    async def test_fuzzy_find_rejects_unrelated_llm_match(self, graph_store: Store):
+        """LLM-selected candidate is rejected when lexical overlap is implausible."""
+        unrelated = await graph_store.create_person(
+            created_by="user-1",
+            name="Miso",
+            aliases=["miso_bot"],
+        )
+
+        mock_llm = AsyncMock()
+        mock_response = MagicMock()
+        # Simulate an incorrect LLM pick for "sksembhi"
+        mock_response.message.get_text.return_value = unrelated.id
+        mock_llm.complete.return_value = mock_response
+        graph_store.set_llm(mock_llm, "test-model")
+
+        result = await graph_store.resolve_or_create_person(
+            "user-1",
+            "sksembhi",
+            content_hint="sksembhi is my wife",
+            relationship_stated_by="dcramer",
+        )
+
+        assert result.created is True
+        assert result.person_id != unrelated.id
+        assert result.person_name == "Sksembhi"
+
 
 class TestHeuristicMatch:
     """Tests for _heuristic_match dedup heuristics."""

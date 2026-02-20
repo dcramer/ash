@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 from ash.store.people.helpers import (
@@ -24,6 +25,81 @@ logger = logging.getLogger(__name__)
 
 class PeopleResolutionMixin:
     """Person lookup and resolution operations."""
+
+    @staticmethod
+    def _lexical_tokens(value: str) -> set[str]:
+        """Tokenize for lightweight lexical overlap checks."""
+        return {token for token in re.findall(r"[a-z0-9]+", value) if len(token) >= 3}
+
+    @classmethod
+    def _is_plausible_fuzzy_match(
+        cls,
+        reference: str,
+        person: PersonEntry,
+        *,
+        content_hint: str | None = None,
+    ) -> bool:
+        """Safety gate for LLM-picked fuzzy person matches.
+
+        LLM fuzzy matching can occasionally return a plausible-looking but wrong
+        person ID. We require deterministic lexical evidence between the
+        reference and the selected person before accepting the match.
+        """
+        ref_norm = normalize_reference(reference)
+        if not ref_norm:
+            return False
+
+        ref_tokens = cls._lexical_tokens(ref_norm)
+        best_ratio = 0.0
+
+        candidate_values = [person.name]
+        candidate_values.extend(alias.value for alias in person.aliases)
+        candidate_values.extend(rel.relationship for rel in person.relationships)
+
+        for value in candidate_values:
+            cand_norm = normalize_reference(value)
+            if not cand_norm:
+                continue
+
+            if cand_norm == ref_norm:
+                return True
+
+            compact = cand_norm.replace(" ", "")
+            if len(ref_norm) >= 4 and (
+                ref_norm in cand_norm
+                or cand_norm in ref_norm
+                or ref_norm in compact
+                or compact in ref_norm
+            ):
+                return True
+
+            ratio = SequenceMatcher(None, ref_norm, cand_norm).ratio()
+            best_ratio = max(best_ratio, ratio)
+
+            cand_tokens = cls._lexical_tokens(cand_norm)
+            if ref_tokens & cand_tokens:
+                return True
+            if any(
+                len(token) >= 5 and (token in ref_norm or ref_norm in token)
+                for token in cand_tokens
+            ):
+                return True
+
+        if best_ratio >= 0.78:
+            return True
+
+        # Relationship bridge fallback:
+        # if the content explicitly contains the reference and a known
+        # relationship term for this person, allow the match.
+        if content_hint:
+            content_norm = normalize_reference(content_hint)
+            if ref_norm in content_norm:
+                for rel in person.relationships:
+                    rel_norm = normalize_reference(rel.relationship)
+                    if rel_norm and rel_norm in content_norm:
+                        return True
+
+        return False
 
     async def find_person(self: Store, reference: str) -> PersonEntry | None:
         from ash.graph.edges import get_merged_into
@@ -210,6 +286,20 @@ class PeopleResolutionMixin:
                 return None
             for p in candidates:
                 if p.id == result:
+                    if not self._is_plausible_fuzzy_match(
+                        reference,
+                        p,
+                        content_hint=content_hint,
+                    ):
+                        logger.warning(
+                            "fuzzy_match_rejected",
+                            extra={
+                                "reference": reference,
+                                "candidate.person_id": p.id,
+                                "candidate.person_name": p.name,
+                            },
+                        )
+                        return None
                     return p
             return None
         except Exception:

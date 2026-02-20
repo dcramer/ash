@@ -67,11 +67,9 @@ async def memory_doctor_embed_missing(store: Store, force: bool) -> None:
                 failed += 1
             progress.advance(task, 1)
 
-    # Save updated index
+    # Save updated index + metadata state
     if embedded:
-        await store._index.save(
-            store._persistence.graph_dir / "embeddings" / "memories.npy"
-        )
+        await store._save_vector_index()
         success(f"Generated embeddings for {embedded} memories")
     if failed:
         warning(f"Failed to embed {failed} memories")

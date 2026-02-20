@@ -350,6 +350,41 @@ class TestSupersedeConflictingMemories:
         assert count == 0
 
 
+class TestBatchMarkSupersededGuards:
+    """Tests for defensive guards in batch_mark_superseded."""
+
+    async def test_skips_self_supersession_pair(self, graph_store: Store):
+        memory = await graph_store.add_memory(
+            content="User likes espresso",
+            owner_user_id="user-1",
+        )
+
+        marked = await graph_store.batch_mark_superseded([(memory.id, memory.id)])
+
+        assert marked == []
+        assert graph_store.graph.memories[memory.id].superseded_at is None
+
+    async def test_skips_pair_that_would_create_cycle(self, graph_store: Store):
+        from ash.graph.edges import create_supersedes_edge
+
+        old = await graph_store.add_memory(
+            content="User uses vim",
+            owner_user_id="user-1",
+        )
+        new = await graph_store.add_memory(
+            content="User switched to neovim",
+            owner_user_id="user-1",
+        )
+
+        # Existing edge old -> new means adding new -> old would create a cycle.
+        graph_store.graph.add_edge(create_supersedes_edge(old.id, new.id))
+
+        marked = await graph_store.batch_mark_superseded([(old.id, new.id)])
+
+        assert marked == []
+        assert graph_store.graph.memories[old.id].superseded_at is None
+
+
 class TestSupersedeConfirmedHearsay:
     """Tests for supersede_confirmed_hearsay."""
 

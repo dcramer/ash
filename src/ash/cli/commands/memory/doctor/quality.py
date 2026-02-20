@@ -112,6 +112,38 @@ def _format_memory_line(m: MemoryEntry, subject_names: dict[str, list[str]]) -> 
     return line
 
 
+async def _reindex_rewritten_memories(
+    store: Store,
+    rewritten: list[MemoryEntry],
+) -> tuple[int, int]:
+    """Rebuild vector rows for rewritten memories.
+
+    Removes existing vectors first so failed regeneration does not leave stale
+    embeddings for changed content.
+    """
+    reindexed = 0
+    failed = 0
+
+    for memory in rewritten:
+        try:
+            try:
+                store._index.remove(memory.id)
+            except Exception:
+                dim(f"Failed to remove stale index row for {memory.id[:8]}")
+
+            embedding_floats = await store._embeddings.embed(memory.content)
+            store._index.add(memory.id, embedding_floats)
+            reindexed += 1
+        except Exception as e:
+            failed += 1
+            dim(f"Failed to reindex rewritten memory {memory.id[:8]}: {e}")
+
+    if reindexed or failed:
+        await store._save_vector_index()
+
+    return reindexed, failed
+
+
 async def memory_doctor_quality(store: Store, config: AshConfig, force: bool) -> None:
     """Content quality review: wrong perspective, fragments, negative knowledge."""
     memories = await store.list_memories(limit=None, include_expired=True)
@@ -232,8 +264,11 @@ async def memory_doctor_quality(store: Store, config: AshConfig, force: bool) ->
         if mem:
             mem.content = new_content
             updated.append(mem)
+    reindexed = 0
+    reindex_failed = 0
     if updated:
         await store.batch_update_memories(updated)
+        reindexed, reindex_failed = await _reindex_rewritten_memories(store, updated)
 
     if archives:
         by_reason: dict[str, set[str]] = {}
@@ -242,4 +277,7 @@ async def memory_doctor_quality(store: Store, config: AshConfig, force: bool) ->
         for qualified_reason, ids in by_reason.items():
             await store.archive_memories(ids, qualified_reason)
 
-    success(f"Applied {len(rewrites)} rewrites and {len(archives)} archives")
+    success(
+        f"Applied {len(rewrites)} rewrites and {len(archives)} archives"
+        f" (reindexed {reindexed}, failed {reindex_failed})"
+    )
