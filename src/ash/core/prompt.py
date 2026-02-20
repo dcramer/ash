@@ -263,6 +263,7 @@ class SystemPromptBuilder:
                 "- NEVER claim success without verification — check tool output before reporting.",
                 "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
                 "- Report failures with actual error messages. If output is empty, say so.",
+                "- When a tool returns unexpected, empty, or confusing results, DO NOT guess or make excuses. Investigate: re-read the output, try alternative approaches, or use the debug-self skill to trace what went wrong.",
                 "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice",
                 "- For deep research, delegate to the `research` skill.",
             ]
@@ -308,7 +309,7 @@ class SystemPromptBuilder:
     _TOOL_OPERATIONAL_RULES: list[str] = [
         "- Run independent operations in parallel (e.g., 3 file reads = 3 simultaneous calls)",
         "- The user cannot see tool results — present the answer directly",
-        "- On failure: include the actual error message. If output is empty, say so.",
+        "- On failure or unexpected output: include the actual error/output. Do NOT fabricate explanations — investigate with another tool call or use the debug-self skill.",
         "- On timeout: report it and try a simpler approach. On persistent failure: explain and ask the user.",
     ]
 
@@ -360,6 +361,8 @@ class SystemPromptBuilder:
             "**MANDATORY**: Before every reply, scan the skill list below.",
             "If the user's request matches a skill, invoke it with `use_skill` — do not attempt the task yourself.",
             "If no skill applies, respond directly.",
+            "",
+            "You may also invoke skills proactively — for example, use debug-self when you encounter tool errors or unexpected behavior, even if the user didn't ask you to debug.",
             "",
             "Skills take over the conversation — the user interacts directly with the skill",
             "until it completes, then control returns to you with the result.",

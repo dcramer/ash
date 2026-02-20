@@ -162,7 +162,15 @@ def extract_memories(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
 
-    typer.echo(f"Extracted {result.get('stored', 0)} memory(ies)")
+    stored = result.get("stored", 0)
+    error = result.get("error")
+    if error:
+        typer.echo(f"Extraction failed: {error}", err=True)
+        raise typer.Exit(1)
+    elif stored == 0:
+        typer.echo("No extractable facts found in this message.")
+    else:
+        typer.echo(f"Extracted {stored} memory(ies)")
 
 
 @app.command("delete")
