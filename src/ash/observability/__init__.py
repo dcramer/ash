@@ -34,7 +34,7 @@ def init_sentry(config: "SentryConfig", server_mode: bool = False) -> bool:
         logger.debug("Sentry SDK not installed, skipping initialization")
         return False
 
-    if not config.dsn:
+    if not config.dsn or not config.dsn.get_secret_value():
         logger.debug("Sentry DSN not configured, skipping initialization")
         return False
 
