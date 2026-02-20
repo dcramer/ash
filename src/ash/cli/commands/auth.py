@@ -19,22 +19,22 @@ def register(app: typer.Typer) -> None:
         provider: Annotated[
             str,
             typer.Argument(help="Provider to authenticate with"),
-        ] = "openai-codex",
+        ] = "openai-oauth",
     ) -> None:
         """Log in to an OAuth provider.
 
-        Currently supported: openai-codex (ChatGPT Plus/Pro)
+        Currently supported: openai-oauth (ChatGPT Plus/Pro)
 
         Examples:
-            ash auth login                  # Login to OpenAI Codex (default)
-            ash auth login openai-codex     # Explicit provider
+            ash auth login                  # Login to OpenAI OAuth (default)
+            ash auth login openai-oauth     # Explicit provider
         """
-        if provider != "openai-codex":
-            error(f"Unknown provider: {provider}. Supported: openai-codex")
+        if provider != "openai-oauth":
+            error(f"Unknown provider: {provider}. Supported: openai-oauth")
             raise typer.Exit(1)
 
         try:
-            asyncio.run(_login_openai_codex())
+            asyncio.run(_login_openai_oauth())
         except KeyboardInterrupt:
             console.print("\n[dim]Login cancelled.[/dim]")
             raise typer.Exit(1) from None
@@ -78,13 +78,13 @@ def register(app: typer.Typer) -> None:
         provider: Annotated[
             str,
             typer.Argument(help="Provider to log out from"),
-        ] = "openai-codex",
+        ] = "openai-oauth",
     ) -> None:
         """Remove stored credentials for a provider.
 
         Examples:
-            ash auth logout                 # Logout from OpenAI Codex (default)
-            ash auth logout openai-codex    # Explicit provider
+            ash auth logout                 # Logout from OpenAI OAuth (default)
+            ash auth logout openai-oauth    # Explicit provider
         """
         from ash.auth.storage import AuthStorage
 
@@ -97,12 +97,12 @@ def register(app: typer.Typer) -> None:
     app.add_typer(auth_app)
 
 
-async def _login_openai_codex() -> None:
-    """Run the OpenAI Codex login flow and save credentials."""
-    from ash.auth.oauth import login_openai_codex
+async def _login_openai_oauth() -> None:
+    """Run the OpenAI OAuth login flow and save credentials."""
+    from ash.auth.oauth import login_openai_oauth
     from ash.auth.storage import AuthStorage, OAuthCredentials
 
-    result = await login_openai_codex()
+    result = await login_openai_oauth()
 
     creds = OAuthCredentials(
         access=str(result["access"]),
@@ -112,8 +112,8 @@ async def _login_openai_codex() -> None:
     )
 
     storage = AuthStorage()
-    storage.save("openai-codex", creds)
+    storage.save("openai-oauth", creds)
 
-    success("Authenticated with OpenAI Codex")
+    success("Authenticated with OpenAI OAuth")
     console.print(f"  Account ID: {creds.account_id[:12]}...")
     console.print("  Credentials saved to ~/.ash/auth.json")

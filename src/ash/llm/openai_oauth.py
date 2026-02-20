@@ -1,4 +1,4 @@
-"""OpenAI Codex LLM provider (ChatGPT OAuth, Codex Responses API)."""
+"""OpenAI OAuth LLM provider (ChatGPT OAuth, Codex Responses API)."""
 
 import logging
 import time
@@ -27,12 +27,12 @@ CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 TOKEN_REFRESH_BUFFER_SECONDS = 300
 
 
-class OpenAICodexProvider(OpenAIProvider):
+class OpenAIOAuthProvider(OpenAIProvider):
     """OpenAI provider using the Codex Responses API with OAuth credentials.
 
     Uses the same Responses API format as OpenAIProvider but targets the
     Codex endpoint at chatgpt.com with OAuth-based authentication.
-    Embeddings are not supported via Codex.
+    Embeddings are not supported via this provider.
     """
 
     def __init__(
@@ -56,21 +56,21 @@ class OpenAICodexProvider(OpenAIProvider):
 
     @property
     def name(self) -> str:
-        return "openai-codex"
+        return "openai-oauth"
 
     async def _maybe_refresh_token(self) -> None:
         """Check token expiry and refresh if needed."""
         if not self._auth_storage:
             return
 
-        creds = self._auth_storage.load("openai-codex")
+        creds = self._auth_storage.load("openai-oauth")
         if not creds:
             return
 
         if time.time() < creds.expires - TOKEN_REFRESH_BUFFER_SECONDS:
             return
 
-        logger.info("Refreshing OpenAI Codex token (expires %.0f)", creds.expires)
+        logger.info("Refreshing OpenAI OAuth token (expires %.0f)", creds.expires)
 
         from ash.auth.oauth import extract_account_id, refresh_access_token
 
@@ -87,7 +87,7 @@ class OpenAICodexProvider(OpenAIProvider):
                 expires=float(tokens["expires"]),
                 account_id=new_account_id,
             )
-            self._auth_storage.save("openai-codex", new_creds)
+            self._auth_storage.save("openai-oauth", new_creds)
 
             # Update the client with new token
             self._client = openai.AsyncOpenAI(
@@ -100,9 +100,9 @@ class OpenAICodexProvider(OpenAIProvider):
                 },
             )
             self._account_id = new_account_id
-            logger.info("OpenAI Codex token refreshed successfully")
+            logger.info("OpenAI OAuth token refreshed successfully")
         except Exception:
-            logger.warning("Failed to refresh OpenAI Codex token", exc_info=True)
+            logger.warning("Failed to refresh OpenAI OAuth token", exc_info=True)
 
     async def complete(
         self,
@@ -160,6 +160,6 @@ class OpenAICodexProvider(OpenAIProvider):
         model: str | None = None,
     ) -> list[list[float]]:
         raise NotImplementedError(
-            "Embeddings are not supported via OpenAI Codex. "
+            "Embeddings are not supported via OpenAI OAuth. "
             "Use the standard OpenAI provider with an API key for embeddings."
         )

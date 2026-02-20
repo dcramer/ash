@@ -9,12 +9,12 @@ from pydantic import SecretStr
 from ash.llm.anthropic import AnthropicProvider
 from ash.llm.base import LLMProvider
 from ash.llm.openai import OpenAIProvider
-from ash.llm.openai_codex import OpenAICodexProvider
+from ash.llm.openai_oauth import OpenAIOAuthProvider
 
 if TYPE_CHECKING:
     from ash.auth.storage import AuthStorage
 
-ProviderName = Literal["anthropic", "openai", "openai-codex"]
+ProviderName = Literal["anthropic", "openai", "openai-oauth"]
 
 
 def create_llm_provider(
@@ -30,9 +30,9 @@ def create_llm_provider(
     Args:
         provider: Provider name.
         api_key: API key (for anthropic/openai providers).
-        access_token: OAuth access token (for openai-codex).
-        account_id: ChatGPT account ID (for openai-codex).
-        auth_storage: Auth storage for token refresh (for openai-codex).
+        access_token: OAuth access token (for openai-oauth).
+        account_id: ChatGPT account ID (for openai-oauth).
+        auth_storage: Auth storage for token refresh (for openai-oauth).
 
     Returns:
         LLM provider instance.
@@ -46,13 +46,13 @@ def create_llm_provider(
         return AnthropicProvider(api_key=key)
     if provider == "openai":
         return OpenAIProvider(api_key=key)
-    if provider == "openai-codex":
+    if provider == "openai-oauth":
         if not access_token or not account_id:
             raise ValueError(
-                "openai-codex provider requires access_token and account_id. "
+                "openai-oauth provider requires access_token and account_id. "
                 "Run 'ash auth login' first."
             )
-        return OpenAICodexProvider(
+        return OpenAIOAuthProvider(
             access_token=access_token,
             account_id=account_id,
             auth_storage=auth_storage,

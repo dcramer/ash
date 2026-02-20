@@ -1,20 +1,20 @@
-"""Tests for OpenAI Codex LLM provider."""
+"""Tests for OpenAI OAuth LLM provider."""
 
 import pytest
 
-from ash.llm.openai_codex import CODEX_BASE_URL, OpenAICodexProvider
+from ash.llm.openai_oauth import CODEX_BASE_URL, OpenAIOAuthProvider
 
 
-class TestOpenAICodexProvider:
+class TestOpenAIOAuthProvider:
     def test_name(self):
-        provider = OpenAICodexProvider(
+        provider = OpenAIOAuthProvider(
             access_token="test-token",
             account_id="acct_123",
         )
-        assert provider.name == "openai-codex"
+        assert provider.name == "openai-oauth"
 
     def test_client_configuration(self):
-        provider = OpenAICodexProvider(
+        provider = OpenAIOAuthProvider(
             access_token="test-token",
             account_id="acct_123",
         )
@@ -22,7 +22,7 @@ class TestOpenAICodexProvider:
         assert provider._client.api_key == "test-token"
 
     def test_default_headers(self):
-        provider = OpenAICodexProvider(
+        provider = OpenAIOAuthProvider(
             access_token="test-token",
             account_id="acct_123",
         )
@@ -32,7 +32,7 @@ class TestOpenAICodexProvider:
         assert headers["originator"] == "ash"
 
     async def test_embed_raises(self):
-        provider = OpenAICodexProvider(
+        provider = OpenAIOAuthProvider(
             access_token="test-token",
             account_id="acct_123",
         )
@@ -42,4 +42,4 @@ class TestOpenAICodexProvider:
     def test_inherits_openai_provider(self):
         from ash.llm.openai import OpenAIProvider
 
-        assert issubclass(OpenAICodexProvider, OpenAIProvider)
+        assert issubclass(OpenAIOAuthProvider, OpenAIProvider)

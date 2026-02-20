@@ -289,8 +289,8 @@ def _parse_callback_url(callback_url: str, expected_state: str) -> str:
     return code
 
 
-async def login_openai_codex() -> dict[str, str | float]:
-    """Run the full OpenAI Codex OAuth login flow.
+async def login_openai_oauth() -> dict[str, str | float]:
+    """Run the full OpenAI OAuth login flow.
 
     Starts a local callback server for browser redirects and also accepts
     a manually pasted callback URL (for headless/remote machines). Whichever

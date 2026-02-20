@@ -32,7 +32,7 @@ class ModelConfig(BaseModel):
     Only supported by Anthropic Claude models.
     """
 
-    provider: Literal["anthropic", "openai", "openai-codex"]
+    provider: Literal["anthropic", "openai", "openai-oauth"]
     model: str
     temperature: float | None = None  # None = use provider default
     max_tokens: int = 4096
@@ -49,7 +49,7 @@ class ProviderConfig(BaseModel):
 class LLMConfig(BaseModel):
     """Configuration for an LLM provider (backward compatibility)."""
 
-    provider: Literal["anthropic", "openai", "openai-codex"]
+    provider: Literal["anthropic", "openai", "openai-oauth"]
     model: str
     api_key: SecretStr | None = None
     temperature: float = 0.7
@@ -457,9 +457,9 @@ class AshConfig(BaseModel):
         return self.get_model("default")
 
     def _resolve_provider_api_key(
-        self, provider: Literal["anthropic", "openai", "openai-codex"]
+        self, provider: Literal["anthropic", "openai", "openai-oauth"]
     ) -> SecretStr | None:
-        if provider == "openai-codex":
+        if provider == "openai-oauth":
             # OAuth-based provider — API key comes from auth.json, not config
             return self._resolve_oauth_api_key(provider)
         provider_config = getattr(self, provider, None)
@@ -497,7 +497,7 @@ class AshConfig(BaseModel):
         """Create an LLM provider instance for a model alias.
 
         Handles both API key-based providers and OAuth-based providers
-        (openai-codex). This is the preferred way to create providers —
+        (openai-oauth). This is the preferred way to create providers —
         callers should use this instead of manually resolving credentials.
 
         Returns:
@@ -510,16 +510,16 @@ class AshConfig(BaseModel):
 
         model_config = self.get_model(alias)
 
-        if model_config.provider == "openai-codex":
+        if model_config.provider == "openai-oauth":
             from ash.auth.storage import AuthStorage
 
-            oauth_creds = self.resolve_oauth_credentials("openai-codex")
+            oauth_creds = self.resolve_oauth_credentials("openai-oauth")
             if not oauth_creds:
                 raise ValueError(
-                    "No OAuth credentials for openai-codex. Run 'ash auth login' first."
+                    "No OAuth credentials for openai-oauth. Run 'ash auth login' first."
                 )
             return create_llm_provider(
-                "openai-codex",
+                "openai-oauth",
                 access_token=oauth_creds.access,
                 account_id=oauth_creds.account_id,
                 auth_storage=AuthStorage(),

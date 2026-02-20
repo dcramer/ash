@@ -19,8 +19,8 @@ class TestAuthStorage:
             expires=1700000000.0,
             account_id="acct_123",
         )
-        storage.save("openai-codex", creds)
-        loaded = storage.load("openai-codex")
+        storage.save("openai-oauth", creds)
+        loaded = storage.load("openai-oauth")
         assert loaded is not None
         assert loaded.access == "access-token"
         assert loaded.refresh == "refresh-token"
@@ -29,18 +29,18 @@ class TestAuthStorage:
 
     def test_load_nonexistent(self, tmp_path):
         storage = self._make_storage(tmp_path)
-        assert storage.load("openai-codex") is None
+        assert storage.load("openai-oauth") is None
 
     def test_remove(self, tmp_path):
         storage = self._make_storage(tmp_path)
         creds = OAuthCredentials(access="a", refresh="r", expires=0.0, account_id="x")
-        storage.save("openai-codex", creds)
-        assert storage.remove("openai-codex") is True
-        assert storage.load("openai-codex") is None
+        storage.save("openai-oauth", creds)
+        assert storage.remove("openai-oauth") is True
+        assert storage.load("openai-oauth") is None
 
     def test_remove_nonexistent(self, tmp_path):
         storage = self._make_storage(tmp_path)
-        assert storage.remove("openai-codex") is False
+        assert storage.remove("openai-oauth") is False
 
     def test_list_providers(self, tmp_path):
         storage = self._make_storage(tmp_path)

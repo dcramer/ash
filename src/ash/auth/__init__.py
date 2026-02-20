@@ -5,7 +5,7 @@ from ash.auth.oauth import (
     exchange_authorization_code,
     extract_account_id,
     generate_pkce,
-    login_openai_codex,
+    login_openai_oauth,
     refresh_access_token,
 )
 from ash.auth.storage import AuthStorage, OAuthCredentials
@@ -17,6 +17,6 @@ __all__ = [
     "exchange_authorization_code",
     "extract_account_id",
     "generate_pkce",
-    "login_openai_codex",
+    "login_openai_oauth",
     "refresh_access_token",
 ]

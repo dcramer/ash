@@ -122,10 +122,10 @@ async def _run_chat(
 
     # Check credentials early
     model_config = ash_config.get_model(resolved_alias)
-    if model_config.provider == "openai-codex":
-        oauth_creds = ash_config.resolve_oauth_credentials("openai-codex")
+    if model_config.provider == "openai-oauth":
+        oauth_creds = ash_config.resolve_oauth_credentials("openai-oauth")
         if oauth_creds is None:
-            error("No OAuth credentials for openai-codex. Run 'ash auth login' first.")
+            error("No OAuth credentials for openai-oauth. Run 'ash auth login' first.")
             raise typer.Exit(1) from None
     else:
         api_key = ash_config.resolve_api_key(resolved_alias)
