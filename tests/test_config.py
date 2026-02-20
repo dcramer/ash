@@ -22,9 +22,9 @@ class TestLLMConfig:
     """Tests for LLMConfig model."""
 
     def test_minimal_config(self):
-        config = LLMConfig(provider="anthropic", model="claude-sonnet-4-5")
-        assert config.provider == "anthropic"
-        assert config.model == "claude-sonnet-4-5"
+        config = LLMConfig(provider="openai", model="gpt-5.2")
+        assert config.provider == "openai"
+        assert config.model == "gpt-5.2"
         assert config.temperature == 0.7  # default
         assert config.max_tokens == 4096  # default
 
@@ -134,12 +134,12 @@ class TestAshConfig:
     """Tests for root AshConfig model."""
 
     def test_minimal_config(self, minimal_config):
-        assert minimal_config.default_llm.provider == "anthropic"
+        assert minimal_config.default_llm.provider == "openai"
         assert minimal_config.fallback_llm is None
         assert minimal_config.telegram is None
 
     def test_full_config(self, full_config):
-        assert full_config.default_llm.provider == "anthropic"
+        assert full_config.default_llm.provider == "openai"
         assert full_config.fallback_llm is not None
         assert full_config.fallback_llm.provider == "openai"
 
@@ -154,8 +154,8 @@ class TestLoadConfig:
     def test_load_from_file(self, config_file):
         config = load_config(config_file)
         assert config.default_llm is not None
-        assert config.default_llm.provider == "anthropic"
-        assert config.default_llm.model == "claude-sonnet-4-5"
+        assert config.default_llm.provider == "openai"
+        assert config.default_llm.model == "gpt-5.2"
 
     def test_file_not_found(self, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -186,7 +186,7 @@ class TestGetDefaultConfig:
     def test_returns_valid_config(self):
         config = get_default_config()
         assert isinstance(config, AshConfig)
-        assert config.default_model.provider == "anthropic"
+        assert config.default_model.provider == "openai"
         assert "default" in config.list_models()
 
 
@@ -194,9 +194,9 @@ class TestModelConfig:
     """Tests for ModelConfig model."""
 
     def test_minimal_config(self):
-        config = ModelConfig(provider="anthropic", model="claude-sonnet-4-5")
-        assert config.provider == "anthropic"
-        assert config.model == "claude-sonnet-4-5"
+        config = ModelConfig(provider="openai", model="gpt-5.2")
+        assert config.provider == "openai"
+        assert config.model == "gpt-5.2"
         assert config.temperature is None  # default: use API default
         assert config.max_tokens == 4096  # default
 
@@ -214,11 +214,34 @@ class TestModelConfig:
     def test_temperature_omitted_for_reasoning_models(self):
         """Test that temperature can be None (for reasoning models)."""
         config = ModelConfig(
-            provider="anthropic",
-            model="claude-3-5-opus",
+            provider="openai",
+            model="gpt-5.2-codex",
             temperature=None,  # Explicitly None for reasoning models
         )
         assert config.temperature is None
+
+    def test_reasoning_field(self):
+        """Test reasoning field accepts valid values."""
+        config = ModelConfig(
+            provider="openai",
+            model="gpt-5.2-pro",
+            reasoning="high",
+        )
+        assert config.reasoning == "high"
+
+    def test_reasoning_default_none(self):
+        """Test reasoning defaults to None."""
+        config = ModelConfig(provider="openai", model="gpt-5.2")
+        assert config.reasoning is None
+
+    def test_reasoning_invalid_value(self):
+        """Test reasoning rejects invalid values."""
+        with pytest.raises(ValidationError):
+            ModelConfig(
+                provider="openai",
+                model="gpt-5.2",
+                reasoning="xhigh",  # type: ignore[arg-type]
+            )
 
     def test_invalid_provider(self):
         with pytest.raises(ValidationError):
@@ -232,32 +255,32 @@ class TestNamedModelConfigs:
         """Test [models.<alias>] configuration."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
-                "fast": ModelConfig(provider="anthropic", model="claude-3-5-haiku"),
+                "default": ModelConfig(provider="openai", model="gpt-5.2"),
+                "fast": ModelConfig(provider="openai", model="gpt-5-mini"),
             }
         )
         assert "default" in config.models
         assert "fast" in config.models
-        assert config.models["default"].model == "claude-sonnet-4-5"
-        assert config.models["fast"].model == "claude-3-5-haiku"
+        assert config.models["default"].model == "gpt-5.2"
+        assert config.models["fast"].model == "gpt-5-mini"
 
     def test_get_model(self):
         """Test get_model() lookup."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
-                "fast": ModelConfig(provider="anthropic", model="claude-3-5-haiku"),
+                "default": ModelConfig(provider="openai", model="gpt-5.2"),
+                "fast": ModelConfig(provider="openai", model="gpt-5-mini"),
             }
         )
         model = config.get_model("fast")
-        assert model.provider == "anthropic"
-        assert model.model == "claude-3-5-haiku"
+        assert model.provider == "openai"
+        assert model.model == "gpt-5-mini"
 
     def test_get_model_unknown_alias(self):
         """Test get_model() with unknown alias raises ConfigError."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
+                "default": ModelConfig(provider="openai", model="gpt-5.2"),
             }
         )
         with pytest.raises(ConfigError) as exc_info:
@@ -269,8 +292,8 @@ class TestNamedModelConfigs:
         """Test list_models() returns sorted aliases."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
-                "fast": ModelConfig(provider="anthropic", model="claude-3-5-haiku"),
+                "default": ModelConfig(provider="openai", model="gpt-5.2"),
+                "fast": ModelConfig(provider="openai", model="gpt-5-mini"),
                 "capable": ModelConfig(provider="openai", model="gpt-4o"),
             }
         )
@@ -281,19 +304,19 @@ class TestNamedModelConfigs:
         """Test default_model property returns 'default' alias."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
+                "default": ModelConfig(provider="openai", model="gpt-5.2"),
             }
         )
-        assert config.default_model.provider == "anthropic"
-        assert config.default_model.model == "claude-sonnet-4-5"
+        assert config.default_model.provider == "openai"
+        assert config.default_model.model == "gpt-5.2"
 
     def test_resolve_api_key_from_provider_config(self):
         """Test API key resolution from provider-level config."""
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
+                "default": ModelConfig(provider="openai", model="gpt-5.2"),
             },
-            anthropic=ProviderConfig(api_key=SecretStr("test-key")),
+            openai=ProviderConfig(api_key=SecretStr("test-key")),
         )
         api_key = config.resolve_api_key("default")
         assert api_key is not None
@@ -301,10 +324,10 @@ class TestNamedModelConfigs:
 
     def test_resolve_api_key_from_env(self, monkeypatch):
         """Test API key resolution from environment variable."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "env-key")
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
+                "default": ModelConfig(provider="openai", model="gpt-5.2"),
             }
         )
         api_key = config.resolve_api_key("default")
@@ -313,12 +336,12 @@ class TestNamedModelConfigs:
 
     def test_resolve_api_key_provider_takes_precedence(self, monkeypatch):
         """Test provider-level config takes precedence over env var."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "env-key")
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
+                "default": ModelConfig(provider="openai", model="gpt-5.2"),
             },
-            anthropic=ProviderConfig(api_key=SecretStr("config-key")),
+            openai=ProviderConfig(api_key=SecretStr("config-key")),
         )
         api_key = config.resolve_api_key("default")
         assert api_key is not None
@@ -326,10 +349,10 @@ class TestNamedModelConfigs:
 
     def test_resolve_api_key_none_if_missing(self, monkeypatch):
         """Test API key resolution returns None if not found."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         config = AshConfig(
             models={
-                "default": ModelConfig(provider="anthropic", model="claude-sonnet-4-5"),
+                "default": ModelConfig(provider="openai", model="gpt-5.2"),
             }
         )
         api_key = config.resolve_api_key("default")
@@ -343,15 +366,15 @@ class TestBackwardCompatibility:
         """Test [default_llm] is migrated to models.default."""
         config = AshConfig(
             default_llm=LLMConfig(
-                provider="anthropic",
-                model="claude-sonnet-4-5",
+                provider="openai",
+                model="gpt-5.2",
                 temperature=0.5,
                 max_tokens=2048,
             )
         )
         assert "default" in config.models
-        assert config.models["default"].provider == "anthropic"
-        assert config.models["default"].model == "claude-sonnet-4-5"
+        assert config.models["default"].provider == "openai"
+        assert config.models["default"].model == "gpt-5.2"
         assert config.models["default"].temperature == 0.5
         assert config.models["default"].max_tokens == 2048
 
@@ -359,14 +382,14 @@ class TestBackwardCompatibility:
         """Test default_llm api_key is migrated to provider config."""
         config = AshConfig(
             default_llm=LLMConfig(
-                provider="anthropic",
-                model="claude-sonnet-4-5",
+                provider="openai",
+                model="gpt-5.2",
                 api_key=SecretStr("test-key"),
             )
         )
-        assert config.anthropic is not None
-        assert config.anthropic.api_key is not None
-        assert config.anthropic.api_key.get_secret_value() == "test-key"
+        assert config.openai is not None
+        assert config.openai.api_key is not None
+        assert config.openai.api_key.get_secret_value() == "test-key"
 
     def test_models_default_takes_precedence_over_default_llm(self, caplog):
         """Test [models.default] takes precedence over [default_llm]."""
@@ -378,8 +401,8 @@ class TestBackwardCompatibility:
                     "default": ModelConfig(provider="openai", model="gpt-4o"),
                 },
                 default_llm=LLMConfig(
-                    provider="anthropic",
-                    model="claude-sonnet-4-5",
+                    provider="openai",
+                    model="gpt-5.2",
                 ),
             )
         # models.default should win
@@ -402,13 +425,13 @@ class TestLoadConfigWithModels:
         """Test loading [models.*] sections from TOML."""
         config_content = """
 [models.default]
-provider = "anthropic"
-model = "claude-sonnet-4-5"
+provider = "openai"
+model = "gpt-5.2"
 temperature = 0.7
 
 [models.fast]
-provider = "anthropic"
-model = "claude-3-5-haiku"
+provider = "openai"
+model = "gpt-5-mini"
 """
         config_file = tmp_path / "config.toml"
         config_file.write_text(config_content)
@@ -416,26 +439,26 @@ model = "claude-3-5-haiku"
 
         assert "default" in config.models
         assert "fast" in config.models
-        assert config.models["default"].model == "claude-sonnet-4-5"
-        assert config.models["fast"].model == "claude-3-5-haiku"
+        assert config.models["default"].model == "gpt-5.2"
+        assert config.models["fast"].model == "gpt-5-mini"
 
     def test_load_provider_api_key_from_toml(self, tmp_path):
         """Test loading provider API keys from TOML."""
         config_content = """
 [models.default]
-provider = "anthropic"
-model = "claude-sonnet-4-5"
+provider = "openai"
+model = "gpt-5.2"
 
-[anthropic]
+[openai]
 api_key = "test-api-key"
 """
         config_file = tmp_path / "config.toml"
         config_file.write_text(config_content)
         config = load_config(config_file)
 
-        assert config.anthropic is not None
-        assert config.anthropic.api_key is not None
-        assert config.anthropic.api_key.get_secret_value() == "test-api-key"
+        assert config.openai is not None
+        assert config.openai.api_key is not None
+        assert config.openai.api_key.get_secret_value() == "test-api-key"
 
 
 class TestResolveEnvSecrets:
@@ -553,7 +576,7 @@ class TestAshConfigTimezoneDefault:
         monkeypatch.setenv("TZ", "Europe/London")
 
         config = AshConfig(
-            models={"default": ModelConfig(provider="anthropic", model="test")}
+            models={"default": ModelConfig(provider="openai", model="test")}
         )
 
         # Should default to system timezone
@@ -565,7 +588,7 @@ class TestAshConfigTimezoneDefault:
         from ash.config.models import AshConfig, ModelConfig
 
         config = AshConfig(
-            models={"default": ModelConfig(provider="anthropic", model="test")},
+            models={"default": ModelConfig(provider="openai", model="test")},
             timezone="America/Los_Angeles",
         )
         assert config.timezone == "America/Los_Angeles"
@@ -576,7 +599,7 @@ class TestAshConfigTimezoneDefault:
 
         with pytest.raises(ValidationError) as exc_info:
             AshConfig(
-                models={"default": ModelConfig(provider="anthropic", model="test")},
+                models={"default": ModelConfig(provider="openai", model="test")},
                 timezone="Invalid/Timezone",
             )
         assert "Invalid timezone" in str(exc_info.value)

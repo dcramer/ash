@@ -1,4 +1,4 @@
-"""OpenAI LLM provider."""
+"""OpenAI LLM provider (Responses API)."""
 
 import json
 import logging
@@ -7,7 +7,6 @@ from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
 import openai
-import openai.types.chat
 
 from ash.llm.base import LLMProvider
 from ash.llm.types import (
@@ -29,12 +28,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gpt-4o"
+DEFAULT_MODEL = "gpt-5.2"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
 
 class OpenAIProvider(LLMProvider):
-    """OpenAI provider."""
+    """OpenAI provider using the Responses API."""
 
     def __init__(self, api_key: str | None = None):
         self._client = openai.AsyncOpenAI(api_key=api_key)
@@ -47,26 +46,30 @@ class OpenAIProvider(LLMProvider):
     def default_model(self) -> str:
         return DEFAULT_MODEL
 
-    def _convert_messages(
-        self, messages: list[Message], system: str | None = None
-    ) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
+    def _convert_input(
+        self, messages: list[Message]
+    ) -> tuple[str | None, list[dict[str, Any]]]:
+        """Convert messages to Responses API input format.
 
-        if system:
-            result.append({"role": "system", "content": system})
+        Returns:
+            Tuple of (instructions, input_items) where instructions is extracted
+            from system messages and input_items is the conversation history.
+        """
+        instructions: str | None = None
+        result: list[dict[str, Any]] = []
 
         for msg in messages:
             if msg.role == Role.SYSTEM:
-                result.append({"role": "system", "content": msg.get_text()})
+                instructions = msg.get_text()
                 continue
 
             if isinstance(msg.content, str):
                 result.append({"role": msg.role.value, "content": msg.content})
                 continue
 
-            tool_calls = []
             tool_results = []
             text_parts = []
+            tool_calls = []
 
             for block in msg.content:
                 if isinstance(block, TextContent):
@@ -74,38 +77,37 @@ class OpenAIProvider(LLMProvider):
                 elif isinstance(block, ToolUse):
                     tool_calls.append(
                         {
-                            "id": block.id,
-                            "type": "function",
-                            "function": {
-                                "name": block.name,
-                                "arguments": json.dumps(block.input),
-                            },
+                            "type": "function_call",
+                            "call_id": block.id,
+                            "name": block.name,
+                            "arguments": json.dumps(block.input),
                         }
                     )
                 elif isinstance(block, ToolResult):
                     tool_results.append(block)
 
             if msg.role == Role.ASSISTANT:
-                msg_dict: dict[str, Any] = {"role": "assistant"}
                 if text_parts:
-                    msg_dict["content"] = "\n".join(text_parts)
-                if tool_calls:
-                    msg_dict["tool_calls"] = tool_calls
-                result.append(msg_dict)
+                    result.append(
+                        {"role": "assistant", "content": "\n".join(text_parts)}
+                    )
+                # Append function_call items directly as output items
+                for tc in tool_calls:
+                    result.append(tc)
 
             for tool_result in tool_results:
                 result.append(
                     {
-                        "role": "tool",
-                        "tool_call_id": tool_result.tool_use_id,
-                        "content": tool_result.content,
+                        "type": "function_call_output",
+                        "call_id": tool_result.tool_use_id,
+                        "output": tool_result.content,
                     }
                 )
 
             if msg.role == Role.USER and text_parts:
                 result.append({"role": "user", "content": "\n".join(text_parts)})
 
-        return result
+        return instructions, result
 
     def _convert_tools(
         self, tools: list[ToolDefinition] | None
@@ -115,11 +117,9 @@ class OpenAIProvider(LLMProvider):
         return [
             {
                 "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.input_schema,
-                },
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.input_schema,
             }
             for tool in tools
         ]
@@ -132,52 +132,63 @@ class OpenAIProvider(LLMProvider):
         system: str | None,
         max_tokens: int,
         temperature: float | None,
+        reasoning: str | None = None,
     ) -> dict[str, Any]:
+        msg_instructions, input_items = self._convert_input(messages)
+        # Prefer explicit system param, fall back to system message from conversation
+        instructions = system or msg_instructions
+
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
-            "messages": self._convert_messages(messages, system),
-            "max_tokens": max_tokens,
+            "input": input_items,
+            "max_output_tokens": max_tokens,
         }
+
+        if instructions:
+            kwargs["instructions"] = instructions
 
         if temperature is not None:
             kwargs["temperature"] = temperature
 
+        if reasoning:
+            kwargs["reasoning"] = {"effort": reasoning}
+
         converted_tools = self._convert_tools(tools)
         if converted_tools:
             kwargs["tools"] = converted_tools
+            kwargs["tool_choice"] = "auto"
 
         return kwargs
 
-    def _parse_response(
-        self, response: openai.types.chat.ChatCompletion
-    ) -> CompletionResponse:
-        choice = response.choices[0]
-        msg = choice.message
+    def _parse_response(self, response: Any) -> CompletionResponse:
         content: list[ContentBlock] = []
 
-        if msg.content:
-            content.append(TextContent(text=msg.content))
-
-        if msg.tool_calls:
-            for tool_call in msg.tool_calls:
-                if isinstance(
-                    tool_call,
-                    openai.types.chat.ChatCompletionMessageFunctionToolCall,
-                ):
-                    content.append(
-                        ToolUse(
-                            id=tool_call.id,
-                            name=tool_call.function.name,
-                            input=json.loads(tool_call.function.arguments),
-                        )
+        for item in response.output:
+            if item.type == "message":
+                for part in item.content:
+                    if part.type == "output_text":
+                        content.append(TextContent(text=part.text))
+            elif item.type == "function_call":
+                content.append(
+                    ToolUse(
+                        id=item.call_id,
+                        name=item.name,
+                        input=json.loads(item.arguments),
                     )
+                )
 
         usage = None
         if response.usage:
             usage = Usage(
-                input_tokens=response.usage.prompt_tokens,
-                output_tokens=response.usage.completion_tokens,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
             )
+
+        stop_reason = (
+            "end_turn"
+            if not any(item.type == "function_call" for item in response.output)
+            else "tool_use"
+        )
 
         return CompletionResponse(
             message=Message(
@@ -185,7 +196,7 @@ class OpenAIProvider(LLMProvider):
                 content=content if content else "",
             ),
             usage=usage,
-            stop_reason=choice.finish_reason,
+            stop_reason=stop_reason,
             model=response.model,
             raw=response.model_dump(),
         )
@@ -200,27 +211,26 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
+        reasoning: str | None = None,
     ) -> CompletionResponse:
         kwargs = self._build_request_kwargs(
-            messages, model, tools, system, max_tokens, temperature
+            messages, model, tools, system, max_tokens, temperature, reasoning
         )
         model_name = kwargs["model"]
 
         start_time = time.monotonic()
-        response = await self._client.chat.completions.create(**kwargs)
+        response = await self._client.responses.create(**kwargs)
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
         usage = response.usage
-        stop_reason = response.choices[0].finish_reason if response.choices else None
         extra: dict[str, object] = {
             "provider": "openai",
             "model": model_name,
-            "stop_reason": stop_reason,
             "duration_ms": duration_ms,
         }
         if usage:
-            extra["tokens_in"] = usage.prompt_tokens
-            extra["tokens_out"] = usage.completion_tokens
+            extra["tokens_in"] = usage.input_tokens
+            extra["tokens_out"] = usage.output_tokens
         logger.info("llm_complete", extra=extra)
 
         return self._parse_response(response)
@@ -235,65 +245,54 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
+        reasoning: str | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         kwargs = self._build_request_kwargs(
-            messages, model, tools, system, max_tokens, temperature
+            messages, model, tools, system, max_tokens, temperature, reasoning
         )
         kwargs["stream"] = True
 
-        current_tool_calls: dict[int, dict[str, Any]] = {}
-        response_stream = await self._client.chat.completions.create(**kwargs)
+        current_tool_calls: dict[str, str] = {}  # call_id -> accumulated arguments
+        response_stream = await self._client.responses.create(**kwargs)
 
         yield StreamChunk(type=StreamEventType.MESSAGE_START)
 
-        async for chunk in response_stream:
-            if not chunk.choices:
-                continue
+        async for event in response_stream:
+            event_type = event.type
 
-            delta = chunk.choices[0].delta
+            if event_type == "response.output_text.delta":
+                yield StreamChunk(type=StreamEventType.TEXT_DELTA, content=event.delta)
 
-            if delta.content:
-                yield StreamChunk(
-                    type=StreamEventType.TEXT_DELTA, content=delta.content
-                )
+            elif event_type == "response.output_item.added":
+                if event.item.type == "function_call":
+                    call_id = event.item.call_id
+                    current_tool_calls[call_id] = ""
+                    yield StreamChunk(
+                        type=StreamEventType.TOOL_USE_START,
+                        tool_use_id=call_id,
+                        tool_name=event.item.name,
+                    )
 
-            if delta.tool_calls:
-                for tool_call in delta.tool_calls:
-                    idx = tool_call.index
+            elif event_type == "response.function_call_arguments.delta":
+                call_id = event.call_id
+                if call_id in current_tool_calls:
+                    current_tool_calls[call_id] += event.delta
+                    yield StreamChunk(
+                        type=StreamEventType.TOOL_USE_DELTA,
+                        content=event.delta,
+                        tool_use_id=call_id,
+                    )
 
-                    if idx not in current_tool_calls:
-                        current_tool_calls[idx] = {
-                            "id": tool_call.id,
-                            "name": tool_call.function.name
-                            if tool_call.function
-                            else "",
-                            "arguments": "",
-                        }
-                        yield StreamChunk(
-                            type=StreamEventType.TOOL_USE_START,
-                            tool_use_id=tool_call.id,
-                            tool_name=tool_call.function.name
-                            if tool_call.function
-                            else None,
-                        )
-
-                    if tool_call.function and tool_call.function.arguments:
-                        current_tool_calls[idx]["arguments"] += (
-                            tool_call.function.arguments
-                        )
-                        yield StreamChunk(
-                            type=StreamEventType.TOOL_USE_DELTA,
-                            content=tool_call.function.arguments,
-                            tool_use_id=current_tool_calls[idx]["id"],
-                        )
-
-            if chunk.choices[0].finish_reason:
-                for tc in current_tool_calls.values():
+            elif event_type == "response.function_call_arguments.done":
+                call_id = event.call_id
+                if call_id in current_tool_calls:
                     yield StreamChunk(
                         type=StreamEventType.TOOL_USE_END,
-                        tool_use_id=tc["id"],
-                        content=tc["arguments"],
+                        tool_use_id=call_id,
+                        content=current_tool_calls[call_id],
                     )
+
+            elif event_type == "response.completed":
                 yield StreamChunk(type=StreamEventType.MESSAGE_END)
 
     async def embed(

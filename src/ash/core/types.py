@@ -57,6 +57,7 @@ class AgentConfig:
     max_tokens: int = 4096
     temperature: float | None = None  # None = use provider default
     thinking: ThinkingConfig | None = None  # Extended thinking config
+    reasoning: str | None = None  # OpenAI reasoning effort level
     max_tool_iterations: int = MAX_TOOL_ITERATIONS
     # Smart pruning configuration
     context_token_budget: int = 100000  # Target context window size

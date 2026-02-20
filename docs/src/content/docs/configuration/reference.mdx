@@ -22,17 +22,17 @@ workspace = "~/.ash/workspace"
 ## API Keys
 
 ```toml
-[anthropic]
-api_key = "sk-ant-..."
-
 [openai]
 api_key = "sk-..."
+
+[anthropic]
+api_key = "sk-ant-..."
 ```
 
 | Section | Option | Env Variable | Description |
 |---------|--------|--------------|-------------|
-| `[anthropic]` | `api_key` | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `[openai]` | `api_key` | `OPENAI_API_KEY` | OpenAI API key |
+| `[anthropic]` | `api_key` | `ANTHROPIC_API_KEY` | Anthropic API key |
 
 ## Models
 
@@ -40,24 +40,30 @@ See [LLM Providers](/systems/llm/) for details.
 
 ```toml
 [models.default]
-provider = "anthropic"
-model = "claude-haiku-4-5"
+provider = "openai"
+model = "gpt-5.2"
 temperature = 0.7
 max_tokens = 4096
 
-[models.sonnet]
-provider = "anthropic"
-model = "claude-sonnet-4-5"
+[models.mini]
+provider = "openai"
+model = "gpt-5-mini"
+max_tokens = 4096
+
+[models.codex]
+provider = "openai"
+model = "gpt-5.2-codex"
 max_tokens = 8192
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | required | `"anthropic"` or `"openai"` |
+| `provider` | string | required | `"openai"` or `"anthropic"` |
 | `model` | string | required | Model identifier |
 | `temperature` | float | `null` | Sampling temperature (0.0-1.0) |
 | `max_tokens` | int | `4096` | Maximum response tokens |
 | `thinking` | string | `null` | Extended thinking: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"` |
+| `reasoning` | string | `null` | OpenAI reasoning effort: `"low"`, `"medium"`, `"high"` |
 
 ## Sandbox
 
@@ -197,11 +203,11 @@ See [Agents](/systems/agents/) for details.
 
 ```toml
 [agents.research]
-model = "sonnet"
+model = "codex"
 max_iterations = 50
 
 [agents.skill-writer]
-model = "sonnet"
+model = "codex"
 max_iterations = 20
 ```
 

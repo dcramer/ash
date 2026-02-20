@@ -726,6 +726,7 @@ class Agent:
                     max_tokens=self._config.max_tokens,
                     temperature=self._config.temperature,
                     thinking=self._config.thinking,
+                    reasoning=self._config.reasoning,
                 )
 
                 session.add_assistant_message(response.message.content)
@@ -854,6 +855,7 @@ class Agent:
                     max_tokens=self._config.max_tokens,
                     temperature=self._config.temperature,
                     thinking=self._config.thinking,
+                    reasoning=self._config.reasoning,
                 ):
                     if chunk.type == StreamEventType.TEXT_DELTA:
                         text = chunk.content if isinstance(chunk.content, str) else ""
@@ -1017,20 +1019,18 @@ async def create_agent(
                 )
                 raise ValueError("Embeddings API key required for memory")
 
-            # Create registry with both embedding provider and Anthropic (for LLM verification)
-            # Get Anthropic key from default model if it's anthropic, otherwise from provider config
-            default_model = config.get_model("default")
-            if default_model.provider == "anthropic":
-                anthropic_key = config.resolve_api_key("default")
-            else:
-                anthropic_key = config._resolve_provider_api_key("anthropic")
+            # Create registry with embedding provider and default LLM provider
+            config.get_model("default")
+            openai_key = config._resolve_provider_api_key("openai")
+            anthropic_key = config._resolve_provider_api_key("anthropic")
+            # Ensure the embedding provider's key is available
+            if config.embeddings.provider == "openai" and not openai_key:
+                openai_key = embeddings_key
             llm_registry = create_registry(
                 anthropic_api_key=anthropic_key.get_secret_value()
                 if anthropic_key
                 else None,
-                openai_api_key=embeddings_key.get_secret_value()
-                if config.embeddings.provider == "openai"
-                else None,
+                openai_api_key=openai_key.get_secret_value() if openai_key else None,
             )
             graph_store = await create_store(
                 graph_dir=graph_dir,
@@ -1134,6 +1134,7 @@ async def create_agent(
             max_tokens=model_config.max_tokens,
             temperature=model_config.temperature,
             thinking=thinking_config,
+            reasoning=model_config.reasoning,
             context_token_budget=config.memory.context_token_budget,
             recency_window=config.memory.recency_window,
             system_prompt_buffer=config.memory.system_prompt_buffer,

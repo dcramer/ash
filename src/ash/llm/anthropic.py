@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-5"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 
 
 class AnthropicProvider(LLMProvider):
@@ -106,6 +106,7 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int,
         temperature: float | None,
         thinking: "ThinkingConfig | None",
+        reasoning: str | None = None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
@@ -169,6 +170,7 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
+        reasoning: str | None = None,
     ) -> CompletionResponse:
         kwargs = self._build_request_kwargs(
             messages, model, tools, system, max_tokens, temperature, thinking
@@ -214,6 +216,7 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
+        reasoning: str | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         kwargs = self._build_request_kwargs(
             messages, model, tools, system, max_tokens, temperature, thinking

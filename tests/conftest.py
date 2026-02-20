@@ -37,8 +37,8 @@ def minimal_config() -> AshConfig:
     """Minimal valid configuration."""
     return AshConfig(
         default_llm=LLMConfig(
-            provider="anthropic",
-            model="claude-sonnet-4-5",
+            provider="openai",
+            model="gpt-5.2",
         )
     )
 
@@ -49,14 +49,14 @@ def full_config(tmp_path: Path) -> AshConfig:
     return AshConfig(
         workspace=tmp_path / "workspace",
         default_llm=LLMConfig(
-            provider="anthropic",
-            model="claude-sonnet-4-5",
+            provider="openai",
+            model="gpt-5.2",
             temperature=0.5,
             max_tokens=2048,
         ),
         fallback_llm=LLMConfig(
             provider="openai",
-            model="gpt-4o",
+            model="gpt-5-mini",
         ),
     )
 
@@ -68,8 +68,8 @@ def config_toml_content() -> str:
 workspace = "/tmp/ash-workspace"
 
 [default_llm]
-provider = "anthropic"
-model = "claude-sonnet-4-5"
+provider = "openai"
+model = "gpt-5.2"
 temperature = 0.7
 max_tokens = 4096
 """
@@ -204,6 +204,7 @@ class MockLLMProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: Any = None,
+        reasoning: str | None = None,
     ) -> CompletionResponse:
         self.complete_calls.append(
             {
@@ -239,6 +240,7 @@ class MockLLMProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: Any = None,
+        reasoning: str | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         self.stream_calls.append(
             {

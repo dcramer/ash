@@ -37,6 +37,7 @@ class ModelConfig(BaseModel):
     temperature: float | None = None  # None = use provider default
     max_tokens: int = 4096
     thinking: Literal["off", "minimal", "low", "medium", "high"] | None = None
+    reasoning: Literal["low", "medium", "high"] | None = None
 
 
 class ProviderConfig(BaseModel):

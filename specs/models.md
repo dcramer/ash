@@ -36,40 +36,41 @@ Files: src/ash/config/models.py, src/ash/config/loader.py, src/ash/llm/registry.
 ```toml
 # Named model configurations
 [models.default]
-provider = "anthropic"
-model = "claude-3-5-haiku"  # Fast, cheap for simple tasks
+provider = "openai"
+model = "gpt-5.2"  # Flagship model for general tasks
 temperature = 0.7  # Optional - omit to use API default
 max_tokens = 4096
 
-[models.sonnet]
-provider = "anthropic"
-model = "claude-sonnet-4-5"  # More capable for complex tasks
+[models.mini]
+provider = "openai"
+model = "gpt-5-mini"  # Fast, cost-effective for simple tasks
+max_tokens = 4096
+
+[models.codex]
+provider = "openai"
+model = "gpt-5.2-codex"  # Optimized for coding tasks
 max_tokens = 8192
 
-[models.reasoning]
-provider = "anthropic"
-model = "claude-3-5-opus"
-# temperature omitted for reasoning models that don't support it
-max_tokens = 8192
+[models.pro]
+provider = "openai"
+model = "gpt-5.2-pro"  # Reasoning model with high effort
+reasoning = "high"
 
 # Provider-level API keys (shared by models using that provider)
-[anthropic]
-api_key = "..."  # or ANTHROPIC_API_KEY env
-
 [openai]
 api_key = "..."  # or OPENAI_API_KEY env
 
 # Per-skill model overrides
 [skills.debug]
-model = "sonnet"  # Use more capable model for debugging
+model = "codex"  # Use coding model for debugging
 
 [skills.code-review]
-model = "sonnet"  # Use more capable model for code review
+model = "codex"  # Use coding model for code review
 
 # Backward compatibility (maps to models.default if no [models] section)
 [default_llm]
-provider = "anthropic"
-model = "claude-3-5-haiku"
+provider = "openai"
+model = "gpt-5.2"
 ```
 
 ### Python Classes
@@ -81,6 +82,8 @@ class ModelConfig(BaseModel):
     model: str
     temperature: float | None = None  # None = use provider default; omit for reasoning models
     max_tokens: int = 4096
+    thinking: Literal["off", "minimal", "low", "medium", "high"] | None = None  # Anthropic extended thinking
+    reasoning: Literal["low", "medium", "high"] | None = None  # OpenAI reasoning effort
 
 class ProviderConfig(BaseModel):
     """Provider-level configuration."""
@@ -126,7 +129,7 @@ ASH_MODEL=fast ash chat "prompt"    # Environment override
 | `--model fast` | Agent uses `models.fast` config | CLI override |
 | `ASH_MODEL=fast` | Default model changes to "fast" | Env override |
 | No API key in model, provider has key | Use provider key | Inheritance |
-| `[skills.debug] model = "sonnet"` | Skill uses `models.sonnet` | Per-skill override |
+| `[skills.debug] model = "codex"` | Skill uses `models.codex` | Per-skill override |
 
 ## Errors
 
@@ -134,7 +137,7 @@ ASH_MODEL=fast ash chat "prompt"    # Environment override
 |-----------|----------|
 | Unknown alias in `--model` | ConfigError: "Unknown model alias 'X'. Available: default, fast, ..." |
 | No `default` model configured | ConfigError: "No default model configured. Add [models.default] or [default_llm]" |
-| Missing API key for provider | ConfigError: "No API key for provider 'anthropic'. Set ANTHROPIC_API_KEY or api_key in config" |
+| Missing API key for provider | ConfigError: "No API key for provider 'openai'. Set OPENAI_API_KEY or api_key in config" |
 | Invalid provider in model | ValidationError: "Invalid provider 'X'. Must be 'anthropic' or 'openai'" |
 
 ## Verification

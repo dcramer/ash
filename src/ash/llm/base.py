@@ -41,6 +41,7 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
+        reasoning: str | None = None,
     ) -> CompletionResponse:
         """Generate a completion (non-streaming)."""
         ...
@@ -56,6 +57,7 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking: "ThinkingConfig | None" = None,
+        reasoning: str | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         """Generate a streaming completion."""
         ...
