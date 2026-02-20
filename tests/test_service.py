@@ -431,7 +431,7 @@ class TestRuntimeState:
 
         state = RuntimeState(
             started_at="2024-01-01T00:00:00+00:00",
-            model="claude-sonnet-4-20250514",
+            model="gpt-5.2",
             sandbox_image="ash-sandbox:latest",
             sandbox_network="bridge",
             sandbox_runtime="runc",
@@ -443,7 +443,7 @@ class TestRuntimeState:
         )
 
         json_str = state.to_json()
-        assert "claude-sonnet" in json_str
+        assert "gpt-5.2" in json_str
         assert "ash-sandbox:latest" in json_str
         assert "bridge" in json_str
 
@@ -453,7 +453,7 @@ class TestRuntimeState:
 
         json_str = """{
             "started_at": "2024-01-01T00:00:00+00:00",
-            "model": "claude-sonnet-4-20250514",
+            "model": "gpt-5.2",
             "sandbox_image": "ash-sandbox:latest",
             "sandbox_network": "bridge",
             "sandbox_runtime": "runc",
@@ -465,7 +465,7 @@ class TestRuntimeState:
         }"""
 
         state = RuntimeState.from_json(json_str)
-        assert state.model == "claude-sonnet-4-20250514"
+        assert state.model == "gpt-5.2"
         assert state.sandbox_image == "ash-sandbox:latest"
         assert state.sandbox_network == "bridge"
         assert state.workspace_access == "rw"
@@ -486,7 +486,7 @@ class TestRuntimeState:
 
         state = RuntimeState(
             started_at="2024-01-01T00:00:00+00:00",
-            model="claude-sonnet-4-20250514",
+            model="gpt-5.2",
             sandbox_image="ash-sandbox:latest",
             sandbox_network="bridge",
             sandbox_runtime="runc",

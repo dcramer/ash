@@ -4,7 +4,10 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
+
+if TYPE_CHECKING:
+    from ash.agents.types import StackFrame
 
 import typer
 
@@ -211,51 +214,145 @@ async def _run_chat(
         if messages:
             logger.info("session_messages_loaded", extra={"count": len(messages)})
 
+        async def _run_skill_loop(
+            main_frame: "StackFrame",
+            child_frame: "StackFrame",
+        ) -> str | None:
+            """Run a subagent skill loop to completion in CLI mode."""
+            from ash.agents.types import AgentStack, TurnAction
+
+            agent_executor = components.agent_executor
+            if not agent_executor:
+                return None
+
+            stack = AgentStack()
+            stack.push(main_frame)
+            stack.push(child_frame)
+
+            collected_text: list[str] = []
+            max_turns = 50
+
+            for _ in range(max_turns):
+                top = stack.top
+                if top is None:
+                    break
+
+                result = await agent_executor.execute_turn(top)
+
+                if result.action == TurnAction.COMPLETE:
+                    completed = stack.pop()
+                    parent = stack.top
+                    if parent and completed.parent_tool_use_id:
+                        result2 = await agent_executor.execute_turn(
+                            parent,
+                            tool_result=(
+                                completed.parent_tool_use_id,
+                                result.text,
+                                False,
+                            ),
+                        )
+                        if result2.action in (
+                            TurnAction.SEND_TEXT,
+                            TurnAction.COMPLETE,
+                        ):
+                            if result2.text:
+                                collected_text.append(result2.text)
+                            if result2.action == TurnAction.COMPLETE:
+                                stack.pop()
+                            break
+                        elif result2.action == TurnAction.CHILD_ACTIVATED:
+                            if result2.child_frame:
+                                stack.push(result2.child_frame)
+                        else:
+                            stack.pop()
+                            break
+                    else:
+                        if result.text:
+                            collected_text.append(result.text)
+                        break
+
+                elif result.action == TurnAction.SEND_TEXT:
+                    if stack.depth == 1 and result.text:
+                        collected_text.append(result.text)
+                        break
+
+                elif result.action == TurnAction.CHILD_ACTIVATED:
+                    if result.child_frame:
+                        stack.push(result.child_frame)
+
+                elif result.action in (
+                    TurnAction.ERROR,
+                    TurnAction.MAX_ITERATIONS,
+                    TurnAction.INTERRUPT,
+                ):
+                    if result.text:
+                        collected_text.append(result.text)
+                    break
+
+            return "\n".join(collected_text) if collected_text else None
+
         async def process_message(
             user_input: str, show_prefix: bool = False, show_meta: bool = False
         ) -> None:
+            from ash.agents.types import ChildActivated
+
             await session_manager.add_user_message(user_input)
 
-            if streaming:
-                if show_prefix:
-                    console.print("[bold green]Ash:[/bold green] ", end="")
-                response_text = ""
-                async for chunk in agent.process_message_streaming(user_input, session):
-                    console.print(chunk, end="")
-                    response_text += chunk
-                console.print("\n" if show_prefix else "")
-                if response_text:
-                    await session_manager.add_assistant_message(response_text)
-            else:
-                with console.status("[dim]Thinking...[/dim]"):
-                    response = await agent.process_message(user_input, session)
-
-                if show_prefix:
-                    console.print("[bold green]Ash:[/bold green]")
-                    console.print(Markdown(response.text))
-                    if show_meta and response.tool_calls:
-                        console.print(
-                            f"[dim]({len(response.tool_calls)} tool calls, "
-                            f"{response.iterations} iterations)[/dim]"
-                        )
-                    console.print()
+            try:
+                if streaming:
+                    if show_prefix:
+                        console.print("[bold green]Ash:[/bold green] ", end="")
+                    response_text = ""
+                    async for chunk in agent.process_message_streaming(
+                        user_input, session
+                    ):
+                        console.print(chunk, end="")
+                        response_text += chunk
+                    console.print("\n" if show_prefix else "")
+                    if response_text:
+                        await session_manager.add_assistant_message(response_text)
                 else:
-                    console.print(response.text)
+                    with console.status("[dim]Thinking...[/dim]"):
+                        response = await agent.process_message(user_input, session)
 
-                if response.text:
-                    await session_manager.add_assistant_message(response.text)
+                    if show_prefix:
+                        console.print("[bold green]Ash:[/bold green]")
+                        console.print(Markdown(response.text))
+                        if show_meta and response.tool_calls:
+                            console.print(
+                                f"[dim]({len(response.tool_calls)} tool calls, "
+                                f"{response.iterations} iterations)[/dim]"
+                            )
+                        console.print()
+                    else:
+                        console.print(response.text)
 
-                for tool_call in response.tool_calls:
-                    await session_manager.add_tool_use(
-                        tool_use_id=tool_call["id"],
-                        name=tool_call["name"],
-                        input_data=tool_call["input"],
-                    )
-                    await session_manager.add_tool_result(
-                        tool_use_id=tool_call["id"],
-                        output=tool_call["result"],
-                        success=not tool_call.get("is_error", False),
-                    )
+                    if response.text:
+                        await session_manager.add_assistant_message(response.text)
+
+                    for tool_call in response.tool_calls:
+                        await session_manager.add_tool_use(
+                            tool_use_id=tool_call["id"],
+                            name=tool_call["name"],
+                            input_data=tool_call["input"],
+                        )
+                        await session_manager.add_tool_result(
+                            tool_use_id=tool_call["id"],
+                            output=tool_call["result"],
+                            success=not tool_call.get("is_error", False),
+                        )
+
+            except ChildActivated as ca:
+                if ca.main_frame and ca.child_frame:
+                    result_text = await _run_skill_loop(ca.main_frame, ca.child_frame)
+                    if result_text:
+                        if show_prefix:
+                            console.print("[bold green]Ash:[/bold green]")
+                            console.print(Markdown(result_text))
+                            console.print()
+                        else:
+                            console.print(result_text)
+                        await session_manager.add_assistant_message(result_text)
 
         if prompt:
             await process_message(prompt)

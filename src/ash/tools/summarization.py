@@ -74,7 +74,7 @@ class ToolResultSummarizer:
     """Summarizes large tool outputs using a fast LLM.
 
     Example usage:
-        summarizer = ToolResultSummarizer(llm_provider, model="claude-haiku-4-5")
+        summarizer = ToolResultSummarizer(llm_provider, model="gpt-5-mini")
 
         # In tool executor or agent:
         result = await tool.execute(input_data, context)

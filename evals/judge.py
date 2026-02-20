@@ -321,7 +321,7 @@ async def judge_response(
     response_text: str,
     tool_calls: list[dict[str, Any]],
     *,
-    model: str = "claude-sonnet-4-5",
+    model: str = "gpt-5.2",
     config: EvalConfig | None = None,
 ) -> JudgeResult:
     """Judge an agent's response against the expected behavior.
@@ -343,7 +343,7 @@ async def judge_response(
 
     if config is None:
         config = EvalConfig(judge_model=model)
-    elif model != "claude-sonnet-4-5":
+    elif model != "gpt-5.2":
         config = replace(config, judge_model=model)
 
     judge = LLMJudge(llm, config)

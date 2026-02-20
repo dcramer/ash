@@ -62,8 +62,8 @@ ash chat "Hello, world"
 
 ```toml
 [models.default]
-provider = "anthropic"
-model = "claude-sonnet-4-5"
+provider = "openai"
+model = "gpt-5.2"
 ```
 
 ```python

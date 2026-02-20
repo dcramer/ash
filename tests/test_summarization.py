@@ -79,7 +79,7 @@ class TestToolResultSummarizer:
         """Create a summarizer with mock LLM."""
         return ToolResultSummarizer(
             llm=mock_llm,
-            model="claude-haiku-4-5",
+            model="gpt-5-mini",
             threshold_bytes=100,  # Low threshold for testing
         )
 

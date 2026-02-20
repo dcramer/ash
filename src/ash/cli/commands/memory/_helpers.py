@@ -68,18 +68,15 @@ async def get_store(config: AshConfig) -> Store | None:
     if not embeddings_key:
         return None
 
-    # Build registry with embedding provider key (and Anthropic for LLM verification)
-    default_model = config.get_model("default")
-    if default_model.provider == "anthropic":
-        anthropic_key = config.resolve_api_key("default")
-    else:
-        anthropic_key = config._resolve_provider_api_key("anthropic")
+    # Build registry with embedding provider and default LLM provider keys
+    openai_key = config._resolve_provider_api_key("openai")
+    anthropic_key = config._resolve_provider_api_key("anthropic")
+    if config.embeddings.provider == "openai" and not openai_key:
+        openai_key = embeddings_key
 
     llm_registry = create_registry(
         anthropic_api_key=anthropic_key.get_secret_value() if anthropic_key else None,
-        openai_api_key=embeddings_key.get_secret_value()
-        if config.embeddings.provider == "openai"
-        else None,
+        openai_api_key=openai_key.get_secret_value() if openai_key else None,
     )
 
     graph_dir = get_graph_dir()

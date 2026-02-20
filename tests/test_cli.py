@@ -194,9 +194,7 @@ class TestScheduleCommand:
             "ash.config.load_config",
             lambda: models.AshConfig(
                 models={
-                    "default": models.ModelConfig(
-                        provider="anthropic", model="claude-3-sonnet"
-                    )
+                    "default": models.ModelConfig(provider="openai", model="gpt-5.2")
                 },
                 workspace=workspace,
             ),
@@ -215,9 +213,7 @@ class TestScheduleCommand:
             "ash.config.load_config",
             lambda: models.AshConfig(
                 models={
-                    "default": models.ModelConfig(
-                        provider="anthropic", model="claude-3-sonnet"
-                    )
+                    "default": models.ModelConfig(provider="openai", model="gpt-5.2")
                 },
                 workspace=workspace,
             ),
@@ -236,9 +232,7 @@ class TestScheduleCommand:
             "ash.config.load_config",
             lambda: models.AshConfig(
                 models={
-                    "default": models.ModelConfig(
-                        provider="anthropic", model="claude-3-sonnet"
-                    )
+                    "default": models.ModelConfig(provider="openai", model="gpt-5.2")
                 },
                 workspace=workspace,
             ),

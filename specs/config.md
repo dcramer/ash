@@ -68,19 +68,18 @@ api_key = "..."  # or OPENAI_API_KEY env
 
 # Named model configurations
 [models.default]
-provider = "anthropic"
-model = "claude-haiku-4-5"
+provider = "openai"
+model = "gpt-5.2"
 temperature = 0.7
 max_tokens = 4096
 
-[models.sonnet]
-provider = "anthropic"
-model = "claude-sonnet-4-5"
-max_tokens = 8192
+[models.mini]
+provider = "openai"
+model = "gpt-5-mini"
 
 # Per-skill model overrides
 [skills.debug]
-model = "sonnet"
+model = "codex"
 
 [skills.code-review]
 model = "sonnet"

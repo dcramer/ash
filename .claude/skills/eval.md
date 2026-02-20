@@ -114,8 +114,8 @@ class TestFeatureEvals:
 ## Rules
 
 - Evals use real LLM calls (cost money)
-- Judge model: `claude-sonnet-4-5` (reliable evaluation)
-- Agent model: `claude-sonnet-4-5` (consistent behavior)
-- Never hardcode dated model names (use `claude-sonnet-4-5` not `claude-sonnet-4-5-20250514`)
+- Judge model: `gpt-5.2` (reliable evaluation)
+- Agent model: `gpt-5.2` (consistent behavior)
+- Never hardcode dated model names (use `gpt-5.2` not `gpt-5.2-2025-05-14`)
 - Fresh session per eval case (isolation)
 - Threshold-based assertions (80% default, adjust per suite)

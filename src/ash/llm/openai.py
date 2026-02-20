@@ -252,7 +252,8 @@ class OpenAIProvider(LLMProvider):
         )
         kwargs["stream"] = True
 
-        current_tool_calls: dict[str, str] = {}  # call_id -> accumulated arguments
+        current_tool_args: dict[str, str] = {}  # call_id -> accumulated arguments
+        item_to_call: dict[str, str] = {}  # item_id -> call_id
         response_stream = await self._client.responses.create(**kwargs)
 
         yield StreamChunk(type=StreamEventType.MESSAGE_START)
@@ -266,7 +267,8 @@ class OpenAIProvider(LLMProvider):
             elif event_type == "response.output_item.added":
                 if event.item.type == "function_call":
                     call_id = event.item.call_id
-                    current_tool_calls[call_id] = ""
+                    item_to_call[event.item.id] = call_id
+                    current_tool_args[call_id] = ""
                     yield StreamChunk(
                         type=StreamEventType.TOOL_USE_START,
                         tool_use_id=call_id,
@@ -274,9 +276,9 @@ class OpenAIProvider(LLMProvider):
                     )
 
             elif event_type == "response.function_call_arguments.delta":
-                call_id = event.call_id
-                if call_id in current_tool_calls:
-                    current_tool_calls[call_id] += event.delta
+                call_id = item_to_call.get(event.item_id, "")
+                if call_id in current_tool_args:
+                    current_tool_args[call_id] += event.delta
                     yield StreamChunk(
                         type=StreamEventType.TOOL_USE_DELTA,
                         content=event.delta,
@@ -284,12 +286,12 @@ class OpenAIProvider(LLMProvider):
                     )
 
             elif event_type == "response.function_call_arguments.done":
-                call_id = event.call_id
-                if call_id in current_tool_calls:
+                call_id = item_to_call.get(event.item_id, "")
+                if call_id in current_tool_args:
                     yield StreamChunk(
                         type=StreamEventType.TOOL_USE_END,
                         tool_use_id=call_id,
-                        content=current_tool_calls[call_id],
+                        content=current_tool_args[call_id],
                     )
 
             elif event_type == "response.completed":

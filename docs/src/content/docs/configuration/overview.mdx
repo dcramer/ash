@@ -26,22 +26,24 @@ Run `ash init` to create your configuration file.
 workspace = "~/.ash/workspace"
 
 # LLM Provider API Keys
-[anthropic]
-api_key = "sk-ant-..."  # Or use ANTHROPIC_API_KEY env var
-
 [openai]
 api_key = "sk-..."  # Or use OPENAI_API_KEY env var
 
-# Named model configurations (Haiku for fast/cheap, Sonnet for complex tasks)
+# Named model configurations
 [models.default]
-provider = "anthropic"
-model = "claude-haiku-4-5"
+provider = "openai"
+model = "gpt-5.2"
 temperature = 0.7
 max_tokens = 4096
 
-[models.sonnet]
-provider = "anthropic"
-model = "claude-sonnet-4-5"
+[models.mini]
+provider = "openai"
+model = "gpt-5-mini"
+max_tokens = 4096
+
+[models.codex]
+provider = "openai"
+model = "gpt-5.2-codex"
 max_tokens = 8192
 
 # Telegram bot integration
@@ -84,7 +86,7 @@ max_concurrent = 2   # Parallel session processing limit
 
 # Agent-specific overrides
 [agents.research]
-model = "sonnet"
+model = "codex"
 max_iterations = 50
 
 # Embeddings for semantic search
@@ -109,8 +111,8 @@ API keys can be set via environment variables instead of the config file:
 
 | Variable | Config Path |
 |----------|-------------|
-| `ANTHROPIC_API_KEY` | `[anthropic].api_key` |
 | `OPENAI_API_KEY` | `[openai].api_key` |
+| `ANTHROPIC_API_KEY` | `[anthropic].api_key` |
 | `TELEGRAM_BOT_TOKEN` | `[telegram].bot_token` |
 | `BRAVE_SEARCH_API_KEY` | `[brave_search].api_key` |
 | `SENTRY_DSN` | `[sentry].dsn` |
@@ -119,30 +121,31 @@ Environment variables take precedence over config file values.
 
 ## Minimal Configuration
 
-Ash requires both Anthropic (for the LLM) and OpenAI (for memory embeddings) API keys. The minimal config:
+Ash requires an OpenAI API key for both the LLM and memory embeddings. The minimal config:
 
 ```toml
-[anthropic]
-api_key = "sk-ant-..."
-
 [openai]
 api_key = "sk-..."
 
 [models.default]
-provider = "anthropic"
-model = "claude-haiku-4-5"
+provider = "openai"
+model = "gpt-5.2"
 
 [embeddings]
 provider = "openai"
 model = "text-embedding-3-small"
 ```
 
-For a better experience, add a "sonnet" alias for complex tasks:
+For a better experience, add a "mini" alias for lightweight tasks and "codex" for coding:
 
 ```toml
-[models.sonnet]
-provider = "anthropic"
-model = "claude-sonnet-4-5"
+[models.mini]
+provider = "openai"
+model = "gpt-5-mini"
+
+[models.codex]
+provider = "openai"
+model = "gpt-5.2-codex"
 ```
 
 ## Configuration Commands

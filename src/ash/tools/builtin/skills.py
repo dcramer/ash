@@ -16,14 +16,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Built-in skills that are handled specially (not loaded from SKILL.md files)
-BUILTIN_SKILLS = {
-    "claude-code": (
-        "Delegate tasks to Claude Code CLI with full permissions. "
-        "Each invocation is a fresh conversation. To continue a previous task, "
-        "have Claude Code write output to a file, then reference it in the next "
-        "prompt using @filename syntax."
-    ),
-}
+BUILTIN_SKILLS: dict[str, str] = {}
 
 # Wrapper guidance prepended to all skill system prompts
 SKILL_AGENT_WRAPPER = """You are a skill executor. Your job is to run the skill instructions below and report results.
@@ -241,51 +234,6 @@ class UseSkillTool(Tool):
                 )
         return env
 
-    async def _execute_claude_code(
-        self,
-        message: str,
-        context: ToolContext | None,
-    ) -> ToolResult:
-        """Execute the claude-code built-in skill.
-
-        This skill delegates to the Claude Code CLI with full permissions.
-        Model is read from [models.claude-code].model config.
-        """
-        from ash.agents.builtin.claude_code import ClaudeCodeAgent
-
-        skill_config = self._config.skills.get("claude-code")
-
-        if skill_config and not skill_config.enabled:
-            return ToolResult.error("Skill 'claude-code' is disabled in config")
-
-        # Get model from [models.claude-code] if configured, default to opus
-        if "claude-code" in self._config.models:
-            model = self._config.models["claude-code"].model
-        else:
-            model = "opus"
-
-        agent = ClaudeCodeAgent()
-
-        if context:
-            agent_context = AgentContext.from_tool_context(context)
-        else:
-            agent_context = AgentContext()
-
-        logger.info(
-            "skill_invoking",
-            extra={"skill.name": "claude-code", "input.preview": message[:100]},
-        )
-
-        result = await agent.execute_passthrough(message, agent_context, model=model)
-
-        if result.is_error:
-            return ToolResult.error(result.content)
-
-        return ToolResult.success(
-            format_skill_result(result.content, "claude-code"),
-            skill="claude-code",
-        )
-
     async def execute(
         self,
         input_data: dict[str, Any],
@@ -300,10 +248,6 @@ class UseSkillTool(Tool):
 
         if not message:
             return ToolResult.error("Missing required field: message")
-
-        # Handle built-in skills specially
-        if skill_name == "claude-code":
-            return await self._execute_claude_code(message, context)
 
         if not self._registry.has(skill_name):
             self._registry.reload_workspace(self._config.workspace)

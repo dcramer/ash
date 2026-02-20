@@ -69,5 +69,5 @@ def get_default_config() -> AshConfig:
     from ash.config.models import ModelConfig
 
     return AshConfig(
-        models={"default": ModelConfig(provider="anthropic", model="claude-haiku-4-5")}
+        models={"default": ModelConfig(provider="openai", model="gpt-5.2")}
     )

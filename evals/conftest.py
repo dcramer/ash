@@ -15,10 +15,10 @@ load_dotenv(_project_root / ".env.local", override=True)
 
 # Handle raw API key in .env.local (no KEY= prefix)
 _env_local = _project_root / ".env.local"
-if _env_local.exists() and not os.environ.get("ANTHROPIC_API_KEY"):
+if _env_local.exists() and not os.environ.get("OPENAI_API_KEY"):
     content = _env_local.read_text().strip()
     if content and "=" not in content:
-        os.environ["ANTHROPIC_API_KEY"] = content
+        os.environ["OPENAI_API_KEY"] = content
 
 from ash.config import AshConfig
 from ash.config.models import (
@@ -28,7 +28,7 @@ from ash.config.models import (
 )
 from ash.config.workspace import Workspace, WorkspaceLoader
 from ash.core.agent import AgentComponents, create_agent
-from ash.llm import AnthropicProvider, LLMProvider
+from ash.llm import LLMProvider, OpenAIProvider
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -86,15 +86,15 @@ def _isolate_ash_home(
 
 @pytest.fixture
 def real_llm() -> LLMProvider:
-    """Create a real Anthropic LLM provider.
+    """Create a real OpenAI LLM provider.
 
-    Requires ANTHROPIC_API_KEY environment variable.
+    Requires OPENAI_API_KEY environment variable.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        pytest.skip("ANTHROPIC_API_KEY not set")
+        pytest.skip("OPENAI_API_KEY not set")
 
-    return AnthropicProvider(api_key=api_key)
+    return OpenAIProvider(api_key=api_key)
 
 
 @pytest.fixture
@@ -156,13 +156,13 @@ def eval_config(eval_workspace_path: Path, tmp_path: Path) -> AshConfig:
         workspace=eval_workspace_path,
         models={
             "default": ModelConfig(
-                provider="anthropic",
-                model="claude-sonnet-4-5",
+                provider="openai",
+                model="gpt-5.2",
                 temperature=0.7,
             ),
-            "haiku": ModelConfig(
-                provider="anthropic",
-                model="claude-haiku-4-5",
+            "mini": ModelConfig(
+                provider="openai",
+                model="gpt-5-mini",
                 temperature=0,
             ),
         },
@@ -201,9 +201,9 @@ async def eval_agent(
     from ash.rpc.server import RPCServer
     from ash.scheduling import ScheduleStore
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        pytest.skip("ANTHROPIC_API_KEY not set")
+        pytest.skip("OPENAI_API_KEY not set")
 
     components = await create_agent(
         config=eval_config,
@@ -235,13 +235,13 @@ def eval_memory_config(eval_workspace_path: Path, tmp_path: Path) -> AshConfig:
         workspace=eval_workspace_path,
         models={
             "default": ModelConfig(
-                provider="anthropic",
-                model="claude-sonnet-4-5",
+                provider="openai",
+                model="gpt-5.2",
                 temperature=0.7,
             ),
-            "haiku": ModelConfig(
-                provider="anthropic",
-                model="claude-haiku-4-5",
+            "mini": ModelConfig(
+                provider="openai",
+                model="gpt-5-mini",
                 temperature=0,
             ),
         },
@@ -270,7 +270,7 @@ async def eval_memory_agent(
     can call back into the real memory pipeline over a Unix socket.
 
     File stores are isolated via the _isolate_ash_home autouse fixture.
-    Requires both ANTHROPIC_API_KEY and OPENAI_API_KEY.
+    Requires OPENAI_API_KEY.
     """
     from ash.config.paths import (
         get_rpc_socket_path,
@@ -282,9 +282,9 @@ async def eval_memory_agent(
     from ash.rpc.server import RPCServer
     from ash.scheduling import ScheduleStore
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        pytest.skip("ANTHROPIC_API_KEY not set")
+        pytest.skip("OPENAI_API_KEY not set")
 
     components = await create_agent(
         config=eval_memory_config,

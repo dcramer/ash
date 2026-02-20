@@ -31,7 +31,7 @@ class EvalConfig:
     """
 
     # Judge configuration
-    judge_model: str = "claude-sonnet-4-5"
+    judge_model: str = "gpt-5.2"
     judge_temperature: float = 0.0
     judge_max_tokens: int = 1024
 

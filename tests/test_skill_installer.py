@@ -324,8 +324,8 @@ class TestConfigWriter:
         config_path.write_text(
             """# My config file
 [models.default]
-provider = "anthropic"
-model = "claude-haiku-4-5"
+provider = "openai"
+model = "gpt-5.2"
 
 [skills.research]
 enabled = true

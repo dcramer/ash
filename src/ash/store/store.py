@@ -111,7 +111,7 @@ async def create_store(
     embedding_model: str | None = None,
     embedding_provider: str = "openai",
     max_entries: int | None = None,
-    llm_provider: str = "anthropic",
+    llm_provider: str = "openai",
 ) -> Store:
     """Create a fully-wired Store.
 
