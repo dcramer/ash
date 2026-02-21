@@ -278,7 +278,7 @@ async def create_store(
             extra={
                 "count": missing_provenance,
                 "memory.ids": sample_ids,
-                "repair.command": "ash memory doctor backfill-learned-in --force",
+                "repair.command": "ash memory doctor prune-missing-provenance --force",
             },
         )
     else:
