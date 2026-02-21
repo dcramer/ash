@@ -294,7 +294,7 @@ class ResponseFinalizer:
         await self._session_manager.add_assistant_message(
             content=response_text,
             token_count=estimate_tokens(response_text),
-            metadata={"bot_response_id": sent_message_id} if sent_message_id else None,
+            metadata={"external_id": sent_message_id} if sent_message_id else None,
         )
 
     async def _persist_tool_call(
