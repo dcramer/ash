@@ -45,10 +45,10 @@ if TYPE_CHECKING:
 
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
-    from ash.memory import MemoryExtractor, RetrievedContext
+    from ash.memory.extractor import MemoryExtractor
     from ash.providers.base import IncomingMessage
     from ash.store.store import Store
-    from ash.store.types import PersonEntry
+    from ash.store.types import PersonEntry, RetrievedContext
 
 logger = logging.getLogger(__name__)
 
@@ -1066,7 +1066,7 @@ async def create_agent(
     from ash.agents.builtin import register_builtin_agents
     from ash.core.prompt import RuntimeInfo
     from ash.llm import create_registry
-    from ash.memory import MemoryExtractor
+    from ash.memory.extractor import MemoryExtractor
     from ash.sandbox import SandboxExecutor
     from ash.sandbox.packages import build_setup_command, collect_skill_packages
     from ash.skills import SkillRegistry

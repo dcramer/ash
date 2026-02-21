@@ -11,8 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ash.llm.types import CompletionResponse, Message, Role, Usage
-from ash.memory import MemoryExtractor
-from ash.memory.extractor import SpeakerInfo
+from ash.memory.extractor import MemoryExtractor, SpeakerInfo
 from ash.store.types import MemoryType
 
 

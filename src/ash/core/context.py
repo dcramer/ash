@@ -12,9 +12,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ash.memory import RetrievedContext
     from ash.store.store import Store
-    from ash.store.types import PersonEntry
+    from ash.store.types import PersonEntry, RetrievedContext
 
 
 logger = logging.getLogger(__name__)

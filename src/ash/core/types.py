@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from ash.core.agent import Agent
     from ash.core.prompt import SystemPromptBuilder
     from ash.llm import LLMProvider
-    from ash.memory import MemoryExtractor
+    from ash.memory.extractor import MemoryExtractor
     from ash.providers.base import IncomingMessage
     from ash.sandbox import SandboxExecutor
     from ash.skills import SkillRegistry
