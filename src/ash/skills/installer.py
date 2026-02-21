@@ -170,11 +170,6 @@ class SkillInstaller:
             if subdir.is_dir() and (subdir / "SKILL.md").exists():
                 skills.append(subdir.name)
 
-        # Check for *.md files with frontmatter (legacy)
-        for md_file in path.glob("*.md"):
-            if md_file.name != "README.md":
-                skills.append(md_file.stem)
-
         return skills
 
     def _discover_all_skills(self, base_path: Path) -> list[str]:
