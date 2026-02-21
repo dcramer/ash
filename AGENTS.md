@@ -72,6 +72,7 @@ Evals are **end-to-end behavioral tests** using real LLM calls — they're slow 
 
 - Cases: `evals/cases/*.yaml` — Tests: `evals/test_*.py` (`@pytest.mark.eval`)
 - Run: `uv run pytest evals/ -v -s -m eval` (requires `ANTHROPIC_API_KEY` + `OPENAI_API_KEY`)
+- Run negative-tag evals only: `uv run python -m evals run --tag negative`
 
 ## Plan Mode
 
