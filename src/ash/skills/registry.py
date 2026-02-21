@@ -180,20 +180,6 @@ class SkillRegistry:
                             },
                         )
 
-        for md_file in skills_dir.glob("*.md"):
-            try:
-                self._load_markdown_skill(
-                    md_file,
-                    source_type=source_type,
-                    source_repo=source_repo,
-                    source_ref=source_ref,
-                )
-            except Exception as e:
-                logger.warning(
-                    "skill_load_failed",
-                    extra={"file.path": str(md_file), "error.message": str(e)},
-                )
-
         count_loaded = len(self._skills) - count_before
         if count_loaded > 0:
             logger.info(

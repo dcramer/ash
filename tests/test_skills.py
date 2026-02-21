@@ -235,8 +235,8 @@ Convert and process media files.
         skill = registry.get("media")
         assert skill.packages == ["ffmpeg", "imagemagick"]
 
-    def test_discover_flat_markdown(self, tmp_path: Path):
-        """Flat markdown files also supported."""
+    def test_discover_flat_markdown_ignored(self, tmp_path: Path):
+        """Flat markdown files are ignored (directory skills only)."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
 
@@ -251,8 +251,8 @@ Help the user.
 
         registry = SkillRegistry()
         registry.discover(tmp_path, include_bundled=False)
-        assert len(registry) == 1
-        assert registry.has("helper")
+        assert len(registry) == 0
+        assert not registry.has("helper")
 
     def test_discover_yaml_skills(self, tmp_path: Path):
         """YAML skill files are ignored (markdown-only skills)."""
