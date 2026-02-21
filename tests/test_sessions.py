@@ -131,6 +131,33 @@ class TestParseEntry:
                 }
             )
 
+    def test_message_entry_requires_dict_metadata(self):
+        with pytest.raises(TypeError, match="message metadata must be a dict"):
+            parse_entry(
+                {
+                    "type": "message",
+                    "id": "m1",
+                    "role": "user",
+                    "content": "hello",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                    "metadata": ["not", "a", "dict"],
+                }
+            )
+
+    def test_message_entry_requires_dict_content_blocks(self):
+        with pytest.raises(
+            TypeError, match="message content blocks must be dict objects"
+        ):
+            parse_entry(
+                {
+                    "type": "message",
+                    "id": "m1",
+                    "role": "assistant",
+                    "content": ["not-a-dict-block"],
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                }
+            )
+
 
 class TestSessionWriter:
     """Integration tests for SessionWriter."""

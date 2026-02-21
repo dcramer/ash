@@ -221,16 +221,26 @@ class MessageEntry:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MessageEntry:
+        content = data["content"]
+        if isinstance(content, list) and not all(
+            isinstance(block, dict) for block in content
+        ):
+            raise TypeError("message content blocks must be dict objects")
+
+        metadata = data.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise TypeError("message metadata must be a dict")
+
         return cls(
             id=data["id"],
             role=data["role"],
-            content=data["content"],
+            content=content,
             created_at=_parse_datetime(data["created_at"]),
             token_count=data.get("token_count"),
             user_id=data.get("user_id"),
             username=data.get("username"),
             display_name=data.get("display_name"),
-            metadata=data.get("metadata"),
+            metadata=metadata,
             agent_session_id=data.get("agent_session_id"),
             parent_id=data.get("parent_id"),
         )
