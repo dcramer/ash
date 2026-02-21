@@ -19,6 +19,7 @@ from ash.cli.console import (
     success,
     warning,
 )
+from ash.cli.doctor_utils import render_doctor_preview, render_force_required
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
@@ -153,13 +154,11 @@ async def _run_people_action(
     elif action == "doctor":
         subcommand = target  # ash people doctor <subcommand>
         if subcommand is None:
-            console.print("[bold]People Doctor Plan (preview only)[/bold]")
-            console.print("No changes were made.")
-            console.print(
-                "Run one subcommand explicitly with [cyan]--force[/cyan] to apply:"
+            render_doctor_preview(
+                title="People Doctor Plan",
+                subcommands=["duplicates", "broken-merges", "orphans", "all"],
+                example="ash people doctor duplicates --force",
             )
-            console.print("- duplicates, broken-merges, orphans, all")
-            console.print("Example: [cyan]ash people doctor duplicates --force[/cyan]")
             return
 
         valid_subcommands = {"duplicates", "broken-merges", "orphans", "all"}
@@ -171,7 +170,7 @@ async def _run_people_action(
             raise typer.Exit(1)
 
         if not force:
-            error("People doctor subcommands are mutating. Re-run with --force.")
+            render_force_required("People doctor")
             raise typer.Exit(1)
 
         await _people_doctor(config, force=True, subcommand=subcommand)

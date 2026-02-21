@@ -387,6 +387,9 @@ class TestDoctorCommand:
         assert "Ash Doctor" in result.stdout
         assert "Summary:" in result.stdout
         assert "Doctor checks passed" in result.stdout
+        assert "Doctor Commands" in result.stdout
+        assert "ash memory doctor" in result.stdout
+        assert "ash people doctor" in result.stdout
 
     def test_doctor_reports_warnings_for_stale_pid_and_bad_schedule(
         self, cli_runner, monkeypatch, tmp_path

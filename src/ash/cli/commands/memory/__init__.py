@@ -9,6 +9,7 @@ import typer
 
 from ash.cli.console import console, error
 from ash.cli.context import get_config
+from ash.cli.doctor_utils import render_doctor_preview, render_force_required
 
 
 def register(app: typer.Typer) -> None:
@@ -303,17 +304,25 @@ async def _run_memory_action(
 
         subcommand = entry_id  # positional arg: ash memory doctor <sub>
         if subcommand is None:
-            console.print("[bold]Memory Doctor Plan (preview only)[/bold]")
-            console.print("No changes were made.")
-            console.print(
-                "Run one subcommand explicitly with [cyan]--force[/cyan] to apply:"
+            render_doctor_preview(
+                title="Memory Doctor Plan",
+                subcommands=[
+                    "embed-missing",
+                    "prune-missing-provenance",
+                    "provenance",
+                    "normalize-semantics",
+                    "self-facts",
+                    "backfill-subjects",
+                    "attribution",
+                    "fix-names",
+                    "reclassify",
+                    "quality",
+                    "dedup",
+                    "contradictions",
+                    "all",
+                ],
+                example="ash memory doctor quality --force",
             )
-            console.print(
-                "- embed-missing, prune-missing-provenance (alias: provenance), "
-                "normalize-semantics, self-facts, backfill-subjects, attribution, "
-                "fix-names, reclassify, quality, dedup, contradictions, all"
-            )
-            console.print("Example: [cyan]ash memory doctor quality --force[/cyan]")
             return
 
         known_subcommands = {
@@ -341,9 +350,7 @@ async def _run_memory_action(
             raise typer.Exit(1)
 
         if not force:
-            error(
-                "Memory doctor subcommands are mutating. Re-run with --force to apply."
-            )
+            render_force_required("Memory doctor")
             raise typer.Exit(1)
 
         if not store:

@@ -99,6 +99,17 @@ def _render_doctor_report(findings: list[Finding]) -> None:
         warning("Doctor found non-blocking issues")
     else:
         success("Doctor checks passed")
+
+    console.print("\n[bold]Doctor Commands[/bold]")
+    console.print(
+        "- [cyan]ash doctor[/cyan]: system/runtime/data integrity checks (read-only)"
+    )
+    console.print(
+        "- [cyan]ash memory doctor[/cyan]: memory repair flows (preview by default)"
+    )
+    console.print(
+        "- [cyan]ash people doctor[/cyan]: people repair flows (preview by default)"
+    )
     dim("Read-only checks. No changes were made.")
 
 
