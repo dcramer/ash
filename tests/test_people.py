@@ -13,6 +13,7 @@ Tests focus on:
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from ash.core.filters import build_owner_matchers, is_owner_name
 from ash.graph.graph import KnowledgeGraph
@@ -281,21 +282,29 @@ class TestAliasProvenance:
         assert person.aliases[0].value == "my wife"
         assert person.aliases[0].added_by == "dcramer"
 
-    async def test_backward_compat_plain_string_aliases(self, graph_store: Store):
-        """Test that old plain-string aliases are handled correctly."""
-        person = await graph_store.create_person(
-            created_by="user-1",
-            name="Sarah",
-        )
-        await graph_store.add_alias(person.id, "my wife", added_by="user-1")
-        await graph_store.add_alias(person.id, "honey", added_by="user-1")
+    def test_rejects_plain_string_aliases_in_payload(self):
+        """Structured alias objects are required in persisted payloads."""
+        with pytest.raises(ValidationError):
+            PersonEntry.from_dict(
+                {
+                    "id": "person-1",
+                    "created_by": "user-1",
+                    "name": "Sarah",
+                    "aliases": ["my wife"],
+                }
+            )
 
-        refreshed = await graph_store.get_person(person.id)
-        assert refreshed is not None
-        assert len(refreshed.aliases) == 2
-        alias_values = {a.value for a in refreshed.aliases}
-        assert "my wife" in alias_values
-        assert "honey" in alias_values
+    def test_rejects_plain_string_relationships_in_payload(self):
+        """Structured relationship objects are required in persisted payloads."""
+        with pytest.raises(ValidationError):
+            PersonEntry.from_dict(
+                {
+                    "id": "person-1",
+                    "created_by": "user-1",
+                    "name": "Sarah",
+                    "relationships": ["wife"],
+                }
+            )
 
 
 class TestRelationshipProvenance:

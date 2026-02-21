@@ -394,18 +394,6 @@ class PersonEntry(BaseModel):
     updated_at: datetime | None = None
     metadata: dict[str, Any] | None = None
 
-    @field_validator("aliases", mode="before")
-    @classmethod
-    def _coerce_aliases(cls, v: list | None) -> list:
-        """Handle legacy format where aliases were plain strings."""
-        return [{"value": a} if isinstance(a, str) else a for a in (v or [])]
-
-    @field_validator("relationships", mode="before")
-    @classmethod
-    def _coerce_relationships(cls, v: list | None) -> list:
-        """Handle legacy format where relationships were plain strings."""
-        return [{"relationship": r} if isinstance(r, str) else r for r in (v or [])]
-
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
         d = self.model_dump(mode="json", exclude_none=True)
