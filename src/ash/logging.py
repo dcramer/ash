@@ -430,6 +430,10 @@ class ComponentFormatter(logging.Formatter):
             "context",
         }
     )
+    _DEFAULT_EXTRA_MAX_LEN = 200
+    _EXTRA_MAX_LEN_BY_KEY: dict[str, int] = {
+        "error.message": 600,
+    }
 
     def format(self, record: logging.LogRecord) -> str:
         # Extract component from logger name
@@ -469,8 +473,13 @@ class ComponentFormatter(logging.Formatter):
             if isinstance(value, dict | list):
                 continue
             display = str(value)
-            if len(display) > 200:
-                display = display[:197] + "..."
+            max_len = self._EXTRA_MAX_LEN_BY_KEY.get(key, self._DEFAULT_EXTRA_MAX_LEN)
+            if key.endswith(".preview"):
+                max_len = max(max_len, 300)
+            if key.endswith(".ids"):
+                max_len = max(max_len, 600)
+            if len(display) > max_len:
+                display = display[: max_len - 3] + "..."
             extra_parts.append(f"{key}={display}")
 
         if extra_parts:

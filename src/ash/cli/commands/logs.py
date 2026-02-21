@@ -44,6 +44,21 @@ HIDDEN_FIELDS: set[str] = {
     "duration_ms",
 }
 
+DEFAULT_EXTRA_MAX_LEN = 120
+EXTRA_MAX_LEN_BY_KEY: dict[str, int] = {
+    "error.message": 320,
+}
+
+
+def _get_extra_max_len(key: str) -> int:
+    """Return max display length for a given extra field key."""
+    max_len = EXTRA_MAX_LEN_BY_KEY.get(key, DEFAULT_EXTRA_MAX_LEN)
+    if key.endswith(".preview"):
+        return max(max_len, 180)
+    if key.endswith(".ids"):
+        return max(max_len, 320)
+    return max_len
+
 
 def register(app: typer.Typer) -> None:
     """Register the logs command."""
@@ -389,8 +404,9 @@ def _format_extras(entry: dict[str, Any]) -> str:
         display_key = FIELD_ALIASES.get(key, key)
 
         val_str = str(value)
-        if len(val_str) > 40:
-            val_str = val_str[:37] + "..."
+        max_len = _get_extra_max_len(key)
+        if len(val_str) > max_len:
+            val_str = val_str[: max_len - 3] + "..."
 
         parts.append(f"{display_key}={val_str}")
 

@@ -511,6 +511,31 @@ class TestComponentFormatter:
             result = formatter.format(record)
             assert "@debug-self" in result
 
+    def test_extra_field_truncation_is_field_aware(self):
+        import logging
+
+        from ash.logging import ComponentFormatter
+
+        formatter = ComponentFormatter("%(component)s: %(message)s")
+        record = logging.LogRecord(
+            name="ash.core",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="event",
+            args=(),
+            exc_info=None,
+        )
+        record.some_field = "x" * 250
+        record.error_message_key = "y" * 250
+        record.__dict__["error.message"] = "z" * 500
+
+        result = formatter.format(record)
+        assert "some_field=" in result
+        assert ("some_field=" + ("x" * 197) + "...") in result
+        # error.message has a larger budget and should not be clipped here
+        assert ("error.message=" + ("z" * 500)) in result
+
 
 class TestGetContextFields:
     """Tests for _get_context_fields helper."""
