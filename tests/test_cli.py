@@ -305,6 +305,7 @@ class TestAppHelp:
         result = cli_runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         assert "serve" in result.stdout
+        assert "doctor" in result.stdout
         assert "chat" in result.stdout
         assert "config" in result.stdout
         assert "memory" in result.stdout
@@ -313,6 +314,51 @@ class TestAppHelp:
         assert "sandbox" in result.stdout
         assert "stats" in result.stdout
         assert "upgrade" in result.stdout
+
+
+class TestDoctorCommand:
+    """Tests for `ash doctor`."""
+
+    def test_doctor_reports_ok_on_clean_home(self, cli_runner, monkeypatch, tmp_path):
+        ash_home = tmp_path / ".ash"
+        ash_home.mkdir(parents=True, exist_ok=True)
+        for name in ("graph", "sessions", "chats", "logs", "run", "workspace"):
+            (ash_home / name).mkdir(exist_ok=True)
+
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = cli_runner.invoke(app, ["doctor"])
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert result.exit_code == 0
+        assert "Ash Doctor" in result.stdout
+        assert "Summary:" in result.stdout
+        assert "Doctor checks passed" in result.stdout
+
+    def test_doctor_reports_warnings_for_stale_pid_and_bad_schedule(
+        self, cli_runner, monkeypatch, tmp_path
+    ):
+        ash_home = tmp_path / ".ash"
+        run_dir = ash_home / "run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "ash.pid").write_text("99999999\n")
+        (ash_home / "schedule.jsonl").write_text("{bad-json}\n")
+
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = cli_runner.invoke(app, ["doctor"])
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert result.exit_code == 0
+        assert "stale pid file" in result.stdout
+        assert "invalid JSONL lines" in result.stdout
+        assert "Doctor found non-blocking issues" in result.stdout
 
 
 class TestStatsCommand:

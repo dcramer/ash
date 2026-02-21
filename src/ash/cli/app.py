@@ -6,6 +6,7 @@ from ash.cli.commands import (
     auth,
     chat,
     config,
+    doctor,
     graph,
     init,
     logs,
@@ -38,6 +39,7 @@ def help(ctx: typer.Context) -> None:
 # Register commands from modules
 auth.register(app)
 init.register(app)
+doctor.register(app)
 serve.register(app)
 chat.register(app)
 config.register(app)
