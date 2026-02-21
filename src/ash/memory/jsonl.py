@@ -130,25 +130,3 @@ class TypedJSONL[T: Serializable]:
         if not self.path.exists():
             return None
         return self.path.stat().st_mtime
-
-
-# Backward compatibility aliases
-def MemoryJSONL(path: Path) -> TypedJSONL:
-    """Create a TypedJSONL for MemoryEntry."""
-    from ash.store.types import MemoryEntry
-
-    return TypedJSONL(path, MemoryEntry)
-
-
-def PersonJSONL(path: Path) -> TypedJSONL:
-    """Create a TypedJSONL for PersonEntry."""
-    from ash.store.types import PersonEntry
-
-    return TypedJSONL(path, PersonEntry)
-
-
-def EmbeddingJSONL(path: Path) -> TypedJSONL:
-    """Create a TypedJSONL for EmbeddingRecord."""
-    from ash.store.types import EmbeddingRecord
-
-    return TypedJSONL(path, EmbeddingRecord)

@@ -1,7 +1,4 @@
-"""Person operations split into focused modules.
-
-Re-exports PeopleOpsMixin for backward compatibility with store.py imports.
-"""
+"""Person operations split into focused modules."""
 
 from ash.store.people.crud import PeopleCrudMixin
 from ash.store.people.dedup import PeopleDedupMixin
@@ -24,9 +21,6 @@ class PeopleOpsMixin(
     - resolution.py: find_person, find_person_for_speaker, resolve_or_create_person
     - dedup.py: merge_people, find_dedup_candidates, _follow_merge_chain
     """
-
-    # Expose normalize_reference as static method for backward compatibility
-    _normalize_reference = staticmethod(normalize_reference)
 
 
 __all__ = [

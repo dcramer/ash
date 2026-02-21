@@ -186,29 +186,12 @@ async def create_store(
 
     Loads KnowledgeGraph from JSONL, NumpyVectorIndex from .npy files.
     """
-    from ash.graph.backfill import backfill_edges_from_raw
     from ash.graph.persistence import hydrate_graph
 
     # Load raw JSONL and hydrate into typed graph
     persistence = GraphPersistence(graph_dir)
     raw_data = await persistence.load_raw()
     graph = hydrate_graph(raw_data)
-
-    # Backfill edges from legacy FK fields if edges.jsonl is empty
-    if not graph.edges and (graph.memories or graph.people or graph.users):
-        result = backfill_edges_from_raw(
-            graph,
-            raw_data["raw_memories"],
-            raw_data["raw_people"],
-            raw_data["raw_users"],
-        )
-        if result.created > 0:
-            logger.info("edges_backfilled", extra={"count": result.created})
-            if result.skipped:
-                for msg in result.skipped:
-                    logger.warning("backfill_warning", extra={"error.message": msg})
-            persistence.mark_dirty("edges")
-            await persistence.flush(graph)
 
     # Load vector index
     embeddings_dir = graph_dir / "embeddings"

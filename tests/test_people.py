@@ -19,6 +19,7 @@ from ash.graph.graph import KnowledgeGraph
 from ash.graph.persistence import GraphPersistence
 from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.processing import extract_relationship_term
+from ash.store.people.helpers import normalize_reference
 from ash.store.store import Store
 from ash.store.types import AliasEntry, PersonEntry, RelationshipClaim
 
@@ -690,23 +691,23 @@ class TestSerialization:
 
 
 class TestNormalizeReference:
-    """Tests for _normalize_reference prefix stripping."""
+    """Tests for normalize_reference prefix stripping."""
 
     def test_strips_my_prefix(self):
-        assert Store._normalize_reference("my wife") == "wife"
+        assert normalize_reference("my wife") == "wife"
 
     def test_strips_the_prefix(self):
-        assert Store._normalize_reference("the boss") == "boss"
+        assert normalize_reference("the boss") == "boss"
 
     def test_strips_at_prefix(self):
-        assert Store._normalize_reference("@dcramer") == "dcramer"
+        assert normalize_reference("@dcramer") == "dcramer"
 
     def test_strips_my_then_at(self):
         """After stripping 'my ', '@dcramer' should also strip '@'."""
-        assert Store._normalize_reference("my @dcramer") == "dcramer"
+        assert normalize_reference("my @dcramer") == "dcramer"
 
     def test_no_prefix(self):
-        assert Store._normalize_reference("sarah") == "sarah"
+        assert normalize_reference("sarah") == "sarah"
 
 
 class TestParsePersonReference:
