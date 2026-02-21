@@ -19,7 +19,7 @@ def register(app: typer.Typer) -> None:
         action: Annotated[
             str | None,
             typer.Argument(
-                help="Action: list, search, show, add, remove, clear, gc, compact, rebuild-index, history, doctor, forget"
+                help="Action: list, search, show, add, remove, clear, gc, compact, rebuild-index, stats, history, doctor, forget"
             ),
         ] = None,
         target: Annotated[
@@ -136,6 +136,7 @@ def register(app: typer.Typer) -> None:
             ash memory clear                   # Clear all memory entries
             ash memory gc                      # Garbage collect expired/superseded
             ash memory rebuild-index           # Rebuild vector index from JSONL
+            ash memory stats                   # Show memory health/consistency stats
             ash memory history <id>            # Show supersession chain
             ash memory forget <person-id>      # Archive all memories about a person
         """
@@ -195,6 +196,7 @@ async def _run_memory_action(
     from ash.cli.commands.memory.mutate import memory_add, memory_clear, memory_remove
     from ash.cli.commands.memory.search import memory_search
     from ash.cli.commands.memory.show import memory_history, memory_show
+    from ash.cli.commands.memory.stats import memory_stats
 
     if scope and scope not in ("personal", "shared", "global"):
         error("--scope must be: personal, shared, or global")
@@ -250,6 +252,11 @@ async def _run_memory_action(
             error("Rebuild-index requires [embeddings] configuration")
             raise typer.Exit(1)
         await memory_rebuild_index(store)
+    elif action == "stats":
+        if not store:
+            error("Memory stats requires [embeddings] configuration")
+            raise typer.Exit(1)
+        await memory_stats(store)
     elif action == "show":
         if not entry_id:
             error("Usage: ash memory show <id>")
@@ -327,6 +334,6 @@ async def _run_memory_action(
     else:
         error(f"Unknown action: {action}")
         console.print(
-            "Valid actions: list, search, show, add, remove, clear, gc, compact, rebuild-index, history, forget, doctor"
+            "Valid actions: list, search, show, add, remove, clear, gc, compact, rebuild-index, stats, history, forget, doctor"
         )
         raise typer.Exit(1)

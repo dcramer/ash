@@ -197,7 +197,9 @@ class Store(
         await self._persistence.update_state(
             active_memory_id_hash=self._active_memory_id_hash(),
             vector_id_hash=self._vector_id_hash(),
+            vector_removed_extra_count=len(extra_ids),
             vector_missing_count=len(missing_ids),
+            consistency_checked_at=datetime.now(UTC).isoformat(),
         )
         return len(extra_ids), len(missing_ids)
 
