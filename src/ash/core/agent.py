@@ -27,6 +27,8 @@ from ash.core.types import (
     CompactionInfo,
     GetSteeringMessagesCallback,
     OnToolStartCallback,
+    PromptContextAugmenter,
+    SandboxEnvAugmenter,
     _MessageSetup,
     _StreamToolAccumulator,
 )
@@ -133,6 +135,8 @@ class Agent:
         config: AgentConfig | None = None,
         graph_store: Store | None = None,
         mount_prefix: str = "/ash",
+        prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
+        sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
     ):
         """Initialize agent.
 
@@ -145,6 +149,8 @@ class Agent:
             config: Agent configuration.
             graph_store: Unified graph store (memory + people).
             mount_prefix: Sandbox mount prefix for container paths.
+            prompt_context_augmenters: Optional hooks for prompt context augmentation.
+            sandbox_env_augmenters: Optional hooks for sandbox environment augmentation.
         """
         self._llm = llm
         self._tools = tool_executor
@@ -156,7 +162,30 @@ class Agent:
         self._people: Store | None = graph_store
         self._config = config or AgentConfig()
         self._mount_prefix = mount_prefix
+        self._prompt_context_augmenters = tuple(prompt_context_augmenters or [])
+        self._sandbox_env_augmenters = tuple(sandbox_env_augmenters or [])
         self._last_extraction_time: float | None = None
+
+    def _apply_prompt_context_hooks(
+        self,
+        prompt_context: PromptContext,
+        session: SessionState,
+    ) -> PromptContext:
+        current = prompt_context
+        for hook in self._prompt_context_augmenters:
+            current = hook(current, session)
+        return current
+
+    def _apply_sandbox_env_hooks(
+        self,
+        env: dict[str, str],
+        session: SessionState,
+        effective_user_id: str,
+    ) -> dict[str, str]:
+        current = env
+        for hook in self._sandbox_env_augmenters:
+            current = hook(current, session, effective_user_id)
+        return current
 
     @property
     def system_prompt(self) -> str:
@@ -200,6 +229,7 @@ class Agent:
         is_name_mentioned: bool = False,
         chat_history: list[dict[str, Any]] | None = None,
         bot_name: str | None = None,
+        session: SessionState | None = None,
     ) -> str:
         """Build system prompt with optional memory context."""
         from ash.core.prompt import ChatInfo, SenderInfo
@@ -228,6 +258,8 @@ class Agent:
             has_reply_context=has_reply_context,
             chat_history=chat_history,
         )
+        if session:
+            prompt_context = self._apply_prompt_context_hooks(prompt_context, session)
         return self._prompt_builder.build(prompt_context)
 
     # Tools that are only for interactive subagents, not the main agent
@@ -422,6 +454,7 @@ class Agent:
             is_name_mentioned=ctx.name_mentioned,
             chat_history=ambient_chat_history,
             bot_name=ctx.bot_name,
+            session=session,
         )
 
         system_tokens = estimate_tokens(system_prompt)
@@ -649,6 +682,14 @@ class Agent:
         Returns:
             ToolContext ready for tool execution.
         """
+        env = _build_routing_env(
+            session,
+            setup.effective_user_id,
+            timezone=self._timezone,
+            mount_prefix=self._mount_prefix,
+        )
+        env = self._apply_sandbox_env_hooks(env, session, setup.effective_user_id)
+
         tool_context = ToolContext(
             session_id=session.session_id,
             user_id=setup.effective_user_id,
@@ -656,12 +697,7 @@ class Agent:
             thread_id=session.context.thread_id,
             provider=session.provider,
             metadata=session.context.to_dict(),
-            env=_build_routing_env(
-                session,
-                setup.effective_user_id,
-                timezone=self._timezone,
-                mount_prefix=self._mount_prefix,
-            ),
+            env=env,
             session_manager=session_manager,
             tool_overrides=tool_overrides or {},
         )
@@ -1061,6 +1097,8 @@ async def create_agent(
     workspace: Workspace,
     graph_dir: Path | None = None,
     model_alias: str = "default",
+    prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
+    sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
 ) -> AgentComponents:
     # Harness composition boundary.
     # Spec contract: specs/subsystems.md (Integration Hooks).
@@ -1258,6 +1296,8 @@ async def create_agent(
         memory_extractor=memory_extractor,
         graph_store=graph_store,
         mount_prefix=config.sandbox.mount_prefix,
+        prompt_context_augmenters=prompt_context_augmenters,
+        sandbox_env_augmenters=sandbox_env_augmenters,
         config=AgentConfig(
             model=model_config.model,
             max_tokens=model_config.max_tokens,

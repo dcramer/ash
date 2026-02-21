@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -7,7 +8,7 @@ from ash.config import AshConfig
 from ash.config.models import ModelConfig
 from ash.config.workspace import Workspace
 from ash.core.agent import Agent, AgentConfig
-from ash.core.prompt import SystemPromptBuilder
+from ash.core.prompt import PromptContext, SystemPromptBuilder
 from ash.core.session import SessionState
 from ash.llm.types import (
     Message,
@@ -188,6 +189,60 @@ class TestAgent:
         assert len(response.tool_calls) == 1
         assert response.tool_calls[0]["name"] == "test_tool"
         assert response.tool_calls[0]["is_error"] is False
+
+    async def test_prompt_context_hook_applies_extra_context(self, workspace):
+        mock_llm = MockLLMProvider(
+            responses=[Message(role=Role.ASSISTANT, content="ok")]
+        )
+        registry = ToolRegistry()
+
+        def add_prompt_context(
+            prompt_context: PromptContext, session: SessionState
+        ) -> PromptContext:
+            prompt_context.extra_context["hooked"] = {"session_id": session.session_id}
+            return prompt_context
+
+        agent = Agent(
+            llm=mock_llm,
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
+            prompt_context_augmenters=[add_prompt_context],
+        )
+
+        await agent.process_message("hello", make_session())
+
+        system_prompt = mock_llm.complete_calls[0]["system"]
+        assert "hooked" in system_prompt
+        assert "session_id" in system_prompt
+
+    async def test_sandbox_env_hook_augments_tool_context_env(self, workspace):
+        tool_use_response = Message(
+            role=Role.ASSISTANT,
+            content=[ToolUse(id="tool-1", name="test_tool", input={"arg": "value"})],
+        )
+        final_response = Message(
+            role=Role.ASSISTANT,
+            content="done",
+        )
+        registry = make_tool_registry("test_tool")
+
+        def add_env(
+            env: dict[str, str], session: SessionState, effective_user_id: str
+        ) -> dict[str, str]:
+            env["HOOKED_USER"] = effective_user_id
+            return env
+
+        agent = Agent(
+            llm=MockLLMProvider(responses=[tool_use_response, final_response]),
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
+            sandbox_env_augmenters=[add_env],
+        )
+
+        await agent.process_message("run tool", make_session())
+        tool = cast(MockTool, registry.get("test_tool"))
+        _, context = tool.execute_calls[0]
+        assert context.env["HOOKED_USER"] == "user"
 
     async def test_includes_recent_chat_messages_in_system_prompt(self, workspace):
         mock_llm = MockLLMProvider(

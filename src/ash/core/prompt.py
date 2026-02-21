@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -244,6 +245,7 @@ class SystemPromptBuilder:
             self._build_memory_section(context.memory),
             self._build_conversation_context_section(context),
             self._build_chat_history_section(context),
+            self._build_extra_context_section(context.extra_context),
             self._build_session_section(context),
         ]
 
@@ -384,6 +386,22 @@ class SystemPromptBuilder:
         lines.append("")
 
         return "\n".join(lines)
+
+    def _build_extra_context_section(self, extra_context: dict[str, Any]) -> str:
+        if not extra_context:
+            return ""
+
+        payload = json.dumps(extra_context, indent=2, sort_keys=True)
+        return "\n".join(
+            [
+                "## Integration Context",
+                "",
+                "Structured integration-provided context:",
+                "```json",
+                payload,
+                "```",
+            ]
+        )
 
     def _build_agents_section(self) -> str:
         if not self._agents:

@@ -18,7 +18,8 @@ from ash.llm.types import ToolUse
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.core.agent import Agent
-    from ash.core.prompt import SystemPromptBuilder
+    from ash.core.prompt import PromptContext, SystemPromptBuilder
+    from ash.core.session import SessionState
     from ash.llm import LLMProvider
     from ash.memory.extractor import MemoryExtractor
     from ash.providers.base import IncomingMessage
@@ -35,6 +36,10 @@ OnToolStartCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 # Callback to check for steering messages during tool execution
 # Returns list of IncomingMessage objects, or empty list to continue normally
 GetSteeringMessagesCallback = Callable[[], Awaitable[list["IncomingMessage"]]]
+
+# Integration hook callbacks.
+PromptContextAugmenter = Callable[["PromptContext", "SessionState"], "PromptContext"]
+SandboxEnvAugmenter = Callable[[dict[str, str], "SessionState", str], dict[str, str]]
 
 MAX_TOOL_ITERATIONS = 25
 
