@@ -6,6 +6,7 @@ from ash.integrations.builtin import (
     SchedulingIntegration,
 )
 from ash.integrations.composer import active_integrations, compose_integrations
+from ash.integrations.defaults import DefaultIntegrations, create_default_integrations
 from ash.integrations.runtime import (
     IntegrationContext,
     IntegrationContributor,
@@ -18,6 +19,8 @@ __all__ = [
     "SchedulingIntegration",
     "compose_integrations",
     "active_integrations",
+    "DefaultIntegrations",
+    "create_default_integrations",
     "IntegrationContext",
     "IntegrationContributor",
     "IntegrationRuntime",

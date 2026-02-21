@@ -156,24 +156,21 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
             get_schedule_file,
             get_sessions_path,
         )
-        from ash.integrations import (
-            MemoryIntegration,
-            SchedulingIntegration,
-            active_integrations,
-        )
+        from ash.integrations import active_integrations, create_default_integrations
         from ash.rpc.server import RPCServer
 
-        schedule_integration = SchedulingIntegration(get_schedule_file())
-        contributors = [schedule_integration]
-        if agent_type == "memory":
-            contributors.append(MemoryIntegration())
+        default_integrations = create_default_integrations(
+            mode="eval",
+            include_memory=agent_type == "memory",
+            schedule_file=get_schedule_file(),
+        )
 
         async with active_integrations(
             config=config,
             components=components,
             mode="eval",
             sessions_path=get_sessions_path(),
-            contributors=contributors,
+            contributors=default_integrations.contributors,
         ) as (integration_runtime, integration_context):
             rpc_server = RPCServer(get_rpc_socket_path())
             integration_runtime.register_rpc_methods(rpc_server, integration_context)

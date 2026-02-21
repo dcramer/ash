@@ -76,10 +76,8 @@ async def _run_server(
     )
     from ash.core import create_agent
     from ash.integrations import (
-        MemoryIntegration,
-        RuntimeRPCIntegration,
-        SchedulingIntegration,
         active_integrations,
+        create_default_integrations,
     )
     from ash.providers.telegram import TelegramProvider
     from ash.rpc import RPCServer
@@ -185,8 +183,11 @@ async def _run_server(
         logger.debug("schedule watcher disabled (no providers)")
 
     # Compose integration contributors for runtime wiring.
-    schedule_integration = SchedulingIntegration(
-        get_schedule_file(),
+    default_integrations = create_default_integrations(
+        mode="serve",
+        logs_path=get_logs_path(),
+        schedule_file=get_schedule_file(),
+        include_memory=True,
         timezone=ash_config.timezone,
         senders=senders,
         registrars=registrars,
@@ -197,15 +198,15 @@ async def _run_server(
         components=components,
         mode="serve",
         sessions_path=get_sessions_path(),
-        contributors=[
-            RuntimeRPCIntegration(get_logs_path()),
-            MemoryIntegration(),
-            schedule_integration,
-        ],
+        contributors=default_integrations.contributors,
     ) as (integration_runtime, integration_context):
-        if schedule_integration.store is None:
+        if default_integrations.scheduling is None:
+            raise RuntimeError("schedule integration setup missing")
+        if default_integrations.scheduling.store is None:
             raise RuntimeError("schedule integration setup failed")
-        logger.debug(f"Schedule store: {schedule_integration.store.schedule_file}")
+        logger.debug(
+            f"Schedule store: {default_integrations.scheduling.store.schedule_file}"
+        )
 
         rpc_server: RPCServer | None = None
         try:

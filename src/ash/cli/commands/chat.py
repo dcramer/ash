@@ -97,8 +97,8 @@ async def _run_chat(
     from ash.core import create_agent
     from ash.core.session import SessionState
     from ash.integrations import (
-        MemoryIntegration,
         active_integrations,
+        create_default_integrations,
     )
     from ash.rpc import RPCServer
     from ash.sessions import SessionManager
@@ -170,7 +170,7 @@ async def _run_chat(
             components=components,
             mode="chat",
             sessions_path=get_sessions_path(),
-            contributors=[MemoryIntegration()],
+            contributors=create_default_integrations(mode="chat").contributors,
         ) as (integration_runtime, integration_context):
             # Start RPC server for sandbox memory access
             if components.memory_manager:
