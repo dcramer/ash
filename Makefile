@@ -1,4 +1,4 @@
-.PHONY: setup install lint format typecheck test hooks clean
+.PHONY: setup install dotagents-install lint format typecheck test hooks clean
 
 # Set up development environment
 setup: install hooks
@@ -6,6 +6,11 @@ setup: install hooks
 # Install dependencies
 install:
 	uv sync --all-groups
+	$(MAKE) dotagents-install
+
+# Install/update dotagents configuration
+dotagents-install:
+	npx --yes @sentry/dotagents install
 
 # Install prek hooks
 hooks:

@@ -19,7 +19,7 @@ Full documentation at **https://dcramer.github.io/ash/**
 ## Development
 
 ```bash
-make setup  # Install deps + prek hooks
+make setup  # Install deps + dotagents + prek hooks
 ```
 
 | Command | Purpose |
