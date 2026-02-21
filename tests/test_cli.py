@@ -317,21 +317,56 @@ class TestScheduleCommand:
 class TestPeopleCommand:
     """Tests for `ash people`."""
 
-    def test_people_doctor_default_is_preview_only(self, cli_runner, config_file):
+    def test_people_doctor_defaults_to_all(self, cli_runner, config_file, monkeypatch):
+        calls: list[tuple[bool, str]] = []
+
+        async def _fake_people_doctor(config, force: bool, subcommand: str = "all"):
+            calls.append((force, subcommand))
+
+        monkeypatch.setattr(
+            "ash.cli.commands.people._people_doctor", _fake_people_doctor
+        )
         result = cli_runner.invoke(
             app, ["people", "doctor", "--config", str(config_file)]
         )
         assert result.exit_code == 0
-        assert "preview only" in result.stdout.lower()
-        assert "No changes were made" in result.stdout
+        assert calls == [(False, "all")]
 
-    def test_people_doctor_subcommand_requires_force(self, cli_runner, config_file):
+    def test_people_doctor_subcommand_runs_interactive_without_force(
+        self, cli_runner, config_file, monkeypatch
+    ):
+        calls: list[tuple[bool, str]] = []
+
+        async def _fake_people_doctor(config, force: bool, subcommand: str = "all"):
+            calls.append((force, subcommand))
+
+        monkeypatch.setattr(
+            "ash.cli.commands.people._people_doctor", _fake_people_doctor
+        )
         result = cli_runner.invoke(
             app,
             ["people", "doctor", "duplicates", "--config", str(config_file)],
         )
-        assert result.exit_code == 1
-        assert "--force" in result.stdout
+        assert result.exit_code == 0
+        assert calls == [(False, "duplicates")]
+
+    def test_people_doctor_subcommand_runs_force_mode(
+        self, cli_runner, config_file, monkeypatch
+    ):
+        calls: list[tuple[bool, str]] = []
+
+        async def _fake_people_doctor(config, force: bool, subcommand: str = "all"):
+            calls.append((force, subcommand))
+
+        monkeypatch.setattr(
+            "ash.cli.commands.people._people_doctor", _fake_people_doctor
+        )
+        result = cli_runner.invoke(
+            app,
+            ["people", "doctor", "all", "--force", "--config", str(config_file)],
+        )
+        assert result.exit_code == 0
+        assert calls == [(True, "all")]
 
     def test_people_doctor_unknown_subcommand(self, cli_runner, config_file):
         result = cli_runner.invoke(

@@ -19,7 +19,6 @@ from ash.cli.console import (
     success,
     warning,
 )
-from ash.cli.doctor_utils import render_doctor_preview, render_force_required
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
@@ -152,15 +151,7 @@ async def _run_people_action(
             config, "Delete", lambda gs: _people_delete(gs, target, force)
         )
     elif action == "doctor":
-        subcommand = target  # ash people doctor <subcommand>
-        if subcommand is None:
-            render_doctor_preview(
-                title="People Doctor Plan",
-                subcommands=["duplicates", "broken-merges", "orphans", "all"],
-                example="ash people doctor duplicates --force",
-            )
-            return
-
+        subcommand = target or "all"
         valid_subcommands = {"duplicates", "broken-merges", "orphans", "all"}
         if subcommand not in valid_subcommands:
             error(f"Unknown people doctor subcommand: {subcommand}")
@@ -169,11 +160,7 @@ async def _run_people_action(
             )
             raise typer.Exit(1)
 
-        if not force:
-            render_force_required("People doctor")
-            raise typer.Exit(1)
-
-        await _people_doctor(config, force=True, subcommand=subcommand)
+        await _people_doctor(config, force=force, subcommand=subcommand)
     else:
         error(f"Unknown action: {action}")
         console.print("Valid actions: list, show, search, merge, delete, doctor")
