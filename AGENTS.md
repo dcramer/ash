@@ -34,6 +34,13 @@ Use `/dex-plan` to create tasks from planning docs (specs, roadmaps).
 - Pydantic at boundaries
 - Tests in `tests/`
 
+## Architecture Contract
+
+- Follow `specs/subsystems.md` integration-hooks rules for harness composition.
+- Do not add direct feature wiring branches in runtime entrypoints when an integration hook exists.
+- Keep prompt augmentation structured; prompt text rendering must stay centralized.
+- Add/update architecture guard tests when touching harness boundaries.
+
 ## Skills
 
 | Skill | Purpose |

@@ -83,6 +83,8 @@ async def _run_chat(
     dump_prompt: bool = False,
 ) -> None:
     """Run the chat session asynchronously."""
+    # Runtime harness boundary.
+    # Spec contract: specs/subsystems.md (Integration Hooks).
     from rich.markdown import Markdown
     from rich.panel import Panel
 

@@ -161,6 +161,8 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
     Creates an isolated ASH_HOME, workspace, graph dir, config, agent, and
     RPC server.  Tears everything down on exit.
     """
+    # Eval harness boundary.
+    # Spec contract: specs/subsystems.md (Integration Hooks).
     async with isolated_ash_home() as _home:
         # Workspace
         workspace_id = uuid.uuid4().hex[:8]

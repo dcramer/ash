@@ -140,3 +140,62 @@ For each subsystem:
 - [ ] Tests pass with mocked dependencies
 - [ ] No imports from other subsystems
 - [ ] Consumers import from root, not internal modules
+
+## Integration Hooks
+
+The runtime harness uses integration hooks to keep core wiring light and deterministic.
+
+### Harness responsibilities (MUST)
+
+The harness MAY only:
+
+1. Build base runtime primitives (config, workspace, LLM/tool executors, registries).
+2. Install integration contributors in deterministic order.
+3. Run lifecycle and integration hook pipelines.
+
+The harness MUST NOT encode feature-specific orchestration logic as ad-hoc branches.
+
+### Hook categories
+
+Integration contributors SHOULD expose one or more of:
+
+- `setup`: build/initialize integration state.
+- `on_startup` / `on_shutdown`: runtime lifecycle hooks.
+- `augment_prompt_context`: contribute structured context data.
+- `register_sandbox_cli`: expose sandbox CLI surface.
+- `register_rpc_methods`: register RPC handlers.
+- `on_message_postprocess`: run post-turn integration work.
+
+### Prompt integration rule (MUST)
+
+Prompt hooks MUST contribute structured data only. Prompt rendering remains centralized
+in prompt-building code. Hooks MUST NOT inject prompt text fragments directly.
+
+### Ordered pipeline rule (MUST)
+
+When multiple contributors implement the same hook, execution MUST be deterministic via
+an explicit order/priority.
+
+### Shared composition path (MUST)
+
+Runtime entrypoints and eval harnesses MUST compose integrations through the same
+composition flow. Evals are not a separate wiring model.
+
+### Testing requirements (MUST)
+
+Each integration MUST provide:
+
+- Unit tests for hook behavior.
+- Architecture tests that enforce harness boundaries and disallow direct feature wiring
+  outside approved integration entrypoints.
+
+## Integration Compliance Checklist
+
+For each new capability/integration:
+
+- [ ] Implements integration hooks for required surfaces.
+- [ ] Registers via harness composition path (not ad-hoc feature branches).
+- [ ] Uses structured prompt augmentation only.
+- [ ] Includes unit tests for hook logic.
+- [ ] Includes/updates architecture guard tests.
+- [ ] Adds code comments at boundaries referencing this spec.

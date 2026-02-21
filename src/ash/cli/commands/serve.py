@@ -54,6 +54,8 @@ async def _run_server(
     port: int = 8080,
 ) -> None:
     """Run the server asynchronously."""
+    # Runtime harness boundary.
+    # Spec contract: specs/subsystems.md (Integration Hooks).
     import signal as signal_module
 
     import uvicorn

@@ -1062,6 +1062,8 @@ async def create_agent(
     graph_dir: Path | None = None,
     model_alias: str = "default",
 ) -> AgentComponents:
+    # Harness composition boundary.
+    # Spec contract: specs/subsystems.md (Integration Hooks).
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.agents.builtin import register_builtin_agents
     from ash.core.prompt import RuntimeInfo
