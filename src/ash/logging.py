@@ -345,6 +345,9 @@ class JSONLHandler(logging.Handler):
             "threadName",
             "taskName",
             "message",
+            # Formatter-derived fields should never round-trip into JSONL extras.
+            "component",
+            "context",
         }
     )
 
@@ -353,6 +356,8 @@ class JSONLHandler(logging.Handler):
         extra = {}
         for key, value in record.__dict__.items():
             if key.startswith("_") or key in self._STANDARD_ATTRS:
+                continue
+            if value in ("", None):
                 continue
             # Only include JSON-serializable values
             try:

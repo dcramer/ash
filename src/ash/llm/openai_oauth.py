@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+DEFAULT_CODEX_INSTRUCTIONS = (
+    "You are Ash, a helpful assistant. Follow instructions carefully."
+)
 
 # Refresh tokens 5 minutes before expiry
 TOKEN_REFRESH_BUFFER_SECONDS = 300
@@ -86,6 +89,10 @@ class OpenAIOAuthProvider(OpenAIProvider):
         result = super()._build_request_kwargs(*args, **kwargs)  # type: ignore[arg-type]
         # Whitelist to Codex-supported params only, then force store=false.
         result = {k: v for k, v in result.items() if k in self._CODEX_ALLOWED_PARAMS}
+        # Codex Responses API requires instructions to be present.
+        instructions = result.get("instructions")
+        if not isinstance(instructions, str) or not instructions.strip():
+            result["instructions"] = DEFAULT_CODEX_INSTRUCTIONS
         result["store"] = False
         return result
 

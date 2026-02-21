@@ -35,6 +35,7 @@ HIDDEN_FIELDS: set[str] = {
     "ts",
     "level",
     "component",
+    "context",
     "chat_id",
     "session_id",
     "user_id",

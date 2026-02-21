@@ -2,7 +2,12 @@
 
 import pytest
 
-from ash.llm.openai_oauth import CODEX_BASE_URL, OpenAIOAuthProvider
+from ash.llm.openai_oauth import (
+    CODEX_BASE_URL,
+    DEFAULT_CODEX_INSTRUCTIONS,
+    OpenAIOAuthProvider,
+)
+from ash.llm.types import Message, Role
 
 
 class TestOpenAIOAuthProvider:
@@ -43,3 +48,35 @@ class TestOpenAIOAuthProvider:
         from ash.llm.openai import OpenAIProvider
 
         assert issubclass(OpenAIOAuthProvider, OpenAIProvider)
+
+    def test_build_request_kwargs_injects_default_instructions_when_missing(self):
+        provider = OpenAIOAuthProvider(
+            access_token="test-token",
+            account_id="acct_123",
+        )
+        kwargs = provider._build_request_kwargs(
+            messages=[Message(role=Role.USER, content="hello")],
+            model="gpt-5",
+            tools=None,
+            system=None,
+            max_tokens=32,
+            temperature=None,
+            reasoning=None,
+        )
+        assert kwargs["instructions"] == DEFAULT_CODEX_INSTRUCTIONS
+
+    def test_build_request_kwargs_preserves_explicit_instructions(self):
+        provider = OpenAIOAuthProvider(
+            access_token="test-token",
+            account_id="acct_123",
+        )
+        kwargs = provider._build_request_kwargs(
+            messages=[Message(role=Role.USER, content="hello")],
+            model="gpt-5",
+            tools=None,
+            system="custom system",
+            max_tokens=32,
+            temperature=None,
+            reasoning=None,
+        )
+        assert kwargs["instructions"] == "custom system"

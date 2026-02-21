@@ -673,3 +673,32 @@ class TestJSONLHandlerContext:
         assert entry["model"] == "gpt-4"
         # Non-overridden context should still be present
         assert entry["agent_name"] == "test"
+
+    def test_emit_ignores_formatter_context_fields(self, tmp_path):
+        import json
+        import logging
+
+        from ash.logging import JSONLHandler
+
+        handler = JSONLHandler(tmp_path)
+        record = logging.LogRecord(
+            name="ash.core",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="formatter fields",
+            args=(),
+            exc_info=None,
+        )
+        # Simulate fields injected by ComponentFormatter on console handler.
+        record.context = ""
+        record.component = "core"
+
+        handler.emit(record)
+        handler.close()
+
+        log_files = list(tmp_path.glob("*.jsonl"))
+        assert len(log_files) == 1
+        entry = json.loads(log_files[0].read_text().strip())
+
+        assert "context" not in entry
