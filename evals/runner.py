@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,49 @@ if TYPE_CHECKING:
     from ash.core.types import AgentComponents
 
 logger = logging.getLogger(__name__)
+
+
+def _record_eval_user_message(
+    session: SessionState,
+    *,
+    user_message: str,
+    user_id: str,
+) -> None:
+    """Mirror runtime chat-history recording for eval turns."""
+    if not session.provider or not session.chat_id:
+        return
+
+    from ash.chats import ChatHistoryWriter
+
+    writer = ChatHistoryWriter(provider=session.provider, chat_id=session.chat_id)
+    writer.record_user_message(
+        content=user_message,
+        created_at=datetime.now(UTC),
+        user_id=user_id,
+        username=session.context.username,
+        display_name=session.context.display_name,
+        metadata={"was_processed": True, "processing_mode": "active"},
+    )
+
+
+def _record_eval_assistant_message(
+    session: SessionState,
+    *,
+    assistant_message: str,
+) -> None:
+    """Mirror runtime assistant chat-history recording for eval turns."""
+    if not session.provider or not session.chat_id:
+        return
+    if not assistant_message.strip():
+        return
+
+    from ash.chats import ChatHistoryWriter
+
+    writer = ChatHistoryWriter(provider=session.provider, chat_id=session.chat_id)
+    writer.record_bot_message(
+        content=assistant_message,
+        created_at=datetime.now(UTC),
+    )
 
 
 def load_eval_suite(path: Path) -> EvalSuite:
@@ -696,11 +740,20 @@ async def _execute_and_judge(
 ) -> EvalResult:
     """Execute a single prompt and judge the response."""
     try:
+        _record_eval_user_message(
+            session,
+            user_message=case.prompt,
+            user_id=user_id,
+        )
         response = await agent.send_message(
             user_message=case.prompt,
             session=session,
             user_id=user_id,
             agent_executor=agent_executor,
+        )
+        _record_eval_assistant_message(
+            session,
+            assistant_message=response.text,
         )
 
         # Pre-judge: forbidden tools check

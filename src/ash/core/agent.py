@@ -301,6 +301,83 @@ class Agent:
             messages_removed=result.messages_removed,
         )
 
+    @staticmethod
+    def _normalize_context_text(text: str) -> str:
+        """Normalize text for lightweight deduplication."""
+        return " ".join(text.split()).strip().lower()
+
+    def _load_ambient_chat_history(
+        self,
+        session: SessionState,
+    ) -> list[dict[str, Any]] | None:
+        """Load recent same-chat messages as ambient context.
+
+        This is intentionally lightweight, non-authoritative context. It excludes the
+        current message when an external ID is available and deduplicates against
+        messages already in the session thread.
+        """
+        if not session.provider or not session.chat_id:
+            return None
+        if self._config.chat_history_limit <= 0:
+            return None
+
+        from ash.chats.history import read_recent_chat_history
+
+        raw_entries = read_recent_chat_history(
+            provider=session.provider,
+            chat_id=session.chat_id,
+            limit=max(
+                self._config.chat_history_limit * 3, self._config.chat_history_limit
+            ),
+        )
+        if not raw_entries:
+            return None
+
+        seen: set[tuple[str, str]] = set()
+        for msg in session.messages:
+            if not isinstance(msg.content, str):
+                continue
+            normalized = self._normalize_context_text(msg.content)
+            if not normalized:
+                continue
+            seen.add((msg.role.value, normalized))
+
+        current_external_id = session.context.current_message_id
+        ambient: list[dict[str, Any]] = []
+        for entry in raw_entries:
+            content = (entry.content or "").strip()
+            if not content:
+                continue
+
+            if current_external_id:
+                external_id = str((entry.metadata or {}).get("external_id", ""))
+                if external_id and external_id == str(current_external_id):
+                    continue
+
+            role = entry.role
+            normalized = self._normalize_context_text(content)
+            if not normalized:
+                continue
+
+            key = (role, normalized)
+            if key in seen:
+                continue
+
+            seen.add(key)
+            ambient.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "username": entry.username,
+                    "display_name": entry.display_name,
+                }
+            )
+
+        if not ambient:
+            return None
+
+        return ambient[-self._config.chat_history_limit :]
+
     async def _prepare_message_context(
         self,
         user_message: str,
@@ -319,6 +396,7 @@ class Agent:
             chat_type=ctx.chat_type,
             sender_username=ctx.username,
         )
+        ambient_chat_history = self._load_ambient_chat_history(session)
 
         system_prompt = self._build_system_prompt(
             context=gathered.memory,
@@ -342,7 +420,7 @@ class Agent:
             is_scheduled_task=ctx.is_scheduled_task,
             is_passive_engagement=ctx.passive_engagement,
             is_name_mentioned=ctx.name_mentioned,
-            chat_history=None,
+            chat_history=ambient_chat_history,
             bot_name=ctx.bot_name,
         )
 
@@ -1186,6 +1264,7 @@ async def create_agent(
             reasoning=model_config.reasoning,
             context_token_budget=config.memory.context_token_budget,
             recency_window=config.memory.recency_window,
+            chat_history_limit=config.conversation.chat_history_limit,
             system_prompt_buffer=config.memory.system_prompt_buffer,
             compaction_enabled=config.memory.compaction_enabled,
             compaction_reserve_tokens=config.memory.compaction_reserve_tokens,

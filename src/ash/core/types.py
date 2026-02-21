@@ -62,6 +62,7 @@ class AgentConfig:
     # Smart pruning configuration
     context_token_budget: int = 100000  # Target context window size
     recency_window: int = 10  # Always keep last N messages
+    chat_history_limit: int = 5  # Include last N same-chat messages in prompt
     system_prompt_buffer: int = 8000  # Reserve for system prompt
     # Compaction configuration (summarizes old messages instead of dropping)
     compaction_enabled: bool = True
