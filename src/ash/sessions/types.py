@@ -79,13 +79,17 @@ class SessionHeader:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SessionHeader:
+        version = data["version"]
+        if version != SESSION_VERSION:
+            raise ValueError(f"unsupported session version: {version}")
+
         return cls(
             id=data["id"],
             created_at=_parse_datetime(data["created_at"]),
             provider=data["provider"],
             user_id=data.get("user_id"),
             chat_id=data.get("chat_id"),
-            version=data["version"],
+            version=version,
         )
 
     @classmethod
@@ -131,10 +135,14 @@ class AgentSessionEntry:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AgentSessionEntry:
+        agent_type = data["agent_type"]
+        if agent_type not in {"skill", "agent"}:
+            raise ValueError(f"invalid agent session type: {agent_type}")
+
         return cls(
             id=data["id"],
             parent_tool_use_id=data["parent_tool_use_id"],
-            agent_type=data["agent_type"],
+            agent_type=agent_type,
             agent_name=data["agent_name"],
             created_at=_parse_datetime(data["created_at"]),
         )
@@ -301,11 +309,15 @@ class ToolUseEntry:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ToolUseEntry:
+        input_data = data["input"]
+        if not isinstance(input_data, dict):
+            raise TypeError("tool_use input must be a dict")
+
         return cls(
             id=data["id"],
             message_id=data["message_id"],
             name=data["name"],
-            input=data["input"],
+            input=input_data,
             agent_session_id=data.get("agent_session_id"),
         )
 
@@ -354,12 +366,16 @@ class ToolResultEntry:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ToolResultEntry:
+        metadata = data.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise TypeError("tool_result metadata must be a dict")
+
         return cls(
             tool_use_id=data["tool_use_id"],
             output=data["output"],
             success=data["success"],
             duration_ms=data.get("duration_ms"),
-            metadata=data.get("metadata"),
+            metadata=metadata,
             agent_session_id=data.get("agent_session_id"),
         )
 

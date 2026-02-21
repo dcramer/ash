@@ -96,6 +96,18 @@ class TestParseEntry:
                 }
             )
 
+    def test_session_header_rejects_unsupported_version(self):
+        with pytest.raises(ValueError, match="unsupported session version"):
+            parse_entry(
+                {
+                    "type": "session",
+                    "version": "1",
+                    "id": "s1",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                    "provider": "cli",
+                }
+            )
+
     def test_compaction_entry_requires_created_at(self):
         with pytest.raises(KeyError, match="created_at"):
             parse_entry(
@@ -184,6 +196,43 @@ class TestParseEntry:
                 }
             )
 
+    def test_agent_session_entry_requires_valid_agent_type(self):
+        with pytest.raises(ValueError, match="invalid agent session type"):
+            parse_entry(
+                {
+                    "type": "agent_session",
+                    "id": "a1",
+                    "parent_tool_use_id": "t1",
+                    "agent_type": "workflow",
+                    "agent_name": "bad-agent-type",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                }
+            )
+
+    def test_tool_use_entry_requires_dict_input(self):
+        with pytest.raises(TypeError, match="tool_use input must be a dict"):
+            parse_entry(
+                {
+                    "type": "tool_use",
+                    "id": "t1",
+                    "message_id": "m1",
+                    "name": "bash",
+                    "input": [],
+                }
+            )
+
+    def test_tool_result_entry_requires_dict_metadata(self):
+        with pytest.raises(TypeError, match="tool_result metadata must be a dict"):
+            parse_entry(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "output": "ok",
+                    "success": True,
+                    "metadata": [],
+                }
+            )
+
 
 class TestSessionWriter:
     """Integration tests for SessionWriter."""
@@ -252,7 +301,7 @@ class TestSessionReader:
 
         session_dir.mkdir(parents=True)
         lines = [
-            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
             '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00"}',
             '{"type":"tool_use","id":"t1","message_id":"m1","name":"bash","input":{}}',
             '{"type":"tool_result","tool_use_id":"t1","output":"result","success":true}',
@@ -271,7 +320,7 @@ class TestSessionReader:
     async def test_load_entries_rejects_malformed_json_line(self, reader, session_dir):
         session_dir.mkdir(parents=True)
         (session_dir / "context.jsonl").write_text(
-            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n{bad-json}\n'
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n{bad-json}\n'
         )
 
         with pytest.raises(ValueError, match="context_parse_error"):
@@ -294,7 +343,7 @@ class TestSessionReader:
     ):
         session_dir.mkdir(parents=True)
         (session_dir / "context.jsonl").write_text(
-            '{"type":"session","version":"1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
+            '{"type":"session","version":"2","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
         )
 
         with pytest.raises(ValueError, match="context_parse_error"):
@@ -307,7 +356,7 @@ class TestSessionReader:
         subagents_dir = session_dir / "subagents"
         subagents_dir.mkdir(parents=True)
         (subagents_dir / "agent-1.jsonl").write_text(
-            '{"type":"session","version":"1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
+            '{"type":"session","version":"2","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
         )
 
         with pytest.raises(ValueError, match="subagent_parse_error"):
@@ -318,7 +367,7 @@ class TestSessionReader:
         """Converts stored messages to LLM-ready format."""
         session_dir.mkdir(parents=True)
         lines = [
-            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
             '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00"}',
             '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00"}',
         ]
@@ -337,7 +386,7 @@ class TestSessionReader:
     ):
         session_dir.mkdir(parents=True)
         lines = [
-            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
             '{"type":"message","id":"m1","role":"assistant","content":[{"type":"unknown_block","value":"x"}],"created_at":"2026-01-11T10:00:01+00:00"}',
         ]
         (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
@@ -351,7 +400,7 @@ class TestSessionReader:
     ):
         session_dir.mkdir(parents=True)
         lines = [
-            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
             '{"type":"message","id":"m1","role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}],"created_at":"2026-01-11T10:00:01+00:00"}',
         ]
         (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
@@ -366,7 +415,7 @@ class TestSessionReader:
         """get_messages_around only matches stored message IDs."""
         session_dir.mkdir(parents=True)
         lines = [
-            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
             '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00","metadata":{"external_id":"ext-1"}}',
             '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00","metadata":{"external_id":"ext-2"}}',
         ]
@@ -384,7 +433,7 @@ class TestSessionReader:
     ):
         session_dir.mkdir(parents=True)
         lines = [
-            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
             '{"type":"message","id":"m1","role":"assistant","content":[{"type":"unknown_block","value":"x"}],"created_at":"2026-01-11T10:00:01+00:00"}',
         ]
         (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
@@ -396,7 +445,7 @@ class TestSessionReader:
     async def test_external_id_lookup_uses_external_id_only(self, reader, session_dir):
         session_dir.mkdir(parents=True)
         lines = [
-            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
             '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00","metadata":{"external_id":"ext-user"}}',
             '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00","metadata":{"legacy_external_id":"ext-legacy"}}',
             '{"type":"message","id":"m3","role":"assistant","content":"Hello again","created_at":"2026-01-11T10:00:03+00:00","metadata":{"external_id":"ext-bot"}}',
