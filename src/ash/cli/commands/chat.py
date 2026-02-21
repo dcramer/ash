@@ -98,9 +98,9 @@ async def _run_chat(
     from ash.core.session import SessionState
     from ash.integrations import (
         active_integrations,
+        active_rpc_server,
         create_default_integrations,
     )
-    from ash.rpc import RPCServer
     from ash.sessions import SessionManager
 
     # Load configuration
@@ -154,7 +154,6 @@ async def _run_chat(
     graph_dir = get_graph_dir()
 
     components = None
-    rpc_server: RPCServer | None = None
     try:
         # Create agent with all dependencies
         components = await create_agent(
@@ -172,43 +171,41 @@ async def _run_chat(
             sessions_path=get_sessions_path(),
             contributors=create_default_integrations(mode="chat").contributors,
         ) as (integration_runtime, integration_context):
-            # Start RPC server for sandbox memory access
-            if components.memory_manager:
-                rpc_server = RPCServer(get_rpc_socket_path())
-                integration_runtime.register_rpc_methods(
-                    rpc_server, integration_context
-                )
-                await rpc_server.start()
-
-            # Dump prompt mode: print system prompt and exit
-            if dump_prompt:
-                system_prompt = agent.system_prompt
-                console.print(
-                    Panel(
-                        "[bold]System Prompt[/bold]\n\n"
-                        f"Model: {resolved_alias}\n"
-                        f"Length: {len(system_prompt)} chars",
-                        title="Prompt Info",
-                        border_style="blue",
+            async with active_rpc_server(
+                runtime=integration_runtime,
+                context=integration_context,
+                socket_path=get_rpc_socket_path(),
+                enabled=components.memory_manager is not None,
+            ):
+                # Dump prompt mode: print system prompt and exit
+                if dump_prompt:
+                    system_prompt = agent.system_prompt
+                    console.print(
+                        Panel(
+                            "[bold]System Prompt[/bold]\n\n"
+                            f"Model: {resolved_alias}\n"
+                            f"Length: {len(system_prompt)} chars",
+                            title="Prompt Info",
+                            border_style="blue",
+                        )
                     )
-                )
-                console.print()
-                console.print(system_prompt)
-                console.print()
-                console.print(
-                    Panel(
-                        "[dim]Note: This is the base prompt without memory context.\n"
-                        "At runtime, memory and conversation context are added dynamically.[/dim]",
-                        border_style="dim",
+                    console.print()
+                    console.print(system_prompt)
+                    console.print()
+                    console.print(
+                        Panel(
+                            "[dim]Note: This is the base prompt without memory context.\n"
+                            "At runtime, memory and conversation context are added dynamically.[/dim]",
+                            border_style="dim",
+                        )
                     )
-                )
-                return
+                    return
 
-            # Create session manager for JSONL persistence
-            session_manager = SessionManager(
-                provider="cli",
-                user_id="local-user",
-            )
+                # Create session manager for JSONL persistence
+                session_manager = SessionManager(
+                    provider="cli",
+                    user_id="local-user",
+                )
 
             # Ensure session exists (creates header if new)
             session_header = await session_manager.ensure_session()
@@ -374,43 +371,40 @@ async def _run_chat(
                                 console.print(result_text)
                             await session_manager.add_assistant_message(result_text)
 
-            if prompt:
-                await process_message(prompt)
-                return
+                if prompt:
+                    await process_message(prompt)
+                    return
 
-            console.print(
-                Panel(
-                    "[bold]Ash Chat[/bold]\n\n"
-                    "Type your message and press Enter. "
-                    "Type 'exit' or 'quit' to end the session.\n"
-                    "Press Ctrl+C to cancel a response.",
-                    title="Welcome",
-                    border_style="blue",
+                console.print(
+                    Panel(
+                        "[bold]Ash Chat[/bold]\n\n"
+                        "Type your message and press Enter. "
+                        "Type 'exit' or 'quit' to end the session.\n"
+                        "Press Ctrl+C to cancel a response.",
+                        title="Welcome",
+                        border_style="blue",
+                    )
                 )
-            )
-            console.print()
+                console.print()
 
-            while True:
-                try:
-                    user_input = console.input("[bold cyan]You:[/bold cyan] ").strip()
-                    if not user_input:
+                while True:
+                    try:
+                        user_input = console.input(
+                            "[bold cyan]You:[/bold cyan] "
+                        ).strip()
+                        if not user_input:
+                            continue
+                        if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
+                            console.print("\n[dim]Goodbye![/dim]")
+                            break
+                        console.print()
+                        await process_message(
+                            user_input, show_prefix=True, show_meta=True
+                        )
+                    except KeyboardInterrupt:
+                        console.print("\n[dim]Cancelled[/dim]\n")
                         continue
-                    if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
-                        console.print("\n[dim]Goodbye![/dim]")
-                        break
-                    console.print()
-                    await process_message(user_input, show_prefix=True, show_meta=True)
-                except KeyboardInterrupt:
-                    console.print("\n[dim]Cancelled[/dim]\n")
-                    continue
     finally:
-        # Stop RPC server
-        if rpc_server:
-            try:
-                await rpc_server.stop()
-            except Exception as e:
-                logger.warning("rpc_server_stop_error", extra={"error.message": str(e)})
-
         # Clean up sandbox container
         if components and components.sandbox_executor:
             try:

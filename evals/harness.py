@@ -156,8 +156,11 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
             get_schedule_file,
             get_sessions_path,
         )
-        from ash.integrations import active_integrations, create_default_integrations
-        from ash.rpc.server import RPCServer
+        from ash.integrations import (
+            active_integrations,
+            active_rpc_server,
+            create_default_integrations,
+        )
 
         default_integrations = create_default_integrations(
             mode="eval",
@@ -172,16 +175,16 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
             sessions_path=get_sessions_path(),
             contributors=default_integrations.contributors,
         ) as (integration_runtime, integration_context):
-            rpc_server = RPCServer(get_rpc_socket_path())
-            integration_runtime.register_rpc_methods(rpc_server, integration_context)
-            await rpc_server.start()
-
-            try:
-                yield components
-            finally:
-                await rpc_server.stop()
-                if components.sandbox_executor:
-                    await components.sandbox_executor.cleanup()
+            async with active_rpc_server(
+                runtime=integration_runtime,
+                context=integration_context,
+                socket_path=get_rpc_socket_path(),
+            ):
+                try:
+                    yield components
+                finally:
+                    if components.sandbox_executor:
+                        await components.sandbox_executor.cleanup()
 
 
 # ---------------------------------------------------------------------------

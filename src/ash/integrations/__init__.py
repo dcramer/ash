@@ -7,6 +7,7 @@ from ash.integrations.builtin import (
 )
 from ash.integrations.composer import active_integrations, compose_integrations
 from ash.integrations.defaults import DefaultIntegrations, create_default_integrations
+from ash.integrations.rpc import active_rpc_server
 from ash.integrations.runtime import (
     IntegrationContext,
     IntegrationContributor,
@@ -21,6 +22,7 @@ __all__ = [
     "active_integrations",
     "DefaultIntegrations",
     "create_default_integrations",
+    "active_rpc_server",
     "IntegrationContext",
     "IntegrationContributor",
     "IntegrationRuntime",

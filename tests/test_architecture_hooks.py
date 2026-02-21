@@ -117,3 +117,16 @@ def test_entrypoints_use_default_integration_builder() -> None:
         assert "create_default_integrations(" in text, (
             f"Expected shared default integration builder in {path.relative_to(ROOT)}"
         )
+
+
+def test_entrypoints_use_shared_rpc_lifecycle_helper() -> None:
+    entrypoint_files = [
+        ROOT / "src/ash/cli/commands/serve.py",
+        ROOT / "src/ash/cli/commands/chat.py",
+        ROOT / "evals/harness.py",
+    ]
+    for path in entrypoint_files:
+        text = path.read_text(encoding="utf-8")
+        assert "active_rpc_server(" in text, (
+            f"Expected shared RPC lifecycle helper in {path.relative_to(ROOT)}"
+        )
