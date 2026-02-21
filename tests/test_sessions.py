@@ -158,6 +158,32 @@ class TestParseEntry:
                 }
             )
 
+    def test_message_entry_requires_valid_role(self):
+        with pytest.raises(ValueError, match="invalid message role"):
+            parse_entry(
+                {
+                    "type": "message",
+                    "id": "m1",
+                    "role": "developer",
+                    "content": "hello",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                }
+            )
+
+    def test_message_entry_requires_string_or_block_list_content(self):
+        with pytest.raises(
+            TypeError, match="message content must be a string or list of dict blocks"
+        ):
+            parse_entry(
+                {
+                    "type": "message",
+                    "id": "m1",
+                    "role": "user",
+                    "content": 123,
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                }
+            )
+
 
 class TestSessionWriter:
     """Integration tests for SessionWriter."""

@@ -221,11 +221,16 @@ class MessageEntry:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MessageEntry:
+        role = data["role"]
+        if role not in {"user", "assistant", "system"}:
+            raise ValueError(f"invalid message role: {role}")
+
         content = data["content"]
-        if isinstance(content, list) and not all(
-            isinstance(block, dict) for block in content
-        ):
-            raise TypeError("message content blocks must be dict objects")
+        if isinstance(content, list):
+            if not all(isinstance(block, dict) for block in content):
+                raise TypeError("message content blocks must be dict objects")
+        elif not isinstance(content, str):
+            raise TypeError("message content must be a string or list of dict blocks")
 
         metadata = data.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
@@ -233,7 +238,7 @@ class MessageEntry:
 
         return cls(
             id=data["id"],
-            role=data["role"],
+            role=role,
             content=content,
             created_at=_parse_datetime(data["created_at"]),
             token_count=data.get("token_count"),
