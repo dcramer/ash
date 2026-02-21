@@ -127,10 +127,6 @@ class SessionReader:
                 continue
 
             if isinstance(entry, MessageEntry):
-                # Backward compat: skip subagent messages from legacy sessions
-                # that wrote them into the parent's context.jsonl
-                if entry.agent_session_id is not None:
-                    continue
                 flush_pending_results()
                 content = self._convert_content(entry.content)
                 if not content:
@@ -147,9 +143,7 @@ class SessionReader:
                 )
 
             elif (
-                isinstance(entry, ToolResultEntry)
-                and entry.tool_use_id in tool_use_ids
-                and entry.agent_session_id is None  # Skip legacy subagent results
+                isinstance(entry, ToolResultEntry) and entry.tool_use_id in tool_use_ids
             ):
                 pending_results.append(
                     ToolResult(
@@ -165,13 +159,9 @@ class SessionReader:
     def _collect_tool_use_ids(self, entries: list[Entry]) -> set[str]:
         tool_use_ids: set[str] = set()
         for entry in entries:
-            if isinstance(entry, ToolUseEntry) and entry.agent_session_id is None:
+            if isinstance(entry, ToolUseEntry):
                 tool_use_ids.add(entry.id)
-            elif (
-                isinstance(entry, MessageEntry)
-                and entry.agent_session_id is None
-                and isinstance(entry.content, list)
-            ):
+            elif isinstance(entry, MessageEntry) and isinstance(entry.content, list):
                 for block in entry.content:
                     if isinstance(block, dict) and block.get("type") == "tool_use":
                         tool_use_ids.add(block["id"])
@@ -437,19 +427,14 @@ class SessionReader:
         messages are on the branch. Then filters tool_use, tool_result,
         agent_session, agent_session_complete, and compaction entries to only
         those associated with branch messages.
-
-        For v1 compatibility: messages with parent_id=None are treated as an
-        implicit linear chain in file order.
         """
         from ash.sessions.types import AgentSessionCompleteEntry, AgentSessionEntry
 
-        # Index messages by id, preserving file order
+        # Index messages by id
         msg_by_id: dict[str, MessageEntry] = {}
-        msg_order: list[str] = []
         for entry in entries:
             if isinstance(entry, MessageEntry):
                 msg_by_id[entry.id] = entry
-                msg_order.append(entry.id)
 
         if head_message_id not in msg_by_id:
             return list(entries)  # Fallback: return all if head not found
@@ -464,14 +449,7 @@ class SessionReader:
             msg = msg_by_id.get(current_id)
             if msg is None:
                 break
-            if msg.parent_id is not None:
-                current_id = msg.parent_id
-            else:
-                # v1 fallback: include all preceding messages in file order
-                idx = msg_order.index(current_id) if current_id in msg_order else 0
-                for prev_id in msg_order[:idx]:
-                    branch_msg_ids.add(prev_id)
-                break
+            current_id = msg.parent_id
 
         # Collect tool_use IDs that belong to branch messages
         branch_tool_use_ids: set[str] = set()

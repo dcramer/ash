@@ -13,7 +13,6 @@ from ash.sessions.types import (
     MessageEntry,
     ToolResultEntry,
     ToolUseEntry,
-    legacy_session_key,
     parse_entry,
     session_key,
 )
@@ -61,12 +60,6 @@ class TestSessionKey:
         assert key1 != key2
         assert key1.startswith("cli_")
         assert key2.startswith("cli_")
-
-    def test_legacy_key_kept_for_simple_ids(self):
-        """Simple IDs should not change across key versions."""
-        key = session_key("telegram", chat_id="12345", thread_id="42")
-        legacy = legacy_session_key("telegram", chat_id="12345", thread_id="42")
-        assert key == legacy
 
 
 class TestParseEntry:
@@ -246,26 +239,6 @@ class TestSessionManager:
         recent = await manager.get_recent_message_ids(recency_window=2)
         assert recent == {m2, m3}
 
-    @pytest.mark.asyncio
-    async def test_uses_legacy_session_dir_when_present(self, sessions_path):
-        """Long-ID sessions created with legacy key remain readable."""
-        long_chat_id = "a" * 100
-        legacy_key = legacy_session_key("telegram", chat_id=long_chat_id)
-        legacy_dir = sessions_path / legacy_key
-        legacy_dir.mkdir(parents=True, exist_ok=True)
-        (legacy_dir / "context.jsonl").write_text(
-            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"telegram","chat_id":"'
-            + long_chat_id
-            + '"}\n'
-        )
-
-        manager = SessionManager(
-            provider="telegram", chat_id=long_chat_id, sessions_path=sessions_path
-        )
-        await manager.ensure_session()
-
-        assert manager.session_dir == legacy_dir
-
 
 class TestSessionBranching:
     """Tests for tree-structured conversation branching."""
@@ -355,28 +328,6 @@ class TestSessionBranching:
         assert "M2" in contents[1]
         assert "M5 (branched)" in contents[2]
         assert len(messages) == 3
-
-    @pytest.mark.asyncio
-    async def test_v1_compat_no_parent_id(self, sessions_path):
-        """v1 sessions (no parent_id) load linearly as before."""
-        session_dir = sessions_path / "cli"
-        session_dir.mkdir(parents=True)
-
-        # Write v1-style entries with no parent_id
-        lines = [
-            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
-            '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00"}',
-            '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00"}',
-            '{"type":"message","id":"m3","role":"user","content":"More","created_at":"2026-01-11T10:00:03+00:00"}',
-        ]
-        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
-
-        reader = SessionReader(session_dir)
-
-        # Branch-aware load should follow v1 fallback (file order)
-        messages, ids = await reader.load_messages_for_branch("m3")
-        assert len(messages) == 3
-        assert ids == ["m1", "m2", "m3"]
 
     @pytest.mark.asyncio
     async def test_nested_fork(self, manager):
@@ -649,111 +600,6 @@ class TestSubagentIsolation:
         agent_entries = [e for e in context_entries if e["type"] == "agent_session"]
         assert len(agent_entries) == 1
         assert agent_entries[0]["id"] == agent_session_id
-
-
-class TestSubagentBackwardCompat:
-    """Tests for backward compat: _build_messages filters legacy subagent entries."""
-
-    @pytest.mark.asyncio
-    async def test_build_messages_filters_legacy_subagent_messages(self, tmp_path):
-        """Messages with agent_session_id in old context.jsonl are filtered out."""
-        session_dir = tmp_path / "test_session"
-        session_dir.mkdir(parents=True)
-
-        lines = [
-            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
-            '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00"}',
-            '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00"}',
-            # Legacy subagent entries that shouldn't appear in main context
-            '{"type":"message","id":"m3","role":"user","content":"subagent prompt","created_at":"2026-01-11T10:00:03+00:00","agent_session_id":"sub1"}',
-            '{"type":"message","id":"m4","role":"assistant","content":"subagent response","created_at":"2026-01-11T10:00:04+00:00","agent_session_id":"sub1"}',
-            '{"type":"message","id":"m5","role":"user","content":"Follow up","created_at":"2026-01-11T10:00:05+00:00"}',
-        ]
-        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
-
-        reader = SessionReader(session_dir)
-        messages, ids = await reader.load_messages_for_llm()
-
-        # Should see m1, m2, m5 — not m3, m4
-        assert len(messages) == 3
-        contents = [
-            m.content if isinstance(m.content, str) else str(m.content)
-            for m in messages
-        ]
-        assert contents == ["Hello", "Hi!", "Follow up"]
-        assert ids == ["m1", "m2", "m5"]
-
-    @pytest.mark.asyncio
-    async def test_build_messages_filters_legacy_subagent_tool_results(self, tmp_path):
-        """Tool results with agent_session_id in old context.jsonl are filtered out."""
-        session_dir = tmp_path / "test_session"
-        session_dir.mkdir(parents=True)
-
-        lines = [
-            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
-            '{"type":"message","id":"m1","role":"user","content":"Do something","created_at":"2026-01-11T10:00:01+00:00"}',
-            '{"type":"message","id":"m2","role":"assistant","content":[{"type":"text","text":"Checking"},{"type":"tool_use","id":"t1","name":"bash","input":{}}],"created_at":"2026-01-11T10:00:02+00:00"}',
-            '{"type":"tool_use","id":"t1","message_id":"m2","name":"bash","input":{}}',
-            '{"type":"tool_result","tool_use_id":"t1","output":"main result","success":true}',
-            # Legacy subagent tool entries
-            '{"type":"tool_use","id":"t2","message_id":"m2","name":"bash","input":{},"agent_session_id":"sub1"}',
-            '{"type":"tool_result","tool_use_id":"t2","output":"subagent result","success":true,"agent_session_id":"sub1"}',
-        ]
-        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
-
-        reader = SessionReader(session_dir)
-        messages, _ = await reader.load_messages_for_llm()
-
-        # Find tool results in the messages
-        from ash.llm.types import ToolResult
-
-        tool_results = []
-        for msg in messages:
-            if isinstance(msg.content, list):
-                for block in msg.content:
-                    if isinstance(block, ToolResult):
-                        tool_results.append(block)
-
-        # Should only have t1 result, not t2 (subagent)
-        assert len(tool_results) == 1
-        assert tool_results[0].tool_use_id == "t1"
-        assert tool_results[0].content == "main result"
-
-    @pytest.mark.asyncio
-    async def test_collect_tool_use_ids_filters_subagent(self, tmp_path):
-        """_collect_tool_use_ids skips entries with agent_session_id."""
-        session_dir = tmp_path / "test_session"
-        session_dir.mkdir(parents=True)
-
-        reader = SessionReader(session_dir)
-
-        from ash.sessions.types import parse_entry
-
-        entries = [
-            parse_entry(
-                {
-                    "type": "tool_use",
-                    "id": "t1",
-                    "message_id": "m1",
-                    "name": "bash",
-                    "input": {},
-                }
-            ),
-            parse_entry(
-                {
-                    "type": "tool_use",
-                    "id": "t2",
-                    "message_id": "m2",
-                    "name": "bash",
-                    "input": {},
-                    "agent_session_id": "sub1",
-                }
-            ),
-        ]
-
-        tool_ids = reader._collect_tool_use_ids(entries)
-        assert "t1" in tool_ids
-        assert "t2" not in tool_ids
 
 
 class TestDMThreading:

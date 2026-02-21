@@ -22,7 +22,6 @@ from ash.sessions.types import (
     ToolResultEntry,
     ToolUseEntry,
     generate_id,
-    legacy_session_key,
     session_key,
 )
 from ash.sessions.utils import content_block_to_dict
@@ -51,22 +50,8 @@ class SessionManager:
         self.user_id = user_id
         self.thread_id = thread_id
         root = sessions_path or get_sessions_path()
-        preferred_key = session_key(provider, chat_id, user_id, thread_id)
-        legacy_key = legacy_session_key(provider, chat_id, user_id, thread_id)
-        preferred_dir = root / preferred_key
-        legacy_dir = root / legacy_key
-
-        # Backward-compatible fallback for sessions created before hash suffixes.
-        if (
-            preferred_key != legacy_key
-            and not preferred_dir.exists()
-            and legacy_dir.exists()
-        ):
-            self._key = legacy_key
-            self._session_dir = legacy_dir
-        else:
-            self._key = preferred_key
-            self._session_dir = preferred_dir
+        self._key = session_key(provider, chat_id, user_id, thread_id)
+        self._session_dir = root / self._key
         self._reader = SessionReader(self._session_dir)
         self._writer = SessionWriter(self._session_dir)
         self._header: SessionHeader | None = None
