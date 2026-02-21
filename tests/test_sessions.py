@@ -599,6 +599,30 @@ class TestSessionManager:
         recent = await manager.get_recent_message_ids(recency_window=2)
         assert recent == {m2, m3}
 
+    @pytest.mark.asyncio
+    async def test_fail_open_on_legacy_context_for_duplicate_lookup(self, manager):
+        """Legacy context parse failures should not crash duplicate checks."""
+        manager.session_dir.mkdir(parents=True, exist_ok=True)
+        (manager.session_dir / "context.jsonl").write_text(
+            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
+        )
+
+        assert not await manager.has_message_with_external_id("ext-1")
+        assert (await manager.get_message_by_external_id("ext-1")) is None
+
+    @pytest.mark.asyncio
+    async def test_fail_open_on_legacy_context_for_message_loading(self, manager):
+        """Legacy context parse failures should return an empty restored context."""
+        manager.session_dir.mkdir(parents=True, exist_ok=True)
+        (manager.session_dir / "context.jsonl").write_text(
+            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
+        )
+
+        messages, ids = await manager.load_messages_for_llm()
+        assert messages == []
+        assert ids == []
+        assert (await manager.get_last_message_time()) is None
+
 
 class TestSessionBranching:
     """Tests for tree-structured conversation branching."""

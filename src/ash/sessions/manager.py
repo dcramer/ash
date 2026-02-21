@@ -280,17 +280,28 @@ class SessionManager:
         branch_head_id: str | None = None,
         branch_id: str | None = None,
     ) -> tuple[list[Message], list[str]]:
-        if branch_head_id is not None:
-            return await self._reader.load_messages_for_branch(
-                branch_head_id,
-                branch_id=branch_id,
-                token_budget=token_budget,
-                recency_window=recency_window,
-                include_timestamps=include_timestamps,
+        try:
+            if branch_head_id is not None:
+                return await self._reader.load_messages_for_branch(
+                    branch_head_id,
+                    branch_id=branch_id,
+                    token_budget=token_budget,
+                    recency_window=recency_window,
+                    include_timestamps=include_timestamps,
+                )
+            return await self._reader.load_messages_for_llm(
+                token_budget, recency_window, include_timestamps
             )
-        return await self._reader.load_messages_for_llm(
-            token_budget, recency_window, include_timestamps
-        )
+        except ValueError as e:
+            logger.warning(
+                "session_context_read_failed",
+                extra={
+                    "session.key": self._key,
+                    "session.operation": "load_messages_for_llm",
+                    "error.message": str(e),
+                },
+            )
+            return [], []
 
     async def get_message_ids(self) -> set[str]:
         return await self._reader.get_message_ids()
@@ -302,10 +313,32 @@ class SessionManager:
         return set(all_ids[max(0, len(all_ids) - recency_window) :])
 
     async def has_message_with_external_id(self, external_id: str) -> bool:
-        return await self._reader.has_message_with_external_id(external_id)
+        try:
+            return await self._reader.has_message_with_external_id(external_id)
+        except ValueError as e:
+            logger.warning(
+                "session_context_read_failed",
+                extra={
+                    "session.key": self._key,
+                    "session.operation": "has_message_with_external_id",
+                    "error.message": str(e),
+                },
+            )
+            return False
 
     async def get_message_by_external_id(self, external_id: str) -> MessageEntry | None:
-        return await self._reader.get_message_by_external_id(external_id)
+        try:
+            return await self._reader.get_message_by_external_id(external_id)
+        except ValueError as e:
+            logger.warning(
+                "session_context_read_failed",
+                extra={
+                    "session.key": self._key,
+                    "session.operation": "get_message_by_external_id",
+                    "error.message": str(e),
+                },
+            )
+            return None
 
     async def get_messages_around(
         self, message_id: str, window: int = 3
@@ -316,7 +349,19 @@ class SessionManager:
         return await self._reader.search_messages(query, limit)
 
     async def get_last_message_time(self) -> datetime | None:
-        entries = await self._reader.load_entries()
+        try:
+            entries = await self._reader.load_entries()
+        except ValueError as e:
+            logger.warning(
+                "session_context_read_failed",
+                extra={
+                    "session.key": self._key,
+                    "session.operation": "get_last_message_time",
+                    "error.message": str(e),
+                },
+            )
+            return None
+
         msg_entries = [e for e in entries if isinstance(e, MessageEntry)]
         return msg_entries[-1].created_at if msg_entries else None
 
@@ -332,7 +377,18 @@ class SessionManager:
         for session_dir in sorted(base_path.iterdir()):
             if not session_dir.is_dir():
                 continue
-            header = await SessionReader(session_dir).load_header()
+            try:
+                header = await SessionReader(session_dir).load_header()
+            except ValueError as e:
+                logger.warning(
+                    "session_context_read_failed",
+                    extra={
+                        "session.key": session_dir.name,
+                        "session.operation": "list_sessions.load_header",
+                        "error.message": str(e),
+                    },
+                )
+                continue
             if header:
                 sessions.append(
                     {
