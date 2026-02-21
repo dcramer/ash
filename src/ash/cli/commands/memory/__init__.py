@@ -289,6 +289,7 @@ async def _run_memory_action(
             memory_doctor_embed_missing,
             memory_doctor_fix_names,
             memory_doctor_normalize_semantics,
+            memory_doctor_prune_missing_provenance,
             memory_doctor_quality,
             memory_doctor_reclassify,
             memory_doctor_self_facts,
@@ -305,8 +306,11 @@ async def _run_memory_action(
             await memory_doctor_backfill_learned_in(store, force)
         elif subcommand == "normalize-semantics":
             await memory_doctor_normalize_semantics(store, force)
+        elif subcommand == "prune-missing-provenance":
+            await memory_doctor_prune_missing_provenance(store, force)
         elif subcommand is None:
             await memory_doctor_backfill_learned_in(store, force)
+            await memory_doctor_prune_missing_provenance(store, force)
             await memory_doctor_self_facts(store, force)
             await memory_doctor_backfill_subjects(store, force)
             await memory_doctor_attribution(store, force)
@@ -319,7 +323,8 @@ async def _run_memory_action(
         else:
             error(f"Unknown doctor subcommand: {subcommand}")
             console.print(
-                "Valid subcommands: embed-missing, backfill-learned-in, normalize-semantics "
+                "Valid subcommands: embed-missing, backfill-learned-in, "
+                "prune-missing-provenance, normalize-semantics "
                 "(or omit for full check)"
             )
             raise typer.Exit(1)
