@@ -22,8 +22,10 @@ authors:                  # Required. Who created/maintains this skill
   - username
 rationale: string         # Required. Why this skill was created (user's intent)
 allowed_tools:            # Optional. Tool whitelist (empty = all tools)
-  - bash                  # Also accepts: allowed-tools (kebab-case), tools (legacy)
+  - bash
   - web_search
+triggers:                 # Optional. Trigger hints/phrases (metadata only)
+  - /research
 env:                      # Optional. Env vars injected from [skills.<name>] config
   - API_KEY
 packages:                 # Optional. System packages (apt) for sandbox

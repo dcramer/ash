@@ -21,12 +21,11 @@ This enables:
 - Load workspace skills from `workspace/skills/`
 - Support directory format: `skills/<name>/SKILL.md` (preferred)
 - Support flat markdown: `skills/<name>.md` (convenience)
-- Support YAML format: `skills/<name>.yaml` or `.yml` (backward compatibility)
 - Each skill defines: name, description, instructions
 - Invoke skills via `use_skill` tool (not by reading files)
 - Run skill as subagent with isolated session
 - Inject env vars from config into skill execution
-- Support `allowed_tools` to restrict subagent's tools (also accepts `allowed-tools`, `tools`)
+- Support `allowed_tools` to restrict subagent's tools
 - Support `model` override per skill
 - Support `max_iterations` limit per skill
 - Provide CLI commands for skill management
@@ -68,7 +67,7 @@ packages:                      # System packages to install (apt)
   - jq
   - curl
 allowed_tools:                 # Tool whitelist (empty = all tools)
-  - bash                       # Also accepts: allowed-tools (kebab-case), tools (legacy)
+  - bash
   - web_search
   - web_fetch
 model: haiku                   # Optional model override

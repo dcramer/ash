@@ -33,8 +33,7 @@ KNOWN_FRONTMATTER_FIELDS = {
     "authors",
     "rationale",
     "allowed_tools",
-    "allowed-tools",
-    "tools",  # legacy alias for allowed_tools
+    "triggers",
     "env",
     "packages",
     "model",
@@ -196,39 +195,12 @@ class SkillRegistry:
                     extra={"file.path": str(md_file), "error.message": str(e)},
                 )
 
-        for pattern in ("*.yaml", "*.yml"):
-            for yaml_file in skills_dir.glob(pattern):
-                try:
-                    self._load_yaml_skill(
-                        yaml_file,
-                        source_type=source_type,
-                        source_repo=source_repo,
-                        source_ref=source_ref,
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "skill_load_failed",
-                        extra={"file.path": str(yaml_file), "error.message": str(e)},
-                    )
-
         count_loaded = len(self._skills) - count_before
         if count_loaded > 0:
             logger.info(
                 "skills_loaded",
                 extra={"count": count_loaded, "file.path": str(skills_dir)},
             )
-
-    @staticmethod
-    def _resolve_allowed_tools(data: dict[str, Any]) -> list[str]:
-        """Resolve allowed_tools from frontmatter, accepting aliases.
-
-        Accepts: allowed_tools, allowed-tools, tools (legacy).
-        Priority: allowed_tools > allowed-tools > tools.
-        """
-        for key in ("allowed_tools", "allowed-tools", "tools"):
-            if key in data:
-                return data[key]
-        return []
 
     def _create_skill(
         self,
@@ -240,15 +212,12 @@ class SkillRegistry:
         source_repo: str | None = None,
         source_ref: str | None = None,
     ) -> SkillDefinition:
-        # Warn about unknown frontmatter fields
+        # Keep discovery behavior consistent with validate_skill_file.
         unknown = set(data.keys()) - KNOWN_FRONTMATTER_FIELDS
         if unknown:
-            logger.warning(
-                "skill_unknown_frontmatter_fields",
-                extra={
-                    "skill.name": name,
-                    "skill.unknown_fields": ", ".join(sorted(unknown)),
-                },
+            unknown_list = ", ".join(sorted(unknown))
+            raise ValueError(
+                f"Unknown frontmatter fields for skill '{name}': {unknown_list}"
             )
 
         return SkillDefinition(
@@ -264,7 +233,7 @@ class SkillRegistry:
             source_ref=source_ref,
             env=data.get("env", []),
             packages=data.get("packages", []),
-            allowed_tools=self._resolve_allowed_tools(data),
+            allowed_tools=data.get("allowed_tools", []),
             model=data.get("model"),
             max_iterations=data.get("max_iterations", 10),
             license=data.get("license"),
@@ -346,30 +315,6 @@ class SkillRegistry:
 
         skill = self._create_skill(
             name, data, instructions, skill_path, source_type, source_repo, source_ref
-        )
-        self._register_skill(skill, path)
-
-    def _load_yaml_skill(
-        self,
-        path: Path,
-        source_type: SkillSourceType = SkillSourceType.WORKSPACE,
-        source_repo: str | None = None,
-        source_ref: str | None = None,
-    ) -> None:
-        with path.open() as f:
-            data = yaml.safe_load(f)
-
-        if not isinstance(data, dict):
-            raise ValueError(f"Invalid skill file: expected dict, got {type(data)}")
-
-        if "description" not in data:
-            raise ValueError("Skill missing required field: description")
-        if "instructions" not in data:
-            raise ValueError("Skill missing required field: instructions")
-
-        name = data.get("name", path.stem)
-        skill = self._create_skill(
-            name, data, data["instructions"], None, source_type, source_repo, source_ref
         )
         self._register_skill(skill, path)
 

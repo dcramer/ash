@@ -96,7 +96,7 @@ Research and summarize topics.
         assert skill.instructions == "Research and summarize topics."
 
     def test_discover_skill_with_tools_legacy_alias(self, tmp_path: Path):
-        """Legacy 'tools:' frontmatter should map to allowed_tools."""
+        """Legacy 'tools:' frontmatter is rejected during discovery."""
         skills_dir = tmp_path / "skills"
         skill_dir = skills_dir / "legacy"
         skill_dir.mkdir(parents=True)
@@ -115,11 +115,10 @@ Do legacy things.
         registry = SkillRegistry()
         registry.discover(tmp_path, include_bundled=False)
 
-        skill = registry.get("legacy")
-        assert skill.allowed_tools == ["bash"]
+        assert not registry.has("legacy")
 
     def test_discover_skill_with_kebab_case_allowed_tools(self, tmp_path: Path):
-        """Kebab-case 'allowed-tools:' should map to allowed_tools."""
+        """Kebab-case 'allowed-tools:' frontmatter is rejected during discovery."""
         skills_dir = tmp_path / "skills"
         skill_dir = skills_dir / "kebab"
         skill_dir.mkdir(parents=True)
@@ -138,8 +137,29 @@ Do kebab things.
         registry = SkillRegistry()
         registry.discover(tmp_path, include_bundled=False)
 
-        skill = registry.get("kebab")
-        assert skill.allowed_tools == ["web_search"]
+        assert not registry.has("kebab")
+
+    def test_discover_skill_with_triggers_field(self, tmp_path: Path):
+        """Known-but-inert fields should not raise unknown-field warnings."""
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "triggered"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Triggered skill
+triggers:
+  - /research
+---
+
+Run triggered behavior.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        assert registry.has("triggered")
 
     def test_discover_skill_with_provenance(self, tmp_path: Path):
         """Test that authors and rationale fields are parsed."""
@@ -235,7 +255,7 @@ Help the user.
         assert registry.has("helper")
 
     def test_discover_yaml_skills(self, tmp_path: Path):
-        """YAML format still supported for backward compatibility."""
+        """YAML skill files are ignored (markdown-only skills)."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
 
@@ -249,8 +269,7 @@ instructions: Do something
 
         registry = SkillRegistry()
         registry.discover(tmp_path, include_bundled=False)
-        assert len(registry) == 1
-        assert registry.has("test")
+        assert len(registry) == 0
 
     def test_discover_yml_extension(self, tmp_path: Path):
         skills_dir = tmp_path / "skills"
@@ -265,8 +284,7 @@ instructions: Do something
 
         registry = SkillRegistry()
         registry.discover(tmp_path, include_bundled=False)
-        assert len(registry) == 1
-        assert registry.has("test")  # Name from filename
+        assert len(registry) == 0
 
     def test_discover_skips_invalid_frontmatter(self, tmp_path: Path):
         skills_dir = tmp_path / "skills"
@@ -434,6 +452,40 @@ Do something.
         is_valid, error = registry.validate_skill_file(skill_file)
         assert is_valid is False
         assert error is not None and "bogus_field" in error
+
+    def test_validate_rejects_legacy_tools_alias(self, tmp_path: Path):
+        skill_file = tmp_path / "test.md"
+        skill_file.write_text(
+            """---
+description: Test skill
+tools:
+  - bash
+---
+
+Do something.
+"""
+        )
+        registry = SkillRegistry()
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is False
+        assert error is not None and "tools" in error
+
+    def test_validate_rejects_kebab_case_allowed_tools(self, tmp_path: Path):
+        skill_file = tmp_path / "test.md"
+        skill_file.write_text(
+            """---
+description: Test skill
+allowed-tools:
+  - bash
+---
+
+Do something.
+"""
+        )
+        registry = SkillRegistry()
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is False
+        assert error is not None and "allowed-tools" in error
 
 
 # =============================================================================

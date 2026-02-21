@@ -52,11 +52,12 @@ Read `/ash/skills/skill-writer/references/example-skill.md` for a working exampl
 - `description` (required) - One line, starts with verb, no trailing period
 - `authors` (required) - List of usernames, starting with who requested it
 - `rationale` (required) - Why the user wanted this, what problem it solves
-- `allowed_tools` - Tool whitelist (empty = all tools). `allowed-tools` (kebab-case) also accepted per agentskills.io spec
+- `allowed_tools` - Tool whitelist (empty = all tools)
 - `env` - Environment variables injected from config (for API keys)
 - `packages` - System packages (apt)
 - `model` - Model override (e.g., "haiku")
 - `max_iterations` - Iteration limit (default: 10)
+- `triggers` - Optional trigger phrases/commands for discovery metadata
 - `license` - License identifier (e.g., "MIT")
 - `compatibility` - Compatibility info
 - `metadata` - Arbitrary key-value metadata
