@@ -56,10 +56,6 @@ async def _run_server(
     """Run the server asynchronously."""
     # Runtime harness boundary.
     # Spec contract: specs/subsystems.md (Integration Hooks).
-    import signal as signal_module
-
-    import uvicorn
-
     from ash.cli.runtime import bootstrap_runtime
     from ash.logging import configure_logging
 
@@ -80,7 +76,7 @@ async def _run_server(
         create_default_integrations,
     )
     from ash.providers import build_provider_runtime
-    from ash.server.app import create_app
+    from ash.server import ServerRunner, create_app
     from ash.service.pid import write_pid_file
 
     # Write PID file for service management
@@ -205,81 +201,13 @@ async def _run_server(
                     extra={"server.address": host, "server.port": port},
                 )
 
-                uvicorn_config = uvicorn.Config(
+                runner = ServerRunner(
                     fastapi_app,
                     host=host,
                     port=port,
-                    log_level="info",
-                    log_config=None,  # Use our logging config, not uvicorn's
+                    telegram_provider=telegram_provider,
                 )
-                server = uvicorn.Server(uvicorn_config)
-
-                # Track tasks for cleanup
-                telegram_task: asyncio.Task | None = None
-                shutdown_event = asyncio.Event()
-
-                # Set up signal handlers for graceful shutdown
-                loop = asyncio.get_running_loop()
-                shutdown_count = 0
-
-                def handle_signal():
-                    nonlocal shutdown_count
-                    shutdown_count += 1
-
-                    if shutdown_count == 1:
-                        # First signal: graceful shutdown
-                        logger.info("server_shutting_down")
-                        server.should_exit = True
-                        shutdown_event.set()
-                        # Stop telegram polling before cancelling task
-                        if telegram_provider:
-                            loop.call_soon(
-                                lambda: asyncio.create_task(telegram_provider.stop())
-                            )
-                        # Cancel telegram task after stop is scheduled
-                        if telegram_task and not telegram_task.done():
-                            telegram_task.cancel()
-                    else:
-                        # Second signal: force immediate exit
-                        logger.warning("server_force_shutdown")
-                        import os
-
-                        os._exit(1)
-
-                for sig in (signal_module.SIGTERM, signal_module.SIGINT):
-                    loop.add_signal_handler(sig, handle_signal)
-
-                if telegram_provider:
-                    # Run both uvicorn and telegram polling
-                    logger.info("telegram_polling_starting")
-
-                    async def start_telegram():
-                        # Wait for server to be ready and handler to be created
-                        handler = None
-                        for _ in range(50):  # Wait up to 5 seconds
-                            handler = (
-                                await fastapi_app.state.server.get_telegram_handler()
-                            )
-                            if handler:
-                                break
-                            await asyncio.sleep(0.1)
-
-                        if handler:
-                            try:
-                                await telegram_provider.start(handler.handle_message)
-                            except asyncio.CancelledError:
-                                logger.info("telegram_polling_cancelled")
-                        else:
-                            logger.error("telegram_handler_timeout")
-
-                    telegram_task = asyncio.create_task(start_telegram())
-                    # return_exceptions=True ensures we wait for server to finish graceful
-                    # shutdown after telegram is cancelled, avoiding double Ctrl+C
-                    await asyncio.gather(
-                        server.serve(), telegram_task, return_exceptions=True
-                    )
-                else:
-                    await server.serve()
+                await runner.run()
         finally:
             await _cleanup_server(
                 telegram_provider,

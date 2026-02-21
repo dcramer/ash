@@ -150,3 +150,11 @@ def test_serve_uses_provider_runtime_adapter() -> None:
     assert "build_provider_runtime(" in text, (
         f"Expected provider runtime adapter in {path.relative_to(ROOT)}"
     )
+
+
+def test_serve_uses_shared_server_runner() -> None:
+    path = ROOT / "src/ash/cli/commands/serve.py"
+    text = path.read_text(encoding="utf-8")
+    assert "ServerRunner(" in text, (
+        f"Expected shared server runner in {path.relative_to(ROOT)}"
+    )
