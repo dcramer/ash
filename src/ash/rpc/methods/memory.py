@@ -554,6 +554,8 @@ def register_memory_methods(
             provider: Provider name (e.g., "telegram")
             user_id: Owner user ID
             chat_id: Chat ID
+            thread_id: Optional thread ID for thread-scoped sessions
+            session_key: Optional explicit session key override
             shared: If True, create group memories (default False)
             source_username: Speaker's username
             source_display_name: Speaker's display name
@@ -568,6 +570,8 @@ def register_memory_methods(
         provider = params.get("provider")
         user_id = params.get("user_id")
         chat_id = params.get("chat_id")
+        thread_id = params.get("thread_id")
+        explicit_session_key = params.get("session_key")
         shared = params.get("shared", False)
         source_username = params.get("source_username")
         source_display_name = params.get("source_display_name")
@@ -584,18 +588,33 @@ def register_memory_methods(
 
             effective_sessions_path = get_sessions_path()
 
-        key = session_key(provider, chat_id, user_id)
-        session_dir = effective_sessions_path / key
-        reader = SessionReader(session_dir)
+        resolved_session_key = explicit_session_key or session_key(
+            provider,
+            chat_id,
+            user_id,
+            thread_id,
+        )
+        reader = SessionReader(effective_sessions_path / resolved_session_key)
 
-        # Get the triggering message + surrounding context
-        surrounding = await reader.get_messages_around(message_id, window=2)
+        surrounding: list[MessageEntry] = await reader.get_messages_around(
+            message_id, window=2
+        )
+        resolved_message_id = message_id
+        if not surrounding:
+            # ASH_MESSAGE_ID is typically an external/provider message ID.
+            external_match = await reader.get_message_by_external_id(message_id)
+            if external_match is not None:
+                resolved_message_id = external_match.id
+                surrounding = await reader.get_messages_around(
+                    resolved_message_id, window=2
+                )
+
         if not surrounding:
             return {"stored": 0, "error": "Message not found in session"}
 
         # Extract author info from the target message
         target_msg = next(
-            (m for m in surrounding if m.id == message_id), surrounding[-1]
+            (m for m in surrounding if m.id == resolved_message_id), surrounding[-1]
         )
         msg_username = target_msg.username or source_username
         msg_display_name = target_msg.display_name or source_display_name

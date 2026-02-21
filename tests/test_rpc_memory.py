@@ -534,6 +534,199 @@ class TestRPCMemoryExtract:
         assert speaker_info.username == "bob"
         assert speaker_info.display_name == "Bob Smith"
 
+    async def test_extract_resolves_external_message_id(
+        self, memory_manager, mock_extractor, tmp_path
+    ):
+        """memory.extract should accept provider/external message IDs."""
+        import json
+        from datetime import UTC, datetime
+
+        from ash.sessions.types import session_key
+
+        key = session_key("telegram", "chat-1", "user-1")
+        session_dir = tmp_path / "sessions" / key
+        session_dir.mkdir(parents=True)
+
+        internal_id = "internal-msg-1"
+        external_id = "123456"
+        context_file = session_dir / "context.jsonl"
+        entries = [
+            {
+                "type": "session",
+                "id": "session-1",
+                "created_at": datetime.now(UTC).isoformat(),
+                "provider": "telegram",
+                "user_id": "user-1",
+                "chat_id": "chat-1",
+                "version": "2",
+            },
+            {
+                "type": "message",
+                "id": internal_id,
+                "role": "user",
+                "content": "Remember that I prefer text updates",
+                "created_at": datetime.now(UTC).isoformat(),
+                "token_count": 10,
+                "username": "alice",
+                "display_name": "Alice",
+                "user_id": "user-1",
+                "metadata": {"external_id": external_id},
+            },
+        ]
+        context_file.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+
+        mock_extractor.extract_from_conversation.return_value = []
+
+        server = MockRPCServer()
+        register_memory_methods(
+            server,  # type: ignore[arg-type]
+            memory_manager,
+            person_manager=memory_manager,
+            memory_extractor=mock_extractor,
+            sessions_path=tmp_path / "sessions",
+        )
+
+        handler = server.methods["memory.extract"]
+        result = await handler(
+            {
+                "message_id": external_id,
+                "provider": "telegram",
+                "user_id": "user-1",
+                "chat_id": "chat-1",
+            }
+        )
+
+        assert result["stored"] == 0
+        mock_extractor.extract_from_conversation.assert_awaited_once()
+
+    async def test_extract_uses_thread_id_for_thread_scoped_session(
+        self, memory_manager, mock_extractor, tmp_path
+    ):
+        """memory.extract should target thread-scoped session via thread_id."""
+        import json
+        from datetime import UTC, datetime
+
+        from ash.sessions.types import session_key
+
+        key = session_key("telegram", "chat-1", "user-1", "thread-1")
+        session_dir = tmp_path / "sessions" / key
+        session_dir.mkdir(parents=True)
+
+        msg_id = "thread-msg-1"
+        context_file = session_dir / "context.jsonl"
+        entries = [
+            {
+                "type": "session",
+                "id": "session-1",
+                "created_at": datetime.now(UTC).isoformat(),
+                "provider": "telegram",
+                "user_id": "user-1",
+                "chat_id": "chat-1",
+                "version": "2",
+            },
+            {
+                "type": "message",
+                "id": msg_id,
+                "role": "user",
+                "content": "Remember I need detergent",
+                "created_at": datetime.now(UTC).isoformat(),
+                "token_count": 10,
+                "username": "alice",
+                "display_name": "Alice",
+                "user_id": "user-1",
+            },
+        ]
+        context_file.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+
+        mock_extractor.extract_from_conversation.return_value = []
+
+        server = MockRPCServer()
+        register_memory_methods(
+            server,  # type: ignore[arg-type]
+            memory_manager,
+            person_manager=memory_manager,
+            memory_extractor=mock_extractor,
+            sessions_path=tmp_path / "sessions",
+        )
+
+        handler = server.methods["memory.extract"]
+        result = await handler(
+            {
+                "message_id": msg_id,
+                "provider": "telegram",
+                "user_id": "user-1",
+                "chat_id": "chat-1",
+                "thread_id": "thread-1",
+            }
+        )
+
+        assert result["stored"] == 0
+        mock_extractor.extract_from_conversation.assert_awaited_once()
+
+    async def test_extract_does_not_scan_other_sessions(
+        self, memory_manager, mock_extractor, tmp_path
+    ):
+        """memory.extract should only read the explicitly addressed session key."""
+        import json
+        from datetime import UTC, datetime
+
+        from ash.sessions.types import session_key
+
+        # Message exists only in a thread-scoped directory.
+        thread_key = session_key("telegram", "chat-1", "user-1", "thread-1")
+        session_dir = tmp_path / "sessions" / thread_key
+        session_dir.mkdir(parents=True)
+
+        msg_id = "thread-only-msg"
+        context_file = session_dir / "context.jsonl"
+        entries = [
+            {
+                "type": "session",
+                "id": "session-1",
+                "created_at": datetime.now(UTC).isoformat(),
+                "provider": "telegram",
+                "user_id": "user-1",
+                "chat_id": "chat-1",
+                "version": "2",
+            },
+            {
+                "type": "message",
+                "id": msg_id,
+                "role": "user",
+                "content": "Remember this from a thread",
+                "created_at": datetime.now(UTC).isoformat(),
+                "token_count": 10,
+                "username": "alice",
+                "display_name": "Alice",
+                "user_id": "user-1",
+            },
+        ]
+        context_file.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+
+        mock_extractor.extract_from_conversation.return_value = []
+
+        server = MockRPCServer()
+        register_memory_methods(
+            server,  # type: ignore[arg-type]
+            memory_manager,
+            person_manager=memory_manager,
+            memory_extractor=mock_extractor,
+            sessions_path=tmp_path / "sessions",
+        )
+
+        handler = server.methods["memory.extract"]
+        result = await handler(
+            {
+                "message_id": msg_id,
+                "provider": "telegram",
+                "user_id": "user-1",
+                "chat_id": "chat-1",
+            }
+        )
+
+        assert result == {"stored": 0, "error": "Message not found in session"}
+        mock_extractor.extract_from_conversation.assert_not_awaited()
+
     async def test_extract_from_messages_requires_provider(self, rpc_server):
         """Explicit-message extraction requires provider for chat provenance."""
         handler = rpc_server.methods["memory.extract_from_messages"]

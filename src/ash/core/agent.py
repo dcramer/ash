@@ -103,6 +103,19 @@ def _build_routing_env(
         "ASH_BOT_NAME": session.context.bot_name or "",
     }
 
+    # Stable session coordinate for sandbox RPC lookups.
+    if session.provider:
+        from ash.sessions.types import session_key
+
+        env["ASH_SESSION_KEY"] = session_key(
+            session.provider,
+            session.chat_id,
+            effective_user_id,
+            session.context.thread_id,
+        )
+    if session.context.thread_id:
+        env["ASH_THREAD_ID"] = session.context.thread_id
+
     # Provide chat state paths for sandbox access
     # ASH_CHAT_PATH: always points to chat-level state
     # ASH_THREAD_PATH: points to thread-specific state when in a thread

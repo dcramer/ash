@@ -105,9 +105,11 @@ def get_context_params() -> dict[str, str | None]:
         "user_id": os.environ.get("ASH_USER_ID"),
         "chat_id": os.environ.get("ASH_CHAT_ID"),
         "chat_type": os.environ.get("ASH_CHAT_TYPE"),
+        "thread_id": os.environ.get("ASH_THREAD_ID"),
         "source_username": os.environ.get("ASH_USERNAME"),
         "source_display_name": os.environ.get("ASH_DISPLAY_NAME"),
         "message_id": os.environ.get("ASH_MESSAGE_ID"),
+        "session_key": os.environ.get("ASH_SESSION_KEY"),
         "current_user_message": os.environ.get("ASH_CURRENT_USER_MESSAGE"),
         "provider": os.environ.get("ASH_PROVIDER"),
     }
