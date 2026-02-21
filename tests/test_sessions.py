@@ -240,6 +240,25 @@ class TestSessionReader:
         by_external = await reader.get_messages_around("ext-1")
         assert by_external == []
 
+    @pytest.mark.asyncio
+    async def test_external_id_lookup_uses_external_id_only(self, reader, session_dir):
+        session_dir.mkdir(parents=True)
+        lines = [
+            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00","metadata":{"external_id":"ext-user"}}',
+            '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00","metadata":{"bot_response_id":"ext-legacy"}}',
+            '{"type":"message","id":"m3","role":"assistant","content":"Hello again","created_at":"2026-01-11T10:00:03+00:00","metadata":{"external_id":"ext-bot"}}',
+        ]
+        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
+
+        assert await reader.has_message_with_external_id("ext-user")
+        assert await reader.has_message_with_external_id("ext-bot")
+        assert not await reader.has_message_with_external_id("ext-legacy")
+
+        assert (await reader.get_message_by_external_id("ext-user")) is not None
+        assert (await reader.get_message_by_external_id("ext-bot")) is not None
+        assert (await reader.get_message_by_external_id("ext-legacy")) is None
+
 
 class TestSessionManager:
     """Integration tests for SessionManager."""

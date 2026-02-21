@@ -224,32 +224,17 @@ class SessionReader:
         return None
 
     async def has_message_with_external_id(self, external_id: str) -> bool:
-        """Check if a message with the given external ID exists in this session.
-
-        This checks BOTH user messages (stored with external_id) AND bot responses
-        (stored with bot_response_id). This is critical for reply detection in group
-        chats - when a user replies to a bot message, we need to find the bot's
-        response by its Telegram message ID (stored as bot_response_id).
-
-        Without checking bot_response_id, replies to bot messages would be skipped
-        because _should_skip_reply() wouldn't find the reply target.
-        """
+        """Check if a message with the given external ID exists in this session."""
         for entry in await self.load_entries():
             if isinstance(entry, MessageEntry) and entry.metadata:
-                if external_id in (
-                    entry.metadata.get("external_id"),
-                    entry.metadata.get("bot_response_id"),
-                ):
+                if external_id == entry.metadata.get("external_id"):
                     return True
         return False
 
     async def get_message_by_external_id(self, external_id: str) -> MessageEntry | None:
         for entry in await self.load_entries():
             if isinstance(entry, MessageEntry) and entry.metadata:
-                if external_id in (
-                    entry.metadata.get("external_id"),
-                    entry.metadata.get("bot_response_id"),
-                ):
+                if external_id == entry.metadata.get("external_id"):
                     return entry
         return None
 

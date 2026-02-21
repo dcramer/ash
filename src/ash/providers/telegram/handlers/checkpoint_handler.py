@@ -129,10 +129,10 @@ class CheckpointHandler:
                 _, _, checkpoint = result
                 return routing, checkpoint
 
-        # Slow path (recovery): find session by bot_response_id in loaded sessions
+        # Slow path (recovery): find session by external bot message id in loaded sessions
         if bot_response_id:
             for sm in self._get_session_managers_dict().values():
-                if await sm.has_bot_response_id(bot_response_id):
+                if await sm.has_message_with_external_id(bot_response_id):
                     result = await sm.get_pending_checkpoint_from_log(truncated_id)
                     if result:
                         _, _, checkpoint = result

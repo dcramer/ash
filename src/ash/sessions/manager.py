@@ -471,15 +471,3 @@ class SessionManager:
                     return (tool_use, entry, checkpoint)
 
         return None
-
-    async def has_bot_response_id(self, bot_response_id: str) -> bool:
-        """Check if this session contains a message with the given bot_response_id."""
-        entries = await self._reader.load_entries()
-        for entry in entries:
-            if isinstance(entry, MessageEntry):
-                if (
-                    entry.metadata
-                    and entry.metadata.get("bot_response_id") == bot_response_id
-                ):
-                    return True
-        return False

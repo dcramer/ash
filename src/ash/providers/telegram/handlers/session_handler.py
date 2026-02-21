@@ -407,8 +407,6 @@ class SessionHandler:
                 user_metadata["external_id"] = external_id
             if reply_to_external_id:
                 user_metadata["reply_to_external_id"] = reply_to_external_id
-            if bot_response_id:
-                user_metadata["bot_response_id"] = bot_response_id
 
             last_msg_id = await session_manager.add_user_message(
                 content=user_message,
@@ -421,7 +419,7 @@ class SessionHandler:
 
         if assistant_message:
             assistant_metadata = (
-                {"bot_response_id": bot_response_id} if bot_response_id else None
+                {"external_id": bot_response_id} if bot_response_id else None
             )
             last_msg_id = await session_manager.add_assistant_message(
                 content=assistant_message,
