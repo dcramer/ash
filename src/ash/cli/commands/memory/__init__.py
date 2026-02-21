@@ -36,13 +36,6 @@ def register(app: typer.Typer) -> None:
                 help="Search query or content to add",
             ),
         ] = None,
-        entry_id: Annotated[
-            str | None,
-            typer.Option(
-                "--id",
-                help="Memory entry ID (for remove, deprecated: use positional arg)",
-            ),
-        ] = None,
         source: Annotated[
             str | None,
             typer.Option(
@@ -151,15 +144,12 @@ def register(app: typer.Typer) -> None:
             click.echo(ctx.get_help())
             raise typer.Exit(0)
 
-        # Use target (positional) or entry_id (--id flag) for ID-based commands
-        resolved_id = target or entry_id
-
         try:
             asyncio.run(
                 _run_memory_action(
                     action=action,
                     query=query,
-                    entry_id=resolved_id,
+                    entry_id=target,
                     source=source,
                     expires_days=expires_days,
                     include_expired=include_expired,
@@ -237,7 +227,7 @@ async def _run_memory_action(
         await memory_add(store, query, source, expires_days)
     elif action == "remove":
         if not entry_id and not all_entries:
-            error("--id or --all is required to remove entries")
+            error("<id> or --all is required to remove entries")
             raise typer.Exit(1)
         if not store:
             error("Memory remove requires [embeddings] configuration")

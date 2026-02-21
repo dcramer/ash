@@ -69,7 +69,7 @@ class TestMemoryCommand:
             app, ["memory", "remove", "--config", str(config_file)]
         )
         assert result.exit_code == 1
-        assert "--id" in result.stdout or "required" in result.stdout.lower()
+        assert "--all" in result.stdout or "required" in result.stdout.lower()
 
     def test_memory_unknown_action(self, cli_runner, config_file):
         result = cli_runner.invoke(
