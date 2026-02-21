@@ -280,6 +280,20 @@ class TestSessionReader:
         assert by_external == []
 
     @pytest.mark.asyncio
+    async def test_search_messages_rejects_unknown_content_block_type(
+        self, reader, session_dir
+    ):
+        session_dir.mkdir(parents=True)
+        lines = [
+            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"message","id":"m1","role":"assistant","content":[{"type":"unknown_block","value":"x"}],"created_at":"2026-01-11T10:00:01+00:00"}',
+        ]
+        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
+
+        with pytest.raises(ValueError, match="Unknown content block type"):
+            await reader.search_messages("anything")
+
+    @pytest.mark.asyncio
     async def test_external_id_lookup_uses_external_id_only(self, reader, session_dir):
         session_dir.mkdir(parents=True)
         lines = [

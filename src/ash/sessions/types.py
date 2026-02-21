@@ -209,11 +209,14 @@ class MessageEntry:
     def _extract_text_content(self) -> str:
         if isinstance(self.content, str):
             return self.content
-        texts = [
-            block.get("text", "")
-            for block in self.content
-            if isinstance(block, dict) and block.get("type") == "text"
-        ]
+        from ash.llm.types import TextContent
+        from ash.sessions.utils import content_block_from_dict
+
+        texts: list[str] = []
+        for block_data in self.content:
+            block = content_block_from_dict(block_data)
+            if isinstance(block, TextContent):
+                texts.append(block.text)
         return "\n".join(texts)
 
     @classmethod
