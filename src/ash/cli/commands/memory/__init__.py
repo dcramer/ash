@@ -282,6 +282,7 @@ async def _run_memory_action(
     elif action == "doctor":
         from ash.cli.commands.memory.doctor import (
             memory_doctor_attribution,
+            memory_doctor_backfill_learned_in,
             memory_doctor_backfill_subjects,
             memory_doctor_contradictions,
             memory_doctor_dedup,
@@ -300,9 +301,12 @@ async def _run_memory_action(
         subcommand = entry_id  # positional arg: ash memory doctor <sub>
         if subcommand == "embed-missing":
             await memory_doctor_embed_missing(store, force)
+        elif subcommand == "backfill-learned-in":
+            await memory_doctor_backfill_learned_in(store, force)
         elif subcommand == "normalize-semantics":
             await memory_doctor_normalize_semantics(store, force)
         elif subcommand is None:
+            await memory_doctor_backfill_learned_in(store, force)
             await memory_doctor_self_facts(store, force)
             await memory_doctor_backfill_subjects(store, force)
             await memory_doctor_attribution(store, force)
@@ -315,7 +319,7 @@ async def _run_memory_action(
         else:
             error(f"Unknown doctor subcommand: {subcommand}")
             console.print(
-                "Valid subcommands: embed-missing, normalize-semantics "
+                "Valid subcommands: embed-missing, backfill-learned-in, normalize-semantics "
                 "(or omit for full check)"
             )
             raise typer.Exit(1)
