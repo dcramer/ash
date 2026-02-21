@@ -388,7 +388,7 @@ class SessionHandler:
         assistant_message: str | None = None,
         external_id: str | None = None,
         reply_to_external_id: str | None = None,
-        bot_response_id: str | None = None,
+        response_external_id: str | None = None,
         compaction: CompactionInfo | None = None,
         username: str | None = None,
         display_name: str | None = None,
@@ -419,7 +419,7 @@ class SessionHandler:
 
         if assistant_message:
             assistant_metadata = (
-                {"external_id": bot_response_id} if bot_response_id else None
+                {"external_id": response_external_id} if response_external_id else None
             )
             last_msg_id = await session_manager.add_assistant_message(
                 content=assistant_message,
@@ -432,8 +432,8 @@ class SessionHandler:
 
             chat_writer = ChatHistoryWriter(self._provider_name, chat_id)
             bot_metadata: dict[str, Any] = {}
-            if bot_response_id:
-                bot_metadata["external_id"] = bot_response_id
+            if response_external_id:
+                bot_metadata["external_id"] = response_external_id
             if thread_id:
                 bot_metadata["thread_id"] = thread_id
             chat_writer.record_bot_message(
@@ -446,9 +446,9 @@ class SessionHandler:
             session_manager.update_branch_head(branch_id, last_msg_id)
 
         # Register bot response in thread index so replies to bot get routed correctly
-        if bot_response_id and thread_id:
+        if response_external_id and thread_id:
             thread_index = self.get_thread_index(chat_id)
-            thread_index.register_message(bot_response_id, thread_id)
+            thread_index.register_message(response_external_id, thread_id)
 
         if compaction:
             await session_manager.add_compaction(

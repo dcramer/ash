@@ -267,7 +267,7 @@ class SyncHandler:
             response.text,
             external_id=message.id,
             reply_to_external_id=message.reply_to_message_id,
-            bot_response_id=sent_message_id,
+            response_external_id=sent_message_id,
             compaction=response.compaction,
             username=message.username,
             display_name=message.display_name,
