@@ -1,0 +1,40 @@
+schema_version: "2.0"
+name: Passive Engagement
+description: Tests follow-up behavior after direct bot engagement in a group chat
+
+defaults:
+  agent: default
+  drain_extraction: false
+  session:
+    provider: telegram
+    chat_id: eval-group-passive
+    chat_type: supergroup
+    chat_title: "Passive Eval Group"
+    user_id: eval-user-alice
+    username: alice
+    display_name: "Alice"
+
+cases:
+  - id: followup_after_tagged_message
+    description: User follows up immediately without tagging after a tagged prompt
+    turns:
+      - prompt: "@miso_834710_bot can you give me a quick deploy checklist?"
+        expected_behavior: |
+          The assistant should provide a short, practical deploy checklist.
+        criteria:
+          - Provides concrete deploy steps
+          - Response is clear and actionable
+      - prompt: "also what order should i do those in?"
+        expected_behavior: |
+          The assistant should treat this as a continuation of the previous
+          tagged exchange and answer with an ordered sequence, even though
+          this second message does not tag the bot.
+        criteria:
+          - Provides an ordered or clearly sequenced response
+          - Does not refuse or ask to be tagged first
+          - Continues the deploy-checklist context from the prior turn
+    tags:
+      - passive
+      - engagement
+      - followup
+      - telegram
