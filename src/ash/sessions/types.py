@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -35,7 +36,7 @@ def session_key(
     user_id: str | None = None,
     thread_id: str | None = None,
 ) -> str:
-    parts = [_sanitize(provider)]
+    parts = [_sanitize(provider, preserve_legacy=True)]
     if chat_id:
         parts.append(_sanitize(chat_id))
         if thread_id:
@@ -45,11 +46,35 @@ def session_key(
     return "_".join(parts)
 
 
-def _sanitize(s: str) -> str:
+def legacy_session_key(
+    provider: str,
+    chat_id: str | None = None,
+    user_id: str | None = None,
+    thread_id: str | None = None,
+) -> str:
+    """Legacy v2 session key without truncation collision protection."""
+    parts = [_sanitize(provider, preserve_legacy=True)]
+    if chat_id:
+        parts.append(_sanitize(chat_id, preserve_legacy=True))
+        if thread_id:
+            parts.append(_sanitize(thread_id, preserve_legacy=True))
+    elif user_id:
+        parts.append(_sanitize(user_id, preserve_legacy=True))
+    return "_".join(parts)
+
+
+def _sanitize(s: str, *, preserve_legacy: bool = False) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9\-]", "_", s)
     cleaned = re.sub(r"_+", "_", cleaned)
     cleaned = cleaned.strip("_")
-    return cleaned[:64] if cleaned else "default"
+    if not cleaned:
+        return "default"
+    if len(cleaned) <= 64:
+        return cleaned
+    if preserve_legacy:
+        return cleaned[:64]
+    digest = hashlib.sha256(s.encode("utf-8")).hexdigest()[:12]
+    return f"{cleaned[:51]}_{digest}"
 
 
 @dataclass

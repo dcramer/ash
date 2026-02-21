@@ -6,15 +6,17 @@ with file locking for safe concurrent access.
 
 import fcntl
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, TypeVar
 
 from ash.scheduling.types import ScheduleEntry
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 class ScheduleStore:
@@ -87,22 +89,18 @@ class ScheduleStore:
         if not self._schedule_file.exists():
             return False
 
-        lines = self._schedule_file.read_text().splitlines()
-        new_lines = []
-        found = False
+        def mutate(lines: list[str]) -> tuple[list[str], bool]:
+            new_lines: list[str] = []
+            found = False
+            for line in lines:
+                entry = ScheduleEntry.from_line(line)
+                if entry and entry.id == entry_id:
+                    found = True
+                    continue
+                new_lines.append(line)
+            return new_lines, found
 
-        for line in lines:
-            entry = ScheduleEntry.from_line(line)
-            if entry and entry.id == entry_id:
-                found = True
-                continue  # Skip this entry (remove it)
-            new_lines.append(line)
-
-        if not found:
-            return False
-
-        self._write_lines(new_lines)
-        return True
+        return self._mutate_lines_locked(mutate)
 
     def update_entry(
         self,
@@ -128,29 +126,26 @@ class ScheduleStore:
         if not self._schedule_file.exists():
             return None
 
-        lines = self._schedule_file.read_text().splitlines()
-        updated_entry = None
-        new_lines = []
+        def mutate(lines: list[str]) -> tuple[list[str], ScheduleEntry | None]:
+            updated_entry: ScheduleEntry | None = None
+            new_lines: list[str] = []
 
-        for line in lines:
-            entry = ScheduleEntry.from_line(line)
-            if entry and entry.id == entry_id:
-                # Apply updates with validation
-                updated_entry = _apply_updates(
-                    entry,
-                    message=message,
-                    trigger_at=trigger_at,
-                    cron=cron,
-                    timezone=timezone,
-                )
-                new_lines.append(updated_entry.to_json_line())
-            else:
-                new_lines.append(line)
+            for line in lines:
+                entry = ScheduleEntry.from_line(line)
+                if entry and entry.id == entry_id:
+                    updated_entry = _apply_updates(
+                        entry,
+                        message=message,
+                        trigger_at=trigger_at,
+                        cron=cron,
+                        timezone=timezone,
+                    )
+                    new_lines.append(updated_entry.to_json_line())
+                else:
+                    new_lines.append(line)
+            return new_lines, updated_entry
 
-        if updated_entry:
-            self._write_lines(new_lines)
-
-        return updated_entry
+        return self._mutate_lines_locked(mutate)
 
     def clear_all(self) -> int:
         """Remove all schedule entries.
@@ -161,10 +156,13 @@ class ScheduleStore:
         if not self._schedule_file.exists():
             return 0
 
-        entries = self.get_entries()
-        count = len(entries)
-        self._schedule_file.write_text("")
-        return count
+        def mutate(lines: list[str]) -> tuple[list[str], int]:
+            count = sum(
+                1 for line in lines if ScheduleEntry.from_line(line) is not None
+            )
+            return [], count
+
+        return self._mutate_lines_locked(mutate)
 
     def remove_and_update(
         self,
@@ -183,21 +181,19 @@ class ScheduleStore:
         if not self._schedule_file.exists():
             return
 
-        with self._schedule_file.open("r") as f:
-            with self._file_lock(f):
-                lines = f.read().splitlines()
+        def mutate(lines: list[str]) -> tuple[list[str], None]:
+            new_lines: list[str] = []
+            for line in lines:
+                entry = ScheduleEntry.from_line(line)
+                if entry and entry.id and entry.id in remove_ids:
+                    continue  # Remove one-shot
+                if entry and entry.id and entry.id in updates:
+                    new_lines.append(updates[entry.id].to_json_line())
+                else:
+                    new_lines.append(line)
+            return new_lines, None
 
-        new_lines = []
-        for line in lines:
-            entry = ScheduleEntry.from_line(line)
-            if entry and entry.id and entry.id in remove_ids:
-                continue  # Remove one-shot
-            if entry and entry.id and entry.id in updates:
-                new_lines.append(updates[entry.id].to_json_line())
-            else:
-                new_lines.append(line)
-
-        self._write_lines(new_lines)
+        self._mutate_lines_locked(mutate)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -218,6 +214,23 @@ class ScheduleStore:
         with self._schedule_file.open("w") as f:
             with self._file_lock(f):
                 f.write(content)
+
+    def _mutate_lines_locked(
+        self, mutate: Callable[[list[str]], tuple[list[str], _T]]
+    ) -> _T:
+        """Atomically read/transform/write schedule lines under one lock."""
+        self._schedule_file.parent.mkdir(parents=True, exist_ok=True)
+        with self._schedule_file.open("a+") as f:
+            with self._file_lock(f):
+                f.seek(0)
+                lines = f.read().splitlines()
+                new_lines, result = mutate(lines)
+                if new_lines != lines:
+                    content = "\n".join(new_lines) + "\n" if new_lines else ""
+                    f.seek(0)
+                    f.truncate()
+                    f.write(content)
+                return result
 
 
 def _apply_updates(

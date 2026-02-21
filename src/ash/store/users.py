@@ -7,7 +7,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from ash.graph.edges import IS_PERSON, create_is_person_edge
+from ash.graph.edges import (
+    IS_PERSON,
+    create_is_person_edge,
+    create_participates_in_edge,
+    person_participates_in_chat,
+)
 from ash.store.types import ChatEntry, UserEntry
 
 if TYPE_CHECKING:
@@ -205,6 +210,27 @@ class UserChatOpsMixin:
         self: Store, provider: str, provider_id: str
     ) -> ChatEntry | None:
         return self._graph.find_chat_by_provider(provider, provider_id)
+
+    async def get_chat_graph_id(
+        self: Store, provider: str, provider_id: str
+    ) -> str | None:
+        chat = self._graph.find_chat_by_provider(provider, provider_id)
+        return chat.id if chat else None
+
+    async def ensure_person_participates_in_chat(
+        self: Store, person_id: str, chat_id: str
+    ) -> bool:
+        """Ensure PARTICIPATES_IN edge exists. Returns True when created."""
+        if person_participates_in_chat(self._graph, person_id, chat_id):
+            return False
+
+        self._graph.add_edge(create_participates_in_edge(person_id, chat_id))
+        self._persistence.mark_dirty("edges")
+        return True
+
+    async def flush_graph(self: Store) -> None:
+        """Flush pending graph mutations."""
+        await self._persistence.flush(self._graph)
 
     async def users_for_person(self: Store, person_id: str) -> list[UserEntry]:
         """Return users linked to a person via IS_PERSON edges."""

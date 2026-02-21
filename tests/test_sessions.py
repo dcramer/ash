@@ -13,6 +13,7 @@ from ash.sessions.types import (
     MessageEntry,
     ToolResultEntry,
     ToolUseEntry,
+    legacy_session_key,
     parse_entry,
     session_key,
 )
@@ -50,6 +51,22 @@ class TestSessionKey:
         long_id = "a" * 100
         key = session_key("cli", chat_id=long_id)
         assert len(key) <= 68  # provider + _ + max 64 chars
+
+    def test_long_ids_include_hash_suffix(self):
+        """Long IDs are hashed to avoid silent key collisions."""
+        id1 = "a" * 100
+        id2 = "a" * 99 + "b"
+        key1 = session_key("cli", chat_id=id1)
+        key2 = session_key("cli", chat_id=id2)
+        assert key1 != key2
+        assert key1.startswith("cli_")
+        assert key2.startswith("cli_")
+
+    def test_legacy_key_kept_for_simple_ids(self):
+        """Simple IDs should not change across key versions."""
+        key = session_key("telegram", chat_id="12345", thread_id="42")
+        legacy = legacy_session_key("telegram", chat_id="12345", thread_id="42")
+        assert key == legacy
 
 
 class TestParseEntry:
@@ -216,6 +233,38 @@ class TestSessionManager:
         sessions = await SessionManager.list_sessions(sessions_path)
         assert len(sessions) == 2
         assert {s["provider"] for s in sessions} == {"cli", "telegram"}
+
+    @pytest.mark.asyncio
+    async def test_get_recent_message_ids_uses_chronological_order(self, manager):
+        """Recent message IDs are selected by append order, not set iteration order."""
+        await manager.ensure_session()
+
+        await manager.add_user_message("one")
+        m2 = await manager.add_assistant_message("two")
+        m3 = await manager.add_user_message("three")
+
+        recent = await manager.get_recent_message_ids(recency_window=2)
+        assert recent == {m2, m3}
+
+    @pytest.mark.asyncio
+    async def test_uses_legacy_session_dir_when_present(self, sessions_path):
+        """Long-ID sessions created with legacy key remain readable."""
+        long_chat_id = "a" * 100
+        legacy_key = legacy_session_key("telegram", chat_id=long_chat_id)
+        legacy_dir = sessions_path / legacy_key
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        (legacy_dir / "context.jsonl").write_text(
+            '{"type":"session","version":"2","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"telegram","chat_id":"'
+            + long_chat_id
+            + '"}\n'
+        )
+
+        manager = SessionManager(
+            provider="telegram", chat_id=long_chat_id, sessions_path=sessions_path
+        )
+        await manager.ensure_session()
+
+        assert manager.session_dir == legacy_dir
 
 
 class TestSessionBranching:

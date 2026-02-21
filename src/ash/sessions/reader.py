@@ -223,6 +223,10 @@ class SessionReader:
         entries = await self.load_entries()
         return {entry.id for entry in entries if isinstance(entry, MessageEntry)}
 
+    async def get_message_ids_in_order(self) -> list[str]:
+        entries = await self.load_entries()
+        return [entry.id for entry in entries if isinstance(entry, MessageEntry)]
+
     async def get_last_compaction(self) -> CompactionEntry | None:
         for entry in reversed(await self.load_entries()):
             if isinstance(entry, CompactionEntry):

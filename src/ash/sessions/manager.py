@@ -22,6 +22,7 @@ from ash.sessions.types import (
     ToolResultEntry,
     ToolUseEntry,
     generate_id,
+    legacy_session_key,
     session_key,
 )
 from ash.sessions.utils import content_block_to_dict
@@ -49,8 +50,23 @@ class SessionManager:
         self.chat_id = chat_id
         self.user_id = user_id
         self.thread_id = thread_id
-        self._key = session_key(provider, chat_id, user_id, thread_id)
-        self._session_dir = (sessions_path or get_sessions_path()) / self._key
+        root = sessions_path or get_sessions_path()
+        preferred_key = session_key(provider, chat_id, user_id, thread_id)
+        legacy_key = legacy_session_key(provider, chat_id, user_id, thread_id)
+        preferred_dir = root / preferred_key
+        legacy_dir = root / legacy_key
+
+        # Backward-compatible fallback for sessions created before hash suffixes.
+        if (
+            preferred_key != legacy_key
+            and not preferred_dir.exists()
+            and legacy_dir.exists()
+        ):
+            self._key = legacy_key
+            self._session_dir = legacy_dir
+        else:
+            self._key = preferred_key
+            self._session_dir = preferred_dir
         self._reader = SessionReader(self._session_dir)
         self._writer = SessionWriter(self._session_dir)
         self._header: SessionHeader | None = None
@@ -295,7 +311,7 @@ class SessionManager:
         return await self._reader.get_message_ids()
 
     async def get_recent_message_ids(self, recency_window: int = 10) -> set[str]:
-        all_ids = list(await self._reader.get_message_ids())
+        all_ids = await self._reader.get_message_ids_in_order()
         if not all_ids:
             return set()
         return set(all_ids[max(0, len(all_ids) - recency_window) :])

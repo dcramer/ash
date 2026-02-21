@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from ash.graph.edges import (
     ABOUT,
     IS_PERSON,
@@ -1057,6 +1059,26 @@ class TestPersistenceRoundTrip:
 
         # Second flush should be a no-op
         assert not persistence._dirty
+
+    async def test_flush_restores_dirty_set_on_write_failure(
+        self, tmp_path, monkeypatch
+    ):
+        from ash.graph.persistence import GraphPersistence
+
+        graph = KnowledgeGraph()
+        persistence = GraphPersistence(tmp_path / "graph")
+        persistence.mark_dirty("memories")
+
+        def fail_write(*args, **kwargs):
+            raise RuntimeError("disk write failed")
+
+        monkeypatch.setattr("ash.graph.persistence._write_snapshot", fail_write)
+
+        with pytest.raises(RuntimeError, match="disk write failed"):
+            await persistence.flush(graph)
+
+        # Failed flush must preserve dirty collections so a later retry can persist.
+        assert persistence._dirty == {"memories"}
 
     async def test_load_save_roundtrip(self, tmp_path):
         from ash.graph.persistence import GraphPersistence, hydrate_graph

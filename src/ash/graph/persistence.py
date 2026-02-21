@@ -68,18 +68,23 @@ class GraphPersistence:
             return
         dirty = self._dirty.copy()
         self._dirty.clear()
-        commit_id = f"g-{uuid.uuid4().hex}"
+        try:
+            commit_id = f"g-{uuid.uuid4().hex}"
 
-        # Snapshot on the event-loop thread to avoid concurrent dict iteration
-        snapshot = _snapshot_dirty(graph, dirty)
-        await asyncio.to_thread(_write_snapshot, self._dir, snapshot)
-        if "memories" in dirty:
-            await self.update_state(
-                graph_commit_id=commit_id,
-                active_memory_id_hash=_hash_active_memory_ids(graph),
-            )
-        else:
-            await self.update_state(graph_commit_id=commit_id)
+            # Snapshot on the event-loop thread to avoid concurrent dict iteration
+            snapshot = _snapshot_dirty(graph, dirty)
+            await asyncio.to_thread(_write_snapshot, self._dir, snapshot)
+            if "memories" in dirty:
+                await self.update_state(
+                    graph_commit_id=commit_id,
+                    active_memory_id_hash=_hash_active_memory_ids(graph),
+                )
+            else:
+                await self.update_state(graph_commit_id=commit_id)
+        except Exception:
+            # Preserve dirty collections so a later flush can retry safely.
+            self._dirty.update(dirty)
+            raise
 
     async def load_raw(self) -> dict[str, list[dict[str, Any]]]:
         """Load raw JSONL data from disk.
