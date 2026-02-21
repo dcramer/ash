@@ -530,6 +530,23 @@ class TestSessionReader:
         assert (await reader.get_message_by_external_id("ext-bot")) is not None
         assert (await reader.get_message_by_external_id("ext-legacy")) is None
 
+    @pytest.mark.asyncio
+    async def test_external_id_lookup_uses_history_when_context_unreadable(
+        self, reader, session_dir
+    ):
+        session_dir.mkdir(parents=True)
+        (session_dir / "context.jsonl").write_text(
+            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
+        )
+        (session_dir / "history.jsonl").write_text(
+            '{"id":"m1","role":"user","content":"hello","created_at":"2026-01-11T10:00:01+00:00","metadata":{"external_id":"ext-user"}}\n'
+        )
+
+        assert await reader.has_message_with_external_id("ext-user")
+        hit = await reader.get_message_by_external_id("ext-user")
+        assert hit is not None
+        assert hit.id == "m1"
+
 
 class TestSessionManager:
     """Integration tests for SessionManager."""
@@ -609,6 +626,22 @@ class TestSessionManager:
 
         assert not await manager.has_message_with_external_id("ext-1")
         assert (await manager.get_message_by_external_id("ext-1")) is None
+
+    @pytest.mark.asyncio
+    async def test_duplicate_lookup_uses_history_when_context_legacy(self, manager):
+        """Duplicate lookups should still work via history on legacy context files."""
+        manager.session_dir.mkdir(parents=True, exist_ok=True)
+        (manager.session_dir / "context.jsonl").write_text(
+            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
+        )
+        (manager.session_dir / "history.jsonl").write_text(
+            '{"id":"m1","role":"user","content":"hello","created_at":"2026-01-11T10:00:01+00:00","metadata":{"external_id":"ext-1"}}\n'
+        )
+
+        assert await manager.has_message_with_external_id("ext-1")
+        hit = await manager.get_message_by_external_id("ext-1")
+        assert hit is not None
+        assert hit.id == "m1"
 
     @pytest.mark.asyncio
     async def test_fail_open_on_legacy_context_for_message_loading(self, manager):

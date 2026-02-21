@@ -225,6 +225,8 @@ class SessionReader:
 
     async def has_message_with_external_id(self, external_id: str) -> bool:
         """Check if a message with the given external ID exists in this session."""
+        if await self._find_history_message_by_external_id(external_id) is not None:
+            return True
         for entry in await self.load_entries():
             if isinstance(entry, MessageEntry) and entry.metadata:
                 if external_id == entry.metadata.get("external_id"):
@@ -232,11 +234,79 @@ class SessionReader:
         return False
 
     async def get_message_by_external_id(self, external_id: str) -> MessageEntry | None:
+        history_match = await self._find_history_message_by_external_id(external_id)
+        if history_match is not None:
+            return history_match
         for entry in await self.load_entries():
             if isinstance(entry, MessageEntry) and entry.metadata:
                 if external_id == entry.metadata.get("external_id"):
                     return entry
         return None
+
+    async def _find_history_message_by_external_id(
+        self, external_id: str
+    ) -> MessageEntry | None:
+        """Lookup by external_id using history.jsonl.
+
+        history.jsonl has a simpler schema than context.jsonl and avoids strict
+        session-header parsing on hot paths like duplicate checks.
+        """
+        if not self.history_file.exists():
+            return None
+
+        latest_match: MessageEntry | None = None
+        async with aiofiles.open(self.history_file, encoding="utf-8") as f:
+            async for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(data, dict):
+                    continue
+
+                metadata = data.get("metadata")
+                if not isinstance(metadata, dict):
+                    continue
+                if metadata.get("external_id") != external_id:
+                    continue
+
+                entry_id = data.get("id")
+                role = data.get("role")
+                content = data.get("content")
+                created_at_raw = data.get("created_at")
+                if (
+                    not isinstance(entry_id, str)
+                    or role not in {"user", "assistant", "system"}
+                    or not isinstance(content, str)
+                    or not isinstance(created_at_raw, str)
+                ):
+                    continue
+                try:
+                    created_at = datetime.fromisoformat(created_at_raw)
+                except ValueError:
+                    continue
+
+                latest_match = MessageEntry(
+                    id=entry_id,
+                    role=role,
+                    content=content,
+                    created_at=created_at,
+                    user_id=data.get("user_id")
+                    if isinstance(data.get("user_id"), str)
+                    else None,
+                    username=data.get("username")
+                    if isinstance(data.get("username"), str)
+                    else None,
+                    display_name=data.get("display_name")
+                    if isinstance(data.get("display_name"), str)
+                    else None,
+                    metadata=metadata,
+                )
+
+        return latest_match
 
     async def get_messages_around(
         self, message_id: str, window: int = 3
