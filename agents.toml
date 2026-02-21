@@ -1,0 +1,15 @@
+version = 1
+# Managed skills are gitignored; collaborators must run 'dotagents install'.
+gitignore = true
+agents = ["claude", "codex"]
+
+[trust]
+allow_all = true
+
+[[skills]]
+name = "agents-md"
+source = "getsentry/skills"
+
+[[skills]]
+name = "skill-creator"
+source = "getsentry/skills"
