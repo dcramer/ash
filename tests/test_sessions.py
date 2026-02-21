@@ -170,6 +170,25 @@ class TestSessionReader:
         assert messages[0].content == "Hello"
         assert ids == ["m1", "m2"]
 
+    @pytest.mark.asyncio
+    async def test_get_messages_around_requires_internal_message_id(
+        self, reader, session_dir
+    ):
+        """get_messages_around only matches stored message IDs."""
+        session_dir.mkdir(parents=True)
+        lines = [
+            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00","metadata":{"external_id":"ext-1"}}',
+            '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00","metadata":{"bot_response_id":"ext-2"}}',
+        ]
+        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
+
+        by_internal = await reader.get_messages_around("m1")
+        assert len(by_internal) == 2
+
+        by_external = await reader.get_messages_around("ext-1")
+        assert by_external == []
+
 
 class TestSessionManager:
     """Integration tests for SessionManager."""
