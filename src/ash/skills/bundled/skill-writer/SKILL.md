@@ -59,7 +59,6 @@ Read `/ash/skills/skill-writer/references/example-skill.md` for a working exampl
 - `max_iterations` - Iteration limit (default: 10)
 - `triggers` - Optional trigger phrases/commands for discovery metadata
 - `license` - License identifier (e.g., "MIT")
-- `compatibility` - Compatibility info
 - `metadata` - Arbitrary key-value metadata
 
 **Instructions must be imperative:**

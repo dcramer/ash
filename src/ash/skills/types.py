@@ -59,7 +59,6 @@ class SkillDefinition:
     model: str | None = None  # Model alias override
     max_iterations: int = 10  # Iteration limit
 
-    # agentskills.io spec fields (informational, no behavior change)
+    # Optional metadata fields
     license: str | None = None
-    compatibility: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

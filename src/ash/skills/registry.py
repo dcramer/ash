@@ -41,7 +41,6 @@ KNOWN_FRONTMATTER_FIELDS = {
     "opt_in",
     "input_schema",
     "license",
-    "compatibility",
     "metadata",
 }
 
@@ -237,7 +236,6 @@ class SkillRegistry:
             model=data.get("model"),
             max_iterations=data.get("max_iterations", 10),
             license=data.get("license"),
-            compatibility=data.get("compatibility"),
             metadata=data.get("metadata", {}),
         )
 
