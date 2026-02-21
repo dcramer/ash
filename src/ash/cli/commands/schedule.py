@@ -143,10 +143,13 @@ def register(app: typer.Typer) -> None:
 def _schedule_list(schedule_file) -> None:
     """List all scheduled tasks."""
     from ash.cli.console import create_table
-    from ash.config import load_config
+    from ash.config import get_default_config, load_config
     from ash.scheduling import ScheduleStore
 
-    config = load_config()
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        config = get_default_config()
     store = ScheduleStore(schedule_file)
     entries = store.get_entries()
 
@@ -234,10 +237,13 @@ def _schedule_update(
     tz: str | None,
 ) -> None:
     """Update a scheduled task by ID."""
-    from ash.config import load_config
+    from ash.config import get_default_config, load_config
     from ash.scheduling import ScheduleStore
 
-    config = load_config()
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        config = get_default_config()
     store = ScheduleStore(schedule_file)
 
     # Parse --at time if provided

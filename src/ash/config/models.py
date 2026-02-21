@@ -46,16 +46,6 @@ class ProviderConfig(BaseModel):
     api_key: SecretStr | None = None
 
 
-class LLMConfig(BaseModel):
-    """Configuration for an LLM provider (backward compatibility)."""
-
-    provider: Literal["anthropic", "openai", "openai-oauth"]
-    model: str
-    api_key: SecretStr | None = None
-    temperature: float = 0.7
-    max_tokens: int = 4096
-
-
 class PassiveListeningConfig(BaseModel):
     """Configuration for passive listening in group chats.
 
@@ -329,9 +319,6 @@ class AshConfig(BaseModel):
     # Provider-level API keys
     anthropic: ProviderConfig | None = None
     openai: ProviderConfig | None = None
-    # Backward compatibility - deprecated, use models.default instead
-    default_llm: LLMConfig | None = None
-    fallback_llm: LLMConfig | None = None
     telegram: TelegramConfig | None = None
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -402,44 +389,9 @@ class AshConfig(BaseModel):
         return data
 
     @model_validator(mode="after")
-    def _migrate_default_llm(self) -> "AshConfig":
-        """Migrate [default_llm] to models.default for backward compatibility."""
-        if self.default_llm is None:
-            return self
-
-        if "default" in self.models:
-            logger.warning("config_duplicate_default_llm")
-            return self
-
-        logger.warning("config_deprecated_default_llm")
-
-        self.models["default"] = ModelConfig(
-            provider=self.default_llm.provider,
-            model=self.default_llm.model,
-            temperature=self.default_llm.temperature,
-            max_tokens=self.default_llm.max_tokens,
-        )
-
-        # Store api_key in provider config if present
-        if self.default_llm.api_key is None:
-            return self
-
-        self._set_provider_api_key(self.default_llm.provider, self.default_llm.api_key)
-        return self
-
-    def _set_provider_api_key(self, provider: str, api_key: SecretStr) -> None:
-        provider_config = getattr(self, provider, None)
-        if provider_config is None:
-            setattr(self, provider, ProviderConfig(api_key=api_key))
-        elif provider_config.api_key is None:
-            provider_config.api_key = api_key
-
-    @model_validator(mode="after")
     def _validate_default_model(self) -> "AshConfig":
-        if "default" not in self.models and self.default_llm is None:
-            raise ValueError(
-                "No default model configured. Add [models.default] or [default_llm]"
-            )
+        if "default" not in self.models:
+            raise ValueError("No default model configured. Add [models.default]")
         return self
 
     def get_model(self, alias: str) -> ModelConfig:

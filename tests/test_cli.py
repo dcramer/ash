@@ -9,7 +9,7 @@ class TestConfigCommand:
     def test_config_show_displays_content(self, cli_runner, config_file):
         result = cli_runner.invoke(app, ["config", "show", "--path", str(config_file)])
         assert result.exit_code == 0
-        assert "[default_llm]" in result.stdout
+        assert "[models.default]" in result.stdout
 
     def test_config_show_missing_file(self, cli_runner, tmp_path):
         result = cli_runner.invoke(
@@ -37,7 +37,7 @@ class TestConfigCommand:
     def test_config_validate_invalid_config(self, cli_runner, tmp_path):
         invalid_config = tmp_path / "bad_config.toml"
         invalid_config.write_text("""
-[default_llm]
+[models.default]
 provider = "invalid_provider"
 model = "test"
 """)

@@ -8,7 +8,6 @@ from ash.config.models import (
     AshConfig,
     ConfigError,
     EmbeddingsConfig,
-    LLMConfig,
     MemoryConfig,
     ModelConfig,
     ProviderConfig,
@@ -16,32 +15,6 @@ from ash.config.models import (
     ServerConfig,
     TelegramConfig,
 )
-
-
-class TestLLMConfig:
-    """Tests for LLMConfig model."""
-
-    def test_minimal_config(self):
-        config = LLMConfig(provider="openai", model="gpt-5.2")
-        assert config.provider == "openai"
-        assert config.model == "gpt-5.2"
-        assert config.temperature == 0.7  # default
-        assert config.max_tokens == 4096  # default
-
-    def test_full_config(self):
-        config = LLMConfig(
-            provider="openai",
-            model="gpt-4o",
-            temperature=0.5,
-            max_tokens=2048,
-        )
-        assert config.provider == "openai"
-        assert config.temperature == 0.5
-        assert config.max_tokens == 2048
-
-    def test_invalid_provider(self):
-        with pytest.raises(ValidationError):
-            LLMConfig(provider="invalid", model="test")  # type: ignore[arg-type]
 
 
 class TestTelegramConfig:
@@ -134,18 +107,16 @@ class TestAshConfig:
     """Tests for root AshConfig model."""
 
     def test_minimal_config(self, minimal_config):
-        assert minimal_config.default_llm.provider == "openai"
-        assert minimal_config.fallback_llm is None
+        assert minimal_config.default_model.provider == "openai"
         assert minimal_config.telegram is None
 
     def test_full_config(self, full_config):
-        assert full_config.default_llm.provider == "openai"
-        assert full_config.fallback_llm is not None
-        assert full_config.fallback_llm.provider == "openai"
+        assert full_config.default_model.provider == "openai"
+        assert "fast" in full_config.models
 
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):
-            AshConfig()  # missing default_llm
+            AshConfig()
 
 
 class TestLoadConfig:
@@ -153,9 +124,8 @@ class TestLoadConfig:
 
     def test_load_from_file(self, config_file):
         config = load_config(config_file)
-        assert config.default_llm is not None
-        assert config.default_llm.provider == "openai"
-        assert config.default_llm.model == "gpt-5.2"
+        assert config.default_model.provider == "openai"
+        assert config.default_model.model == "gpt-5.2"
 
     def test_file_not_found(self, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -172,7 +142,7 @@ class TestLoadConfig:
     def test_invalid_config_values(self, tmp_path):
         invalid_config = tmp_path / "invalid_config.toml"
         invalid_config.write_text("""
-[default_llm]
+[models.default]
 provider = "invalid_provider"
 model = "test"
 """)
@@ -359,60 +329,8 @@ class TestNamedModelConfigs:
         assert api_key is None
 
 
-class TestBackwardCompatibility:
-    """Tests for backward compatibility with [default_llm]."""
-
-    def test_default_llm_migrates_to_models(self):
-        """Test [default_llm] is migrated to models.default."""
-        config = AshConfig(
-            default_llm=LLMConfig(
-                provider="openai",
-                model="gpt-5.2",
-                temperature=0.5,
-                max_tokens=2048,
-            )
-        )
-        assert "default" in config.models
-        assert config.models["default"].provider == "openai"
-        assert config.models["default"].model == "gpt-5.2"
-        assert config.models["default"].temperature == 0.5
-        assert config.models["default"].max_tokens == 2048
-
-    def test_default_llm_api_key_migrates_to_provider(self):
-        """Test default_llm api_key is migrated to provider config."""
-        config = AshConfig(
-            default_llm=LLMConfig(
-                provider="openai",
-                model="gpt-5.2",
-                api_key=SecretStr("test-key"),
-            )
-        )
-        assert config.openai is not None
-        assert config.openai.api_key is not None
-        assert config.openai.api_key.get_secret_value() == "test-key"
-
-    def test_models_default_takes_precedence_over_default_llm(self, caplog):
-        """Test [models.default] takes precedence over [default_llm]."""
-        import logging
-
-        with caplog.at_level(logging.WARNING):
-            config = AshConfig(
-                models={
-                    "default": ModelConfig(provider="openai", model="gpt-4o"),
-                },
-                default_llm=LLMConfig(
-                    provider="openai",
-                    model="gpt-5.2",
-                ),
-            )
-        # models.default should win
-        assert config.models["default"].provider == "openai"
-        assert config.models["default"].model == "gpt-4o"
-        # Warning should be logged
-        assert "config_duplicate_default_llm" in caplog.text
-
+class TestConfigValidation:
     def test_no_default_model_raises_error(self):
-        """Test error when no default model is configured."""
         with pytest.raises(ValueError) as exc_info:
             AshConfig(models={})
         assert "No default model configured" in str(exc_info.value)
@@ -466,30 +384,20 @@ class TestResolveEnvSecrets:
 
     def test_resolves_anthropic_api_key(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        config = {
-            "default_llm": {
-                "provider": "anthropic",
-                "model": "test",
-            }
-        }
+        config = {"anthropic": {}}
         result = _resolve_env_secrets(config)
-        assert result["default_llm"]["api_key"].get_secret_value() == "test-key"
+        assert result["anthropic"]["api_key"].get_secret_value() == "test-key"
 
     def test_resolves_openai_api_key(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
-        config = {
-            "default_llm": {
-                "provider": "openai",
-                "model": "test",
-            }
-        }
+        config = {"openai": {}}
         result = _resolve_env_secrets(config)
-        assert result["default_llm"]["api_key"].get_secret_value() == "test-openai-key"
+        assert result["openai"]["api_key"].get_secret_value() == "test-openai-key"
 
     def test_resolves_telegram_token(self, monkeypatch):
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
         config = {
-            "default_llm": {"provider": "anthropic", "model": "test"},
+            "models": {"default": {"provider": "anthropic", "model": "test"}},
             "telegram": {},
         }
         result = _resolve_env_secrets(config)
@@ -498,7 +406,7 @@ class TestResolveEnvSecrets:
     def test_resolves_brave_search_key(self, monkeypatch):
         monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-key")
         config = {
-            "default_llm": {"provider": "anthropic", "model": "test"},
+            "models": {"default": {"provider": "anthropic", "model": "test"}},
             "brave_search": {},
         }
         result = _resolve_env_secrets(config)
@@ -508,28 +416,17 @@ class TestResolveEnvSecrets:
         from pydantic import SecretStr
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
-        config = {
-            "default_llm": {
-                "provider": "anthropic",
-                "model": "test",
-                "api_key": SecretStr("file-key"),
-            }
-        }
+        config = {"anthropic": {"api_key": SecretStr("file-key")}}
         result = _resolve_env_secrets(config)
         # Should keep file-key, not override with env-key
-        assert result["default_llm"]["api_key"].get_secret_value() == "file-key"
+        assert result["anthropic"]["api_key"].get_secret_value() == "file-key"
 
     def test_missing_env_var_leaves_none(self, monkeypatch):
         # Ensure env var is not set
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        config = {
-            "default_llm": {
-                "provider": "anthropic",
-                "model": "test",
-            }
-        }
+        config = {"anthropic": {}}
         result = _resolve_env_secrets(config)
-        assert result["default_llm"].get("api_key") is None
+        assert result["anthropic"].get("api_key") is None
 
 
 class TestSystemTimezone:

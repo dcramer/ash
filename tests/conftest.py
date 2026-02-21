@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from ash.config.models import AshConfig, LLMConfig
+from ash.config.models import AshConfig, ModelConfig
 from ash.graph.graph import KnowledgeGraph
 from ash.graph.persistence import GraphPersistence
 from ash.graph.vectors import NumpyVectorIndex
@@ -36,10 +36,7 @@ from ash.tools.registry import ToolRegistry
 def minimal_config() -> AshConfig:
     """Minimal valid configuration."""
     return AshConfig(
-        default_llm=LLMConfig(
-            provider="openai",
-            model="gpt-5.2",
-        )
+        models={"default": ModelConfig(provider="openai", model="gpt-5.2")}
     )
 
 
@@ -48,16 +45,15 @@ def full_config(tmp_path: Path) -> AshConfig:
     """Full configuration with all options."""
     return AshConfig(
         workspace=tmp_path / "workspace",
-        default_llm=LLMConfig(
-            provider="openai",
-            model="gpt-5.2",
-            temperature=0.5,
-            max_tokens=2048,
-        ),
-        fallback_llm=LLMConfig(
-            provider="openai",
-            model="gpt-5-mini",
-        ),
+        models={
+            "default": ModelConfig(
+                provider="openai",
+                model="gpt-5.2",
+                temperature=0.5,
+                max_tokens=2048,
+            ),
+            "fast": ModelConfig(provider="openai", model="gpt-5-mini"),
+        },
     )
 
 
@@ -67,7 +63,7 @@ def config_toml_content() -> str:
     return """
 workspace = "/tmp/ash-workspace"
 
-[default_llm]
+[models.default]
 provider = "openai"
 model = "gpt-5.2"
 temperature = 0.7

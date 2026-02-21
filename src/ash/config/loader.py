@@ -10,12 +10,6 @@ from pydantic import SecretStr
 from ash.config.models import AshConfig
 from ash.config.paths import get_config_path
 
-DEFAULT_CONFIG_PATHS = [
-    Path("config.toml"),
-    get_config_path(),
-    Path("/etc/ash/config.toml"),
-]
-
 ENV_VAR_MAPPINGS = {
     "anthropic": ("api_key", "ANTHROPIC_API_KEY"),
     "openai": ("api_key", "OPENAI_API_KEY"),
@@ -24,8 +18,6 @@ ENV_VAR_MAPPINGS = {
     "sentry": ("dsn", "SENTRY_DSN"),
 }
 
-PROVIDER_ENV_VARS = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
-
 
 def _resolve_env_secrets(config: dict[str, Any]) -> dict[str, Any]:
     for section_name, (key, env_var) in ENV_VAR_MAPPINGS.items():
@@ -33,31 +25,13 @@ def _resolve_env_secrets(config: dict[str, Any]) -> dict[str, Any]:
             if section.get(key) is None and (value := os.environ.get(env_var)):
                 section[key] = SecretStr(value)
 
-    for llm_key in ("default_llm", "fallback_llm"):
-        if (section := config.get(llm_key)) and (provider := section.get("provider")):
-            if env_var := PROVIDER_ENV_VARS.get(provider):
-                if section.get("api_key") is None and (
-                    value := os.environ.get(env_var)
-                ):
-                    section["api_key"] = SecretStr(value)
-
     return config
 
 
 def load_config(path: Path | None = None) -> AshConfig:
-    if path is not None:
-        config_path = Path(path).expanduser()
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-    else:
-        config_path = next(
-            (p.expanduser() for p in DEFAULT_CONFIG_PATHS if p.expanduser().exists()),
-            None,
-        )
-        if config_path is None:
-            raise FileNotFoundError(
-                f"No config file found. Searched: {', '.join(str(p) for p in DEFAULT_CONFIG_PATHS)}"
-            )
+    config_path = Path(path).expanduser() if path is not None else get_config_path()
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
 
     with config_path.open("rb") as f:
         raw_config = tomllib.load(f)
