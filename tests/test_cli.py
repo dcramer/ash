@@ -89,6 +89,7 @@ class TestMemoryCommand:
         assert result.exit_code == 0
         assert "list" in result.stdout
         assert "search" in result.stdout
+        assert "stats" in result.stdout
         assert "add" in result.stdout
         assert "remove" in result.stdout
         assert "clear" in result.stdout
