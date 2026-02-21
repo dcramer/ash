@@ -142,3 +142,11 @@ def test_chat_and_serve_use_shared_runtime_bootstrap_helper() -> None:
         assert "bootstrap_runtime(" in text, (
             f"Expected shared runtime bootstrap helper in {path.relative_to(ROOT)}"
         )
+
+
+def test_serve_uses_provider_runtime_adapter() -> None:
+    path = ROOT / "src/ash/cli/commands/serve.py"
+    text = path.read_text(encoding="utf-8")
+    assert "build_provider_runtime(" in text, (
+        f"Expected provider runtime adapter in {path.relative_to(ROOT)}"
+    )

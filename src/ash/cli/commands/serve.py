@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 
@@ -79,7 +79,7 @@ async def _run_server(
         active_rpc_server,
         create_default_integrations,
     )
-    from ash.providers.telegram import TelegramProvider
+    from ash.providers import build_provider_runtime
     from ash.server.app import create_app
     from ash.service.pid import write_pid_file
 
@@ -135,37 +135,12 @@ async def _run_server(
                 "memory_gc_complete", extra={"memory.count": gc_result.removed_count}
             )
 
-    # Set up Telegram if configured
-    telegram_provider = None
-    if ash_config.telegram and ash_config.telegram.bot_token:
-        logger.info("telegram_provider_setup")
-        telegram_provider = TelegramProvider(
-            bot_token=ash_config.telegram.bot_token.get_secret_value(),
-            allowed_users=ash_config.telegram.allowed_users,
-            allowed_groups=ash_config.telegram.allowed_groups,
-            group_mode=ash_config.telegram.group_mode,
-            passive_config=ash_config.telegram.passive,
-        )
-
-    # Build sender map from available providers
-    senders: dict[str, Any] = {}
-    registrars: dict[str, Any] = {}
+    provider_runtime = build_provider_runtime(ash_config)
+    telegram_provider = provider_runtime.telegram_provider
     if telegram_provider:
-        senders["telegram"] = telegram_provider.send_message
+        logger.info("telegram_provider_setup")
 
-        # Create registrar for tracking scheduled messages in thread index
-        from ash.chats import ChatStateManager, ThreadIndex
-
-        async def telegram_registrar(chat_id: str, message_id: str) -> None:
-            """Register a scheduled message in the thread index for reply tracking."""
-            manager = ChatStateManager(provider="telegram", chat_id=chat_id)
-            thread_index = ThreadIndex(manager)
-            # Scheduled messages start new threads (message_id is both external_id and thread_id)
-            thread_index.register_message(message_id, message_id)
-
-        registrars["telegram"] = telegram_registrar
-
-    if not senders:
+    if not provider_runtime.senders:
         logger.debug("schedule watcher disabled (no providers)")
 
     # Compose integration contributors for runtime wiring.
@@ -175,8 +150,8 @@ async def _run_server(
         schedule_file=get_schedule_file(),
         include_memory=True,
         timezone=ash_config.timezone,
-        senders=senders,
-        registrars=registrars,
+        senders=provider_runtime.senders,
+        registrars=provider_runtime.registrars,
         agent_executor=components.agent_executor,
     )
     async with active_integrations(
