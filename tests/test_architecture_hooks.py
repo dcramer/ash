@@ -104,3 +104,16 @@ def test_entrypoints_compose_integrations_via_runtime() -> None:
         assert "compose_integrations(" in text or "active_integrations(" in text, (
             f"Expected shared integration composition path in {path.relative_to(ROOT)}"
         )
+
+
+def test_entrypoints_use_default_integration_builder() -> None:
+    entrypoint_files = [
+        ROOT / "src/ash/cli/commands/serve.py",
+        ROOT / "src/ash/cli/commands/chat.py",
+        ROOT / "evals/harness.py",
+    ]
+    for path in entrypoint_files:
+        text = path.read_text(encoding="utf-8")
+        assert "create_default_integrations(" in text, (
+            f"Expected shared default integration builder in {path.relative_to(ROOT)}"
+        )
