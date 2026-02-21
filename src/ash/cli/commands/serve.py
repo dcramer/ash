@@ -76,11 +76,10 @@ async def _run_server(
     )
     from ash.core import create_agent
     from ash.integrations import (
-        IntegrationContext,
-        IntegrationRuntime,
         MemoryIntegration,
         RuntimeRPCIntegration,
         SchedulingIntegration,
+        compose_integrations,
     )
     from ash.providers.telegram import TelegramProvider
     from ash.rpc import RPCServer
@@ -193,27 +192,16 @@ async def _run_server(
         registrars=registrars,
         agent_executor=components.agent_executor,
     )
-    integration_runtime = IntegrationRuntime(
-        [
-            RuntimeRPCIntegration(get_logs_path()),
-            MemoryIntegration(),
-            schedule_integration,
-        ]
-    )
-    integration_context = IntegrationContext(
+    integration_runtime, integration_context = await compose_integrations(
         config=ash_config,
         components=components,
         mode="serve",
         sessions_path=get_sessions_path(),
-    )
-    await integration_runtime.setup(integration_context)
-    agent.install_integration_hooks(
-        prompt_context_augmenters=integration_runtime.prompt_context_augmenters(
-            integration_context
-        ),
-        sandbox_env_augmenters=integration_runtime.sandbox_env_augmenters(
-            integration_context
-        ),
+        contributors=[
+            RuntimeRPCIntegration(get_logs_path()),
+            MemoryIntegration(),
+            schedule_integration,
+        ],
     )
 
     if schedule_integration.store is None:

@@ -103,10 +103,9 @@ async def _start_rpc(
         get_sessions_path,
     )
     from ash.integrations import (
-        IntegrationContext,
-        IntegrationRuntime,
         MemoryIntegration,
         SchedulingIntegration,
+        compose_integrations,
     )
     from ash.rpc.server import RPCServer
 
@@ -115,19 +114,12 @@ async def _start_rpc(
     if agent_type == "memory":
         contributors.append(MemoryIntegration())
 
-    integration_runtime = IntegrationRuntime(contributors)
-    context = IntegrationContext(
+    integration_runtime, context = await compose_integrations(
         config=config,
         components=components,
         mode="eval",
         sessions_path=get_sessions_path(),
-    )
-    await integration_runtime.setup(context)
-    components.agent.install_integration_hooks(
-        prompt_context_augmenters=integration_runtime.prompt_context_augmenters(
-            context
-        ),
-        sandbox_env_augmenters=integration_runtime.sandbox_env_augmenters(context),
+        contributors=contributors,
     )
     await integration_runtime.on_startup(context)
 

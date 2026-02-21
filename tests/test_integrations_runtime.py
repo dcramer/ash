@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -13,6 +14,7 @@ from ash.integrations import (
     IntegrationContext,
     IntegrationContributor,
     IntegrationRuntime,
+    compose_integrations,
 )
 
 
@@ -136,3 +138,43 @@ def test_integration_runtime_builds_prompt_and_env_hooks() -> None:
         ("env", "a"),
         ("env", "b"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_compose_integrations_runs_setup_and_installs_hooks() -> None:
+    events: list[tuple[str, str]] = []
+
+    class _FakeAgent:
+        def __init__(self) -> None:
+            self.prompt_hooks = None
+            self.env_hooks = None
+
+        def install_integration_hooks(
+            self,
+            *,
+            prompt_context_augmenters=None,
+            sandbox_env_augmenters=None,
+        ) -> None:
+            self.prompt_hooks = prompt_context_augmenters
+            self.env_hooks = sandbox_env_augmenters
+
+    config = AshConfig(
+        workspace=Path("tmp-workspace"),
+        models={"default": ModelConfig(provider="openai", model="gpt-5-mini")},
+    )
+    fake_agent = _FakeAgent()
+    components = cast(Any, SimpleNamespace(agent=fake_agent))
+    runtime, context = await compose_integrations(
+        config=config,
+        components=components,
+        mode="eval",
+        contributors=[_StubContributor(name="x", priority=10, events=events)],
+    )
+
+    assert isinstance(runtime, IntegrationRuntime)
+    assert context.mode == "eval"
+    assert events == [("setup", "x")]
+    assert fake_agent.prompt_hooks is not None
+    assert fake_agent.env_hooks is not None
+    assert len(fake_agent.prompt_hooks) == 1
+    assert len(fake_agent.env_hooks) == 1

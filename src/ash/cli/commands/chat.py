@@ -100,6 +100,7 @@ async def _run_chat(
         IntegrationContext,
         IntegrationRuntime,
         MemoryIntegration,
+        compose_integrations,
     )
     from ash.rpc import RPCServer
     from ash.sessions import SessionManager
@@ -168,21 +169,12 @@ async def _run_chat(
         )
         agent = components.agent
 
-        integration_runtime = IntegrationRuntime([MemoryIntegration()])
-        integration_context = IntegrationContext(
+        integration_runtime, integration_context = await compose_integrations(
             config=ash_config,
             components=components,
             mode="chat",
             sessions_path=get_sessions_path(),
-        )
-        await integration_runtime.setup(integration_context)
-        agent.install_integration_hooks(
-            prompt_context_augmenters=integration_runtime.prompt_context_augmenters(
-                integration_context
-            ),
-            sandbox_env_augmenters=integration_runtime.sandbox_env_augmenters(
-                integration_context
-            ),
+            contributors=[MemoryIntegration()],
         )
         await integration_runtime.on_startup(integration_context)
 
