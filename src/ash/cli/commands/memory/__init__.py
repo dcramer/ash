@@ -301,36 +301,88 @@ async def _run_memory_action(
             memory_doctor_self_facts,
         )
 
+        subcommand = entry_id  # positional arg: ash memory doctor <sub>
+        if subcommand is None:
+            console.print("[bold]Memory Doctor Plan (preview only)[/bold]")
+            console.print("No changes were made.")
+            console.print(
+                "Run one subcommand explicitly with [cyan]--force[/cyan] to apply:"
+            )
+            console.print(
+                "- embed-missing, prune-missing-provenance (alias: provenance), "
+                "normalize-semantics, self-facts, backfill-subjects, attribution, "
+                "fix-names, reclassify, quality, dedup, contradictions, all"
+            )
+            console.print("Example: [cyan]ash memory doctor quality --force[/cyan]")
+            return
+
+        known_subcommands = {
+            "embed-missing",
+            "normalize-semantics",
+            "prune-missing-provenance",
+            "provenance",
+            "self-facts",
+            "backfill-subjects",
+            "attribution",
+            "fix-names",
+            "reclassify",
+            "quality",
+            "dedup",
+            "contradictions",
+            "all",
+        }
+        if subcommand not in known_subcommands:
+            error(f"Unknown doctor subcommand: {subcommand}")
+            console.print(
+                "Valid subcommands: embed-missing, prune-missing-provenance, "
+                "provenance, normalize-semantics, self-facts, backfill-subjects, "
+                "attribution, fix-names, reclassify, quality, dedup, contradictions, all"
+            )
+            raise typer.Exit(1)
+
+        if not force:
+            error(
+                "Memory doctor subcommands are mutating. Re-run with --force to apply."
+            )
+            raise typer.Exit(1)
+
         if not store:
             error("Memory doctor requires [embeddings] configuration")
             raise typer.Exit(1)
 
-        subcommand = entry_id  # positional arg: ash memory doctor <sub>
         if subcommand == "embed-missing":
-            await memory_doctor_embed_missing(store, force)
+            await memory_doctor_embed_missing(store, force=True)
         elif subcommand == "normalize-semantics":
-            await memory_doctor_normalize_semantics(store, force)
+            await memory_doctor_normalize_semantics(store, force=True)
         elif subcommand in ("prune-missing-provenance", "provenance"):
-            await memory_doctor_prune_missing_provenance(store, force)
-        elif subcommand is None:
-            await memory_doctor_prune_missing_provenance(store, force)
-            await memory_doctor_self_facts(store, force)
-            await memory_doctor_backfill_subjects(store, force)
-            await memory_doctor_attribution(store, force)
-            await memory_doctor_fix_names(store, force)
-            await memory_doctor_normalize_semantics(store, force)
-            await memory_doctor_reclassify(store, config, force)
-            await memory_doctor_quality(store, config, force)
-            await memory_doctor_dedup(store, config, force)
-            await memory_doctor_contradictions(store, config, force)
-        else:
-            error(f"Unknown doctor subcommand: {subcommand}")
-            console.print(
-                "Valid subcommands: embed-missing, prune-missing-provenance, "
-                "provenance, normalize-semantics "
-                "(or omit for full check)"
-            )
-            raise typer.Exit(1)
+            await memory_doctor_prune_missing_provenance(store, force=True)
+        elif subcommand == "self-facts":
+            await memory_doctor_self_facts(store, force=True)
+        elif subcommand == "backfill-subjects":
+            await memory_doctor_backfill_subjects(store, force=True)
+        elif subcommand == "attribution":
+            await memory_doctor_attribution(store, force=True)
+        elif subcommand == "fix-names":
+            await memory_doctor_fix_names(store, force=True)
+        elif subcommand == "reclassify":
+            await memory_doctor_reclassify(store, config, force=True)
+        elif subcommand == "quality":
+            await memory_doctor_quality(store, config, force=True)
+        elif subcommand == "dedup":
+            await memory_doctor_dedup(store, config, force=True)
+        elif subcommand == "contradictions":
+            await memory_doctor_contradictions(store, config, force=True)
+        elif subcommand == "all":
+            await memory_doctor_prune_missing_provenance(store, force=True)
+            await memory_doctor_self_facts(store, force=True)
+            await memory_doctor_backfill_subjects(store, force=True)
+            await memory_doctor_attribution(store, force=True)
+            await memory_doctor_fix_names(store, force=True)
+            await memory_doctor_normalize_semantics(store, force=True)
+            await memory_doctor_reclassify(store, config, force=True)
+            await memory_doctor_quality(store, config, force=True)
+            await memory_doctor_dedup(store, config, force=True)
+            await memory_doctor_contradictions(store, config, force=True)
     else:
         error(f"Unknown action: {action}")
         console.print(

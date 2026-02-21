@@ -95,6 +95,28 @@ class TestMemoryCommand:
         assert "remove" in result.stdout
         assert "clear" in result.stdout
 
+    def test_memory_doctor_default_is_preview_only(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app, ["memory", "doctor", "--config", str(config_file)]
+        )
+        assert result.exit_code == 0
+        assert "preview only" in result.stdout.lower()
+        assert "No changes were made" in result.stdout
+
+    def test_memory_doctor_subcommand_requires_force(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app, ["memory", "doctor", "embed-missing", "--config", str(config_file)]
+        )
+        assert result.exit_code == 1
+        assert "--force" in result.stdout
+
+    def test_memory_doctor_all_requires_force(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app, ["memory", "doctor", "all", "--config", str(config_file)]
+        )
+        assert result.exit_code == 1
+        assert "--force" in result.stdout
+
 
 class TestSessionsCommand:
     """Tests for 'ash sessions' command."""
