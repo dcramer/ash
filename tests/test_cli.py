@@ -1,6 +1,7 @@
 """Tests for CLI commands."""
 
 from ash.cli.app import app
+from ash.config.paths import ENV_VAR, get_ash_home
 
 
 class TestConfigCommand:
@@ -310,4 +311,48 @@ class TestAppHelp:
         assert "schedule" in result.stdout
         assert "sessions" in result.stdout
         assert "sandbox" in result.stdout
+        assert "stats" in result.stdout
         assert "upgrade" in result.stdout
+
+
+class TestStatsCommand:
+    """Tests for `ash stats` and `ash info`."""
+
+    def test_stats_prints_home_and_directory_stats(
+        self, cli_runner, monkeypatch, tmp_path
+    ):
+        ash_home = tmp_path / ".ash"
+        (ash_home / "sessions").mkdir(parents=True)
+        (ash_home / "sessions" / "history.jsonl").write_text("{}\n")
+        (ash_home / "logs").mkdir(parents=True)
+        (ash_home / "logs" / "2026-02-21.jsonl").write_text("{}\n")
+        (ash_home / "config.toml").write_text("[models.default]\nprovider='openai'\n")
+
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = cli_runner.invoke(app, ["stats"])
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert result.exit_code == 0
+        assert str(ash_home) in result.stdout
+        assert "Directory Stats" in result.stdout
+        assert "sessions" in result.stdout
+        assert "Core Files" in result.stdout
+        assert "config.toml" in result.stdout
+
+    def test_info_is_alias_for_stats(self, cli_runner, monkeypatch, tmp_path):
+        ash_home = tmp_path / ".ash"
+        ash_home.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = cli_runner.invoke(app, ["info"])
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert result.exit_code == 0
+        assert "Ash Home" in result.stdout
