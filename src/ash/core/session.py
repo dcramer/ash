@@ -334,14 +334,14 @@ class SessionState:
         Returns:
             Session state.
         """
-        messages = [cls._message_from_dict(m) for m in data.get("messages", [])]
+        messages = [cls._message_from_dict(m) for m in data["messages"]]
         return cls(
             session_id=data["session_id"],
             provider=data["provider"],
             chat_id=data["chat_id"],
             user_id=data["user_id"],
             messages=messages,
-            context=SessionContext.from_dict(data.get("metadata", {})),
+            context=SessionContext.from_dict(data["metadata"]),
         )
 
     @staticmethod

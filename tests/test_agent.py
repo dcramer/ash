@@ -480,6 +480,13 @@ class TestSessionState:
         assert restored.session_id == session.session_id
         assert len(restored.messages) == 1
 
+    def test_from_dict_requires_metadata(self, session):
+        data = session.to_dict()
+        del data["metadata"]
+
+        with pytest.raises(KeyError, match="metadata"):
+            SessionState.from_dict(data)
+
     def test_get_messages_for_llm_no_budget(self, session):
         session.add_user_message("Hello")
         session.add_assistant_message("Hi!")
