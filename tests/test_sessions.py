@@ -230,7 +230,7 @@ class TestSessionReader:
         lines = [
             '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
             '{"type":"message","id":"m1","role":"user","content":"Hello","created_at":"2026-01-11T10:00:01+00:00","metadata":{"external_id":"ext-1"}}',
-            '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00","metadata":{"bot_response_id":"ext-2"}}',
+            '{"type":"message","id":"m2","role":"assistant","content":"Hi!","created_at":"2026-01-11T10:00:02+00:00","metadata":{"external_id":"ext-2"}}',
         ]
         (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
 

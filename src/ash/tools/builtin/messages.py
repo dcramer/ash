@@ -120,7 +120,7 @@ class SendMessageTool(Tool):
                 content=message,
                 token_count=estimate_tokens(message),
                 metadata={
-                    "bot_response_id": sent_id,
+                    "external_id": sent_id,
                     "from_tool": "send_message",
                 },
             )
