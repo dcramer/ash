@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-import typer
-
 from ash.cli.console import console
 
 
@@ -72,38 +70,3 @@ def render_force_required(command_name: str) -> None:
     console.print(
         f"[red]{command_name} subcommands are mutating. Re-run with --force.[/red]"
     )
-
-
-def require_doctor_subcommand(
-    *,
-    subcommand: str | None,
-    valid_subcommands: list[str],
-    title: str,
-    example: str,
-    command_name: str,
-    force: bool,
-    default_subcommand_on_force: str | None = None,
-) -> str:
-    """Validate doctor subcommand and force-gating with a shared UX."""
-    if subcommand is None:
-        if force and default_subcommand_on_force is not None:
-            return default_subcommand_on_force
-        render_doctor_preview(
-            title=title,
-            subcommands=valid_subcommands,
-            example=example,
-        )
-        raise typer.Exit(0)
-
-    if subcommand not in set(valid_subcommands):
-        console.print(
-            f"[red]Unknown {command_name.lower()} doctor subcommand:[/red] {subcommand}"
-        )
-        console.print(f"Valid doctor subcommands: {', '.join(valid_subcommands)}")
-        raise typer.Exit(1)
-
-    if not force:
-        render_force_required(f"{command_name} doctor")
-        raise typer.Exit(1)
-
-    return subcommand

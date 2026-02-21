@@ -9,7 +9,6 @@ import typer
 
 from ash.cli.console import console, error
 from ash.cli.context import get_config
-from ash.cli.doctor_utils import render_doctor_preview, render_force_required
 
 
 def register(app: typer.Typer) -> None:
@@ -302,28 +301,7 @@ async def _run_memory_action(
             memory_doctor_self_facts,
         )
 
-        subcommand = entry_id  # positional arg: ash memory doctor <sub>
-        if subcommand is None:
-            render_doctor_preview(
-                title="Memory Doctor Plan",
-                subcommands=[
-                    "embed-missing",
-                    "prune-missing-provenance",
-                    "provenance",
-                    "normalize-semantics",
-                    "self-facts",
-                    "backfill-subjects",
-                    "attribution",
-                    "fix-names",
-                    "reclassify",
-                    "quality",
-                    "dedup",
-                    "contradictions",
-                    "all",
-                ],
-                example="ash memory doctor quality --force",
-            )
-            return
+        subcommand = entry_id or "all"  # positional arg: ash memory doctor <sub>
 
         known_subcommands = {
             "embed-missing",
@@ -349,47 +327,43 @@ async def _run_memory_action(
             )
             raise typer.Exit(1)
 
-        if not force:
-            render_force_required("Memory doctor")
-            raise typer.Exit(1)
-
         if not store:
             error("Memory doctor requires [embeddings] configuration")
             raise typer.Exit(1)
 
         if subcommand == "embed-missing":
-            await memory_doctor_embed_missing(store, force=True)
+            await memory_doctor_embed_missing(store, force=force)
         elif subcommand == "normalize-semantics":
-            await memory_doctor_normalize_semantics(store, force=True)
+            await memory_doctor_normalize_semantics(store, force=force)
         elif subcommand in ("prune-missing-provenance", "provenance"):
-            await memory_doctor_prune_missing_provenance(store, force=True)
+            await memory_doctor_prune_missing_provenance(store, force=force)
         elif subcommand == "self-facts":
-            await memory_doctor_self_facts(store, force=True)
+            await memory_doctor_self_facts(store, force=force)
         elif subcommand == "backfill-subjects":
-            await memory_doctor_backfill_subjects(store, force=True)
+            await memory_doctor_backfill_subjects(store, force=force)
         elif subcommand == "attribution":
-            await memory_doctor_attribution(store, force=True)
+            await memory_doctor_attribution(store, force=force)
         elif subcommand == "fix-names":
-            await memory_doctor_fix_names(store, force=True)
+            await memory_doctor_fix_names(store, force=force)
         elif subcommand == "reclassify":
-            await memory_doctor_reclassify(store, config, force=True)
+            await memory_doctor_reclassify(store, config, force=force)
         elif subcommand == "quality":
-            await memory_doctor_quality(store, config, force=True)
+            await memory_doctor_quality(store, config, force=force)
         elif subcommand == "dedup":
-            await memory_doctor_dedup(store, config, force=True)
+            await memory_doctor_dedup(store, config, force=force)
         elif subcommand == "contradictions":
-            await memory_doctor_contradictions(store, config, force=True)
+            await memory_doctor_contradictions(store, config, force=force)
         elif subcommand == "all":
-            await memory_doctor_prune_missing_provenance(store, force=True)
-            await memory_doctor_self_facts(store, force=True)
-            await memory_doctor_backfill_subjects(store, force=True)
-            await memory_doctor_attribution(store, force=True)
-            await memory_doctor_fix_names(store, force=True)
-            await memory_doctor_normalize_semantics(store, force=True)
-            await memory_doctor_reclassify(store, config, force=True)
-            await memory_doctor_quality(store, config, force=True)
-            await memory_doctor_dedup(store, config, force=True)
-            await memory_doctor_contradictions(store, config, force=True)
+            await memory_doctor_prune_missing_provenance(store, force=force)
+            await memory_doctor_self_facts(store, force=force)
+            await memory_doctor_backfill_subjects(store, force=force)
+            await memory_doctor_attribution(store, force=force)
+            await memory_doctor_fix_names(store, force=force)
+            await memory_doctor_normalize_semantics(store, force=force)
+            await memory_doctor_reclassify(store, config, force=force)
+            await memory_doctor_quality(store, config, force=force)
+            await memory_doctor_dedup(store, config, force=force)
+            await memory_doctor_contradictions(store, config, force=force)
     else:
         error(f"Unknown action: {action}")
         console.print(

@@ -95,27 +95,169 @@ class TestMemoryCommand:
         assert "remove" in result.stdout
         assert "clear" in result.stdout
 
-    def test_memory_doctor_default_is_preview_only(self, cli_runner, config_file):
+    def test_memory_doctor_defaults_to_all(self, cli_runner, config_file, monkeypatch):
+        calls: list[tuple[str, bool]] = []
+
+        class DummyStore:
+            pass
+
+        async def _fake_get_store(_config):
+            return DummyStore()
+
+        def _mk(name: str):
+            async def _f(*args, **kwargs):
+                calls.append((name, kwargs["force"]))
+
+            return _f
+
+        monkeypatch.setattr(
+            "ash.cli.commands.memory._helpers.get_store", _fake_get_store
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_prune_missing_provenance",
+            _mk("prune-missing-provenance"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_self_facts", _mk("self-facts")
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_backfill_subjects",
+            _mk("backfill-subjects"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_attribution",
+            _mk("attribution"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_fix_names", _mk("fix-names")
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_normalize_semantics",
+            _mk("normalize-semantics"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_reclassify",
+            _mk("reclassify"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_quality", _mk("quality")
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_dedup", _mk("dedup")
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_contradictions",
+            _mk("contradictions"),
+        )
+
         result = cli_runner.invoke(
             app, ["memory", "doctor", "--config", str(config_file)]
         )
         assert result.exit_code == 0
-        assert "preview only" in result.stdout.lower()
-        assert "No changes were made" in result.stdout
+        assert [name for name, _force in calls] == [
+            "prune-missing-provenance",
+            "self-facts",
+            "backfill-subjects",
+            "attribution",
+            "fix-names",
+            "normalize-semantics",
+            "reclassify",
+            "quality",
+            "dedup",
+            "contradictions",
+        ]
+        assert all(force is False for _name, force in calls)
 
-    def test_memory_doctor_subcommand_requires_force(self, cli_runner, config_file):
+    def test_memory_doctor_subcommand_runs_interactive_without_force(
+        self, cli_runner, config_file, monkeypatch
+    ):
+        calls: list[bool] = []
+
+        class DummyStore:
+            pass
+
+        async def _fake_get_store(_config):
+            return DummyStore()
+
+        async def _fake_embed_missing(*args, **kwargs):
+            calls.append(kwargs["force"])
+
+        monkeypatch.setattr(
+            "ash.cli.commands.memory._helpers.get_store", _fake_get_store
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_embed_missing",
+            _fake_embed_missing,
+        )
         result = cli_runner.invoke(
             app, ["memory", "doctor", "embed-missing", "--config", str(config_file)]
         )
-        assert result.exit_code == 1
-        assert "--force" in result.stdout
+        assert result.exit_code == 0
+        assert calls == [False]
 
-    def test_memory_doctor_all_requires_force(self, cli_runner, config_file):
-        result = cli_runner.invoke(
-            app, ["memory", "doctor", "all", "--config", str(config_file)]
+    def test_memory_doctor_all_runs_force_mode(
+        self, cli_runner, config_file, monkeypatch
+    ):
+        calls: list[tuple[str, bool]] = []
+
+        class DummyStore:
+            pass
+
+        async def _fake_get_store(_config):
+            return DummyStore()
+
+        def _mk(name: str):
+            async def _f(*args, **kwargs):
+                calls.append((name, kwargs["force"]))
+
+            return _f
+
+        monkeypatch.setattr(
+            "ash.cli.commands.memory._helpers.get_store", _fake_get_store
         )
-        assert result.exit_code == 1
-        assert "--force" in result.stdout
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_prune_missing_provenance",
+            _mk("prune-missing-provenance"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_self_facts", _mk("self-facts")
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_backfill_subjects",
+            _mk("backfill-subjects"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_attribution",
+            _mk("attribution"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_fix_names", _mk("fix-names")
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_normalize_semantics",
+            _mk("normalize-semantics"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_reclassify",
+            _mk("reclassify"),
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_quality", _mk("quality")
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_dedup", _mk("dedup")
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_contradictions",
+            _mk("contradictions"),
+        )
+
+        result = cli_runner.invoke(
+            app, ["memory", "doctor", "all", "--force", "--config", str(config_file)]
+        )
+        assert result.exit_code == 0
+        assert len(calls) == 10
+        assert all(force is True for _name, force in calls)
 
 
 class TestSessionsCommand:
