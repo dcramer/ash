@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import os
 import stat
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import typer
 
 from ash.cli.console import console, create_table, dim, error, success, warning
+from ash.cli.doctor_utils import DoctorFinding, DoctorResult
 from ash.config.paths import (
     get_ash_home,
     get_graph_dir,
@@ -24,31 +24,21 @@ from ash.config.paths import (
 SESSION_VERSION = "2"
 
 
-@dataclass
-class Finding:
-    level: Literal["ok", "warning", "error"]
-    check: str
-    detail: str
-    repair: str | None = None
-
-
 def register(app: typer.Typer) -> None:
     """Register the top-level doctor command."""
 
     @app.command()
     def doctor() -> None:
         """Run read-only operational health checks."""
-        findings = run_doctor_checks()
-        _render_doctor_report(findings)
-
-        error_count = sum(1 for f in findings if f.level == "error")
-        if error_count:
+        result = run_doctor_checks()
+        _render_doctor_report(result)
+        if result.has_errors:
             raise typer.Exit(1)
 
 
-def run_doctor_checks() -> list[Finding]:
+def run_doctor_checks() -> DoctorResult:
     """Run all read-only doctor checks."""
-    findings: list[Finding] = []
+    findings: list[DoctorFinding] = []
 
     findings.extend(_check_home())
     findings.extend(_check_runtime_artifacts())
@@ -57,14 +47,11 @@ def run_doctor_checks() -> list[Finding]:
     findings.extend(_check_graph_state())
     findings.extend(_check_logs_dir())
 
-    return findings
+    return DoctorResult(findings=findings)
 
 
-def _render_doctor_report(findings: list[Finding]) -> None:
+def _render_doctor_report(result: DoctorResult) -> None:
     home = get_ash_home()
-    ok_count = sum(1 for f in findings if f.level == "ok")
-    warning_count = sum(1 for f in findings if f.level == "warning")
-    error_count = sum(1 for f in findings if f.level == "error")
 
     console.print(f"[bold]Ash Doctor[/bold] [cyan]{home}[/cyan]")
     table = create_table(
@@ -82,7 +69,7 @@ def _render_doctor_report(findings: list[Finding]) -> None:
         "warning": "[yellow]WARN[/yellow]",
         "error": "[red]ERROR[/red]",
     }
-    for finding in findings:
+    for finding in result.findings:
         table.add_row(
             level_label[finding.level],
             finding.check,
@@ -91,11 +78,10 @@ def _render_doctor_report(findings: list[Finding]) -> None:
         )
     console.print(table)
 
-    summary = f"checks={len(findings)} ok={ok_count} warnings={warning_count} errors={error_count}"
-    console.print(f"[bold]Summary:[/bold] {summary}")
-    if error_count:
+    console.print(f"[bold]Summary:[/bold] {result.summary_text()}")
+    if result.has_errors:
         error("Doctor found blocking issues")
-    elif warning_count:
+    elif result.warning_count:
         warning("Doctor found non-blocking issues")
     else:
         success("Doctor checks passed")
@@ -113,11 +99,11 @@ def _render_doctor_report(findings: list[Finding]) -> None:
     dim("Read-only checks. No changes were made.")
 
 
-def _check_home() -> list[Finding]:
+def _check_home() -> list[DoctorFinding]:
     home = get_ash_home()
     if not home.exists():
         return [
-            Finding(
+            DoctorFinding(
                 level="warning",
                 check="home.exists",
                 detail=f"ASH_HOME does not exist: {home}",
@@ -125,8 +111,8 @@ def _check_home() -> list[Finding]:
             )
         ]
 
-    findings: list[Finding] = [
-        Finding(
+    findings: list[DoctorFinding] = [
+        DoctorFinding(
             level="ok", check="home.exists", detail=f"home directory exists: {home}"
         )
     ]
@@ -143,7 +129,7 @@ def _check_home() -> list[Finding]:
         path = home / dirname
         if path.exists():
             findings.append(
-                Finding(
+                DoctorFinding(
                     level="ok",
                     check=f"dir.{dirname}",
                     detail=f"{dirname} exists",
@@ -151,7 +137,7 @@ def _check_home() -> list[Finding]:
             )
         else:
             findings.append(
-                Finding(
+                DoctorFinding(
                     level="warning",
                     check=f"dir.{dirname}",
                     detail=f"{dirname} missing",
@@ -161,20 +147,22 @@ def _check_home() -> list[Finding]:
     return findings
 
 
-def _check_runtime_artifacts() -> list[Finding]:
-    findings: list[Finding] = []
+def _check_runtime_artifacts() -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
     run_dir = get_run_path()
     pid_path = run_dir / "ash.pid"
     sock_path = run_dir / "rpc.sock"
 
     if not pid_path.exists():
-        findings.append(Finding(level="ok", check="run.pid", detail="no pid file"))
+        findings.append(
+            DoctorFinding(level="ok", check="run.pid", detail="no pid file")
+        )
     else:
         try:
             pid = int(pid_path.read_text().strip())
             os.kill(pid, 0)
             findings.append(
-                Finding(
+                DoctorFinding(
                     level="ok",
                     check="run.pid",
                     detail=f"pid file references running process: {pid}",
@@ -182,7 +170,7 @@ def _check_runtime_artifacts() -> list[Finding]:
             )
         except ProcessLookupError:
             findings.append(
-                Finding(
+                DoctorFinding(
                     level="warning",
                     check="run.pid",
                     detail=f"stale pid file: {pid_path}",
@@ -191,7 +179,7 @@ def _check_runtime_artifacts() -> list[Finding]:
             )
         except (PermissionError, ValueError, OSError):
             findings.append(
-                Finding(
+                DoctorFinding(
                     level="warning",
                     check="run.pid",
                     detail=f"unreadable or invalid pid file: {pid_path}",
@@ -201,20 +189,22 @@ def _check_runtime_artifacts() -> list[Finding]:
 
     if not sock_path.exists():
         findings.append(
-            Finding(level="ok", check="run.rpc_socket", detail="rpc socket not present")
+            DoctorFinding(
+                level="ok", check="run.rpc_socket", detail="rpc socket not present"
+            )
         )
     else:
         try:
             mode = sock_path.stat().st_mode
             if stat.S_ISSOCK(mode):
                 findings.append(
-                    Finding(
+                    DoctorFinding(
                         level="ok", check="run.rpc_socket", detail="rpc socket exists"
                     )
                 )
             else:
                 findings.append(
-                    Finding(
+                    DoctorFinding(
                         level="warning",
                         check="run.rpc_socket",
                         detail=f"path exists but is not a socket: {sock_path}",
@@ -223,7 +213,7 @@ def _check_runtime_artifacts() -> list[Finding]:
                 )
         except OSError:
             findings.append(
-                Finding(
+                DoctorFinding(
                     level="warning",
                     check="run.rpc_socket",
                     detail=f"failed to stat socket path: {sock_path}",
@@ -233,11 +223,11 @@ def _check_runtime_artifacts() -> list[Finding]:
     return findings
 
 
-def _check_schedule_file() -> list[Finding]:
+def _check_schedule_file() -> list[DoctorFinding]:
     schedule_file = get_schedule_file()
     if not schedule_file.exists():
         return [
-            Finding(
+            DoctorFinding(
                 level="ok", check="schedule.file", detail="schedule file not present"
             )
         ]
@@ -245,7 +235,7 @@ def _check_schedule_file() -> list[Finding]:
     invalid_lines = _count_invalid_jsonl_lines(schedule_file)
     if invalid_lines:
         return [
-            Finding(
+            DoctorFinding(
                 level="warning",
                 check="schedule.jsonl",
                 detail=f"{invalid_lines} invalid JSONL lines in {schedule_file}",
@@ -253,17 +243,17 @@ def _check_schedule_file() -> list[Finding]:
             )
         ]
     return [
-        Finding(
+        DoctorFinding(
             level="ok", check="schedule.jsonl", detail="schedule file is valid JSONL"
         )
     ]
 
 
-def _check_sessions_jsonl() -> list[Finding]:
+def _check_sessions_jsonl() -> list[DoctorFinding]:
     sessions_path = get_sessions_path()
     if not sessions_path.exists():
         return [
-            Finding(
+            DoctorFinding(
                 level="ok",
                 check="sessions.dir",
                 detail="sessions directory not present",
@@ -285,8 +275,8 @@ def _check_sessions_jsonl() -> list[Finding]:
     for path in history_files:
         invalid_history_lines += _count_invalid_jsonl_lines(path)
 
-    findings: list[Finding] = [
-        Finding(
+    findings: list[DoctorFinding] = [
+        DoctorFinding(
             level="ok",
             check="sessions.files",
             detail=f"scanned {len(context_files)} context and {len(history_files)} history files",
@@ -294,7 +284,7 @@ def _check_sessions_jsonl() -> list[Finding]:
     ]
     if invalid_context_lines:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="warning",
                 check="sessions.context_jsonl",
                 detail=f"invalid lines in context.jsonl files: {invalid_context_lines}",
@@ -303,7 +293,7 @@ def _check_sessions_jsonl() -> list[Finding]:
         )
     else:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="ok",
                 check="sessions.context_jsonl",
                 detail="all context.jsonl lines parse as JSON",
@@ -312,7 +302,7 @@ def _check_sessions_jsonl() -> list[Finding]:
 
     if invalid_history_lines:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="warning",
                 check="sessions.history_jsonl",
                 detail=f"invalid lines in history.jsonl files: {invalid_history_lines}",
@@ -321,7 +311,7 @@ def _check_sessions_jsonl() -> list[Finding]:
         )
     else:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="ok",
                 check="sessions.history_jsonl",
                 detail="all history.jsonl lines parse as JSON",
@@ -330,7 +320,7 @@ def _check_sessions_jsonl() -> list[Finding]:
 
     if legacy_session_headers:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="warning",
                 check="sessions.version",
                 detail=f"legacy session headers found (version != {SESSION_VERSION}): {legacy_session_headers}",
@@ -339,7 +329,7 @@ def _check_sessions_jsonl() -> list[Finding]:
         )
     else:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="ok",
                 check="sessions.version",
                 detail=f"no legacy session headers found (version={SESSION_VERSION})",
@@ -349,12 +339,12 @@ def _check_sessions_jsonl() -> list[Finding]:
     return findings
 
 
-def _check_graph_state() -> list[Finding]:
+def _check_graph_state() -> list[DoctorFinding]:
     graph_dir = get_graph_dir()
     state_path = graph_dir / "state.json"
     if not state_path.exists():
         return [
-            Finding(
+            DoctorFinding(
                 level="ok", check="graph.state", detail="graph state file not present"
             )
         ]
@@ -363,7 +353,7 @@ def _check_graph_state() -> list[Finding]:
         state = json.loads(state_path.read_text())
     except Exception:
         return [
-            Finding(
+            DoctorFinding(
                 level="warning",
                 check="graph.state",
                 detail=f"failed to parse {state_path}",
@@ -371,8 +361,8 @@ def _check_graph_state() -> list[Finding]:
             )
         ]
 
-    findings: list[Finding] = [
-        Finding(
+    findings: list[DoctorFinding] = [
+        DoctorFinding(
             level="ok", check="graph.state", detail="graph state parsed successfully"
         )
     ]
@@ -382,7 +372,7 @@ def _check_graph_state() -> list[Finding]:
 
     if vector_missing > 0:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="warning",
                 check="graph.vector_consistency",
                 detail=f"vector_missing_count={vector_missing}",
@@ -391,7 +381,7 @@ def _check_graph_state() -> list[Finding]:
         )
     else:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="ok",
                 check="graph.vector_consistency",
                 detail="vector_missing_count=0",
@@ -400,7 +390,7 @@ def _check_graph_state() -> list[Finding]:
 
     if provenance_missing > 0:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="warning",
                 check="graph.provenance",
                 detail=f"provenance_missing_count={provenance_missing}",
@@ -409,7 +399,7 @@ def _check_graph_state() -> list[Finding]:
         )
     else:
         findings.append(
-            Finding(
+            DoctorFinding(
                 level="ok",
                 check="graph.provenance",
                 detail="provenance_missing_count=0",
@@ -419,16 +409,20 @@ def _check_graph_state() -> list[Finding]:
     return findings
 
 
-def _check_logs_dir() -> list[Finding]:
+def _check_logs_dir() -> list[DoctorFinding]:
     logs_path = get_logs_path()
     if not logs_path.exists():
         return [
-            Finding(level="ok", check="logs.dir", detail="logs directory not present")
+            DoctorFinding(
+                level="ok", check="logs.dir", detail="logs directory not present"
+            )
         ]
 
     log_files = list(logs_path.glob("*.jsonl"))
     if not log_files:
-        return [Finding(level="ok", check="logs.files", detail="no log files found")]
+        return [
+            DoctorFinding(level="ok", check="logs.files", detail="no log files found")
+        ]
 
     invalid_lines = 0
     for path in log_files:
@@ -436,7 +430,7 @@ def _check_logs_dir() -> list[Finding]:
 
     if invalid_lines:
         return [
-            Finding(
+            DoctorFinding(
                 level="warning",
                 check="logs.jsonl",
                 detail=f"invalid lines across log files: {invalid_lines}",
@@ -444,7 +438,7 @@ def _check_logs_dir() -> list[Finding]:
             )
         ]
     return [
-        Finding(
+        DoctorFinding(
             level="ok",
             check="logs.jsonl",
             detail=f"log files parse as JSONL ({len(log_files)} files)",
