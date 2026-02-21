@@ -473,6 +473,15 @@ class TestSessionState:
         assert len(restored.messages) == 3
         assert restored.messages[0].role == Role.USER
 
+    def test_to_dict_includes_explicit_context_booleans(self, session):
+        data = session.to_dict()
+        metadata = data["metadata"]
+
+        assert metadata["is_scheduled_task"] is False
+        assert metadata["passive_engagement"] is False
+        assert metadata["name_mentioned"] is False
+        assert metadata["has_reply_context"] is False
+
     def test_to_json_and_back(self, session):
         session.add_user_message("Test")
         json_str = session.to_json()
@@ -485,6 +494,13 @@ class TestSessionState:
         del data["metadata"]
 
         with pytest.raises(KeyError, match="metadata"):
+            SessionState.from_dict(data)
+
+    def test_from_dict_requires_context_boolean_metadata(self, session):
+        data = session.to_dict()
+        del data["metadata"]["is_scheduled_task"]
+
+        with pytest.raises(KeyError, match="is_scheduled_task"):
             SessionState.from_dict(data)
 
     def test_from_dict_rejects_unknown_content_block_type(self, session):

@@ -57,25 +57,21 @@ class SessionContext:
             d["branch_head_id"] = self.branch_head_id
         if self.conversation_gap_minutes is not None:
             d["conversation_gap_minutes"] = self.conversation_gap_minutes
-        if self.is_scheduled_task:
-            d["is_scheduled_task"] = True
-        if self.passive_engagement:
-            d["passive_engagement"] = True
-        if self.name_mentioned:
-            d["name_mentioned"] = True
+        d["is_scheduled_task"] = self.is_scheduled_task
+        d["passive_engagement"] = self.passive_engagement
+        d["name_mentioned"] = self.name_mentioned
         if self.reply_to_message_id is not None:
             d["reply_to_message_id"] = self.reply_to_message_id
         if self.current_message_id is not None:
             d["current_message_id"] = self.current_message_id
-        if self.has_reply_context:
-            d["has_reply_context"] = True
+        d["has_reply_context"] = self.has_reply_context
         if self.bot_name is not None:
             d["bot_name"] = self.bot_name
         return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SessionContext":
-        """Create from a metadata dict (for backward-compatible deserialization)."""
+        """Create from a metadata dict."""
         return cls(
             username=data.get("username"),
             display_name=data.get("display_name"),
@@ -85,12 +81,12 @@ class SessionContext:
             branch_id=data.get("branch_id"),
             branch_head_id=data.get("branch_head_id"),
             conversation_gap_minutes=data.get("conversation_gap_minutes"),
-            is_scheduled_task=data.get("is_scheduled_task", False),
-            passive_engagement=data.get("passive_engagement", False),
-            name_mentioned=data.get("name_mentioned", False),
+            is_scheduled_task=data["is_scheduled_task"],
+            passive_engagement=data["passive_engagement"],
+            name_mentioned=data["name_mentioned"],
             reply_to_message_id=data.get("reply_to_message_id"),
             current_message_id=data.get("current_message_id"),
-            has_reply_context=data.get("has_reply_context", False),
+            has_reply_context=data["has_reply_context"],
             bot_name=data.get("bot_name"),
         )
 
