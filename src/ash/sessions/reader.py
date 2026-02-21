@@ -16,6 +16,7 @@ from ash.llm.types import (
     Role,
     TextContent,
     ToolResult,
+    ToolUse,
 )
 from ash.sessions.types import (
     CompactionEntry,
@@ -162,9 +163,17 @@ class SessionReader:
             if isinstance(entry, ToolUseEntry):
                 tool_use_ids.add(entry.id)
             elif isinstance(entry, MessageEntry) and isinstance(entry.content, list):
-                for block in entry.content:
-                    if isinstance(block, dict) and block.get("type") == "tool_use":
-                        tool_use_ids.add(block["id"])
+                tool_use_ids.update(self._tool_use_ids_from_content(entry.content))
+        return tool_use_ids
+
+    def _tool_use_ids_from_content(self, content: list[dict[str, Any]]) -> set[str]:
+        from ash.sessions.utils import content_block_from_dict
+
+        tool_use_ids: set[str] = set()
+        for block_data in content:
+            block = content_block_from_dict(block_data)
+            if isinstance(block, ToolUse):
+                tool_use_ids.add(block.id)
         return tool_use_ids
 
     def _convert_content(
@@ -325,9 +334,7 @@ class SessionReader:
             if isinstance(entry, ToolUseEntry):
                 tool_use_ids.add(entry.id)
             elif isinstance(entry, MessageEntry) and isinstance(entry.content, list):
-                for block in entry.content:
-                    if isinstance(block, dict) and block.get("type") == "tool_use":
-                        tool_use_ids.add(block["id"])
+                tool_use_ids.update(self._tool_use_ids_from_content(entry.content))
 
         messages: list[Message] = []
         message_ids: list[str] = []
@@ -424,9 +431,9 @@ class SessionReader:
                 branch_tool_use_ids.add(entry.id)
             elif isinstance(entry, MessageEntry) and entry.id in branch_msg_ids:
                 if isinstance(entry.content, list):
-                    for block in entry.content:
-                        if isinstance(block, dict) and block.get("type") == "tool_use":
-                            branch_tool_use_ids.add(block["id"])
+                    branch_tool_use_ids.update(
+                        self._tool_use_ids_from_content(entry.content)
+                    )
 
         # Collect agent_session IDs that belong to branch tool uses
         branch_agent_session_ids: set[str] = set()
