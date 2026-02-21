@@ -194,6 +194,8 @@ def register_memory_methods(
                 )
                 if chat_entry:
                     learned_in_chat_id = chat_entry.id
+            if learned_in_chat_id is None:
+                return []
 
         results = await memory_manager.search(
             query=query,
@@ -653,6 +655,8 @@ def register_memory_methods(
                 )
                 if chat_entry:
                     learned_in_chat_id = chat_entry.id
+            if learned_in_chat_id is None:
+                return []
 
         memories = await memory_manager.list_memories(
             limit=limit,

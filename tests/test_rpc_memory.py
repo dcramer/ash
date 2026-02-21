@@ -1096,3 +1096,45 @@ class TestRPCThisChatFiltering:
         )
         assert len(results) == 1
         assert results[0]["content"] == "Learned in this chat"
+
+    async def test_search_this_chat_fails_closed_without_resolved_chat(
+        self, rpc_server, memory_manager
+    ):
+        """this_chat search returns no results when chat provenance can't be resolved."""
+        mem = await memory_manager.add_memory(
+            content="Unscoped candidate",
+            owner_user_id="user-1",
+        )
+        memory_manager._index.search = MagicMock(return_value=[(mem.id, 0.90)])
+
+        handler = rpc_server.methods["memory.search"]
+        results = await handler(
+            {
+                "query": "candidate",
+                "user_id": "user-1",
+                "provider": "telegram",
+                "chat_id": "unknown-chat",
+                "this_chat": True,
+            }
+        )
+        assert results == []
+
+    async def test_list_this_chat_fails_closed_without_resolved_chat(
+        self, rpc_server, memory_manager
+    ):
+        """this_chat list returns no results when chat provenance can't be resolved."""
+        await memory_manager.add_memory(
+            content="Unscoped candidate",
+            owner_user_id="user-1",
+        )
+
+        handler = rpc_server.methods["memory.list"]
+        results = await handler(
+            {
+                "user_id": "user-1",
+                "provider": "telegram",
+                "chat_id": "unknown-chat",
+                "this_chat": True,
+            }
+        )
+        assert results == []
