@@ -101,6 +101,6 @@ def test_entrypoints_compose_integrations_via_runtime() -> None:
     ]
     for path in entrypoint_files:
         text = path.read_text(encoding="utf-8")
-        assert "compose_integrations(" in text, (
-            f"Expected shared compose_integrations path in {path.relative_to(ROOT)}"
+        assert "compose_integrations(" in text or "active_integrations(" in text, (
+            f"Expected shared integration composition path in {path.relative_to(ROOT)}"
         )

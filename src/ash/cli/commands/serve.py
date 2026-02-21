@@ -79,7 +79,7 @@ async def _run_server(
         MemoryIntegration,
         RuntimeRPCIntegration,
         SchedulingIntegration,
-        compose_integrations,
+        active_integrations,
     )
     from ash.providers.telegram import TelegramProvider
     from ash.rpc import RPCServer
@@ -192,7 +192,7 @@ async def _run_server(
         registrars=registrars,
         agent_executor=components.agent_executor,
     )
-    integration_runtime, integration_context = await compose_integrations(
+    async with active_integrations(
         config=ash_config,
         components=components,
         mode="serve",
@@ -202,122 +202,125 @@ async def _run_server(
             MemoryIntegration(),
             schedule_integration,
         ],
-    )
+    ) as (integration_runtime, integration_context):
+        if schedule_integration.store is None:
+            raise RuntimeError("schedule integration setup failed")
+        logger.debug(f"Schedule store: {schedule_integration.store.schedule_file}")
 
-    if schedule_integration.store is None:
-        raise RuntimeError("schedule integration setup failed")
-    logger.debug(f"Schedule store: {schedule_integration.store.schedule_file}")
+        rpc_server: RPCServer | None = None
+        try:
+            rpc_socket_path = get_rpc_socket_path()
+            rpc_server = RPCServer(rpc_socket_path)
+            integration_runtime.register_rpc_methods(rpc_server, integration_context)
+            await rpc_server.start()
+            logger.info(
+                "rpc_server_started", extra={"socket.path": str(rpc_socket_path)}
+            )
 
-    rpc_socket_path = get_rpc_socket_path()
-    rpc_server = RPCServer(rpc_socket_path)
-    integration_runtime.register_rpc_methods(rpc_server, integration_context)
-    await rpc_server.start()
-    logger.info("rpc_server_started", extra={"socket.path": str(rpc_socket_path)})
+            logger.debug(f"Tools: {', '.join(components.tool_registry.names)}")
+            if components.skill_registry:
+                logger.debug(f"Skills: {len(components.skill_registry)} discovered")
 
-    logger.debug(f"Tools: {', '.join(components.tool_registry.names)}")
-    if components.skill_registry:
-        logger.debug(f"Skills: {len(components.skill_registry)} discovered")
+            # Create FastAPI app
+            logger.info("server_creating")
+            fastapi_app = create_app(
+                agent=agent,
+                telegram_provider=telegram_provider,
+                config=ash_config,
+                agent_registry=components.agent_registry,
+                skill_registry=components.skill_registry,
+                tool_registry=components.tool_registry,
+                llm_provider=components.llm,
+                memory_manager=components.memory_manager,
+                memory_extractor=components.memory_extractor,
+                agent_executor=components.agent_executor,
+            )
 
-    # Create FastAPI app
-    logger.info("server_creating")
-    fastapi_app = create_app(
-        agent=agent,
-        telegram_provider=telegram_provider,
-        config=ash_config,
-        agent_registry=components.agent_registry,
-        skill_registry=components.skill_registry,
-        tool_registry=components.tool_registry,
-        llm_provider=components.llm,
-        memory_manager=components.memory_manager,
-        memory_extractor=components.memory_extractor,
-        agent_executor=components.agent_executor,
-    )
+            # Start server
+            logger.info(
+                "server_starting", extra={"server.address": host, "server.port": port}
+            )
 
-    # Start server
-    logger.info("server_starting", extra={"server.address": host, "server.port": port})
+            uvicorn_config = uvicorn.Config(
+                fastapi_app,
+                host=host,
+                port=port,
+                log_level="info",
+                log_config=None,  # Use our logging config, not uvicorn's
+            )
+            server = uvicorn.Server(uvicorn_config)
 
-    try:
-        uvicorn_config = uvicorn.Config(
-            fastapi_app,
-            host=host,
-            port=port,
-            log_level="info",
-            log_config=None,  # Use our logging config, not uvicorn's
-        )
-        server = uvicorn.Server(uvicorn_config)
+            # Track tasks for cleanup
+            telegram_task: asyncio.Task | None = None
+            shutdown_event = asyncio.Event()
 
-        await integration_runtime.on_startup(integration_context)
+            # Set up signal handlers for graceful shutdown
+            loop = asyncio.get_running_loop()
+            shutdown_count = 0
 
-        # Track tasks for cleanup
-        telegram_task: asyncio.Task | None = None
-        shutdown_event = asyncio.Event()
+            def handle_signal():
+                nonlocal shutdown_count
+                shutdown_count += 1
 
-        # Set up signal handlers for graceful shutdown
-        loop = asyncio.get_running_loop()
-        shutdown_count = 0
-
-        def handle_signal():
-            nonlocal shutdown_count
-            shutdown_count += 1
-
-            if shutdown_count == 1:
-                # First signal: graceful shutdown
-                logger.info("server_shutting_down")
-                server.should_exit = True
-                shutdown_event.set()
-                # Stop telegram polling before cancelling task
-                if telegram_provider:
-                    loop.call_soon(
-                        lambda: asyncio.create_task(telegram_provider.stop())
-                    )
-                # Cancel telegram task after stop is scheduled
-                if telegram_task and not telegram_task.done():
-                    telegram_task.cancel()
-            else:
-                # Second signal: force immediate exit
-                logger.warning("server_force_shutdown")
-                import os
-
-                os._exit(1)
-
-        for sig in (signal_module.SIGTERM, signal_module.SIGINT):
-            loop.add_signal_handler(sig, handle_signal)
-
-        if telegram_provider:
-            # Run both uvicorn and telegram polling
-            logger.info("telegram_polling_starting")
-
-            async def start_telegram():
-                # Wait for server to be ready and handler to be created
-                handler = None
-                for _ in range(50):  # Wait up to 5 seconds
-                    handler = await fastapi_app.state.server.get_telegram_handler()
-                    if handler:
-                        break
-                    await asyncio.sleep(0.1)
-
-                if handler:
-                    try:
-                        await telegram_provider.start(handler.handle_message)
-                    except asyncio.CancelledError:
-                        logger.info("telegram_polling_cancelled")
+                if shutdown_count == 1:
+                    # First signal: graceful shutdown
+                    logger.info("server_shutting_down")
+                    server.should_exit = True
+                    shutdown_event.set()
+                    # Stop telegram polling before cancelling task
+                    if telegram_provider:
+                        loop.call_soon(
+                            lambda: asyncio.create_task(telegram_provider.stop())
+                        )
+                    # Cancel telegram task after stop is scheduled
+                    if telegram_task and not telegram_task.done():
+                        telegram_task.cancel()
                 else:
-                    logger.error("telegram_handler_timeout")
+                    # Second signal: force immediate exit
+                    logger.warning("server_force_shutdown")
+                    import os
 
-            telegram_task = asyncio.create_task(start_telegram())
-            # return_exceptions=True ensures we wait for server to finish graceful
-            # shutdown after telegram is cancelled, avoiding double Ctrl+C
-            await asyncio.gather(server.serve(), telegram_task, return_exceptions=True)
-        else:
-            await server.serve()
-    finally:
-        await integration_runtime.on_shutdown(integration_context)
-        await _cleanup_server(
-            telegram_provider,
-            rpc_server,
-            components.sandbox_executor,
-            pid_path,
-        )
+                    os._exit(1)
+
+            for sig in (signal_module.SIGTERM, signal_module.SIGINT):
+                loop.add_signal_handler(sig, handle_signal)
+
+            if telegram_provider:
+                # Run both uvicorn and telegram polling
+                logger.info("telegram_polling_starting")
+
+                async def start_telegram():
+                    # Wait for server to be ready and handler to be created
+                    handler = None
+                    for _ in range(50):  # Wait up to 5 seconds
+                        handler = await fastapi_app.state.server.get_telegram_handler()
+                        if handler:
+                            break
+                        await asyncio.sleep(0.1)
+
+                    if handler:
+                        try:
+                            await telegram_provider.start(handler.handle_message)
+                        except asyncio.CancelledError:
+                            logger.info("telegram_polling_cancelled")
+                    else:
+                        logger.error("telegram_handler_timeout")
+
+                telegram_task = asyncio.create_task(start_telegram())
+                # return_exceptions=True ensures we wait for server to finish graceful
+                # shutdown after telegram is cancelled, avoiding double Ctrl+C
+                await asyncio.gather(
+                    server.serve(), telegram_task, return_exceptions=True
+                )
+            else:
+                await server.serve()
+        finally:
+            await _cleanup_server(
+                telegram_provider,
+                rpc_server,
+                components.sandbox_executor,
+                pid_path,
+            )
 
 
 async def _cleanup_server(

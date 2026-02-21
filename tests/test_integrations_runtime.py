@@ -14,6 +14,7 @@ from ash.integrations import (
     IntegrationContext,
     IntegrationContributor,
     IntegrationRuntime,
+    active_integrations,
     compose_integrations,
 )
 
@@ -178,3 +179,38 @@ async def test_compose_integrations_runs_setup_and_installs_hooks() -> None:
     assert fake_agent.env_hooks is not None
     assert len(fake_agent.prompt_hooks) == 1
     assert len(fake_agent.env_hooks) == 1
+
+
+@pytest.mark.asyncio
+async def test_active_integrations_runs_full_lifecycle() -> None:
+    events: list[tuple[str, str]] = []
+
+    class _FakeAgent:
+        def install_integration_hooks(
+            self,
+            *,
+            prompt_context_augmenters=None,
+            sandbox_env_augmenters=None,
+        ) -> None:
+            _ = (prompt_context_augmenters, sandbox_env_augmenters)
+
+    config = AshConfig(
+        workspace=Path("tmp-workspace"),
+        models={"default": ModelConfig(provider="openai", model="gpt-5-mini")},
+    )
+    components = cast(Any, SimpleNamespace(agent=_FakeAgent()))
+
+    async with active_integrations(
+        config=config,
+        components=components,
+        mode="eval",
+        contributors=[_StubContributor(name="x", priority=10, events=events)],
+    ):
+        events.append(("inside", "ok"))
+
+    assert events == [
+        ("setup", "x"),
+        ("startup", "x"),
+        ("inside", "ok"),
+        ("shutdown", "x"),
+    ]

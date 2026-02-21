@@ -5,7 +5,7 @@ from ash.integrations.builtin import (
     RuntimeRPCIntegration,
     SchedulingIntegration,
 )
-from ash.integrations.composer import compose_integrations
+from ash.integrations.composer import active_integrations, compose_integrations
 from ash.integrations.runtime import (
     IntegrationContext,
     IntegrationContributor,
@@ -17,6 +17,7 @@ __all__ = [
     "RuntimeRPCIntegration",
     "SchedulingIntegration",
     "compose_integrations",
+    "active_integrations",
     "IntegrationContext",
     "IntegrationContributor",
     "IntegrationRuntime",

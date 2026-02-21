@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -36,3 +38,27 @@ async def compose_integrations(
         sandbox_env_augmenters=runtime.sandbox_env_augmenters(context),
     )
     return runtime, context
+
+
+@asynccontextmanager
+async def active_integrations(
+    *,
+    config: AshConfig,
+    components: AgentComponents,
+    mode: Literal["serve", "chat", "eval"],
+    contributors: list[IntegrationContributor],
+    sessions_path: Path | None = None,
+) -> AsyncIterator[tuple[IntegrationRuntime, IntegrationContext]]:
+    """Compose integrations and manage startup/shutdown lifecycle."""
+    runtime, context = await compose_integrations(
+        config=config,
+        components=components,
+        mode=mode,
+        contributors=contributors,
+        sessions_path=sessions_path,
+    )
+    await runtime.on_startup(context)
+    try:
+        yield runtime, context
+    finally:
+        await runtime.on_shutdown(context)
