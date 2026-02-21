@@ -380,7 +380,7 @@ class TelegramMessageHandler:
                     message.chat_id, message.user_id, thread_id_for_sm
                 )
                 self._persist_stack(session_key, sm)
-                bot_response_id = await self._run_orchestration_loop(
+                response_external_id = await self._run_orchestration_loop(
                     message,
                     session_key,
                     entry_user_message=None,
@@ -395,14 +395,14 @@ class TelegramMessageHandler:
                     message.text,
                     assistant_message=None,
                     external_id=message.id,
-                    response_external_id=bot_response_id,
+                    response_external_id=response_external_id,
                     thread_id=thread_id,
                     username=message.username,
                     display_name=message.display_name,
                     skip_user_message=True,
                 )
                 # Clean up orphaned thinking message if no response sent
-                if not bot_response_id and tracker.thinking_msg_id:
+                if not response_external_id and tracker.thinking_msg_id:
                     try:
                         await self._provider.delete(
                             message.chat_id, tracker.thinking_msg_id
@@ -610,15 +610,15 @@ class TelegramMessageHandler:
                 "input.preview": _truncate(message.text),
             },
         )
-        bot_response_id = await self._run_orchestration_loop(
+        response_external_id = await self._run_orchestration_loop(
             message, session_key, entry_user_message=message.text
         )
         # Register bot response in thread_index so follow-up replies get routed
-        if bot_response_id:
+        if response_external_id:
             thread_id = message.metadata.get("thread_id")
             if thread_id:
                 thread_index = self._session_handler.get_thread_index(message.chat_id)
-                thread_index.register_message(bot_response_id, thread_id)
+                thread_index.register_message(response_external_id, thread_id)
 
     async def _run_orchestration_loop(
         self,
@@ -646,14 +646,14 @@ class TelegramMessageHandler:
         )
 
         entry_tool_result: tuple[str, str, bool] | None = None
-        bot_response_id: str | None = None
+        response_external_id: str | None = None
 
         while True:
             top = stack.top
             if top is None:
                 # Stack is empty — shouldn't normally happen here
                 logger.warning("orchestration_loop_stack_empty")
-                return bot_response_id
+                return response_external_id
 
             result = await self._agent_executor.execute_turn(
                 top,
@@ -666,7 +666,7 @@ class TelegramMessageHandler:
 
             match result.action:
                 case TurnAction.SEND_TEXT:
-                    bot_response_id = await self._send_stack_response(
+                    response_external_id = await self._send_stack_response(
                         message, result.text, thinking_msg_id=thinking_msg_id
                     )
                     thinking_msg_id = None  # Consume after first use
@@ -682,7 +682,7 @@ class TelegramMessageHandler:
                         self._persist_stack(session_key, sm)
                     else:
                         self._persist_stack(session_key, sm)
-                    return bot_response_id  # Wait for next user message
+                    return response_external_id  # Wait for next user message
 
                 case TurnAction.COMPLETE:
                     completed = stack.pop()
@@ -696,7 +696,7 @@ class TelegramMessageHandler:
                     if stack.is_empty:
                         # Edge case: no parent to cascade to
                         if result.text:
-                            bot_response_id = await self._send_stack_response(
+                            response_external_id = await self._send_stack_response(
                                 message,
                                 result.text,
                                 thinking_msg_id=thinking_msg_id,
@@ -704,7 +704,7 @@ class TelegramMessageHandler:
                             thinking_msg_id = None
                         self._stack_manager.clear(session_key)
                         self._persist_stack(session_key, sm)
-                        return bot_response_id
+                        return response_external_id
                     self._persist_stack(session_key, sm)
                     # Inject result into parent's pending tool_use
                     assert completed.parent_tool_use_id is not None
@@ -730,11 +730,11 @@ class TelegramMessageHandler:
 
                 case TurnAction.INTERRUPT:
                     # For now, treat interrupts in stack mode as text to user
-                    bot_response_id = await self._send_stack_response(
+                    response_external_id = await self._send_stack_response(
                         message, result.text, thinking_msg_id=thinking_msg_id
                     )
                     thinking_msg_id = None
-                    return bot_response_id
+                    return response_external_id
 
                 case TurnAction.MAX_ITERATIONS:
                     failed = stack.pop()
@@ -743,7 +743,7 @@ class TelegramMessageHandler:
                         extra={"agent_name": failed.agent_name},
                     )
                     if stack.is_empty:
-                        bot_response_id = await self._send_stack_response(
+                        response_external_id = await self._send_stack_response(
                             message,
                             "Agent reached maximum steps.",
                             thinking_msg_id=thinking_msg_id,
@@ -751,7 +751,7 @@ class TelegramMessageHandler:
                         thinking_msg_id = None
                         self._stack_manager.clear(session_key)
                         self._persist_stack(session_key, sm)
-                        return bot_response_id
+                        return response_external_id
                     self._persist_stack(session_key, sm)
                     assert failed.parent_tool_use_id is not None
                     entry_tool_result = (
@@ -771,7 +771,7 @@ class TelegramMessageHandler:
                         },
                     )
                     if stack.is_empty:
-                        bot_response_id = await self._send_stack_response(
+                        response_external_id = await self._send_stack_response(
                             message,
                             result.text or "An error occurred.",
                             thinking_msg_id=thinking_msg_id,
@@ -779,7 +779,7 @@ class TelegramMessageHandler:
                         thinking_msg_id = None
                         self._stack_manager.clear(session_key)
                         self._persist_stack(session_key, sm)
-                        return bot_response_id
+                        return response_external_id
                     self._persist_stack(session_key, sm)
                     assert failed.parent_tool_use_id is not None
                     entry_tool_result = (
