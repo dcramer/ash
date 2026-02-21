@@ -64,6 +64,9 @@ class PassiveListeningConfig(BaseModel):
     )
     max_engagements_per_hour: int = 10  # Global rate limit across all chats
     skip_after_active_messages: int = 3  # Skip passive if N active messages recently
+    direct_followup_window_seconds: int = (
+        120  # Bypass passive throttle for direct follow-ups within this window
+    )
 
     # Extraction
     extraction_enabled: bool = True  # Run memory extraction on passive messages

@@ -1,5 +1,6 @@
 """Tests for provider implementations."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -741,3 +742,142 @@ class TestTelegramMessageHandler:
 
         # Agent SHOULD have been called (name mention bypasses throttle)
         mock_agent.process_message_streaming.assert_called()
+
+    async def test_handle_passive_message_direct_followup_bypasses_throttle_but_uses_decider(
+        self, mock_provider, mock_agent, tmp_path
+    ):
+        """Recent post-reply follow-up should bypass throttle but still run LLM decision."""
+        from ash.chats.history import ChatHistoryWriter
+        from ash.config.models import PassiveListeningConfig
+        from ash.providers.base import IncomingMessage
+        from ash.providers.telegram.handlers import TelegramMessageHandler
+        from ash.providers.telegram.passive import PassiveEngagementThrottler
+
+        mock_provider.passive_config = PassiveListeningConfig(
+            enabled=True,
+            chat_cooldown_minutes=30,
+            direct_followup_window_seconds=120,
+        )
+        mock_provider.bot_username = "ash_bot"
+
+        handler = TelegramMessageHandler(
+            provider=mock_provider,
+            agent=mock_agent,
+            streaming=False,
+        )
+
+        # Create recent direct interaction history:
+        # active user message -> bot reply -> current user follow-up (no mention).
+        writer = ChatHistoryWriter("telegram", "group_123")
+        writer.record_user_message(
+            content="@ash_bot can you help?",
+            created_at=datetime.now(UTC) - timedelta(seconds=30),
+            user_id="user_456",
+            username="otheruser",
+            metadata={"external_id": "97", "processing_mode": "active"},
+        )
+        writer.record_bot_message(
+            content="Sure, what's up?",
+            created_at=datetime.now(UTC) - timedelta(seconds=20),
+            metadata={"external_id": "98"},
+        )
+        writer.record_user_message(
+            content="its about deploys",
+            created_at=datetime.now(UTC) - timedelta(seconds=5),
+            user_id="user_456",
+            username="otheruser",
+            metadata={"external_id": "99", "processing_mode": "passive"},
+        )
+
+        # Throttler would block if consulted, but follow-up should bypass it.
+        mock_throttler = MagicMock(spec=PassiveEngagementThrottler)
+        mock_throttler.should_consider.return_value = False
+        handler._passive_handler._passive_throttler = mock_throttler  # type: ignore[union-attr]
+
+        # Decision still goes through decider and returns SILENT.
+        mock_decider = MagicMock()
+        mock_decider.decide = AsyncMock(return_value=False)
+        handler._passive_handler._passive_decider = mock_decider  # type: ignore[union-attr]
+        handler._passive_handler._memory_manager = MagicMock()  # type: ignore[union-attr]
+
+        passive_message = IncomingMessage(
+            id="99",
+            chat_id="group_123",
+            user_id="user_456",
+            text="its about deploys",
+            username="otheruser",
+            display_name="Other User",
+            timestamp=datetime.now(UTC),
+        )
+
+        await handler.handle_passive_message(passive_message)
+
+        mock_throttler.should_consider.assert_not_called()
+        mock_decider.decide.assert_awaited_once()
+        mock_agent.process_message.assert_not_called()
+        mock_agent.process_message_streaming.assert_not_called()
+
+    async def test_handle_passive_message_no_direct_followup_uses_throttle(
+        self, mock_provider, mock_agent, tmp_path
+    ):
+        """Without recent direct interaction, passive flow should use throttler."""
+        from ash.chats.history import ChatHistoryWriter
+        from ash.config.models import PassiveListeningConfig
+        from ash.providers.base import IncomingMessage
+        from ash.providers.telegram.handlers import TelegramMessageHandler
+        from ash.providers.telegram.passive import PassiveEngagementThrottler
+
+        mock_provider.passive_config = PassiveListeningConfig(
+            enabled=True,
+            chat_cooldown_minutes=30,
+            direct_followup_window_seconds=30,
+        )
+        mock_provider.bot_username = "ash_bot"
+
+        handler = TelegramMessageHandler(
+            provider=mock_provider,
+            agent=mock_agent,
+            streaming=False,
+        )
+
+        # Old assistant reply outside follow-up window.
+        writer = ChatHistoryWriter("telegram", "group_123")
+        writer.record_user_message(
+            content="@ash_bot help",
+            created_at=datetime.now(UTC) - timedelta(minutes=3),
+            user_id="user_456",
+            username="otheruser",
+            metadata={"external_id": "80", "processing_mode": "active"},
+        )
+        writer.record_bot_message(
+            content="How can I help?",
+            created_at=datetime.now(UTC) - timedelta(minutes=2, seconds=50),
+            metadata={"external_id": "81"},
+        )
+        writer.record_user_message(
+            content="follow up",
+            created_at=datetime.now(UTC),
+            user_id="user_456",
+            username="otheruser",
+            metadata={"external_id": "82", "processing_mode": "passive"},
+        )
+
+        mock_throttler = MagicMock(spec=PassiveEngagementThrottler)
+        mock_throttler.should_consider.return_value = False
+        handler._passive_handler._passive_throttler = mock_throttler  # type: ignore[union-attr]
+        handler._passive_handler._passive_decider = MagicMock()  # type: ignore[union-attr]
+        handler._passive_handler._memory_manager = MagicMock()  # type: ignore[union-attr]
+
+        passive_message = IncomingMessage(
+            id="82",
+            chat_id="group_123",
+            user_id="user_456",
+            text="follow up",
+            username="otheruser",
+            display_name="Other User",
+            timestamp=datetime.now(UTC),
+        )
+
+        await handler.handle_passive_message(passive_message)
+
+        mock_throttler.should_consider.assert_called_once_with("group_123")

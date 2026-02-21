@@ -11,6 +11,7 @@ is not directly mentioned or replied to. It orchestrates:
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -164,9 +165,12 @@ class PassiveHandler:
         # users explicitly address the bot.
         text = message.text or ""
         name_mentioned = check_bot_name_mention(text, bot_context)
+        direct_followup = await self._is_direct_followup_after_bot_reply(message)
 
         if name_mentioned:
             logger.info("passive_fast_path_name_mentioned")
+        elif direct_followup:
+            logger.info("passive_fast_path_direct_followup")
         else:
             # Step 3: Throttle check (only if not directly addressed)
             # Enforces per-chat cooldowns, active message limits, and global
@@ -209,7 +213,10 @@ class PassiveHandler:
                     )
 
                 # Get recent messages for context
-                recent_messages = await self._get_recent_message_texts(chat_id, limit=5)
+                context_limit = passive_config.context_messages if passive_config else 5
+                recent_messages = await self._get_recent_message_texts(
+                    chat_id, limit=context_limit
+                )
 
                 # _passive_decider is guaranteed to exist (checked in guard above)
                 assert self._passive_decider is not None
@@ -247,6 +254,8 @@ class PassiveHandler:
             message.metadata["passive_engagement"] = True
             if name_mentioned:
                 message.metadata["name_mentioned"] = True
+            if direct_followup:
+                message.metadata["direct_followup"] = True
 
             # Promote to active processing - this calls handle_message() which
             # creates a full agent session and generates a response
@@ -289,6 +298,62 @@ class PassiveHandler:
             logger.warning(
                 "passive_memory_extraction_failed", extra={"error.message": str(e)}
             )
+
+    async def _is_direct_followup_after_bot_reply(
+        self, message: IncomingMessage
+    ) -> bool:
+        """Return True for immediate post-reply follow-ups from the same user."""
+        passive_config = self._provider.passive_config
+        if not passive_config:
+            return False
+
+        from ash.chats.history import read_recent_chat_history
+
+        entries = read_recent_chat_history(
+            self._provider.name, message.chat_id, limit=12
+        )
+        if len(entries) < 2:
+            return False
+
+        # Prefer matching against persisted current message entry when available.
+        external_id = message.id
+        current_idx: int | None = None
+        for idx in range(len(entries) - 1, -1, -1):
+            entry = entries[idx]
+            if entry.role != "user":
+                continue
+            metadata = entry.metadata or {}
+            if str(metadata.get("external_id")) == external_id:
+                current_idx = idx
+                break
+
+        if current_idx is None:
+            # Fallback for tests and edge cases where current message is not yet recorded.
+            current_idx = len(entries)
+
+        if current_idx < 2:
+            return False
+
+        assistant_entry = entries[current_idx - 1]
+        previous_user_entry = entries[current_idx - 2]
+        if assistant_entry.role != "assistant" or previous_user_entry.role != "user":
+            return False
+
+        if (
+            previous_user_entry.user_id
+            and message.user_id != previous_user_entry.user_id
+        ):
+            return False
+
+        prev_meta = previous_user_entry.metadata or {}
+        if prev_meta.get("processing_mode") != "active":
+            return False
+
+        now_ts = message.timestamp or datetime.now(UTC)
+        delta = (now_ts - assistant_entry.created_at).total_seconds()
+        if delta < 0:
+            return False
+        return delta <= passive_config.direct_followup_window_seconds
 
     async def _get_recent_message_texts(
         self, chat_id: str, limit: int = 5
