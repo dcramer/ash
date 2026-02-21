@@ -1129,20 +1129,15 @@ class TestScheduleEntryTimezone:
         assert next_fire_la.hour == 19
         assert next_fire_la.minute == 0
 
-    def test_cron_without_created_at_or_last_run_uses_now(self):
-        """Test cron entry without created_at or last_run uses datetime.now() as fallback.
-
-        This ensures backward compatibility for entries that don't have created_at.
-        """
+    def test_cron_without_last_run_uses_default_created_at(self):
+        """Cron entry without last_run uses created_at default for scheduling."""
         entry = ScheduleEntry(
             message="Legacy entry",
             cron="0 8 * * *",  # 8 AM daily
             timezone="UTC",
-            created_at=None,
-            last_run=None,
         )
 
-        # Should calculate from now, so next fire is in the future
+        # Should calculate from default created_at, so next fire is in the future
         next_fire = entry.next_fire_time()
         assert next_fire is not None
         assert next_fire > datetime.now(UTC)

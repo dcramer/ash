@@ -33,8 +33,8 @@ class ScheduleEntry:
     user_id: str | None = None
     username: str | None = None  # For @mentions in response
     provider: str | None = None
-    created_at: datetime | None = None
-    # Internal tracking (kept for backwards compatibility during migration)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # Internal tracking
     line_number: int = 0
     _extra: dict[str, Any] = field(default_factory=dict)  # Preserve unknown fields
 
@@ -180,15 +180,13 @@ class ScheduleEntry:
                 )
                 tz = ZoneInfo("UTC")
 
-            # Convert base time to local timezone for cron evaluation
+            # Convert base time to local timezone for cron evaluation.
             # Use last_run if available, otherwise created_at to anchor the first
-            # scheduled occurrence after creation (not recalculated on each poll)
+            # scheduled occurrence after creation (not recalculated on each poll).
             if self.last_run:
                 base_time = self.last_run.astimezone(tz)
-            elif self.created_at:
-                base_time = self.created_at.astimezone(tz)
             else:
-                base_time = datetime.now(tz)
+                base_time = self.created_at.astimezone(tz)
 
             # Evaluate cron in local timezone, result is timezone-aware
             next_local = croniter(self.cron, base_time).get_next(datetime)
@@ -238,8 +236,7 @@ class ScheduleEntry:
             data["username"] = self.username
         if self.provider:
             data["provider"] = self.provider
-        if self.created_at:
-            data["created_at"] = self.created_at.isoformat()
+        data["created_at"] = self.created_at.isoformat()
 
         return json.dumps(data)
 
@@ -267,6 +264,8 @@ class ScheduleEntry:
 
             if not trigger_at and not cron:
                 return None
+            if not created_at:
+                created_at = datetime.now(UTC)
 
             # Collect extra fields we don't explicitly handle
             known_fields = {
