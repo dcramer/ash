@@ -60,21 +60,20 @@ async def _run_server(
 
     import uvicorn
 
+    from ash.cli.runtime import bootstrap_runtime
     from ash.logging import configure_logging
 
     # Configure logging with Rich for colorful server output and file logging
     configure_logging(use_rich=True, log_to_file=True)
 
-    from ash.config import WorkspaceLoader, load_config
+    from ash.config import load_config
     from ash.config.paths import (
-        get_graph_dir,
         get_logs_path,
         get_pid_path,
         get_rpc_socket_path,
         get_schedule_file,
         get_sessions_path,
     )
-    from ash.core import create_agent
     from ash.integrations import (
         active_integrations,
         active_rpc_server,
@@ -92,30 +91,17 @@ async def _run_server(
     logger.info("config_loading")
     ash_config = load_config(config_path)
 
-    # Initialize Sentry for server mode
-    if ash_config.sentry:
-        from ash.observability import init_sentry
-
-        if init_sentry(ash_config.sentry, server_mode=True):
-            logger.info("sentry_initialized")
-
-    # Set up graph directory for memory
-    graph_dir = get_graph_dir()
-
-    # Load workspace
     logger.info("workspace_loading")
-    workspace_loader = WorkspaceLoader(ash_config.workspace)
-    workspace_loader.ensure_workspace()
-    workspace = workspace_loader.load()
-
-    # Create agent with all dependencies
     logger.info("agent_setup")
-    components = await create_agent(
+    runtime = await bootstrap_runtime(
         config=ash_config,
-        workspace=workspace,
-        graph_dir=graph_dir,
         model_alias="default",
+        initialize_sentry=True,
+        sentry_server_mode=True,
     )
+    if runtime.sentry_initialized:
+        logger.info("sentry_initialized")
+    components = runtime.components
     agent = components.agent
 
     # Log sandbox configuration
@@ -131,13 +117,13 @@ async def _run_server(
             "sandbox.image": sandbox.image,
             "sandbox.network_mode": sandbox.network_mode,
             "sandbox.runtime": sandbox.runtime,
-            "sandbox.workspace_path": str(workspace.path),
+            "sandbox.workspace_path": str(runtime.workspace.path),
             "sandbox.workspace_access": sandbox.workspace_access,
         },
     )
 
     # Write runtime state for service status
-    runtime_state = create_runtime_state_from_config(ash_config, workspace.path)
+    runtime_state = create_runtime_state_from_config(ash_config, runtime.workspace.path)
     write_runtime_state(runtime_state)
 
     # Run memory garbage collection on startup if enabled

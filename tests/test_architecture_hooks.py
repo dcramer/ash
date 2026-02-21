@@ -88,8 +88,8 @@ def test_entrypoints_use_shared_create_agent_composition_path() -> None:
     ]
     for path in entrypoint_files:
         text = path.read_text(encoding="utf-8")
-        assert "create_agent(" in text, (
-            f"Expected shared create_agent composition path in {path.relative_to(ROOT)}"
+        assert "create_agent(" in text or "bootstrap_runtime(" in text, (
+            f"Expected shared agent composition path in {path.relative_to(ROOT)}"
         )
 
 
@@ -129,4 +129,16 @@ def test_entrypoints_use_shared_rpc_lifecycle_helper() -> None:
         text = path.read_text(encoding="utf-8")
         assert "active_rpc_server(" in text, (
             f"Expected shared RPC lifecycle helper in {path.relative_to(ROOT)}"
+        )
+
+
+def test_chat_and_serve_use_shared_runtime_bootstrap_helper() -> None:
+    entrypoint_files = [
+        ROOT / "src/ash/cli/commands/serve.py",
+        ROOT / "src/ash/cli/commands/chat.py",
+    ]
+    for path in entrypoint_files:
+        text = path.read_text(encoding="utf-8")
+        assert "bootstrap_runtime(" in text, (
+            f"Expected shared runtime bootstrap helper in {path.relative_to(ROOT)}"
         )
