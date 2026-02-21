@@ -381,9 +381,7 @@ class SessionState:
             content: str | list[ContentBlock] = raw_content
         else:
             content = [
-                block
-                for block_data in raw_content
-                if (block := content_block_from_dict(block_data)) is not None
+                content_block_from_dict(block_data) for block_data in raw_content
             ]
 
         return Message(role=role, content=content)

@@ -113,8 +113,8 @@ def content_block_to_dict(block: ContentBlock) -> dict[str, Any]:
     return {}
 
 
-def content_block_from_dict(data: dict[str, Any]) -> ContentBlock | None:
-    block_type = data.get("type")
+def content_block_from_dict(data: dict[str, Any]) -> ContentBlock:
+    block_type = data["type"]
     if block_type == "text":
         return TextContent(text=data["text"])
     if block_type == "tool_use":
@@ -125,7 +125,7 @@ def content_block_from_dict(data: dict[str, Any]) -> ContentBlock | None:
             content=data["content"],
             is_error=data.get("is_error", False),
         )
-    return None
+    raise ValueError(f"Unknown content block type: {block_type}")
 
 
 def _make_synthetic_results(tool_uses: list[ToolUse]) -> Message:

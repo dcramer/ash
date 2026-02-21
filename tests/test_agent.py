@@ -487,6 +487,18 @@ class TestSessionState:
         with pytest.raises(KeyError, match="metadata"):
             SessionState.from_dict(data)
 
+    def test_from_dict_rejects_unknown_content_block_type(self, session):
+        data = session.to_dict()
+        data["messages"] = [
+            {
+                "role": "assistant",
+                "content": [{"type": "unknown_block", "value": "x"}],
+            }
+        ]
+
+        with pytest.raises(ValueError, match="Unknown content block type"):
+            SessionState.from_dict(data)
+
     def test_get_messages_for_llm_no_budget(self, session):
         session.add_user_message("Hello")
         session.add_assistant_message("Hi!")

@@ -175,11 +175,7 @@ class SessionReader:
 
         from ash.sessions.utils import content_block_from_dict
 
-        blocks: list[ContentBlock] = [
-            block
-            for item in content
-            if (block := content_block_from_dict(item)) is not None
-        ]
+        blocks: list[ContentBlock] = [content_block_from_dict(item) for item in content]
         return blocks if blocks else ""
 
     def _prefix_with_timestamp(
