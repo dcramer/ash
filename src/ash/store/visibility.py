@@ -19,25 +19,6 @@ if TYPE_CHECKING:
     from ash.graph.graph import KnowledgeGraph
 
 
-def is_dm_sourced(graph: KnowledgeGraph, memory_id: str) -> bool | None:
-    """Return whether a memory was learned in a private chat.
-
-    Returns:
-        True: memory was learned in a private chat.
-        False: memory was learned in a non-private chat.
-        None: memory has no LEARNED_IN edge or source chat is unknown.
-    """
-    source_chat_id = get_learned_in_chat(graph, memory_id)
-    if not source_chat_id:
-        return None
-
-    source_chat = graph.chats.get(source_chat_id)
-    if not source_chat:
-        return None
-
-    return source_chat.chat_type == "private"
-
-
 def is_private_sourced_outside_current_chat(
     graph: KnowledgeGraph,
     memory_id: str,
@@ -89,16 +70,14 @@ def is_group_disclosable(
     """Group chat disclosure policy for a single memory.
 
     Rules:
-    - DM-sourced memories are always blocked.
-    - Unknown provenance (no LEARNED_IN edge) is blocked.
+    - Memories are visible only when provenance proves they were learned
+      in a non-private chat.
     - Self-memories (no subjects) are allowed.
     - PUBLIC memories are allowed.
     - PERSONAL/SENSITIVE memories require a participant subject overlap.
     """
-    dm_sourced = is_dm_sourced(graph, memory_id)
-    if dm_sourced is True:
-        return False
-    if dm_sourced is None:
+    # Fail closed for groups unless provenance proves non-private source.
+    if is_private_sourced_outside_current_chat(graph, memory_id, None):
         return False
 
     if not subject_person_ids:
