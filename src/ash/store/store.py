@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ash.graph.edges import get_learned_in_chat
 from ash.graph.graph import KnowledgeGraph
 from ash.graph.persistence import GraphPersistence
 from ash.graph.vectors import NumpyVectorIndex
@@ -132,6 +133,27 @@ class Store(
         )
         payload = "\n".join(active).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
+
+    def _active_memory_ids(self) -> set[str]:
+        now = datetime.now(UTC)
+        return {
+            mid for mid, memory in self._graph.memories.items() if memory.is_active(now)
+        }
+
+    def missing_learned_in_provenance_ids(self) -> list[str]:
+        """Return active memory IDs with no LEARNED_IN edge."""
+        missing = [
+            mid
+            for mid in sorted(self._active_memory_ids())
+            if get_learned_in_chat(self._graph, mid) is None
+        ]
+        return missing
+
+    async def ensure_learned_in_provenance_consistency(self) -> tuple[int, list[str]]:
+        """Report active memories missing LEARNED_IN and persist the count."""
+        missing_ids = self.missing_learned_in_provenance_ids()
+        await self._persistence.update_state(provenance_missing_count=len(missing_ids))
+        return len(missing_ids), missing_ids[:20]
 
     async def ensure_vector_consistency(
         self,
@@ -245,5 +267,21 @@ async def create_store(
         )
     else:
         logger.debug("vector_index_consistency_ok")
+
+    (
+        missing_provenance,
+        sample_ids,
+    ) = await store.ensure_learned_in_provenance_consistency()
+    if missing_provenance:
+        logger.warning(
+            "learned_in_provenance_missing",
+            extra={
+                "count": missing_provenance,
+                "memory.ids": sample_ids,
+                "repair.command": "ash memory doctor backfill-learned-in --force",
+            },
+        )
+    else:
+        logger.debug("learned_in_provenance_ok")
 
     return store

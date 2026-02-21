@@ -33,7 +33,7 @@ async def test_backfill_learned_in_defaults_owner_memories_to_private(graph_stor
     learned_in = get_learned_in_chat(graph_store.graph, memory.id)
     assert learned_in is not None
     chat = graph_store.graph.chats[learned_in]
-    assert chat.provider == "legacy-backfill"
+    assert chat.provider == "provenance-backfill"
     assert chat.provider_id == "owner:user-42"
     assert chat.chat_type == "private"
 

@@ -871,13 +871,13 @@ class TestRPCDMSourceFiltering:
         assert len(results) == 1
         assert results[0]["content"] == "Group-sourced fact"
 
-    async def test_search_filters_legacy_memories_in_group(
+    async def test_search_filters_missing_provenance_memories_in_group(
         self, rpc_server, memory_manager
     ):
-        """Legacy memories (no LEARNED_IN edge) should be excluded in group chats."""
-        # Add a memory with no LEARNED_IN edge (legacy)
+        """Memories missing LEARNED_IN provenance should be excluded in group chats."""
+        # Add a memory with no LEARNED_IN edge (missing provenance)
         mem = await memory_manager.add_memory(
-            content="Legacy fact",
+            content="Fact missing provenance",
             owner_user_id="user-1",
         )
 
@@ -886,17 +886,17 @@ class TestRPCDMSourceFiltering:
         handler = rpc_server.methods["memory.search"]
         results = await handler(
             {
-                "query": "legacy",
+                "query": "missing provenance",
                 "user_id": "user-1",
                 "chat_type": "group",
             }
         )
         assert len(results) == 0
 
-    async def test_list_filters_legacy_memories_in_group(
+    async def test_list_filters_missing_provenance_memories_in_group(
         self, rpc_server, memory_manager
     ):
-        """Legacy memories (no LEARNED_IN edge) should be excluded from list in group chats."""
+        """Memories missing LEARNED_IN provenance should be excluded from list in group chats."""
         from ash.graph.edges import create_learned_in_edge
         from ash.store.types import ChatEntry
 
@@ -909,9 +909,9 @@ class TestRPCDMSourceFiltering:
         )
         memory_manager.graph.add_chat(group_chat)
 
-        # Legacy memory (no LEARNED_IN edge)
+        # Memory missing LEARNED_IN provenance
         await memory_manager.add_memory(
-            content="Legacy fact",
+            content="Fact missing provenance",
             owner_user_id="user-1",
         )
 
@@ -1118,7 +1118,9 @@ class TestRPCThisChatFiltering:
         assert len(results) == 1
         assert results[0]["content"] == "This chat memory"
 
-    async def test_this_chat_excludes_legacy_memories(self, rpc_server, memory_manager):
+    async def test_this_chat_excludes_missing_provenance_memories(
+        self, rpc_server, memory_manager
+    ):
         """Memories without LEARNED_IN edges are excluded when this_chat is active."""
         from ash.graph.edges import create_learned_in_edge
         from ash.store.types import ChatEntry
@@ -1131,9 +1133,9 @@ class TestRPCThisChatFiltering:
         )
         memory_manager.graph.add_chat(chat)
 
-        # Legacy memory (no LEARNED_IN)
-        mem_legacy = await memory_manager.add_memory(
-            content="Legacy memory",
+        # Memory missing LEARNED_IN provenance
+        mem_missing_provenance = await memory_manager.add_memory(
+            content="Memory missing provenance",
             owner_user_id="user-1",
         )
 
@@ -1145,7 +1147,7 @@ class TestRPCThisChatFiltering:
         memory_manager.graph.add_edge(create_learned_in_edge(mem_here.id, chat.id))
 
         memory_manager._index.search = MagicMock(
-            return_value=[(mem_legacy.id, 0.90), (mem_here.id, 0.85)]
+            return_value=[(mem_missing_provenance.id, 0.90), (mem_here.id, 0.85)]
         )
 
         handler = rpc_server.methods["memory.search"]

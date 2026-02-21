@@ -1,4 +1,4 @@
-"""Backfill missing LEARNED_IN provenance edges for legacy memories."""
+"""Backfill missing LEARNED_IN provenance edges."""
 
 from __future__ import annotations
 
@@ -43,18 +43,18 @@ async def memory_doctor_backfill_learned_in(store: Store, force: bool) -> None:
         else:
             if memory.owner_user_id:
                 bucket = f"owner:{memory.owner_user_id}"
-                title = f"Legacy private provenance ({memory.owner_user_id})"
+                title = f"Backfilled private provenance ({memory.owner_user_id})"
             elif memory.chat_id:
                 bucket = f"chat:{memory.chat_id}"
-                title = f"Legacy private provenance ({memory.chat_id[:16]})"
+                title = f"Backfilled private provenance ({memory.chat_id[:16]})"
             else:
                 bucket = "unknown"
-                title = "Legacy private provenance (unknown)"
+                title = "Backfilled private provenance (unknown)"
 
             target_chat_id = synthetic_chat_cache.get(bucket, "")
             if not target_chat_id:
                 private_chat = await store.ensure_chat(
-                    provider="legacy-backfill",
+                    provider="provenance-backfill",
                     provider_id=bucket,
                     chat_type="private",
                     title=title,

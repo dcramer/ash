@@ -3,7 +3,7 @@
 Classifies memories as FACT or HEARSAY based on STATED_BY and ABOUT edges:
 - FACT: The memory was STATED_BY a person who is also a subject (ABOUT edge)
 - HEARSAY: The memory was stated by someone other than the subject
-- UNKNOWN: No STATED_BY edge exists (legacy data or agent-provided)
+- UNKNOWN: No STATED_BY edge exists (missing attribution or agent-provided)
 """
 
 from __future__ import annotations

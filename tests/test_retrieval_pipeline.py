@@ -1081,7 +1081,11 @@ class TestDMContextualFilter:
 
     def test_dm_missing_provenance_no_learned_in_blocked(self, pipeline):
         """Memories without LEARNED_IN edges are blocked in DMs."""
-        results = [self._make_result("mem-legacy", subject_person_ids=["person-carol"])]
+        results = [
+            self._make_result(
+                "mem-missing-provenance", subject_person_ids=["person-carol"]
+            )
+        ]
         context = RetrievalContext(
             user_id="user-1",
             query="test",
@@ -1378,10 +1382,12 @@ class TestGroupDMSourceFilter:
         assert len(filtered) == 0
 
     def test_no_learned_in_edge_blocked(self, pipeline):
-        """Legacy memory without LEARNED_IN edge is blocked (fail-closed)."""
+        """Memory without LEARNED_IN edge is blocked (fail-closed)."""
         results = [
             self._make_result(
-                "mem-legacy", subject_person_ids=["person-alice"], sensitivity="public"
+                "mem-missing-provenance",
+                subject_person_ids=["person-alice"],
+                sensitivity="public",
             )
         ]
         context = RetrievalContext(
