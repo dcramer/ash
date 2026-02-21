@@ -138,12 +138,3 @@ def extract_text_content(content: list[dict[str, Any]]) -> str:
         if isinstance(block, dict) and block.get("type") == "text"
     ]
     return "\n".join(texts) if texts else ""
-
-
-# Backward compatibility aliases (internal names used in handlers.py)
-_truncate_str = truncate_str
-_get_filename = get_filename
-_get_domain = get_domain
-_resolve_agent_model = resolve_agent_model
-_resolve_skill_model = resolve_skill_model
-_extract_text_content = extract_text_content
