@@ -365,6 +365,20 @@ class TestRPCMemoryExtract:
         with pytest.raises(ValueError, match="provider is required"):
             await handler({"message_id": "msg-1"})
 
+    async def test_extract_requires_chat_id_or_session_key(self, rpc_server):
+        """Test that memory.extract requires explicit session coordinates."""
+        handler = rpc_server.methods["memory.extract"]
+
+        with pytest.raises(
+            ValueError, match="chat_id is required unless session_key is provided"
+        ):
+            await handler(
+                {
+                    "message_id": "msg-1",
+                    "provider": "telegram",
+                }
+            )
+
     async def test_extract_returns_zero_when_message_not_found(
         self, rpc_server, tmp_path
     ):
@@ -726,6 +740,64 @@ class TestRPCMemoryExtract:
 
         assert result == {"stored": 0, "error": "Message not found in session"}
         mock_extractor.extract_from_conversation.assert_not_awaited()
+
+    async def test_extract_accepts_explicit_session_key_without_chat_id(
+        self, memory_manager, mock_extractor, tmp_path
+    ):
+        """memory.extract should resolve directly from explicit session_key."""
+        import json
+        from datetime import UTC, datetime
+
+        session_key = "telegram_chat_1_thread_1"
+        session_dir = tmp_path / "sessions" / session_key
+        session_dir.mkdir(parents=True)
+
+        msg_id = "msg-from-explicit-key"
+        context_file = session_dir / "context.jsonl"
+        entries = [
+            {
+                "type": "session",
+                "id": "session-1",
+                "created_at": datetime.now(UTC).isoformat(),
+                "provider": "telegram",
+                "version": "2",
+            },
+            {
+                "type": "message",
+                "id": msg_id,
+                "role": "user",
+                "content": "Remember this from explicit key",
+                "created_at": datetime.now(UTC).isoformat(),
+                "token_count": 10,
+                "username": "alice",
+                "display_name": "Alice",
+                "user_id": "user-1",
+            },
+        ]
+        context_file.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+
+        mock_extractor.extract_from_conversation.return_value = []
+
+        server = MockRPCServer()
+        register_memory_methods(
+            server,  # type: ignore[arg-type]
+            memory_manager,
+            person_manager=memory_manager,
+            memory_extractor=mock_extractor,
+            sessions_path=tmp_path / "sessions",
+        )
+
+        handler = server.methods["memory.extract"]
+        result = await handler(
+            {
+                "message_id": msg_id,
+                "provider": "telegram",
+                "session_key": session_key,
+            }
+        )
+
+        assert result["stored"] == 0
+        mock_extractor.extract_from_conversation.assert_awaited_once()
 
     async def test_extract_from_messages_requires_provider(self, rpc_server):
         """Explicit-message extraction requires provider for chat provenance."""

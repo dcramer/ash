@@ -580,6 +580,8 @@ def register_memory_methods(
             raise ValueError("message_id is required (set via ASH_MESSAGE_ID)")
         if not provider:
             raise ValueError("provider is required")
+        if not explicit_session_key and not chat_id:
+            raise ValueError("chat_id is required unless session_key is provided")
 
         # Build session path and reader
         effective_sessions_path = sessions_path
