@@ -22,7 +22,7 @@ class CallbackContext:
 
     truncated_id: str
     option_index: int
-    bot_response_id: str | None
+    response_external_id: str | None
     chat_id: str | None
     user_id: str | None
 
@@ -31,7 +31,7 @@ class CallbackContext:
         cls, callback_query: CallbackQuery, truncated_id: str, option_index: int
     ) -> CallbackContext:
         """Create context from a callback query."""
-        bot_response_id = (
+        response_external_id = (
             str(callback_query.message.message_id) if callback_query.message else None
         )
         chat_id = (
@@ -41,7 +41,7 @@ class CallbackContext:
         return cls(
             truncated_id=truncated_id,
             option_index=option_index,
-            bot_response_id=bot_response_id,
+            response_external_id=response_external_id,
             chat_id=chat_id,
             user_id=user_id,
         )

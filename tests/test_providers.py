@@ -598,7 +598,7 @@ class TestTelegramMessageHandler:
         # Try to recover checkpoint using get_checkpoint (disk recovery path)
         routing, checkpoint = await handler._checkpoint_handler.get_checkpoint(
             truncated_id,
-            bot_response_id="100",  # Dummy ID
+            response_external_id="100",  # Dummy ID
             chat_id="456",
             user_id="789",
         )

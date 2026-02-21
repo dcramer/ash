@@ -109,7 +109,7 @@ class CheckpointHandler:
     async def get_checkpoint(
         self,
         truncated_id: str,
-        bot_response_id: str | None = None,
+        response_external_id: str | None = None,
         chat_id: str | None = None,
         user_id: str | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -130,9 +130,9 @@ class CheckpointHandler:
                 return routing, checkpoint
 
         # Slow path (recovery): find session by external bot message id in loaded sessions
-        if bot_response_id:
+        if response_external_id:
             for sm in self._get_session_managers_dict().values():
-                if await sm.has_message_with_external_id(bot_response_id):
+                if await sm.has_message_with_external_id(response_external_id):
                     result = await sm.get_pending_checkpoint_from_log(truncated_id)
                     if result:
                         _, _, checkpoint = result
@@ -196,7 +196,7 @@ class CheckpointHandler:
         # Retrieve checkpoint
         routing, checkpoint = await self.get_checkpoint(
             context.truncated_id,
-            context.bot_response_id,
+            context.response_external_id,
             chat_id=context.chat_id,
             user_id=context.user_id,
         )
