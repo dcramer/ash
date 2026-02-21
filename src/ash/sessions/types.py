@@ -175,9 +175,7 @@ class MessageEntry:
     display_name: str | None = None
     metadata: dict[str, Any] | None = None
     agent_session_id: str | None = None  # Links to AgentSessionEntry for subagent msgs
-    parent_id: str | None = (
-        None  # ID of preceding message on this branch (None = v1 legacy / first msg)
-    )
+    parent_id: str | None = None  # ID of preceding message on this branch
     type: Literal["message"] = "message"
 
     def to_dict(self) -> dict[str, Any]:
@@ -244,18 +242,34 @@ class MessageEntry:
         if metadata is not None and not isinstance(metadata, dict):
             raise TypeError("message metadata must be a dict")
 
+        token_count = data.get("token_count")
+        if token_count is not None:
+            if not isinstance(token_count, int):
+                raise TypeError("message token_count must be an integer")
+            if token_count < 0:
+                raise ValueError("message token_count must be non-negative")
+
+        parent_id = data.get("parent_id")
+        if parent_id is not None and not isinstance(parent_id, str):
+            raise TypeError("message parent_id must be a string")
+
+        for field_name in ("user_id", "username", "display_name", "agent_session_id"):
+            field_value = data.get(field_name)
+            if field_value is not None and not isinstance(field_value, str):
+                raise TypeError(f"message {field_name} must be a string")
+
         return cls(
             id=data["id"],
             role=role,
             content=content,
             created_at=_parse_datetime(data["created_at"]),
-            token_count=data.get("token_count"),
+            token_count=token_count,
             user_id=data.get("user_id"),
             username=data.get("username"),
             display_name=data.get("display_name"),
             metadata=metadata,
             agent_session_id=data.get("agent_session_id"),
-            parent_id=data.get("parent_id"),
+            parent_id=parent_id,
         )
 
     @classmethod

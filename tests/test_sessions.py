@@ -196,6 +196,76 @@ class TestParseEntry:
                 }
             )
 
+    def test_message_entry_requires_integer_token_count(self):
+        with pytest.raises(TypeError, match="message token_count must be an integer"):
+            parse_entry(
+                {
+                    "type": "message",
+                    "id": "m1",
+                    "role": "user",
+                    "content": "hello",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                    "token_count": "12",
+                }
+            )
+
+    def test_message_entry_rejects_negative_token_count(self):
+        with pytest.raises(
+            ValueError, match="message token_count must be non-negative"
+        ):
+            parse_entry(
+                {
+                    "type": "message",
+                    "id": "m1",
+                    "role": "user",
+                    "content": "hello",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                    "token_count": -1,
+                }
+            )
+
+    def test_message_entry_requires_string_parent_id(self):
+        with pytest.raises(TypeError, match="message parent_id must be a string"):
+            parse_entry(
+                {
+                    "type": "message",
+                    "id": "m1",
+                    "role": "assistant",
+                    "content": "hello",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                    "parent_id": 42,
+                }
+            )
+
+    @pytest.mark.parametrize("field_name", ["user_id", "username", "display_name"])
+    def test_message_entry_identity_fields_must_be_strings(self, field_name: str):
+        with pytest.raises(TypeError, match=rf"message {field_name} must be a string"):
+            parse_entry(
+                {
+                    "type": "message",
+                    "id": "m1",
+                    "role": "user",
+                    "content": "hello",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                    field_name: 123,
+                }
+            )
+
+    def test_message_entry_requires_string_agent_session_id(self):
+        with pytest.raises(
+            TypeError, match="message agent_session_id must be a string"
+        ):
+            parse_entry(
+                {
+                    "type": "message",
+                    "id": "m1",
+                    "role": "assistant",
+                    "content": "hello",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                    "agent_session_id": 7,
+                }
+            )
+
     def test_agent_session_entry_requires_valid_agent_type(self):
         with pytest.raises(ValueError, match="invalid agent session type"):
             parse_entry(
