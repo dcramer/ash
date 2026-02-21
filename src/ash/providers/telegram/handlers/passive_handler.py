@@ -178,6 +178,14 @@ class PassiveHandler:
             if self._passive_throttler and not self._passive_throttler.should_consider(
                 chat_id
             ):
+                logger.info(
+                    "passive_engagement_skipped",
+                    extra={
+                        "decision_path": "throttled",
+                        "engagement_reason": "rate_limiter",
+                        "username": message.username or message.user_id,
+                    },
+                )
                 return
             logger.info("passive_throttle_passed")
 
@@ -195,6 +203,8 @@ class PassiveHandler:
         # Otherwise, query memories and ask the LLM if we should respond.
         if name_mentioned:
             should_engage = True
+            decision_path = "name_mentioned_fast_path"
+            engagement_reason = "name_mentioned"
         else:
             try:
                 # Query relevant memories for context
@@ -227,6 +237,16 @@ class PassiveHandler:
                     bot_context=bot_context,
                     relevant_memories=relevant_memories,
                 )
+                if direct_followup:
+                    decision_path = (
+                        "direct_followup_llm_engage"
+                        if should_engage
+                        else "direct_followup_llm_silent"
+                    )
+                    engagement_reason = "direct_followup"
+                else:
+                    decision_path = "llm_engage" if should_engage else "llm_silent"
+                    engagement_reason = "llm_decision"
             except Exception as e:
                 logger.exception(
                     "passive_engagement_decision_failed",
@@ -242,7 +262,11 @@ class PassiveHandler:
         if should_engage:
             logger.info(
                 "passive_engaging",
-                extra={"username": message.username or message.user_id},
+                extra={
+                    "username": message.username or message.user_id,
+                    "decision_path": decision_path,
+                    "engagement_reason": engagement_reason,
+                },
             )
 
             # Record the engagement so throttler knows when we last engaged
@@ -261,9 +285,13 @@ class PassiveHandler:
             # creates a full agent session and generates a response
             await self._handle_message(message)
         else:
-            logger.debug(
-                "Passive engagement: staying silent for message from %s",
-                message.username or message.user_id,
+            logger.info(
+                "passive_engagement_silent",
+                extra={
+                    "username": message.username or message.user_id,
+                    "decision_path": decision_path,
+                    "engagement_reason": engagement_reason,
+                },
             )
 
     async def _extract_passive_memories(self, message: IncomingMessage) -> None:

@@ -612,9 +612,10 @@ class TestTelegramMessageHandler:
         assert routing["chat_id"] == "456"
 
     async def test_handle_passive_message_throttling(
-        self, mock_provider, mock_agent, tmp_path
+        self, mock_provider, mock_agent, tmp_path, caplog
     ):
         """Test that throttled passive messages are dropped."""
+        import logging
         from unittest.mock import MagicMock
 
         from ash.config.models import PassiveListeningConfig
@@ -655,7 +656,8 @@ class TestTelegramMessageHandler:
             display_name="Other User",
         )
 
-        await handler.handle_passive_message(passive_message)
+        with caplog.at_level(logging.INFO, logger="telegram"):
+            await handler.handle_passive_message(passive_message)
 
         # Agent should NOT have been called (throttled)
         mock_agent.process_message_streaming.assert_not_called()
@@ -666,11 +668,18 @@ class TestTelegramMessageHandler:
 
         # Throttler was consulted
         mock_throttler.should_consider.assert_called_once_with("group_123")
+        skipped = next(
+            (r for r in caplog.records if r.msg == "passive_engagement_skipped"), None
+        )
+        assert skipped is not None
+        assert getattr(skipped, "decision_path", None) == "throttled"
+        assert getattr(skipped, "engagement_reason", None) == "rate_limiter"
 
     async def test_handle_passive_message_engages_on_name_mention(
-        self, mock_provider, mock_agent, tmp_path
+        self, mock_provider, mock_agent, tmp_path, caplog
     ):
         """Test that bot name mention bypasses throttle and engages."""
+        import logging
         from unittest.mock import MagicMock
 
         from ash.config.models import PassiveListeningConfig
@@ -732,7 +741,8 @@ class TestTelegramMessageHandler:
             display_name="Other User",
         )
 
-        await handler.handle_passive_message(passive_message)
+        with caplog.at_level(logging.INFO, logger="telegram"):
+            await handler.handle_passive_message(passive_message)
 
         # Throttler.should_consider should NOT have been called (bypassed)
         mock_throttler.should_consider.assert_not_called()
@@ -742,11 +752,19 @@ class TestTelegramMessageHandler:
 
         # Agent SHOULD have been called (name mention bypasses throttle)
         mock_agent.process_message_streaming.assert_called()
+        engaging = next(
+            (r for r in caplog.records if r.msg == "passive_engaging"), None
+        )
+        assert engaging is not None
+        assert getattr(engaging, "decision_path", None) == "name_mentioned_fast_path"
+        assert getattr(engaging, "engagement_reason", None) == "name_mentioned"
 
     async def test_handle_passive_message_direct_followup_bypasses_throttle_but_uses_decider(
-        self, mock_provider, mock_agent, tmp_path
+        self, mock_provider, mock_agent, tmp_path, caplog
     ):
         """Recent post-reply follow-up should bypass throttle but still run LLM decision."""
+        import logging
+
         from ash.chats.history import ChatHistoryWriter
         from ash.config.models import PassiveListeningConfig
         from ash.providers.base import IncomingMessage
@@ -810,12 +828,19 @@ class TestTelegramMessageHandler:
             timestamp=datetime.now(UTC),
         )
 
-        await handler.handle_passive_message(passive_message)
+        with caplog.at_level(logging.INFO, logger="telegram"):
+            await handler.handle_passive_message(passive_message)
 
         mock_throttler.should_consider.assert_not_called()
         mock_decider.decide.assert_awaited_once()
         mock_agent.process_message.assert_not_called()
         mock_agent.process_message_streaming.assert_not_called()
+        silent = next(
+            (r for r in caplog.records if r.msg == "passive_engagement_silent"), None
+        )
+        assert silent is not None
+        assert getattr(silent, "decision_path", None) == "direct_followup_llm_silent"
+        assert getattr(silent, "engagement_reason", None) == "direct_followup"
 
     async def test_handle_passive_message_no_direct_followup_uses_throttle(
         self, mock_provider, mock_agent, tmp_path
