@@ -26,7 +26,11 @@ from ash.graph.graph import KnowledgeGraph
 from ash.graph.persistence import GraphPersistence
 from ash.graph.vectors import NumpyVectorIndex
 from ash.memory.embeddings import EmbeddingGenerator
-from ash.store.memories import MemoryOpsMixin
+from ash.store.memories import (
+    MemoryCrudMixin,
+    MemoryEvictionMixin,
+    MemoryLifecycleMixin,
+)
 from ash.store.people import RELATIONSHIP_TERMS as RELATIONSHIP_TERMS
 from ash.store.people import PeopleOpsMixin
 from ash.store.search import SearchMixin
@@ -40,7 +44,9 @@ logger = logging.getLogger(__name__)
 
 
 class Store(
-    MemoryOpsMixin,
+    MemoryCrudMixin,
+    MemoryLifecycleMixin,
+    MemoryEvictionMixin,
     SearchMixin,
     SupersessionMixin,
     PeopleOpsMixin,
