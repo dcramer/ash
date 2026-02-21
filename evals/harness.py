@@ -27,6 +27,7 @@ from ash.core.agent import AgentComponents, create_agent
 from evals.types import EvalCase, EvalSuite
 
 if TYPE_CHECKING:
+    from ash.integrations import IntegrationContext, IntegrationRuntime
     from ash.rpc.server import RPCServer
 
 logger = logging.getLogger(__name__)
@@ -90,33 +91,50 @@ def _build_config(agent_type: str, workspace_path: Path) -> AshConfig:
     )
 
 
-async def _start_rpc(agent_type: str, components: AgentComponents) -> RPCServer:
+async def _start_rpc(
+    agent_type: str,
+    components: AgentComponents,
+    config: AshConfig,
+) -> tuple[RPCServer, IntegrationRuntime, IntegrationContext]:
     """Create, configure, and start an RPC server for eval use."""
     from ash.config.paths import (
         get_rpc_socket_path,
         get_schedule_file,
         get_sessions_path,
     )
-    from ash.rpc.methods.schedule import register_schedule_methods
+    from ash.integrations import (
+        IntegrationContext,
+        IntegrationRuntime,
+        MemoryIntegration,
+        SchedulingIntegration,
+    )
     from ash.rpc.server import RPCServer
-    from ash.scheduling import ScheduleStore
+
+    schedule_integration = SchedulingIntegration(get_schedule_file())
+    contributors = [schedule_integration]
+    if agent_type == "memory":
+        contributors.append(MemoryIntegration())
+
+    integration_runtime = IntegrationRuntime(contributors)
+    context = IntegrationContext(
+        config=config,
+        components=components,
+        mode="eval",
+        sessions_path=get_sessions_path(),
+    )
+    await integration_runtime.setup(context)
+    components.agent.install_integration_hooks(
+        prompt_context_augmenters=integration_runtime.prompt_context_augmenters(
+            context
+        ),
+        sandbox_env_augmenters=integration_runtime.sandbox_env_augmenters(context),
+    )
+    await integration_runtime.on_startup(context)
 
     rpc_server = RPCServer(get_rpc_socket_path())
-    register_schedule_methods(rpc_server, ScheduleStore(get_schedule_file()))
-
-    if agent_type == "memory" and components.memory_manager is not None:
-        from ash.rpc.methods.memory import register_memory_methods
-
-        register_memory_methods(
-            rpc_server,
-            components.memory_manager,
-            components.person_manager,
-            memory_extractor=components.memory_extractor,
-            sessions_path=get_sessions_path(),
-        )
-
+    integration_runtime.register_rpc_methods(rpc_server, context)
     await rpc_server.start()
-    return rpc_server
+    return rpc_server, integration_runtime, context
 
 
 # ---------------------------------------------------------------------------
@@ -186,12 +204,15 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
         )
 
         # RPC
-        rpc_server = await _start_rpc(agent_type, components)
+        rpc_server, integration_runtime, integration_context = await _start_rpc(
+            agent_type, components, config
+        )
 
         try:
             yield components
         finally:
             await rpc_server.stop()
+            await integration_runtime.on_shutdown(integration_context)
             if components.sandbox_executor:
                 await components.sandbox_executor.cleanup()
 

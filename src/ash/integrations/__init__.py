@@ -1,5 +1,6 @@
 """Integration hooks runtime."""
 
+from ash.integrations.builtin import MemoryIntegration, SchedulingIntegration
 from ash.integrations.runtime import (
     IntegrationContext,
     IntegrationContributor,
@@ -7,6 +8,8 @@ from ash.integrations.runtime import (
 )
 
 __all__ = [
+    "MemoryIntegration",
+    "SchedulingIntegration",
     "IntegrationContext",
     "IntegrationContributor",
     "IntegrationRuntime",

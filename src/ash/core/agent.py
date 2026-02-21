@@ -166,6 +166,16 @@ class Agent:
         self._sandbox_env_augmenters = tuple(sandbox_env_augmenters or [])
         self._last_extraction_time: float | None = None
 
+    def install_integration_hooks(
+        self,
+        *,
+        prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
+        sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
+    ) -> None:
+        """Install integration hooks after agent construction."""
+        self._prompt_context_augmenters = tuple(prompt_context_augmenters or [])
+        self._sandbox_env_augmenters = tuple(sandbox_env_augmenters or [])
+
     def _apply_prompt_context_hooks(
         self,
         prompt_context: PromptContext,

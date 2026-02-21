@@ -89,14 +89,19 @@ async def _run_chat(
     from rich.panel import Panel
 
     from ash.config import ConfigError, WorkspaceLoader, load_config
-    from ash.config.paths import get_graph_dir, get_rpc_socket_path
+    from ash.config.paths import get_graph_dir, get_rpc_socket_path, get_sessions_path
     from ash.logging import configure_logging
 
     # Configure logging - suppress to WARNING for chat TUI
     configure_logging(level="WARNING")
     from ash.core import create_agent
     from ash.core.session import SessionState
-    from ash.rpc import RPCServer, register_memory_methods
+    from ash.integrations import (
+        IntegrationContext,
+        IntegrationRuntime,
+        MemoryIntegration,
+    )
+    from ash.rpc import RPCServer
     from ash.sessions import SessionManager
 
     # Load configuration
@@ -151,6 +156,8 @@ async def _run_chat(
 
     components = None
     rpc_server: RPCServer | None = None
+    integration_runtime: IntegrationRuntime | None = None
+    integration_context: IntegrationContext | None = None
     try:
         # Create agent with all dependencies
         components = await create_agent(
@@ -161,15 +168,28 @@ async def _run_chat(
         )
         agent = components.agent
 
+        integration_runtime = IntegrationRuntime([MemoryIntegration()])
+        integration_context = IntegrationContext(
+            config=ash_config,
+            components=components,
+            mode="chat",
+            sessions_path=get_sessions_path(),
+        )
+        await integration_runtime.setup(integration_context)
+        agent.install_integration_hooks(
+            prompt_context_augmenters=integration_runtime.prompt_context_augmenters(
+                integration_context
+            ),
+            sandbox_env_augmenters=integration_runtime.sandbox_env_augmenters(
+                integration_context
+            ),
+        )
+        await integration_runtime.on_startup(integration_context)
+
         # Start RPC server for sandbox memory access
         if components.memory_manager:
             rpc_server = RPCServer(get_rpc_socket_path())
-            register_memory_methods(
-                rpc_server,
-                components.memory_manager,
-                components.person_manager,
-                memory_extractor=components.memory_extractor,
-            )
+            integration_runtime.register_rpc_methods(rpc_server, integration_context)
             await rpc_server.start()
 
         # Dump prompt mode: print system prompt and exit
@@ -394,6 +414,9 @@ async def _run_chat(
                 console.print("\n[dim]Cancelled[/dim]\n")
                 continue
     finally:
+        if integration_runtime and integration_context:
+            await integration_runtime.on_shutdown(integration_context)
+
         # Stop RPC server
         if rpc_server:
             try:

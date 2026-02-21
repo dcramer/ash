@@ -29,9 +29,7 @@ def test_register_memory_methods_wiring_is_constrained() -> None:
 
     call_sites = _find_call_sites(r"\bregister_memory_methods\(", files)
     assert call_sites == {
-        Path("evals/harness.py"),
-        Path("src/ash/cli/commands/chat.py"),
-        Path("src/ash/cli/commands/serve.py"),
+        Path("src/ash/integrations/builtin.py"),
         Path("src/ash/rpc/methods/memory.py"),
     }
 
@@ -42,8 +40,7 @@ def test_register_schedule_methods_wiring_is_constrained() -> None:
 
     call_sites = _find_call_sites(r"\bregister_schedule_methods\(", files)
     assert call_sites == {
-        Path("evals/harness.py"),
-        Path("src/ash/cli/commands/serve.py"),
+        Path("src/ash/integrations/builtin.py"),
         Path("src/ash/rpc/methods/schedule.py"),
     }
 
@@ -73,4 +70,17 @@ def test_entrypoints_use_shared_create_agent_composition_path() -> None:
         text = path.read_text(encoding="utf-8")
         assert "create_agent(" in text, (
             f"Expected shared create_agent composition path in {path.relative_to(ROOT)}"
+        )
+
+
+def test_entrypoints_compose_integrations_via_runtime() -> None:
+    entrypoint_files = [
+        ROOT / "src/ash/cli/commands/serve.py",
+        ROOT / "src/ash/cli/commands/chat.py",
+        ROOT / "evals/harness.py",
+    ]
+    for path in entrypoint_files:
+        text = path.read_text(encoding="utf-8")
+        assert "IntegrationRuntime(" in text, (
+            f"Expected IntegrationRuntime composition in {path.relative_to(ROOT)}"
         )

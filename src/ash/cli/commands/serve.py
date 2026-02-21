@@ -75,12 +75,17 @@ async def _run_server(
         get_sessions_path,
     )
     from ash.core import create_agent
+    from ash.integrations import (
+        IntegrationContext,
+        IntegrationRuntime,
+        MemoryIntegration,
+        SchedulingIntegration,
+    )
     from ash.providers.telegram import TelegramProvider
     from ash.rpc import (
         RPCServer,
         register_config_methods,
         register_log_methods,
-        register_memory_methods,
     )
     from ash.server.app import create_app
     from ash.service.pid import write_pid_file
@@ -150,25 +155,36 @@ async def _run_server(
                 "memory_gc_complete", extra={"memory.count": gc_result.removed_count}
             )
 
-    # Start RPC server for sandbox communication
-    from ash.rpc.methods.schedule import register_schedule_methods
-    from ash.scheduling import ScheduleStore
+    # Compose integration contributors for runtime wiring.
+    schedule_integration = SchedulingIntegration(get_schedule_file())
+    integration_runtime = IntegrationRuntime(
+        [MemoryIntegration(), schedule_integration]
+    )
+    integration_context = IntegrationContext(
+        config=ash_config,
+        components=components,
+        mode="serve",
+        sessions_path=get_sessions_path(),
+    )
+    await integration_runtime.setup(integration_context)
+    agent.install_integration_hooks(
+        prompt_context_augmenters=integration_runtime.prompt_context_augmenters(
+            integration_context
+        ),
+        sandbox_env_augmenters=integration_runtime.sandbox_env_augmenters(
+            integration_context
+        ),
+    )
 
-    schedule_store = ScheduleStore(get_schedule_file())
+    if schedule_integration.store is None:
+        raise RuntimeError("schedule integration setup failed")
+    schedule_store = schedule_integration.store
 
     rpc_socket_path = get_rpc_socket_path()
     rpc_server = RPCServer(rpc_socket_path)
-    if components.memory_manager:
-        register_memory_methods(
-            rpc_server,
-            components.memory_manager,
-            components.person_manager,
-            memory_extractor=components.memory_extractor,
-            sessions_path=get_sessions_path(),
-        )
+    integration_runtime.register_rpc_methods(rpc_server, integration_context)
     register_config_methods(rpc_server, ash_config, components.skill_registry)
     register_log_methods(rpc_server, get_logs_path())
-    register_schedule_methods(rpc_server, schedule_store)
     await rpc_server.start()
     logger.info("rpc_server_started", extra={"socket.path": str(rpc_socket_path)})
 
@@ -253,6 +269,8 @@ async def _run_server(
         )
         server = uvicorn.Server(uvicorn_config)
 
+        await integration_runtime.on_startup(integration_context)
+
         # Start schedule watcher
         if senders:
             await schedule_watcher.start()
@@ -320,6 +338,7 @@ async def _run_server(
         else:
             await server.serve()
     finally:
+        await integration_runtime.on_shutdown(integration_context)
         await _cleanup_server(
             schedule_watcher,
             telegram_provider,
