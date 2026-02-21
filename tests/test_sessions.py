@@ -236,6 +236,31 @@ class TestSessionReader:
             await reader.load_subagent_entries("agent-1")
 
     @pytest.mark.asyncio
+    async def test_load_entries_wraps_structural_parse_errors(
+        self, reader, session_dir
+    ):
+        session_dir.mkdir(parents=True)
+        (session_dir / "context.jsonl").write_text(
+            '{"type":"session","version":"1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
+        )
+
+        with pytest.raises(ValueError, match="context_parse_error"):
+            await reader.load_entries()
+
+    @pytest.mark.asyncio
+    async def test_load_subagent_entries_wraps_structural_parse_errors(
+        self, reader, session_dir
+    ):
+        subagents_dir = session_dir / "subagents"
+        subagents_dir.mkdir(parents=True)
+        (subagents_dir / "agent-1.jsonl").write_text(
+            '{"type":"session","version":"1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}\n'
+        )
+
+        with pytest.raises(ValueError, match="subagent_parse_error"):
+            await reader.load_subagent_entries("agent-1")
+
+    @pytest.mark.asyncio
     async def test_load_messages_for_llm(self, reader, session_dir):
         """Converts stored messages to LLM-ready format."""
         session_dir.mkdir(parents=True)
