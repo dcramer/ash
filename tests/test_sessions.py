@@ -69,6 +69,10 @@ class TestParseEntry:
         with pytest.raises(ValueError, match="Unknown entry type"):
             parse_entry({"type": "unknown"})
 
+    def test_missing_type_raises(self):
+        with pytest.raises(KeyError, match="type"):
+            parse_entry({})
+
     def test_session_header_requires_version(self):
         with pytest.raises(KeyError, match="version"):
             parse_entry(

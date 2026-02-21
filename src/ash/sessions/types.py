@@ -491,8 +491,8 @@ _ENTRY_PARSERS: dict[str, type[Entry]] = {
 
 
 def parse_entry(data: dict[str, Any]) -> Entry:
-    entry_type = data.get("type")
-    parser = _ENTRY_PARSERS.get(entry_type)  # type: ignore[arg-type]
+    entry_type = data["type"]
+    parser = _ENTRY_PARSERS.get(entry_type)
     if parser is None:
         raise ValueError(f"Unknown entry type: {entry_type}")
     return parser.from_dict(data)
