@@ -120,6 +120,17 @@ class TestParseEntry:
                 }
             )
 
+    def test_agent_session_complete_requires_is_error(self):
+        with pytest.raises(KeyError, match="is_error"):
+            parse_entry(
+                {
+                    "type": "agent_session_complete",
+                    "agent_session_id": "a1",
+                    "result": "done",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                }
+            )
+
 
 class TestSessionWriter:
     """Integration tests for SessionWriter."""
@@ -233,6 +244,20 @@ class TestSessionReader:
         (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
 
         with pytest.raises(ValueError, match="Unknown content block type"):
+            await reader.load_messages_for_llm()
+
+    @pytest.mark.asyncio
+    async def test_load_messages_for_llm_requires_tool_result_is_error(
+        self, reader, session_dir
+    ):
+        session_dir.mkdir(parents=True)
+        lines = [
+            '{"type":"session","version":"1","id":"s1","created_at":"2026-01-11T10:00:00+00:00","provider":"cli"}',
+            '{"type":"message","id":"m1","role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}],"created_at":"2026-01-11T10:00:01+00:00"}',
+        ]
+        (session_dir / "context.jsonl").write_text("\n".join(lines) + "\n")
+
+        with pytest.raises(KeyError, match="is_error"):
             await reader.load_messages_for_llm()
 
     @pytest.mark.asyncio

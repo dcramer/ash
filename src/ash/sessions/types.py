@@ -449,7 +449,7 @@ class AgentSessionCompleteEntry:
         return cls(
             agent_session_id=data["agent_session_id"],
             result=data["result"],
-            is_error=data.get("is_error", False),
+            is_error=data["is_error"],
             created_at=_parse_datetime(data["created_at"]),
         )
 

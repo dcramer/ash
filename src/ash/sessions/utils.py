@@ -123,7 +123,7 @@ def content_block_from_dict(data: dict[str, Any]) -> ContentBlock:
         return ToolResult(
             tool_use_id=data["tool_use_id"],
             content=data["content"],
-            is_error=data.get("is_error", False),
+            is_error=data["is_error"],
         )
     raise ValueError(f"Unknown content block type: {block_type}")
 
