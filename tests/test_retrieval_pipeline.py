@@ -191,10 +191,10 @@ class TestPrivacyFilter:
         )
         assert result is True
 
-    def test_none_sensitivity_passes_filter(self, pipeline):
-        """None sensitivity should pass (treated as PUBLIC)."""
+    def test_public_sensitivity_passes_filter(self, pipeline):
+        """PUBLIC sensitivity should pass."""
         result = pipeline._passes_privacy_filter(
-            sensitivity=None,
+            sensitivity=Sensitivity.PUBLIC,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids=set(),
@@ -384,7 +384,7 @@ class TestStage1PrivacyFilter:
 
     @pytest.mark.asyncio
     async def test_stage1_public_passes_in_group(self, mock_store):
-        """PUBLIC and None-sensitivity memories pass through in group chat."""
+        """PUBLIC memories pass through in group chat."""
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -394,16 +394,6 @@ class TestStage1PrivacyFilter:
                     metadata={
                         "sensitivity": "public",
                         "subject_person_ids": ["person-alice"],
-                    },
-                    source_type="memory",
-                ),
-                SearchResult(
-                    id="mem-none",
-                    content="Bob works at Acme",
-                    similarity=0.85,
-                    metadata={
-                        "sensitivity": None,
-                        "subject_person_ids": ["person-bob"],
                     },
                     source_type="memory",
                 ),
@@ -419,7 +409,7 @@ class TestStage1PrivacyFilter:
         )
 
         result = await pipeline.retrieve(context)
-        assert len(result.memories) == 2
+        assert len(result.memories) == 1
 
     @pytest.mark.asyncio
     async def test_stage1_sensitive_passes_in_private(self, mock_store):

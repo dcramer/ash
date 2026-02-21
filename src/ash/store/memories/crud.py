@@ -143,7 +143,7 @@ class MemoryCrudMixin:
             source_session_id=source_session_id,
             source_message_id=source_message_id,
             extraction_confidence=extraction_confidence,
-            sensitivity=sensitivity,
+            sensitivity=sensitivity or Sensitivity.PUBLIC,
             portable=portable,
             expires_at=expires_at,
             metadata=metadata,

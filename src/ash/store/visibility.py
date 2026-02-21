@@ -62,13 +62,13 @@ def is_private_sourced_outside_current_chat(
 
 
 def passes_sensitivity_policy(
-    sensitivity: Sensitivity | None,
+    sensitivity: Sensitivity,
     subject_person_ids: list[str],
     chat_type: str | None,
     querying_person_ids: set[str],
 ) -> bool:
     """Check sensitivity-based disclosure policy."""
-    if sensitivity is None or sensitivity == Sensitivity.PUBLIC:
+    if sensitivity == Sensitivity.PUBLIC:
         return True
 
     is_subject = bool(set(subject_person_ids) & querying_person_ids)
@@ -83,7 +83,7 @@ def is_group_disclosable(
     graph: KnowledgeGraph,
     memory_id: str,
     subject_person_ids: list[str],
-    sensitivity: Sensitivity | None,
+    sensitivity: Sensitivity,
     participant_person_ids: set[str],
 ) -> bool:
     """Group chat disclosure policy for a single memory.
@@ -104,7 +104,7 @@ def is_group_disclosable(
     if not subject_person_ids:
         return True
 
-    if sensitivity not in (Sensitivity.PERSONAL, Sensitivity.SENSITIVE):
+    if sensitivity == Sensitivity.PUBLIC:
         return True
 
     return bool(set(subject_person_ids) & participant_person_ids)

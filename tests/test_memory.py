@@ -512,15 +512,14 @@ class TestSensitivity:
         assert loaded is not None
         assert loaded.sensitivity == Sensitivity.SENSITIVE
 
-    async def test_sensitivity_none_means_public(self, graph_store: Store):
-        """Test that None sensitivity is treated as public."""
+    async def test_default_sensitivity_is_public(self, graph_store: Store):
+        """Test that omitted sensitivity defaults to PUBLIC."""
         memory = await graph_store.add_memory(
             content="Likes pizza",
             owner_user_id="user-1",
         )
 
-        # No sensitivity set
-        assert memory.sensitivity is None
+        assert memory.sensitivity == Sensitivity.PUBLIC
 
     async def test_memory_serialization_with_sensitivity(self, graph_store: Store):
         """Test that sensitivity is correctly stored and retrieved."""
@@ -561,10 +560,10 @@ class TestPrivacyFilter:
             querying_person_ids=set(),
         )
 
-    def test_none_sensitivity_treated_as_public(self, pipeline):
-        """None sensitivity (legacy) treated as PUBLIC."""
+    def test_public_sensitivity_treated_as_public(self, pipeline):
+        """PUBLIC sensitivity passes."""
         assert pipeline._passes_privacy_filter(
-            sensitivity=None,
+            sensitivity=Sensitivity.PUBLIC,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids=set(),
@@ -1129,7 +1128,7 @@ class TestDMSensitivityFloor:
         mem = await graph_store.get_memory(stored_ids[0])
         assert mem is not None
         # PREFERENCE is not ephemeral, so no floor applied
-        assert mem.sensitivity is None
+        assert mem.sensitivity == Sensitivity.PUBLIC
 
     @pytest.mark.asyncio
     async def test_group_event_keeps_original_sensitivity(self, graph_store: Store):
@@ -1158,7 +1157,7 @@ class TestDMSensitivityFloor:
         assert len(stored_ids) == 1
         mem = await graph_store.get_memory(stored_ids[0])
         assert mem is not None
-        assert mem.sensitivity is None
+        assert mem.sensitivity == Sensitivity.PUBLIC
 
     @pytest.mark.asyncio
     async def test_dm_sensitive_memory_not_downgraded(self, graph_store: Store):

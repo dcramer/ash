@@ -178,8 +178,8 @@ class MemoryEntry(BaseModel):
     source_message_id: str | None = None
     extraction_confidence: float | None = None
 
-    # Privacy (optional)
-    sensitivity: Sensitivity | None = None  # None = PUBLIC for backward compat
+    # Privacy (required; defaults to PUBLIC)
+    sensitivity: Sensitivity = Sensitivity.PUBLIC
 
     # Cross-context portability (optional)
     portable: bool = True  # Whether this memory crosses chat boundaries via ABOUT edges

@@ -476,12 +476,12 @@ class RetrievalPipeline:
             meta = result.metadata or {}
             subject_person_ids = meta.get("subject_person_ids", []) or []
             sensitivity_raw = meta.get("sensitivity")
-            sensitivity = None
+            sensitivity = Sensitivity.PUBLIC
             if isinstance(sensitivity_raw, str):
                 try:
                     sensitivity = Sensitivity(sensitivity_raw)
                 except ValueError:
-                    sensitivity = None
+                    sensitivity = Sensitivity.PUBLIC
 
             if is_group_disclosable(
                 self._store.graph,
@@ -495,7 +495,7 @@ class RetrievalPipeline:
 
     def _passes_privacy_filter(
         self,
-        sensitivity: Sensitivity | None,
+        sensitivity: Sensitivity,
         subject_person_ids: list[str],
         chat_type: str | None,
         querying_person_ids: set[str],

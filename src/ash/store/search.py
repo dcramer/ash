@@ -90,9 +90,7 @@ class SearchMixin:
                     "memory_type": memory.memory_type.value,
                     "subject_person_ids": mem_subjects,
                     "source_username": memory.source_username,
-                    "sensitivity": (
-                        memory.sensitivity.value if memory.sensitivity else None
-                    ),
+                    "sensitivity": memory.sensitivity.value,
                     "trust": trust_level,
                     "discovery_stage": "person_graph",
                     **assertion_metadata_summary(memory),
@@ -145,9 +143,7 @@ class SearchMixin:
                     "memory_type": memory.memory_type.value,
                     "subject_person_ids": mem_subjects,
                     "source_username": memory.source_username,
-                    "sensitivity": (
-                        memory.sensitivity.value if memory.sensitivity else None
-                    ),
+                    "sensitivity": memory.sensitivity.value,
                     "trust": trust_level,
                     "discovery_stage": "person_graph_related",
                     **assertion_metadata_summary(memory),
@@ -227,7 +223,7 @@ class SearchMixin:
                 "memory_type": memory.memory_type.value,
                 "subject_person_ids": mem_subjects,
                 "source_username": memory.source_username,
-                "sensitivity": memory.sensitivity.value if memory.sensitivity else None,
+                "sensitivity": memory.sensitivity.value,
                 "trust": trust_level,
                 **assertion_metadata_summary(memory),
                 **(memory.metadata or {}),
