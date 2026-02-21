@@ -69,6 +69,17 @@ class TestParseEntry:
         with pytest.raises(ValueError, match="Unknown entry type"):
             parse_entry({"type": "unknown"})
 
+    def test_session_header_requires_version(self):
+        with pytest.raises(KeyError, match="version"):
+            parse_entry(
+                {
+                    "type": "session",
+                    "id": "s1",
+                    "created_at": "2026-01-11T10:00:00+00:00",
+                    "provider": "cli",
+                }
+            )
+
 
 class TestSessionWriter:
     """Integration tests for SessionWriter."""

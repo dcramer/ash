@@ -87,7 +87,7 @@ class SessionHeader:
             provider=data["provider"],
             user_id=data.get("user_id"),
             chat_id=data.get("chat_id"),
-            version=data.get("version", SESSION_VERSION),
+            version=data["version"],
         )
 
     @classmethod
