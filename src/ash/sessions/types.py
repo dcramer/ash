@@ -400,7 +400,7 @@ class CompactionEntry:
             tokens_before=data["tokens_before"],
             tokens_after=data["tokens_after"],
             first_kept_entry_id=data["first_kept_entry_id"],
-            created_at=_parse_datetime(data.get("created_at")),
+            created_at=_parse_datetime(data["created_at"]),
             branch_id=data.get("branch_id"),
         )
 
@@ -452,7 +452,7 @@ class AgentSessionCompleteEntry:
             agent_session_id=data["agent_session_id"],
             result=data["result"],
             is_error=data.get("is_error", False),
-            created_at=_parse_datetime(data.get("created_at")),
+            created_at=_parse_datetime(data["created_at"]),
         )
 
     @classmethod

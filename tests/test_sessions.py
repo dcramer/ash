@@ -80,6 +80,30 @@ class TestParseEntry:
                 }
             )
 
+    def test_compaction_entry_requires_created_at(self):
+        with pytest.raises(KeyError, match="created_at"):
+            parse_entry(
+                {
+                    "type": "compaction",
+                    "id": "c1",
+                    "summary": "summary",
+                    "tokens_before": 100,
+                    "tokens_after": 50,
+                    "first_kept_entry_id": "m1",
+                }
+            )
+
+    def test_agent_session_complete_requires_created_at(self):
+        with pytest.raises(KeyError, match="created_at"):
+            parse_entry(
+                {
+                    "type": "agent_session_complete",
+                    "agent_session_id": "a1",
+                    "result": "done",
+                    "is_error": False,
+                }
+            )
+
 
 class TestSessionWriter:
     """Integration tests for SessionWriter."""
