@@ -32,6 +32,8 @@ def is_private_sourced_outside_current_chat(
     source_chat = graph.chats.get(source_chat_id)
     if not source_chat:
         return True
+    if source_chat.chat_type not in {"private", "group", "supergroup"}:
+        return True
     if source_chat.chat_type != "private":
         return False
 

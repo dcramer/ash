@@ -296,6 +296,20 @@ class TestStage1PrivacyFilter:
     @pytest.mark.asyncio
     async def test_stage1_sensitive_passes_for_participant_in_group(self, mock_store):
         """SENSITIVE memory passes in group when subject is a participant."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-group",
+                provider="telegram",
+                provider_id="grp-1",
+                chat_type="group",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-sensitive", "chat-group"))
+        mock_store.graph = graph
+
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -325,6 +339,20 @@ class TestStage1PrivacyFilter:
     @pytest.mark.asyncio
     async def test_stage1_personal_passes_for_participant_in_group(self, mock_store):
         """PERSONAL memory passes in group when subject is a participant."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-group",
+                provider="telegram",
+                provider_id="grp-1",
+                chat_type="group",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-personal", "chat-group"))
+        mock_store.graph = graph
+
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -385,6 +413,20 @@ class TestStage1PrivacyFilter:
     @pytest.mark.asyncio
     async def test_stage1_public_passes_in_group(self, mock_store):
         """PUBLIC memories pass through in group chat."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-group",
+                provider="telegram",
+                provider_id="grp-1",
+                chat_type="group",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-public", "chat-group"))
+        mock_store.graph = graph
+
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -414,6 +456,20 @@ class TestStage1PrivacyFilter:
     @pytest.mark.asyncio
     async def test_stage1_sensitive_passes_in_private(self, mock_store):
         """SENSITIVE memory passes in private chat (filter only applies to groups)."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-group",
+                provider="telegram",
+                provider_id="grp-1",
+                chat_type="group",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-sensitive", "chat-group"))
+        mock_store.graph = graph
+
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -444,6 +500,20 @@ class TestStage1PrivacyFilter:
     @pytest.mark.asyncio
     async def test_stage1_self_memory_passes_in_group(self, mock_store):
         """Self-memory (no subjects) always visible to owner in group chat."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-group",
+                provider="telegram",
+                provider_id="grp-1",
+                chat_type="group",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-self", "chat-group"))
+        mock_store.graph = graph
+
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -828,7 +898,12 @@ class TestDMContextualFilter:
         graph = KnowledgeGraph()
         # Register chat and people nodes
         graph.add_chat(
-            ChatEntry(id="chat-source", provider="telegram", provider_id="100")
+            ChatEntry(
+                id="chat-source",
+                provider="telegram",
+                provider_id="100",
+                chat_type="group",
+            )
         )
         mock_store.graph = graph
         mock_store._graph = graph
@@ -1043,6 +1118,20 @@ class TestGroupPersonalFilter:
     @pytest.mark.asyncio
     async def test_group_personal_about_participant_passes(self, mock_store):
         """PERSONAL memory about a participant passes in group."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-group",
+                provider="telegram",
+                provider_id="grp-1",
+                chat_type="group",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-personal", "chat-group"))
+        mock_store.graph = graph
+
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -1101,6 +1190,20 @@ class TestGroupPersonalFilter:
     @pytest.mark.asyncio
     async def test_group_public_always_passes(self, mock_store):
         """PUBLIC memories always pass in group regardless of subjects."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-group",
+                provider="telegram",
+                provider_id="grp-1",
+                chat_type="group",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-public", "chat-group"))
+        mock_store.graph = graph
+
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(

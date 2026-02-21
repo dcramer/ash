@@ -735,6 +735,37 @@ class TestRPCDMSourceFiltering:
         )
         assert len(results) == 1
 
+    async def test_search_chat_id_without_chat_type_fails_closed(
+        self, rpc_server, memory_manager
+    ):
+        """Chat-scoped requests without chat_type should fail closed."""
+        from ash.store.types import ChatEntry
+
+        memory_manager.graph.chats["dm-chat-1"] = ChatEntry(
+            id="dm-chat-1",
+            provider="telegram",
+            provider_id="dm-123",
+            chat_type="private",
+        )
+
+        mem = await memory_manager.add_memory(
+            content="Secret plan from DM",
+            owner_user_id="user-1",
+        )
+        self._link_to_dm(memory_manager.graph, mem.id)
+
+        memory_manager._index.search = MagicMock(return_value=[(mem.id, 0.95)])
+
+        handler = rpc_server.methods["memory.search"]
+        results = await handler(
+            {
+                "query": "secret plan",
+                "user_id": "user-1",
+                "chat_id": "dm-123",
+            }
+        )
+        assert len(results) == 0
+
     async def test_list_filters_dm_sourced_in_group(self, rpc_server, memory_manager):
         """DM-sourced memories should be filtered from list in group chats."""
         from ash.graph.edges import create_learned_in_edge
@@ -806,6 +837,39 @@ class TestRPCDMSourceFiltering:
             }
         )
         assert len(results) == 0
+
+    async def test_list_resolves_chat_type_from_provider_context(
+        self, rpc_server, memory_manager
+    ):
+        """List should resolve chat_type from provider+chat_id like search does."""
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
+        group_chat = ChatEntry(
+            id="group-chat-1",
+            provider="telegram",
+            provider_id="group-456",
+            chat_type="group",
+        )
+        memory_manager.graph.add_chat(group_chat)
+
+        mem = await memory_manager.add_memory(
+            content="Group-sourced fact",
+            owner_user_id="user-1",
+        )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem.id, group_chat.id))
+
+        handler = rpc_server.methods["memory.list"]
+        results = await handler(
+            {
+                "user_id": "user-1",
+                "provider": "telegram",
+                "chat_id": "group-456",
+            }
+        )
+
+        assert len(results) == 1
+        assert results[0]["content"] == "Group-sourced fact"
 
     async def test_search_filters_legacy_memories_in_group(
         self, rpc_server, memory_manager

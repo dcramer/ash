@@ -142,6 +142,9 @@ def register_memory_methods(
     ) -> bool:
         """Chat context visibility gate shared by list/search RPCs."""
         graph = memory_manager.graph
+        if chat_type is None and chat_provider_id is not None:
+            # Fail closed when a chat-scoped request does not provide/resolve type.
+            return False
         if chat_type in ("group", "supergroup"):
             # In groups, only memories proven to come from non-private chats are visible.
             return not is_private_sourced_outside_current_chat(
@@ -643,7 +646,9 @@ def register_memory_methods(
         include_expired = params.get("include_expired", False)
         user_id = params.get("user_id")
         chat_id = params.get("chat_id")
-        chat_type = params.get("chat_type")
+        chat_type = _resolve_chat_type(
+            params.get("chat_type"), params.get("provider"), chat_id
+        )
 
         # Resolve graph_chat_id for --this-chat filtering
         learned_in_chat_id: str | None = None
