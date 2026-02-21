@@ -38,3 +38,32 @@ cases:
       - engagement
       - followup
       - telegram
+
+  - id: followup_after_context_shift_should_not_assume
+    description: After context shifts away, an untagged follow-up should not assume old tagged intent
+    turns:
+      - prompt: "@miso_834710_bot can you give me a quick deploy checklist?"
+        expected_behavior: |
+          The assistant should provide a short, practical deploy checklist.
+        criteria:
+          - Provides concrete deploy steps
+          - Response is clear and actionable
+      - prompt: "cool thanks. switching topics: i'm choosing between pizza toppings now."
+        expected_behavior: |
+          The assistant should acknowledge the topic shift naturally.
+        criteria:
+          - Acknowledges or responds to the pizza-topic shift
+      - prompt: "also what order should i do those in?"
+        expected_behavior: |
+          Because context has shifted, the assistant should avoid confidently
+          assuming "those" refers to the old deploy checklist. It should ask
+          a clarifying question or explicitly confirm what "those" refers to.
+        criteria:
+          - Asks for clarification or confirms what "those" refers to
+          - Does not confidently present a deploy-step ordering without clarification
+    tags:
+      - passive
+      - engagement
+      - followup
+      - negative
+      - telegram
