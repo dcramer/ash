@@ -60,14 +60,9 @@ class SessionReader:
                 try:
                     entries.append(parse_entry(json.loads(line)))
                 except (json.JSONDecodeError, ValueError) as e:
-                    logger.warning(
-                        "context_parse_error",
-                        extra={
-                            "line_num": line_num,
-                            "file": str(self.context_file),
-                            "error.message": str(e),
-                        },
-                    )
+                    raise ValueError(
+                        f"context_parse_error line={line_num} file={self.context_file}: {e}"
+                    ) from e
         return entries
 
     async def load_header(self) -> SessionHeader | None:
@@ -309,14 +304,9 @@ class SessionReader:
                 try:
                     entries.append(parse_entry(json.loads(line)))
                 except (json.JSONDecodeError, ValueError) as e:
-                    logger.warning(
-                        "subagent_parse_error",
-                        extra={
-                            "line_num": line_num,
-                            "file": str(path),
-                            "error.message": str(e),
-                        },
-                    )
+                    raise ValueError(
+                        f"subagent_parse_error line={line_num} file={path}: {e}"
+                    ) from e
         return entries
 
     def build_subagent_messages(
