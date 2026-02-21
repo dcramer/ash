@@ -326,26 +326,11 @@ class SessionHandler:
         between unrelated conversations.
 
         Returns:
-            thread_id for session key, or None for legacy sessions
+            thread_id for session key
         """
         # If Telegram already provides a thread_id (forum topics), use it
         if thread_id := message.metadata.get("thread_id"):
             return thread_id
-
-        # Migration: check if reply target exists in legacy session (no thread_id)
-        # If so, continue using that session to maintain conversation continuity
-        if message.reply_to_message_id:
-            legacy_manager = self.get_session_manager(
-                message.chat_id, message.user_id, thread_id=None
-            )
-            if await legacy_manager.has_message_with_external_id(
-                message.reply_to_message_id
-            ):
-                logger.debug(
-                    "Reply target %s found in legacy session, continuing there",
-                    message.reply_to_message_id,
-                )
-                return None
 
         # Resolve thread from reply chain
         thread_index = self.get_thread_index(message.chat_id)
@@ -375,12 +360,7 @@ class SessionHandler:
         2. Replies to messages in an existing conversation thread
 
         For replies, we check if the reply target exists in:
-        - thread_index: Tracks all messages in threaded conversations
-        - legacy session: Pre-thread-indexing messages (via has_message_with_external_id)
-
-        IMPORTANT: has_message_with_external_id must check BOTH external_id AND
-        bot_response_id, because users often reply to the bot's messages (which
-        are stored with bot_response_id, not external_id).
+        - thread_index: Tracks all messages in threaded conversations.
 
         Returns:
             True if the reply should be skipped (target not found).
@@ -397,15 +377,6 @@ class SessionHandler:
         thread_index = self.get_thread_index(message.chat_id)
         if thread_index.get_thread_id(message.reply_to_message_id) is not None:
             return False  # Found in thread index, don't skip
-
-        # Also check legacy session (pre-thread-indexing messages)
-        legacy_manager = self.get_session_manager(
-            message.chat_id, message.user_id, thread_id=None
-        )
-        if await legacy_manager.has_message_with_external_id(
-            message.reply_to_message_id
-        ):
-            return False  # Found in legacy session, don't skip
 
         return True  # Not found anywhere, skip
 

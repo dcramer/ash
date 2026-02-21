@@ -662,28 +662,11 @@ class TestDMThreading:
         assert thread_id is not None
 
     @pytest.mark.asyncio
-    async def test_legacy_dm_reply_returns_none(self, handler, tmp_path):
-        """Reply to a legacy session message (pre-threading) returns None."""
-        from ash.sessions.manager import SessionManager
-
-        # Set up a legacy session with an existing message
-        legacy_manager = SessionManager(
-            provider="telegram",
-            chat_id="user123",
-            user_id="user123",
-            sessions_path=tmp_path / "sessions",
-        )
-        await legacy_manager.ensure_session()
-        await legacy_manager.add_user_message("old msg", metadata={"external_id": "50"})
-
-        # Inject the legacy manager into the handler
-        handler._session_managers[legacy_manager.session_key] = legacy_manager
-
+    async def test_dm_reply_to_unknown_parent_creates_thread(self, handler):
+        """Reply to an unknown message still gets a concrete thread ID."""
         msg = self._make_message("101", chat_type="private", reply_to="50")
         thread_id = await handler.resolve_reply_chain_thread(msg)
-
-        # Should return None to continue using legacy session
-        assert thread_id is None
+        assert thread_id is not None
 
 
 class TestChatHistoryInjection:
