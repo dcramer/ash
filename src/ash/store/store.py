@@ -284,4 +284,13 @@ async def create_store(
     else:
         logger.debug("learned_in_provenance_ok")
 
+    logger.info(
+        "store_startup_consistency_summary",
+        extra={
+            "vector.removed_extra": removed,
+            "vector.missing_after_repair": missing,
+            "provenance.missing_learned_in": missing_provenance,
+        },
+    )
+
     return store

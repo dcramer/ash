@@ -398,14 +398,19 @@ def _format_extras(entry: dict[str, Any]) -> str:
             pass
 
     for key, value in entry.items():
-        if key in HIDDEN_FIELDS:
+        normalized_key = key.strip()
+        if normalized_key in HIDDEN_FIELDS:
+            continue
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
             continue
 
         # Apply alias
-        display_key = FIELD_ALIASES.get(key, key)
+        display_key = FIELD_ALIASES.get(normalized_key, normalized_key)
 
         val_str = str(value)
-        max_len = _get_extra_max_len(key)
+        max_len = _get_extra_max_len(normalized_key)
         if len(val_str) > max_len:
             val_str = val_str[: max_len - 3] + "..."
 

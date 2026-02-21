@@ -37,3 +37,23 @@ def test_format_extras_keeps_more_ids_detail() -> None:
     # ids fields get a larger budget than generic fields.
     assert "memory.ids=" in extras
     assert "..." not in extras
+
+
+def test_format_extras_hides_empty_and_context_noise_fields() -> None:
+    extras = _format_extras(
+        {
+            "message": "event",
+            "component": "telegram",
+            "context": "",
+            "context ": "",
+            "session_id": "s-1",
+            "foo": "",
+            "bar": None,
+            "ok": "value",
+        }
+    )
+    assert "context=" not in extras
+    assert "session_id=" not in extras
+    assert "foo=" not in extras
+    assert "bar=" not in extras
+    assert "ok=value" in extras
