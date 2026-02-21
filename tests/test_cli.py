@@ -314,6 +314,34 @@ class TestScheduleCommand:
         assert schedule_file.read_text() == ""
 
 
+class TestPeopleCommand:
+    """Tests for `ash people`."""
+
+    def test_people_doctor_default_is_preview_only(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app, ["people", "doctor", "--config", str(config_file)]
+        )
+        assert result.exit_code == 0
+        assert "preview only" in result.stdout.lower()
+        assert "No changes were made" in result.stdout
+
+    def test_people_doctor_subcommand_requires_force(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app,
+            ["people", "doctor", "duplicates", "--config", str(config_file)],
+        )
+        assert result.exit_code == 1
+        assert "--force" in result.stdout
+
+    def test_people_doctor_unknown_subcommand(self, cli_runner, config_file):
+        result = cli_runner.invoke(
+            app,
+            ["people", "doctor", "unknown-check", "--config", str(config_file)],
+        )
+        assert result.exit_code == 1
+        assert "Unknown people doctor subcommand" in result.stdout
+
+
 class TestAppHelp:
     """Tests for main app help."""
 

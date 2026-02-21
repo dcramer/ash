@@ -74,8 +74,9 @@ def register(app: typer.Typer) -> None:
             ash people search <query>    # Search by name/alias
             ash people merge <id1> <id2> # Merge two people
             ash people delete <id>       # Delete a person record
-            ash people doctor            # Preview proposed fixes
-            ash people doctor -f         # Apply fixes without confirmation
+            ash people doctor            # Preview doctor checks (no changes)
+            ash people doctor all -f     # Apply all doctor checks
+            ash people doctor orphans -f # Apply only orphan cleanup
         """
         if action is None:
             ctx = click.get_current_context()
@@ -150,7 +151,30 @@ async def _run_people_action(
             config, "Delete", lambda gs: _people_delete(gs, target, force)
         )
     elif action == "doctor":
-        await _people_doctor(config, force)
+        subcommand = target  # ash people doctor <subcommand>
+        if subcommand is None:
+            console.print("[bold]People Doctor Plan (preview only)[/bold]")
+            console.print("No changes were made.")
+            console.print(
+                "Run one subcommand explicitly with [cyan]--force[/cyan] to apply:"
+            )
+            console.print("- duplicates, broken-merges, orphans, all")
+            console.print("Example: [cyan]ash people doctor duplicates --force[/cyan]")
+            return
+
+        valid_subcommands = {"duplicates", "broken-merges", "orphans", "all"}
+        if subcommand not in valid_subcommands:
+            error(f"Unknown people doctor subcommand: {subcommand}")
+            console.print(
+                "Valid doctor subcommands: duplicates, broken-merges, orphans, all"
+            )
+            raise typer.Exit(1)
+
+        if not force:
+            error("People doctor subcommands are mutating. Re-run with --force.")
+            raise typer.Exit(1)
+
+        await _people_doctor(config, force=True, subcommand=subcommand)
     else:
         error(f"Unknown action: {action}")
         console.print("Valid actions: list, show, search, merge, delete, doctor")
@@ -388,7 +412,9 @@ async def _create_store(config: AshConfig) -> Store | None:
     return await get_store(config)
 
 
-async def _people_doctor(config: AshConfig, force: bool) -> None:
+async def _people_doctor(
+    config: AshConfig, force: bool, subcommand: str = "all"
+) -> None:
     """Run all people health checks: duplicates, broken merges, orphans."""
 
     async def _run(store: Store) -> None:
@@ -404,9 +430,12 @@ async def _people_doctor(config: AshConfig, force: bool) -> None:
             dim("Doctor requires an LLM to verify merge candidates.")
             raise typer.Exit(1) from None
 
-        await _doctor_check_duplicates(store, force)
-        await _doctor_check_broken_merges(store, force)
-        await _doctor_check_orphans(store, force)
+        if subcommand in {"duplicates", "all"}:
+            await _doctor_check_duplicates(store, force)
+        if subcommand in {"broken-merges", "all"}:
+            await _doctor_check_broken_merges(store, force)
+        if subcommand in {"orphans", "all"}:
+            await _doctor_check_orphans(store, force)
 
     await _with_store(config, "Doctor", _run)
 
