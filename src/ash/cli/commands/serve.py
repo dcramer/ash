@@ -79,14 +79,11 @@ async def _run_server(
         IntegrationContext,
         IntegrationRuntime,
         MemoryIntegration,
+        RuntimeRPCIntegration,
         SchedulingIntegration,
     )
     from ash.providers.telegram import TelegramProvider
-    from ash.rpc import (
-        RPCServer,
-        register_config_methods,
-        register_log_methods,
-    )
+    from ash.rpc import RPCServer
     from ash.server.app import create_app
     from ash.service.pid import write_pid_file
 
@@ -155,43 +152,6 @@ async def _run_server(
                 "memory_gc_complete", extra={"memory.count": gc_result.removed_count}
             )
 
-    # Compose integration contributors for runtime wiring.
-    schedule_integration = SchedulingIntegration(get_schedule_file())
-    integration_runtime = IntegrationRuntime(
-        [MemoryIntegration(), schedule_integration]
-    )
-    integration_context = IntegrationContext(
-        config=ash_config,
-        components=components,
-        mode="serve",
-        sessions_path=get_sessions_path(),
-    )
-    await integration_runtime.setup(integration_context)
-    agent.install_integration_hooks(
-        prompt_context_augmenters=integration_runtime.prompt_context_augmenters(
-            integration_context
-        ),
-        sandbox_env_augmenters=integration_runtime.sandbox_env_augmenters(
-            integration_context
-        ),
-    )
-
-    if schedule_integration.store is None:
-        raise RuntimeError("schedule integration setup failed")
-    schedule_store = schedule_integration.store
-
-    rpc_socket_path = get_rpc_socket_path()
-    rpc_server = RPCServer(rpc_socket_path)
-    integration_runtime.register_rpc_methods(rpc_server, integration_context)
-    register_config_methods(rpc_server, ash_config, components.skill_registry)
-    register_log_methods(rpc_server, get_logs_path())
-    await rpc_server.start()
-    logger.info("rpc_server_started", extra={"socket.path": str(rpc_socket_path)})
-
-    logger.debug(f"Tools: {', '.join(components.tool_registry.names)}")
-    if components.skill_registry:
-        logger.debug(f"Skills: {len(components.skill_registry)} discovered")
-
     # Set up Telegram if configured
     telegram_provider = None
     if ash_config.telegram and ash_config.telegram.bot_token:
@@ -203,11 +163,6 @@ async def _run_server(
             group_mode=ash_config.telegram.group_mode,
             passive_config=ash_config.telegram.passive,
         )
-
-    # Set up schedule watcher
-    from ash.scheduling import ScheduledTaskHandler, ScheduleWatcher
-
-    schedule_watcher = ScheduleWatcher(schedule_store, timezone=ash_config.timezone)
 
     # Build sender map from available providers
     senders: dict[str, Any] = {}
@@ -227,19 +182,53 @@ async def _run_server(
 
         registrars["telegram"] = telegram_registrar
 
-    # Create and register handler if we have senders
-    if senders:
-        schedule_handler = ScheduledTaskHandler(
-            agent,
-            senders,
-            registrars,
-            timezone=ash_config.timezone,
-            agent_executor=components.agent_executor,
-        )
-        schedule_watcher.add_handler(schedule_handler.handle)
-        logger.debug(f"Schedule watcher: {schedule_store.schedule_file}")
-    else:
-        logger.debug("Schedule watcher disabled (no providers)")
+    if not senders:
+        logger.debug("schedule watcher disabled (no providers)")
+
+    # Compose integration contributors for runtime wiring.
+    schedule_integration = SchedulingIntegration(
+        get_schedule_file(),
+        timezone=ash_config.timezone,
+        senders=senders,
+        registrars=registrars,
+        agent_executor=components.agent_executor,
+    )
+    integration_runtime = IntegrationRuntime(
+        [
+            RuntimeRPCIntegration(get_logs_path()),
+            MemoryIntegration(),
+            schedule_integration,
+        ]
+    )
+    integration_context = IntegrationContext(
+        config=ash_config,
+        components=components,
+        mode="serve",
+        sessions_path=get_sessions_path(),
+    )
+    await integration_runtime.setup(integration_context)
+    agent.install_integration_hooks(
+        prompt_context_augmenters=integration_runtime.prompt_context_augmenters(
+            integration_context
+        ),
+        sandbox_env_augmenters=integration_runtime.sandbox_env_augmenters(
+            integration_context
+        ),
+    )
+
+    if schedule_integration.store is None:
+        raise RuntimeError("schedule integration setup failed")
+    logger.debug(f"Schedule store: {schedule_integration.store.schedule_file}")
+
+    rpc_socket_path = get_rpc_socket_path()
+    rpc_server = RPCServer(rpc_socket_path)
+    integration_runtime.register_rpc_methods(rpc_server, integration_context)
+    await rpc_server.start()
+    logger.info("rpc_server_started", extra={"socket.path": str(rpc_socket_path)})
+
+    logger.debug(f"Tools: {', '.join(components.tool_registry.names)}")
+    if components.skill_registry:
+        logger.debug(f"Skills: {len(components.skill_registry)} discovered")
 
     # Create FastAPI app
     logger.info("server_creating")
@@ -270,10 +259,6 @@ async def _run_server(
         server = uvicorn.Server(uvicorn_config)
 
         await integration_runtime.on_startup(integration_context)
-
-        # Start schedule watcher
-        if senders:
-            await schedule_watcher.start()
 
         # Track tasks for cleanup
         telegram_task: asyncio.Task | None = None
@@ -340,7 +325,6 @@ async def _run_server(
     finally:
         await integration_runtime.on_shutdown(integration_context)
         await _cleanup_server(
-            schedule_watcher,
             telegram_provider,
             rpc_server,
             components.sandbox_executor,
@@ -349,7 +333,6 @@ async def _run_server(
 
 
 async def _cleanup_server(
-    schedule_watcher,
     telegram_provider,
     rpc_server,
     sandbox_executor,
@@ -362,7 +345,6 @@ async def _cleanup_server(
     cleanup_timeout = 5.0  # Max seconds per cleanup operation
 
     for resource, method in [
-        (schedule_watcher, "stop"),
         (telegram_provider, "stop"),
         (rpc_server, "stop"),
         (sandbox_executor, "cleanup"),

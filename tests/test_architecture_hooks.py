@@ -45,6 +45,26 @@ def test_register_schedule_methods_wiring_is_constrained() -> None:
     }
 
 
+def test_register_config_methods_wiring_is_constrained() -> None:
+    files = _python_files_under("src/ash")
+
+    call_sites = _find_call_sites(r"\bregister_config_methods\(", files)
+    assert call_sites == {
+        Path("src/ash/integrations/builtin.py"),
+        Path("src/ash/rpc/methods/config.py"),
+    }
+
+
+def test_register_log_methods_wiring_is_constrained() -> None:
+    files = _python_files_under("src/ash")
+
+    call_sites = _find_call_sites(r"\bregister_log_methods\(", files)
+    assert call_sites == {
+        Path("src/ash/integrations/builtin.py"),
+        Path("src/ash/rpc/methods/logs.py"),
+    }
+
+
 def test_harness_boundaries_reference_integration_hooks_spec() -> None:
     expected_comment = "specs/subsystems.md (Integration Hooks)"
     boundary_files = [
