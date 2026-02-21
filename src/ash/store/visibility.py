@@ -25,7 +25,7 @@ def is_dm_sourced(graph: KnowledgeGraph, memory_id: str) -> bool | None:
     Returns:
         True: memory was learned in a private chat.
         False: memory was learned in a non-private chat.
-        None: memory has no LEARNED_IN edge (legacy/unknown provenance).
+        None: memory has no LEARNED_IN edge or source chat is unknown.
     """
     source_chat_id = get_learned_in_chat(graph, memory_id)
     if not source_chat_id:
@@ -38,24 +38,20 @@ def is_dm_sourced(graph: KnowledgeGraph, memory_id: str) -> bool | None:
     return source_chat.chat_type == "private"
 
 
-def is_dm_sourced_or_legacy(graph: KnowledgeGraph, memory_id: str) -> bool:
-    """Return True for DM-sourced memories and legacy/unknown provenance."""
-    source = is_dm_sourced(graph, memory_id)
-    return source is None or source is True
-
-
 def is_private_sourced_outside_current_chat(
     graph: KnowledgeGraph,
     memory_id: str,
     current_chat_provider_id: str | None,
 ) -> bool:
-    """Return True if a memory came from a different/unknown DM chat."""
+    """Return True unless memory provenance proves it came from this DM chat."""
     source_chat_id = get_learned_in_chat(graph, memory_id)
     if not source_chat_id:
-        return False
+        return True
 
     source_chat = graph.chats.get(source_chat_id)
-    if not source_chat or source_chat.chat_type != "private":
+    if not source_chat:
+        return True
+    if source_chat.chat_type != "private":
         return False
 
     # Fail closed when we cannot prove this is the same DM.
@@ -89,14 +85,12 @@ def is_group_disclosable(
     subject_person_ids: list[str],
     sensitivity: Sensitivity | None,
     participant_person_ids: set[str],
-    *,
-    exclude_legacy: bool = True,
 ) -> bool:
     """Group chat disclosure policy for a single memory.
 
     Rules:
     - DM-sourced memories are always blocked.
-    - Legacy/unknown provenance can be blocked (default: True, fail-closed).
+    - Unknown provenance (no LEARNED_IN edge) is blocked.
     - Self-memories (no subjects) are allowed.
     - PUBLIC memories are allowed.
     - PERSONAL/SENSITIVE memories require a participant subject overlap.
@@ -104,7 +98,7 @@ def is_group_disclosable(
     dm_sourced = is_dm_sourced(graph, memory_id)
     if dm_sourced is True:
         return False
-    if dm_sourced is None and exclude_legacy:
+    if dm_sourced is None:
         return False
 
     if not subject_person_ids:
@@ -126,12 +120,11 @@ def is_dm_contextually_disclosable(
     """DM contextual disclosure filter.
 
     A memory is disclosable if:
-    - If sourced in a DM, it must be from this same DM
+    - It has known LEARNED_IN provenance in this same DM (for DM-sourced memories)
     - It is about the DM partner
     - It was stated by the DM partner
     - The DM partner participated in the source chat
     - It is a self-memory (no subjects)
-    - It has no LEARNED_IN edge (legacy data, fail-open)
     """
     if is_private_sourced_outside_current_chat(
         graph,
@@ -155,7 +148,7 @@ def is_dm_contextually_disclosable(
 
     learned_in_chat = get_learned_in_chat(graph, memory_id)
     if learned_in_chat is None:
-        return True
+        return False
 
     return any(
         person_participates_in_chat(graph, pid, learned_in_chat)

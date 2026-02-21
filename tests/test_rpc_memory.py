@@ -979,7 +979,7 @@ class TestRPCThisChatFiltering:
     async def test_search_without_this_chat_returns_all(
         self, rpc_server, memory_manager
     ):
-        """Without this_chat, default behavior returns all matching memories."""
+        """Without this_chat, private chat visibility still filters unknown provenance."""
         from ash.graph.edges import create_learned_in_edge
         from ash.store.types import ChatEntry
 
@@ -1015,7 +1015,8 @@ class TestRPCThisChatFiltering:
                 "chat_id": "chat-200",
             }
         )
-        assert len(results) == 2
+        assert len(results) == 1
+        assert results[0]["content"] == "From this chat"
 
     async def test_list_this_chat_filters(self, rpc_server, memory_manager):
         """memory.list with this_chat=True only returns memories learned in current chat."""

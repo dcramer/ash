@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ash.store.visibility import (
-    is_dm_sourced_or_legacy,
+    is_dm_sourced,
     is_private_sourced_outside_current_chat,
 )
 
@@ -144,7 +144,7 @@ def register_memory_methods(
         """Chat context visibility gate shared by list/search RPCs."""
         graph = memory_manager.graph
         if chat_type in ("group", "supergroup"):
-            return not is_dm_sourced_or_legacy(graph, memory_id)
+            return is_dm_sourced(graph, memory_id) is False
         if chat_type == "private":
             return not is_private_sourced_outside_current_chat(
                 graph,
@@ -165,9 +165,9 @@ def register_memory_methods(
             this_chat: If True, only return memories learned in the current chat
 
         Privacy behavior:
-            - Group chats: DM-sourced and legacy memories are excluded
+            - Group chats: DM-sourced and unknown-provenance memories are excluded
             - Private chats: DM-sourced memories are only shown when sourced from
-              the same DM chat_id
+              the same DM chat_id; unknown-provenance memories are excluded
         """
         query = params.get("query")
         if not query:
@@ -199,7 +199,7 @@ def register_memory_methods(
             learned_in_chat_id=learned_in_chat_id,
         )
 
-        # Filter DM-sourced memories in group chats
+        # Filter by chat context provenance policy
         results = [
             r for r in results if _visible_in_chat_context(r.id, chat_type, chat_id)
         ]

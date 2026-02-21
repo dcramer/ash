@@ -863,6 +863,11 @@ class TestDMContextualFilter:
 
     def test_dm_self_memory_always_passes(self, pipeline):
         """Self-memories (no subjects) always pass in DMs."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = pipeline._store.graph
+        graph.add_edge(create_learned_in_edge("mem-self", "chat-source"))
+
         results = [self._make_result("mem-self", subject_person_ids=[])]
         context = RetrievalContext(
             user_id="user-1",
@@ -927,9 +932,10 @@ class TestDMContextualFilter:
 
     def test_dm_memory_about_partner_passes(self, pipeline):
         """Memory ABOUT the DM partner passes."""
-        from ash.graph.edges import create_about_edge
+        from ash.graph.edges import create_about_edge, create_learned_in_edge
 
         graph = pipeline._store.graph
+        graph.add_edge(create_learned_in_edge("mem-about-bob", "chat-source"))
         graph.add_edge(create_about_edge("mem-about-bob", "person-bob"))
 
         results = [
@@ -946,9 +952,10 @@ class TestDMContextualFilter:
 
     def test_dm_memory_stated_by_partner_passes(self, pipeline):
         """Memory STATED_BY the DM partner passes."""
-        from ash.graph.edges import create_stated_by_edge
+        from ash.graph.edges import create_learned_in_edge, create_stated_by_edge
 
         graph = pipeline._store.graph
+        graph.add_edge(create_learned_in_edge("mem-stated", "chat-source"))
         graph.add_edge(create_stated_by_edge("mem-stated", "person-bob"))
 
         results = [self._make_result("mem-stated", subject_person_ids=["person-carol"])]
@@ -1007,8 +1014,8 @@ class TestDMContextualFilter:
         filtered = pipeline._filter_results_by_privacy(results, context)
         assert len(filtered) == 0
 
-    def test_dm_legacy_memory_no_learned_in_passes(self, pipeline):
-        """Legacy memories without LEARNED_IN edges pass (backward compat)."""
+    def test_dm_missing_provenance_no_learned_in_blocked(self, pipeline):
+        """Memories without LEARNED_IN edges are blocked in DMs."""
         results = [self._make_result("mem-legacy", subject_person_ids=["person-carol"])]
         context = RetrievalContext(
             user_id="user-1",
@@ -1017,10 +1024,10 @@ class TestDMContextualFilter:
             participant_person_ids={"bob": {"person-bob"}},
         )
         filtered = pipeline._filter_results_by_privacy(results, context)
-        assert len(filtered) == 1
+        assert len(filtered) == 0
 
-    def test_dm_no_partner_info_passes_all(self, pipeline):
-        """When no partner person IDs available, all memories pass (fail-open)."""
+    def test_dm_no_partner_info_blocks_third_party(self, pipeline):
+        """Without partner IDs, third-party memories are blocked in DMs."""
         results = [self._make_result("mem-any", subject_person_ids=["person-carol"])]
         context = RetrievalContext(
             user_id="user-1",
@@ -1029,7 +1036,7 @@ class TestDMContextualFilter:
             participant_person_ids={},
         )
         filtered = pipeline._filter_results_by_privacy(results, context)
-        assert len(filtered) == 1
+        assert len(filtered) == 0
 
 
 class TestGroupPersonalFilter:

@@ -430,15 +430,11 @@ class RetrievalPipeline:
         - It was stated by the DM partner (STATED_BY edge)
         - The DM partner was in the chat where it was learned (LEARNED_IN → PARTICIPATES_IN)
         - It's a self-memory (no subjects)
-        - It has no LEARNED_IN edge (legacy data, fail-open)
         """
         # Collect DM partner person IDs
         partner_person_ids: set[str] = set()
         for pids in context.participant_person_ids.values():
             partner_person_ids |= pids
-
-        if not partner_person_ids:
-            return results  # No partner info — fail-open
 
         graph = self._store.graph
         filtered = []
@@ -504,7 +500,7 @@ class RetrievalPipeline:
         chat_type: str | None,
         querying_person_ids: set[str],
     ) -> bool:
-        """Backward-compatible wrapper for sensitivity policy checks."""
+        """Wrapper for sensitivity policy checks."""
         return passes_sensitivity_policy(
             sensitivity=sensitivity,
             subject_person_ids=subject_person_ids,

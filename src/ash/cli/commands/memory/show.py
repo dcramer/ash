@@ -119,7 +119,7 @@ async def memory_show(store: Store, memory_id: str) -> None:
                 f"Locked to DM chat {source_chat.provider_id} for contextual retrieval",
             )
     else:
-        table.add_row("Learned In", "- (legacy/no provenance edge)")
+        table.add_row("Learned In", "- (missing provenance)")
 
     stated_by_pid = get_stated_by_person(store.graph, memory.id)
     if stated_by_pid:
