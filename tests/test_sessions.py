@@ -84,6 +84,18 @@ class TestParseEntry:
                 }
             )
 
+    def test_session_header_rejects_null_created_at(self):
+        with pytest.raises(TypeError):
+            parse_entry(
+                {
+                    "type": "session",
+                    "version": "2",
+                    "id": "s1",
+                    "created_at": None,
+                    "provider": "cli",
+                }
+            )
+
     def test_compaction_entry_requires_created_at(self):
         with pytest.raises(KeyError, match="created_at"):
             parse_entry(

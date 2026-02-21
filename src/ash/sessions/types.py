@@ -22,9 +22,7 @@ def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def _parse_datetime(value: str | datetime | None) -> datetime:
-    if value is None:
-        return now_utc()
+def _parse_datetime(value: str | datetime) -> datetime:
     if isinstance(value, datetime):
         return value
     return datetime.fromisoformat(value)
