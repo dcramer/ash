@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger("telegram.passive")
-LOG_PREVIEW_MAX_LEN = 120
+LOG_PREVIEW_MAX_LEN = 180
 
 
 def _format_speaker_label(username: str | None, display_name: str | None) -> str:

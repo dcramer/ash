@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,8 @@ class BrowserManager:
                 error_code="browser_disabled",
                 error_message="browser integration is disabled",
             )
+
+        self._apply_retention_policies(effective_user_id=effective_user_id)
 
         provider_key = (provider_name or self._config.browser.provider).strip().lower()
         provider = self._providers.get(provider_key)
@@ -674,7 +677,88 @@ class BrowserManager:
         if not sessions:
             return None
         provider_sessions = [s for s in sessions if s.provider == provider_name]
-        return provider_sessions[0] if provider_sessions else sessions[0]
+        return provider_sessions[0] if provider_sessions else None
+
+    def _apply_retention_policies(self, *, effective_user_id: str) -> None:
+        """Apply browser session/artifact retention best-effort."""
+        self._expire_stale_sessions(effective_user_id=effective_user_id)
+        self._prune_artifacts()
+
+    def _expire_stale_sessions(self, *, effective_user_id: str) -> None:
+        max_age_minutes = self._config.browser.max_session_minutes
+        if max_age_minutes <= 0:
+            return
+
+        cutoff = datetime.now(UTC) - timedelta(minutes=max_age_minutes)
+        sessions = self._store.list_sessions(
+            effective_user_id=effective_user_id,
+            include_archived=False,
+        )
+        for session in sessions:
+            if session.status != "active":
+                continue
+            if session.updated_at >= cutoff:
+                continue
+            expired = replace(
+                session,
+                status="closed",
+                last_error="session_expired",
+                updated_at=datetime.now(UTC),
+            )
+            self._store.append_session(expired)
+            logger.info(
+                "browser_session_expired",
+                extra={
+                    "browser.session_id": session.id,
+                    "browser.session_name": session.name,
+                    "browser.provider": session.provider,
+                },
+            )
+
+    def _prune_artifacts(self) -> None:
+        retention_days = self._config.browser.artifacts_retention_days
+        if retention_days < 0:
+            return
+
+        artifacts_dir = self._store.artifacts_dir
+        if not artifacts_dir.exists():
+            return
+
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+        removed_files = 0
+        for path in artifacts_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+                if modified_at < cutoff:
+                    path.unlink()
+                    removed_files += 1
+            except OSError:
+                continue
+
+        removed_dirs = 0
+        # Cleanup empty session artifact directories after file pruning
+        for path in sorted(artifacts_dir.rglob("*"), reverse=True):
+            if not path.is_dir():
+                continue
+            try:
+                if any(path.iterdir()):
+                    continue
+                shutil.rmtree(path)
+                removed_dirs += 1
+            except OSError:
+                continue
+
+        if removed_files or removed_dirs:
+            logger.info(
+                "browser_artifacts_pruned",
+                extra={
+                    "browser.removed_file_count": removed_files,
+                    "browser.removed_dir_count": removed_dirs,
+                    "browser.retention_days": retention_days,
+                },
+            )
 
     def _session_artifacts_dir(self, session_id: str) -> Path:
         path = self._store.artifacts_dir / session_id

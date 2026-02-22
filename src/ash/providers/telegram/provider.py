@@ -38,7 +38,7 @@ logger = logging.getLogger("telegram")
 
 # Minimum interval between message edits (Telegram rate limit)
 EDIT_INTERVAL = 1.0
-LOG_PREVIEW_MAX_LEN = 120
+LOG_PREVIEW_MAX_LEN = 180
 
 
 def _get_parse_mode(mode: str | None) -> ParseMode:
