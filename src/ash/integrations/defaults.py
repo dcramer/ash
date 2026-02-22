@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from ash.integrations.memory import MemoryIntegration
+from ash.integrations.runtime import IntegrationMode
 from ash.integrations.runtime_rpc import RuntimeRPCIntegration
 from ash.integrations.scheduling import SchedulingIntegration
 
@@ -76,7 +77,7 @@ def _create_serve_integrations(
 
 def create_default_integrations(
     *,
-    mode: Literal["serve", "chat", "eval"],
+    mode: IntegrationMode,
     include_memory: bool = True,
     schedule_file: Path | None = None,
     logs_path: Path | None = None,

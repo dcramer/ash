@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
 
 from ash.config import AshConfig
 from ash.core.types import AgentComponents
 from ash.integrations.runtime import (
     IntegrationContext,
     IntegrationContributor,
+    IntegrationMode,
     IntegrationRuntime,
 )
 
@@ -20,7 +20,7 @@ async def compose_integrations(
     *,
     config: AshConfig,
     components: AgentComponents,
-    mode: Literal["serve", "chat", "eval"],
+    mode: IntegrationMode,
     contributors: list[IntegrationContributor],
     sessions_path: Path | None = None,
 ) -> tuple[IntegrationRuntime, IntegrationContext]:
@@ -46,7 +46,7 @@ async def active_integrations(
     *,
     config: AshConfig,
     components: AgentComponents,
-    mode: Literal["serve", "chat", "eval"],
+    mode: IntegrationMode,
     contributors: list[IntegrationContributor],
     sessions_path: Path | None = None,
 ) -> AsyncIterator[tuple[IntegrationRuntime, IntegrationContext]]:

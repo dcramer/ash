@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ash.rpc.server import RPCServer
 
 T = TypeVar("T")
+IntegrationMode = Literal["serve", "chat", "eval"]
 
 
 @dataclass(slots=True)
@@ -25,7 +26,7 @@ class IntegrationContext:
 
     config: AshConfig
     components: AgentComponents
-    mode: Literal["serve", "chat", "eval"]
+    mode: IntegrationMode
     sessions_path: Path | None = None
 
 
