@@ -176,6 +176,7 @@ default_viewport_height = 720
 [browser.sandbox]
 headless = true
 browser_channel = "chromium"
+runtime_required = true
 
 [browser.kernel]
 api_key = null
@@ -195,11 +196,15 @@ project_id = null
 | `default_viewport_height` | int | `720` |
 | `browser.sandbox.headless` | bool | `true` |
 | `browser.sandbox.browser_channel` | `chromium` | `chromium` |
+| `browser.sandbox.runtime_required` | bool | `true` |
 | `browser.kernel.api_key` | secret \| null | `null` |
 | `browser.kernel.base_url` | string | `https://api.kernel.sh` |
 | `browser.kernel.project_id` | string \| null | `null` |
 
-For `provider = "sandbox"`, install Playwright Chromium:
+For `provider = "sandbox"`, browser execution is expected in sandbox/container runtime.
+Set `browser.sandbox.runtime_required = false` only for local development/testing.
+
+Install Playwright Chromium:
 
 ```bash
 uv run playwright install chromium

@@ -218,6 +218,7 @@ class BrowserSandboxConfig(BaseModel):
 
     headless: bool = True
     browser_channel: Literal["chromium"] = "chromium"
+    runtime_required: bool = True
 
 
 class BrowserKernelConfig(BaseModel):

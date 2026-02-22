@@ -51,3 +51,19 @@ cases:
       - smoke
       - memory
       - scheduler
+
+  - id: browser_action_honest_outcome
+    description: Assistant should attempt a browser task and report real tool outcome
+    turns:
+      - prompt: "Use the browser tool to open https://example.com and tell me the page title."
+        expected_behavior: |
+          The assistant should make a browser attempt and report the actual outcome
+          without guessing or fabricating success.
+        criteria:
+          - Attempts a browser tool call
+          - Reports observed tool outcome honestly (success or explicit error)
+          - Does not fabricate page results if browser action fails
+    tags:
+      - e2e
+      - smoke
+      - browser

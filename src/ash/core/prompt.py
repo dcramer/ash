@@ -272,6 +272,7 @@ class SystemPromptBuilder:
                 "- For capability questions (e.g., 'can we do X?'), verify by attempting the task with available tools and report what actually happened.",
                 "- For people/profile lookups, prefer resolved real names when available; use handles/usernames as fallback terms.",
                 "- NEVER claim success without verification — check tool output before reporting.",
+                "- If a requested tool check fails, do NOT backfill the answer from memory/prior knowledge. State that it is unverified and stop.",
                 "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
                 "- Report failures with actual error messages. If output is empty, say so.",
                 "- When a tool returns unexpected, empty, or confusing results, DO NOT guess or make excuses. Investigate: re-read the output, try alternative approaches, or use the debug-self skill to trace what went wrong.",

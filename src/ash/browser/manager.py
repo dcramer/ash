@@ -41,6 +41,17 @@ class BrowserManager:
     def store(self) -> BrowserStore:
         return self._store
 
+    def _is_sandbox_runtime(self) -> bool:
+        """Return True when running in sandbox/container runtime context."""
+        env_value = (
+            os.environ.get("ASH_BROWSER_SANDBOX_RUNTIME")
+            or os.environ.get("ASH_IN_SANDBOX")
+            or ""
+        ).strip()
+        if env_value.lower() in {"1", "true", "yes", "on"}:
+            return True
+        return Path("/.dockerenv").exists()
+
     async def execute_action(
         self,
         *,
@@ -72,6 +83,29 @@ class BrowserManager:
                 action=action,
                 error_code="invalid_provider",
                 error_message=f"unsupported provider: {provider_key}",
+            )
+        if (
+            provider_key == "sandbox"
+            and self._config.browser.sandbox.runtime_required
+            and not self._is_sandbox_runtime()
+        ):
+            message = (
+                "sandbox_runtime_required: browser provider 'sandbox' must run "
+                "inside sandbox/container runtime"
+            )
+            logger.warning(
+                "browser_sandbox_runtime_required",
+                extra={
+                    "browser.action": action,
+                    "browser.provider": provider_key,
+                    "error.message": message,
+                },
+            )
+            return BrowserActionResult(
+                ok=False,
+                action=action,
+                error_code="sandbox_runtime_required",
+                error_message=message,
             )
 
         logger.info(
@@ -791,16 +825,6 @@ def create_browser_manager(config: AshConfig) -> BrowserManager:
     # Runtime boundary contract: specs/browser.md
     # Sandbox provider execution must remain sandbox/container-scoped.
     browser_cfg = config.browser
-    if browser_cfg.enabled and browser_cfg.provider == "sandbox":
-        # Operational guardrail for spec conformance.
-        if not os.environ.get("ASH_RPC_SOCKET"):
-            logger.warning(
-                "browser_sandbox_runtime_unverified",
-                extra={
-                    "browser.provider": "sandbox",
-                    "config.hint": "Run Ash in sandbox/container runtime for sandbox provider conformance",
-                },
-            )
     base_dir = (
         browser_cfg.state_dir.expanduser()
         if browser_cfg.state_dir

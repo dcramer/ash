@@ -13,7 +13,12 @@ from ash_sandbox_cli.commands.browser import app
 from typer.testing import CliRunner
 
 from ash.browser import create_browser_manager
-from ash.config.models import AshConfig, BrowserConfig, ModelConfig
+from ash.config.models import (
+    AshConfig,
+    BrowserConfig,
+    BrowserSandboxConfig,
+    ModelConfig,
+)
 from ash.integrations import BrowserIntegration, IntegrationContext, IntegrationRuntime
 from ash.integrations.rpc import active_rpc_server
 
@@ -99,7 +104,10 @@ async def test_browser_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
     config = AshConfig(
         models={"default": ModelConfig(provider="openai", model="gpt-5-mini")},
         browser=BrowserConfig(
-            enabled=True, provider="sandbox", state_dir=browser_state
+            enabled=True,
+            provider="sandbox",
+            state_dir=browser_state,
+            sandbox=BrowserSandboxConfig(runtime_required=False),
         ),
     )
     browser_manager = create_browser_manager(config)

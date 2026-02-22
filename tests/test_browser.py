@@ -15,7 +15,12 @@ from ash.browser.providers.base import (
 )
 from ash.browser.store import BrowserStore
 from ash.browser.types import BrowserSession
-from ash.config.models import AshConfig, BrowserConfig, ModelConfig
+from ash.config.models import (
+    AshConfig,
+    BrowserConfig,
+    BrowserSandboxConfig,
+    ModelConfig,
+)
 from ash.tools.base import ToolContext
 from ash.tools.builtin.browser import BrowserTool
 
@@ -89,7 +94,19 @@ def _config() -> AshConfig:
     return AshConfig(
         workspace=Path("tmp-workspace"),
         models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
-        browser=BrowserConfig(),
+        browser=BrowserConfig(
+            sandbox=BrowserSandboxConfig(runtime_required=False),
+        ),
+    )
+
+
+def _strict_config() -> AshConfig:
+    return AshConfig(
+        workspace=Path("tmp-workspace"),
+        models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
+        browser=BrowserConfig(
+            sandbox=BrowserSandboxConfig(runtime_required=True),
+        ),
     )
 
 
@@ -309,3 +326,24 @@ async def test_browser_manager_prunes_expired_artifacts(tmp_path) -> None:
 
     assert not old_file.exists()
     assert new_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_browser_manager_requires_sandbox_runtime_when_enabled(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    manager = BrowserManager(
+        config=_strict_config(),
+        store=store,
+        providers={"sandbox": _FakeProvider()},
+    )
+    monkeypatch.setattr(manager, "_is_sandbox_runtime", lambda: False)
+
+    started = await manager.execute_action(
+        action="session.start",
+        effective_user_id="u1",
+        provider_name="sandbox",
+    )
+    assert started.ok is False
+    assert started.error_code == "sandbox_runtime_required"
