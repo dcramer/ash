@@ -118,6 +118,52 @@ def test_rpc_method_registrar_imports_are_constrained() -> None:
     }
 
 
+def test_integration_module_import_direction_is_constrained() -> None:
+    files = _python_files_under("src/ash")
+
+    memory_imports = _find_import_sites(
+        r"(from ash\.integrations\.memory import|import ash\.integrations\.memory)",
+        files,
+    )
+    assert memory_imports == {
+        Path("src/ash/integrations/__init__.py"),
+        Path("src/ash/integrations/builtin.py"),
+        Path("src/ash/integrations/defaults.py"),
+    }
+
+    scheduling_imports = _find_import_sites(
+        r"(from ash\.integrations\.scheduling import|import ash\.integrations\.scheduling)",
+        files,
+    )
+    assert scheduling_imports == {
+        Path("src/ash/integrations/__init__.py"),
+        Path("src/ash/integrations/builtin.py"),
+        Path("src/ash/integrations/defaults.py"),
+    }
+
+    runtime_rpc_imports = _find_import_sites(
+        r"(from ash\.integrations\.runtime_rpc import|import ash\.integrations\.runtime_rpc)",
+        files,
+    )
+    assert runtime_rpc_imports == {
+        Path("src/ash/integrations/__init__.py"),
+        Path("src/ash/integrations/builtin.py"),
+        Path("src/ash/integrations/defaults.py"),
+    }
+
+
+def test_scheduling_lifecycle_wiring_is_owned_by_scheduling_integration() -> None:
+    files = _python_files_under("src/ash")
+
+    schedule_runtime_imports = _find_import_sites(
+        r"from ash\.scheduling import .*?(ScheduleWatcher|ScheduledTaskHandler)",
+        files,
+    )
+    assert schedule_runtime_imports == {
+        Path("src/ash/integrations/scheduling.py"),
+    }
+
+
 def test_harness_boundaries_reference_integration_hooks_spec() -> None:
     expected_comment = "specs/subsystems.md (Integration Hooks)"
     boundary_files = [
