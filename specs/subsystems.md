@@ -25,6 +25,7 @@ A subsystem is NOT:
 | memory | Long-term fact storage and retrieval | Conversation history, session state |
 | sessions | Conversation persistence and context | Fact extraction, semantic search |
 | scheduling | Deferred task execution | Task content, routing |
+| images | Inbound image understanding + context extraction | Message transport, LLM orchestration |
 
 ### Consumers use public API only
 
@@ -162,6 +163,7 @@ Integration contributors SHOULD expose one or more of:
 
 - `setup`: build/initialize integration state.
 - `on_startup` / `on_shutdown`: runtime lifecycle hooks.
+- `preprocess_incoming_message`: transform inbound provider message before session/agent processing.
 - `augment_prompt_context`: contribute structured context data.
 - `register_sandbox_cli`: expose sandbox CLI surface.
 - `register_rpc_methods`: register RPC handlers.

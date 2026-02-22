@@ -39,6 +39,7 @@ async def compose_integrations(
     components.agent.install_integration_hooks(
         prompt_context_augmenters=runtime.prompt_context_augmenters(context),
         sandbox_env_augmenters=runtime.sandbox_env_augmenters(context),
+        incoming_message_preprocessors=runtime.incoming_message_preprocessors(context),
         message_postprocess_hooks=runtime.message_postprocess_hooks(context),
     )
     return runtime, context

@@ -35,7 +35,7 @@ Files: src/ash/providers/telegram/provider.py, src/ash/providers/telegram/handle
 
 - Support inline keyboards
 - Support document/file attachments
-- Full vision model integration for image analysis
+- Image understanding through integration preprocess hooks
 
 ## Group Chat
 
@@ -206,8 +206,8 @@ For streaming mode, balance responsiveness with API efficiency:
 | /start command | Send welcome message with bot introduction |
 | /help command | Send help message listing capabilities |
 | Photo message | Download photo, create IncomingMessage with image attachment |
-| Photo with caption | Process caption with image context |
-| Photo without caption | Acknowledge receipt, suggest adding caption |
+| Photo with caption | Analyze image and inject structured image context before agent processing |
+| Photo without caption | Analyze image and respond with concise description plus one clarifying follow-up question |
 | New session | Restore up to 50 messages from database |
 | Before processing | Set 👀 reaction, send typing indicator |
 | Tool execution | Show "Thinking..." message, update per tool |

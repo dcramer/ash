@@ -5,6 +5,7 @@ Spec contract: specs/subsystems.md (Integration Hooks).
 
 from ash.integrations.composer import active_integrations, compose_integrations
 from ash.integrations.defaults import DefaultIntegrations, create_default_integrations
+from ash.integrations.image import ImageIntegration
 from ash.integrations.memory import MemoryIntegration
 from ash.integrations.rpc import active_rpc_server
 from ash.integrations.runtime import (
@@ -17,6 +18,7 @@ from ash.integrations.scheduling import SchedulingIntegration
 
 __all__ = [
     "MemoryIntegration",
+    "ImageIntegration",
     "RuntimeRPCIntegration",
     "SchedulingIntegration",
     "compose_integrations",

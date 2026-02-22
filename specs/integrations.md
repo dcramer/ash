@@ -26,6 +26,9 @@ class ExampleIntegration(IntegrationContributor):
     def augment_sandbox_env(self, env, session, effective_user_id, context):
         return env
 
+    async def preprocess_incoming_message(self, message, context: IntegrationContext):
+        return message
+
     async def on_message_postprocess(
         self,
         user_message: str,
@@ -41,9 +44,10 @@ class ExampleIntegration(IntegrationContributor):
 1. Set stable `name` and `priority`; runtime ordering is `(priority, name)`.
 2. Keep hook behavior local to the integration domain.
 3. Post-turn behavior belongs in `on_message_postprocess`, not provider/core call sites.
-4. Register via shared composition (`create_default_integrations` + `compose_integrations`).
-5. Hook failures must be isolated per contributor and logged with hook + contributor metadata.
-6. Contributors that fail in `setup` are excluded from later hook/lifecycle execution.
+4. Pre-turn inbound transformations belong in `preprocess_incoming_message`.
+5. Register via shared composition (`create_default_integrations` + `compose_integrations`).
+6. Hook failures must be isolated per contributor and logged with hook + contributor metadata.
+7. Contributors that fail in `setup` are excluded from later hook/lifecycle execution.
 
 ## Testing Checklist
 

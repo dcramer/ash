@@ -244,6 +244,36 @@ class TestAgent:
         _, context = tool.execute_calls[0]
         assert context.env["HOOKED_USER"] == "user"
 
+    async def test_incoming_message_preprocessor_hook_applies(self, workspace):
+        registry = ToolRegistry()
+        agent = Agent(
+            llm=MockLLMProvider(responses=[Message(role=Role.ASSISTANT, content="ok")]),
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
+        )
+
+        async def add_image_context(message: IncomingMessage) -> IncomingMessage:
+            message.text = (
+                f"[IMAGE_CONTEXT]\n- summary: test\n[/IMAGE_CONTEXT]\n\n{message.text}"
+            )
+            message.metadata["image.processed"] = True
+            return message
+
+        agent.install_integration_hooks(
+            incoming_message_preprocessors=[add_image_context],
+        )
+
+        original = IncomingMessage(
+            id="m-1",
+            chat_id="c-1",
+            user_id="u-1",
+            text="what is this?",
+        )
+        updated = await agent.run_incoming_message_preprocessors(original)
+
+        assert "[IMAGE_CONTEXT]" in updated.text
+        assert updated.metadata["image.processed"] is True
+
     async def test_includes_recent_chat_messages_in_system_prompt(self, workspace):
         mock_llm = MockLLMProvider(
             responses=[Message(role=Role.ASSISTANT, content="Sounds good.")]

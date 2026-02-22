@@ -75,6 +75,15 @@ class _StubContributor(IntegrationContributor):
     ) -> None:
         self._events.append(("postprocess", self.name))
 
+    async def preprocess_incoming_message(
+        self,
+        message,
+        context: IntegrationContext,
+    ):
+        self._events.append(("incoming", self.name))
+        message.metadata[f"incoming_{self.name}"] = True
+        return message
+
 
 class _FailingContributor(_StubContributor):
     def __init__(
@@ -141,6 +150,15 @@ class _FailingContributor(_StubContributor):
         await super().on_message_postprocess(
             user_message, session, effective_user_id, context
         )
+
+    async def preprocess_incoming_message(
+        self,
+        message,
+        context: IntegrationContext,
+    ):
+        if self._fail_in == "preprocess_incoming_message":
+            raise RuntimeError("incoming preprocess failure")
+        return await super().preprocess_incoming_message(message, context)
 
 
 def _context() -> IntegrationContext:
@@ -246,6 +264,37 @@ async def test_integration_runtime_builds_postprocess_hooks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_integration_runtime_builds_incoming_message_preprocessors() -> None:
+    from ash.providers.base import IncomingMessage
+
+    events: list[tuple[str, str]] = []
+    runtime = IntegrationRuntime(
+        [
+            _StubContributor(name="a", priority=10, events=events),
+            _StubContributor(name="b", priority=20, events=events),
+        ]
+    )
+    context = _context()
+    message = IncomingMessage(
+        id="m-1",
+        chat_id="c-1",
+        user_id="u-1",
+        text="hello",
+    )
+
+    current = message
+    for hook in runtime.incoming_message_preprocessors(context):
+        current = await hook(current)
+
+    assert current.metadata["incoming_a"] is True
+    assert current.metadata["incoming_b"] is True
+    assert events == [
+        ("incoming", "a"),
+        ("incoming", "b"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_integration_runtime_setup_failure_disables_only_failing_contributor() -> (
     None
 ):
@@ -328,10 +377,12 @@ async def test_compose_integrations_runs_setup_and_installs_hooks() -> None:
             *,
             prompt_context_augmenters=None,
             sandbox_env_augmenters=None,
+            incoming_message_preprocessors=None,
             message_postprocess_hooks=None,
         ) -> None:
             self.prompt_hooks = prompt_context_augmenters
             self.env_hooks = sandbox_env_augmenters
+            self.incoming_hooks = incoming_message_preprocessors
             self.postprocess_hooks = message_postprocess_hooks
 
     config = AshConfig(
@@ -352,9 +403,11 @@ async def test_compose_integrations_runs_setup_and_installs_hooks() -> None:
     assert events == [("setup", "x")]
     assert fake_agent.prompt_hooks is not None
     assert fake_agent.env_hooks is not None
+    assert fake_agent.incoming_hooks is not None
     assert fake_agent.postprocess_hooks is not None
     assert len(fake_agent.prompt_hooks) == 1
     assert len(fake_agent.env_hooks) == 1
+    assert len(fake_agent.incoming_hooks) == 1
     assert len(fake_agent.postprocess_hooks) == 1
 
 
@@ -368,11 +421,13 @@ async def test_active_integrations_runs_full_lifecycle() -> None:
             *,
             prompt_context_augmenters=None,
             sandbox_env_augmenters=None,
+            incoming_message_preprocessors=None,
             message_postprocess_hooks=None,
         ) -> None:
             _ = (
                 prompt_context_augmenters,
                 sandbox_env_augmenters,
+                incoming_message_preprocessors,
                 message_postprocess_hooks,
             )
 
@@ -414,9 +469,14 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
             *,
             prompt_context_augmenters=None,
             sandbox_env_augmenters=None,
+            incoming_message_preprocessors=None,
             message_postprocess_hooks=None,
         ) -> None:
-            _ = (prompt_context_augmenters, sandbox_env_augmenters)
+            _ = (
+                prompt_context_augmenters,
+                sandbox_env_augmenters,
+                incoming_message_preprocessors,
+            )
             self.postprocess_hooks = message_postprocess_hooks
 
     class _FakeMemoryPostprocessService:

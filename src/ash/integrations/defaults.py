@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ash.integrations.image import ImageIntegration
 from ash.integrations.memory import MemoryIntegration
 from ash.integrations.runtime import IntegrationMode
 from ash.integrations.runtime_rpc import RuntimeRPCIntegration
@@ -25,8 +26,12 @@ class DefaultIntegrations:
     scheduling: SchedulingIntegration | None = None
 
 
-def _create_chat_integrations(*, include_memory: bool) -> DefaultIntegrations:
+def _create_chat_integrations(
+    *, include_memory: bool, include_image: bool
+) -> DefaultIntegrations:
     contributors: list[IntegrationContributor] = []
+    if include_image:
+        contributors.append(ImageIntegration())
     if include_memory:
         contributors.append(MemoryIntegration())
     return DefaultIntegrations(contributors=contributors)
@@ -35,6 +40,7 @@ def _create_chat_integrations(*, include_memory: bool) -> DefaultIntegrations:
 def _create_eval_integrations(
     *,
     include_memory: bool,
+    include_image: bool,
     schedule_file: Path | None,
 ) -> DefaultIntegrations:
     if schedule_file is None:
@@ -42,6 +48,8 @@ def _create_eval_integrations(
 
     scheduling = SchedulingIntegration(schedule_file)
     contributors: list[IntegrationContributor] = [scheduling]
+    if include_image:
+        contributors.append(ImageIntegration())
     if include_memory:
         contributors.append(MemoryIntegration())
     return DefaultIntegrations(contributors=contributors, scheduling=scheduling)
@@ -50,6 +58,7 @@ def _create_eval_integrations(
 def _create_serve_integrations(
     *,
     include_memory: bool,
+    include_image: bool,
     schedule_file: Path | None,
     logs_path: Path | None,
     timezone: str,
@@ -69,6 +78,8 @@ def _create_serve_integrations(
     )
 
     contributors: list[IntegrationContributor] = [RuntimeRPCIntegration(logs_path)]
+    if include_image:
+        contributors.append(ImageIntegration())
     if include_memory:
         contributors.append(MemoryIntegration())
     contributors.append(scheduling)
@@ -79,6 +90,7 @@ def create_default_integrations(
     *,
     mode: IntegrationMode,
     include_memory: bool = True,
+    include_image: bool = True,
     schedule_file: Path | None = None,
     logs_path: Path | None = None,
     timezone: str = "UTC",
@@ -90,6 +102,7 @@ def create_default_integrations(
     if mode == "serve":
         return _create_serve_integrations(
             include_memory=include_memory,
+            include_image=include_image,
             schedule_file=schedule_file,
             logs_path=logs_path,
             timezone=timezone,
@@ -98,10 +111,14 @@ def create_default_integrations(
             agent_executor=agent_executor,
         )
     if mode == "chat":
-        return _create_chat_integrations(include_memory=include_memory)
+        return _create_chat_integrations(
+            include_memory=include_memory,
+            include_image=include_image,
+        )
     if mode == "eval":
         return _create_eval_integrations(
             include_memory=include_memory,
+            include_image=include_image,
             schedule_file=schedule_file,
         )
     raise ValueError(f"unsupported integration mode: {mode}")

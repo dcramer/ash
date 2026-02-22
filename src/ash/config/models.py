@@ -199,6 +199,20 @@ class MemoryConfig(BaseModel):
     )
 
 
+class ImageConfig(BaseModel):
+    """Configuration for image understanding on inbound provider messages."""
+
+    enabled: bool = True
+    provider: Literal["openai"] = "openai"
+    model: str | None = None  # Model alias or provider model name (None = use default)
+    max_images_per_message: int = 1
+    max_image_bytes: int = 8_000_000
+    request_timeout_seconds: float = 12.0
+    include_ocr_text: bool = True
+    inject_position: Literal["prepend", "append"] = "prepend"
+    no_caption_auto_respond: bool = True
+
+
 class ConversationConfig(BaseModel):
     """Configuration for conversation context management."""
 
@@ -335,6 +349,7 @@ class AshConfig(BaseModel):
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    image: ImageConfig = Field(default_factory=ImageConfig)
     conversation: ConversationConfig = Field(default_factory=ConversationConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     embeddings: EmbeddingsConfig | None = None

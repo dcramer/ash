@@ -11,13 +11,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeVar
 
-from ash.core.types import PromptContextAugmenter, SandboxEnvAugmenter
+from ash.core.types import (
+    IncomingMessagePreprocessor,
+    PromptContextAugmenter,
+    SandboxEnvAugmenter,
+)
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
     from ash.core.prompt import PromptContext
     from ash.core.session import SessionState
     from ash.core.types import AgentComponents, MessagePostprocessHook
+    from ash.providers.base import IncomingMessage
     from ash.rpc.server import RPCServer
 
 T = TypeVar("T")
@@ -79,6 +84,14 @@ class IntegrationContributor:
     ) -> dict[str, str]:
         """Augment sandbox env for tool execution."""
         return env
+
+    async def preprocess_incoming_message(
+        self,
+        message: IncomingMessage,
+        context: IntegrationContext,
+    ) -> IncomingMessage:
+        """Preprocess provider incoming messages before session processing."""
+        return message
 
     async def on_message_postprocess(
         self,
@@ -234,6 +247,28 @@ class IntegrationRuntime:
                         hook_name="on_message_postprocess",
                         contributor=contributor,
                     )
+
+            return _hook
+
+        return self._build_hooks(_factory)
+
+    def incoming_message_preprocessors(
+        self, context: IntegrationContext
+    ) -> list[IncomingMessagePreprocessor]:
+        def _factory(
+            contributor: IntegrationContributor,
+        ) -> IncomingMessagePreprocessor:
+            async def _hook(message: IncomingMessage) -> IncomingMessage:
+                try:
+                    return await contributor.preprocess_incoming_message(
+                        message, context
+                    )
+                except Exception:
+                    self._log_hook_failure(
+                        hook_name="preprocess_incoming_message",
+                        contributor=contributor,
+                    )
+                    return message
 
             return _hook
 

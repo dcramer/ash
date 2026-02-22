@@ -63,6 +63,7 @@ Use `/dex-plan` to create tasks from planning docs (specs, roadmaps).
 | `specs/skills.md` | Creating or modifying skills |
 | `specs/interactive-agents.md` | Agent/subagent stack communication |
 | `specs/subsystems.md` | Public API patterns |
+| `specs/images.md` | Inbound image understanding integration |
 
 ## Terminology
 

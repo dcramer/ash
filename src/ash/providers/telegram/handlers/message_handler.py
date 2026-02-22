@@ -302,13 +302,7 @@ class TelegramMessageHandler:
     ) -> None:
         """Inner implementation of _process_single_message (runs with log context)."""
         await self._provider.set_reaction(message.chat_id, message.id, "👀")
-
-        if message.has_images:
-            try:
-                await self._handle_image_message(message)
-            finally:
-                await self._provider.clear_reaction(message.chat_id, message.id)
-            return
+        message = await self._agent.run_incoming_message_preprocessors(message)
 
         # Check if there's an active interactive subagent stack for this session
         thread_id = message.metadata.get("thread_id")
@@ -829,87 +823,6 @@ class TelegramMessageHandler:
                 reply_to_message_id=message.id,
             )
         )
-
-    async def _handle_image_message(self, message: IncomingMessage) -> None:
-        """Handle a message containing images."""
-        logger.info(
-            "user_message_received_image",
-            extra={
-                "username": message.username or message.user_id,
-                "input.preview": _truncate(message.text) if message.text else "[image]",
-            },
-        )
-
-        if not message.text:
-            response_text = (
-                "I received your image! Image analysis isn't fully supported yet, "
-                "but you can add a caption to tell me what you'd like to know about it."
-            )
-            await self._provider.send(
-                OutgoingMessage(
-                    chat_id=message.chat_id,
-                    text=response_text,
-                    reply_to_message_id=message.id,
-                )
-            )
-            self._log_response(response_text)
-            return
-
-        session = await self._session_handler.get_or_create_session(message)
-        image = message.images[0]
-        image_context = "[User sent an image"
-        if image.width and image.height:
-            image_context += f" ({image.width}x{image.height})"
-        image_context += f"]\n\n{message.text}"
-
-        await self._provider.send_typing(message.chat_id)
-        tracker = self._create_tool_tracker(message)
-
-        if self._streaming:
-            response_content = ""
-            async for chunk in self._agent.process_message_streaming(
-                image_context,
-                session,
-                user_id=message.user_id,
-                on_tool_start=tracker.on_tool_start,
-            ):
-                response_content += chunk
-            sent_message_id = await tracker.finalize_response(response_content)
-            await self._session_handler.persist_messages(
-                message.chat_id,
-                message.user_id,
-                image_context,
-                response_content,
-                external_id=message.id,
-                response_external_id=sent_message_id,
-                username=message.username,
-                display_name=message.display_name,
-                thread_id=message.metadata.get("thread_id"),
-                branch_id=session.context.branch_id,
-            )
-            self._log_response(response_content)
-        else:
-            response = await self._agent.process_message(
-                image_context,
-                session,
-                user_id=message.user_id,
-                on_tool_start=tracker.on_tool_start,
-            )
-            sent_message_id = await tracker.finalize_response(response.text or "")
-            await self._session_handler.persist_messages(
-                message.chat_id,
-                message.user_id,
-                image_context,
-                response.text,
-                external_id=message.id,
-                response_external_id=sent_message_id,
-                compaction=response.compaction,
-                username=message.username,
-                display_name=message.display_name,
-                thread_id=message.metadata.get("thread_id"),
-                branch_id=session.context.branch_id,
-            )
-            self._log_response(response.text)
 
     def _store_checkpoint(
         self,

@@ -26,6 +26,7 @@ from ash.core.types import (
     AgentResponse,
     CompactionInfo,
     GetSteeringMessagesCallback,
+    IncomingMessagePreprocessor,
     MessagePostprocessHook,
     OnToolStartCallback,
     PromptContextAugmenter,
@@ -151,6 +152,7 @@ class Agent:
         mount_prefix: str = "/ash",
         prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
         sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
+        incoming_message_preprocessors: list[IncomingMessagePreprocessor] | None = None,
         message_postprocess_hooks: list[MessagePostprocessHook] | None = None,
     ):
         """Initialize agent.
@@ -166,6 +168,7 @@ class Agent:
             mount_prefix: Sandbox mount prefix for container paths.
             prompt_context_augmenters: Optional hooks for prompt context augmentation.
             sandbox_env_augmenters: Optional hooks for sandbox environment augmentation.
+            incoming_message_preprocessors: Optional hooks for inbound message preprocessing.
             message_postprocess_hooks: Optional hooks run after a user turn.
         """
         self._llm = llm
@@ -180,6 +183,9 @@ class Agent:
         self._mount_prefix = mount_prefix
         self._prompt_context_augmenters = tuple(prompt_context_augmenters or [])
         self._sandbox_env_augmenters = tuple(sandbox_env_augmenters or [])
+        self._incoming_message_preprocessors = tuple(
+            incoming_message_preprocessors or []
+        )
         self._message_postprocess_hooks = tuple(message_postprocess_hooks or [])
 
     def install_integration_hooks(
@@ -187,12 +193,29 @@ class Agent:
         *,
         prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
         sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
+        incoming_message_preprocessors: list[IncomingMessagePreprocessor] | None = None,
         message_postprocess_hooks: list[MessagePostprocessHook] | None = None,
     ) -> None:
         """Install integration hooks after agent construction."""
         self._prompt_context_augmenters = tuple(prompt_context_augmenters or [])
         self._sandbox_env_augmenters = tuple(sandbox_env_augmenters or [])
+        self._incoming_message_preprocessors = tuple(
+            incoming_message_preprocessors or []
+        )
         self._message_postprocess_hooks = tuple(message_postprocess_hooks or [])
+
+    async def run_incoming_message_preprocessors(
+        self,
+        message: IncomingMessage,
+    ) -> IncomingMessage:
+        """Run incoming message preprocessors in order."""
+        current = message
+        for hook in self._incoming_message_preprocessors:
+            try:
+                current = await hook(current)
+            except Exception:
+                logger.warning("incoming_message_preprocessor_failed", exc_info=True)
+        return current
 
     def _apply_prompt_context_hooks(
         self,
@@ -957,6 +980,7 @@ async def create_agent(
     model_alias: str = "default",
     prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
     sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
+    incoming_message_preprocessors: list[IncomingMessagePreprocessor] | None = None,
     message_postprocess_hooks: list[MessagePostprocessHook] | None = None,
 ) -> AgentComponents:
     # Harness composition boundary.
@@ -1094,6 +1118,7 @@ async def create_agent(
         mount_prefix=config.sandbox.mount_prefix,
         prompt_context_augmenters=prompt_context_augmenters,
         sandbox_env_augmenters=sandbox_env_augmenters,
+        incoming_message_preprocessors=incoming_message_preprocessors,
         message_postprocess_hooks=message_postprocess_hooks,
         config=AgentConfig(
             model=model_config.model,
