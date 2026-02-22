@@ -78,9 +78,10 @@ class ImageIntegration(IntegrationContributor):
         try:
             updated = await self._service.preprocess_message(message)
         except Exception as e:
+            duration_ms = int((time.monotonic() - started) * 1000)
             logger.warning(
                 "image_preprocess_failed",
-                extra={"error.message": str(e)},
+                extra={"error.message": str(e), "duration_ms": duration_ms},
             )
             # Keep flow safe and deterministic: no image context on failure.
             if (
@@ -93,11 +94,25 @@ class ImageIntegration(IntegrationContributor):
                 )
             return message
 
+        duration_ms = int((time.monotonic() - started) * 1000)
+        if not bool(updated.metadata.get("image.processed")):
+            logger.warning(
+                "image_preprocess_skipped",
+                extra={
+                    "skip_reason": str(
+                        updated.metadata.get("image.skip_reason") or "unknown"
+                    ),
+                    "image.count": len(message.images),
+                    "duration_ms": duration_ms,
+                },
+            )
+            return updated
+
         logger.info(
             "image_preprocess_succeeded",
             extra={
                 "image.count": len(message.images),
-                "duration_ms": int((time.monotonic() - started) * 1000),
+                "duration_ms": duration_ms,
             },
         )
         return updated

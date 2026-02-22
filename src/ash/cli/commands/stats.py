@@ -67,6 +67,25 @@ class MemoryQualityStats:
     last_seen: datetime | None = None
 
 
+@dataclass
+class VisionStats:
+    """Aggregated image preprocessing counters from logs."""
+
+    runs_started: int = 0
+    runs_succeeded: int = 0
+    runs_failed: int = 0
+    runs_skipped: int = 0
+    images_started: int = 0
+    images_succeeded: int = 0
+    success_duration_ms_total: int = 0
+    skipped_no_usable_images: int = 0
+    skipped_missing_openai_api_key: int = 0
+    skipped_unsupported_provider: int = 0
+    skipped_invalid_image_model_config: int = 0
+    skipped_other: int = 0
+    last_seen: datetime | None = None
+
+
 def register(app: typer.Typer) -> None:
     """Register stats/info commands."""
 
@@ -192,6 +211,43 @@ def _render_stats() -> None:
     quality_table.add_row("Last quality event", _format_dt(quality.last_seen))
     console.print(quality_table)
 
+    vision = _collect_vision_stats()
+    vision_table = create_table(
+        "Vision (from logs)",
+        [
+            ("Metric", "cyan"),
+            ("Value", "green"),
+        ],
+    )
+    vision_table.add_row("Runs started", str(vision.runs_started))
+    vision_table.add_row("Runs succeeded", str(vision.runs_succeeded))
+    vision_table.add_row("Runs failed", str(vision.runs_failed))
+    vision_table.add_row("Runs skipped", str(vision.runs_skipped))
+    vision_table.add_row("Images started", str(vision.images_started))
+    vision_table.add_row("Images succeeded", str(vision.images_succeeded))
+    avg_success_ms = (
+        f"{vision.success_duration_ms_total / vision.runs_succeeded:.1f} ms"
+        if vision.runs_succeeded
+        else "-"
+    )
+    vision_table.add_row("Avg success latency", avg_success_ms)
+    vision_table.add_row(
+        "Skipped (no usable images)", str(vision.skipped_no_usable_images)
+    )
+    vision_table.add_row(
+        "Skipped (missing OpenAI key)", str(vision.skipped_missing_openai_api_key)
+    )
+    vision_table.add_row(
+        "Skipped (unsupported provider)", str(vision.skipped_unsupported_provider)
+    )
+    vision_table.add_row(
+        "Skipped (invalid image model config)",
+        str(vision.skipped_invalid_image_model_config),
+    )
+    vision_table.add_row("Skipped (other)", str(vision.skipped_other))
+    vision_table.add_row("Last vision event", _format_dt(vision.last_seen))
+    console.print(vision_table)
+
 
 def _collect_dir_stats(path: Path) -> DirStats:
     file_count = 0
@@ -284,6 +340,69 @@ def _collect_memory_quality_stats() -> MemoryQualityStats:
                         stats.verification_dropped_low_utility += int(
                             record.get("fact.dropped_low_utility", 0) or 0
                         )
+
+                    ts = record.get("ts")
+                    if isinstance(ts, str):
+                        try:
+                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        except ValueError:
+                            continue
+                        if stats.last_seen is None or dt > stats.last_seen:
+                            stats.last_seen = dt
+        except OSError:
+            continue
+
+    return stats
+
+
+def _collect_vision_stats() -> VisionStats:
+    stats = VisionStats()
+    logs_dir = get_logs_path()
+    if not logs_dir.exists():
+        return stats
+
+    log_files = sorted(logs_dir.glob("*.jsonl"), reverse=True)[:7]
+    for path in log_files:
+        try:
+            with path.open() as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+
+                    message = record.get("message")
+                    if message == "image_preprocess_started":
+                        stats.runs_started += 1
+                        stats.images_started += int(record.get("image.count", 0) or 0)
+                    elif message == "image_preprocess_succeeded":
+                        stats.runs_succeeded += 1
+                        stats.images_succeeded += int(record.get("image.count", 0) or 0)
+                        stats.success_duration_ms_total += int(
+                            record.get("duration_ms", 0) or 0
+                        )
+                    elif message == "image_preprocess_failed":
+                        stats.runs_failed += 1
+                    elif message == "image_preprocess_skipped":
+                        stats.runs_skipped += 1
+                        skip_reason = str(record.get("skip_reason", "") or "").strip()
+                        if skip_reason == "no_usable_images":
+                            stats.skipped_no_usable_images += 1
+                        elif skip_reason == "missing_openai_api_key":
+                            stats.skipped_missing_openai_api_key += 1
+                        elif skip_reason == "unsupported_provider":
+                            stats.skipped_unsupported_provider += 1
+                        elif skip_reason == "invalid_image_model_config":
+                            stats.skipped_invalid_image_model_config += 1
+                        else:
+                            stats.skipped_other += 1
+                    else:
+                        continue
 
                     ts = record.get("ts")
                     if isinstance(ts, str):

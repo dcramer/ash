@@ -677,6 +677,10 @@ class TestStatsCommand:
                 [
                     '{"ts":"2026-02-22T10:00:00+00:00","message":"memory_extraction_filter_stats","fact.total_candidates":5,"fact.accepted_count":3,"fact.dropped_low_confidence":1,"fact.dropped_secret":1}',
                     '{"ts":"2026-02-22T10:01:00+00:00","message":"memory_verification_stats","fact.total_candidates":3,"fact.accepted_count":2,"fact.rewritten_count":1,"fact.dropped_ambiguous":1,"fact.dropped_meta_system":0,"fact.dropped_stale_status":0,"fact.dropped_low_utility":0}',
+                    '{"ts":"2026-02-22T10:02:00+00:00","message":"image_preprocess_started","image.count":1}',
+                    '{"ts":"2026-02-22T10:02:01+00:00","message":"image_preprocess_succeeded","image.count":1,"duration_ms":120}',
+                    '{"ts":"2026-02-22T10:03:00+00:00","message":"image_preprocess_skipped","skip_reason":"no_usable_images","image.count":1,"duration_ms":4}',
+                    '{"ts":"2026-02-22T10:04:00+00:00","message":"image_preprocess_failed","error.message":"timeout","duration_ms":8000}',
                 ]
             )
             + "\n"
@@ -695,3 +699,10 @@ class TestStatsCommand:
         assert "Extraction runs" in result.stdout
         assert "Verification runs" in result.stdout
         assert "Verification rewritten" in result.stdout
+        assert "Vision (from logs)" in result.stdout
+        assert "Runs started" in result.stdout
+        assert "Runs succeeded" in result.stdout
+        assert "Runs failed" in result.stdout
+        assert "Runs skipped" in result.stdout
+        assert "Avg success latency" in result.stdout
+        assert "Skipped (no usable images)" in result.stdout

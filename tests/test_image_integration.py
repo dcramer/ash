@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -185,3 +186,36 @@ async def test_image_integration_passes_resolved_openai_api_key(monkeypatch) -> 
     await integration.setup(context)
 
     assert captured["api_key"] == "sk-test"
+
+
+@pytest.mark.asyncio
+async def test_image_integration_logs_skipped_when_no_usable_images(
+    monkeypatch, caplog
+) -> None:
+    monkeypatch.setattr(
+        "ash.integrations.image.OpenAIImageProvider",
+        lambda api_key=None: _FakeImageProvider(),
+    )
+    config = _config()
+    config.openai = ProviderConfig(api_key=SecretStr("sk-test"))
+    context = IntegrationContext(
+        config=config,
+        components=cast(Any, SimpleNamespace()),
+        mode="serve",
+    )
+    integration = ImageIntegration()
+    await integration.setup(context)
+
+    message = IncomingMessage(
+        id="m-1",
+        chat_id="c-1",
+        user_id="u-1",
+        text="",
+        images=[ImageAttachment(file_id="file-1", mime_type="image/png", data=None)],
+    )
+
+    caplog.set_level(logging.INFO, logger="image")
+    await integration.preprocess_incoming_message(message, context)
+
+    assert any(r.message == "image_preprocess_skipped" for r in caplog.records)
+    assert not any(r.message == "image_preprocess_succeeded" for r in caplog.records)
