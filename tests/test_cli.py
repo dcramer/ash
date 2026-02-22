@@ -632,3 +632,34 @@ class TestStatsCommand:
 
         assert result.exit_code == 0
         assert "Ash Home" in result.stdout
+
+    def test_stats_includes_memory_quality_from_logs(
+        self, cli_runner, monkeypatch, tmp_path
+    ):
+        ash_home = tmp_path / ".ash"
+        logs = ash_home / "logs"
+        logs.mkdir(parents=True)
+        (ash_home / "config.toml").write_text("[models.default]\nprovider='openai'\n")
+        (logs / "2026-02-22.jsonl").write_text(
+            "\n".join(
+                [
+                    '{"ts":"2026-02-22T10:00:00+00:00","message":"memory_extraction_filter_stats","fact.total_candidates":5,"fact.accepted_count":3,"fact.dropped_low_confidence":1,"fact.dropped_secret":1}',
+                    '{"ts":"2026-02-22T10:01:00+00:00","message":"memory_verification_stats","fact.total_candidates":3,"fact.accepted_count":2,"fact.rewritten_count":1,"fact.dropped_ambiguous":1,"fact.dropped_meta_system":0,"fact.dropped_stale_status":0,"fact.dropped_low_utility":0}',
+                ]
+            )
+            + "\n"
+        )
+
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = cli_runner.invoke(app, ["stats"])
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert result.exit_code == 0
+        assert "Memory Quality (from logs)" in result.stdout
+        assert "Extraction runs" in result.stdout
+        assert "Verification runs" in result.stdout
+        assert "Verification rewritten" in result.stdout

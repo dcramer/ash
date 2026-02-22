@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from ash.config.paths import (
     get_ash_home,
     get_auth_path,
     get_config_path,
+    get_logs_path,
     get_schedule_file,
 )
 
@@ -43,6 +45,26 @@ class DirStats:
     dir_count: int
     total_bytes: int
     latest_mtime: datetime | None
+
+
+@dataclass
+class MemoryQualityStats:
+    """Aggregated memory extraction/verification counters from logs."""
+
+    extraction_runs: int = 0
+    extraction_candidates: int = 0
+    extraction_accepted: int = 0
+    extraction_dropped_low_confidence: int = 0
+    extraction_dropped_secret: int = 0
+    verification_runs: int = 0
+    verification_candidates: int = 0
+    verification_accepted: int = 0
+    verification_rewritten: int = 0
+    verification_dropped_ambiguous: int = 0
+    verification_dropped_meta_system: int = 0
+    verification_dropped_stale_status: int = 0
+    verification_dropped_low_utility: int = 0
+    last_seen: datetime | None = None
 
 
 def register(app: typer.Typer) -> None:
@@ -126,6 +148,50 @@ def _render_stats() -> None:
         )
     console.print(file_table)
 
+    quality = _collect_memory_quality_stats()
+    quality_table = create_table(
+        "Memory Quality (from logs)",
+        [
+            ("Metric", "cyan"),
+            ("Value", "green"),
+        ],
+    )
+    quality_table.add_row("Extraction runs", str(quality.extraction_runs))
+    quality_table.add_row("Extraction candidates", str(quality.extraction_candidates))
+    quality_table.add_row("Extraction accepted", str(quality.extraction_accepted))
+    quality_table.add_row(
+        "Extraction dropped (low confidence)",
+        str(quality.extraction_dropped_low_confidence),
+    )
+    quality_table.add_row(
+        "Extraction dropped (secret)",
+        str(quality.extraction_dropped_secret),
+    )
+    quality_table.add_row("Verification runs", str(quality.verification_runs))
+    quality_table.add_row(
+        "Verification candidates", str(quality.verification_candidates)
+    )
+    quality_table.add_row("Verification accepted", str(quality.verification_accepted))
+    quality_table.add_row("Verification rewritten", str(quality.verification_rewritten))
+    quality_table.add_row(
+        "Verification dropped (ambiguous)",
+        str(quality.verification_dropped_ambiguous),
+    )
+    quality_table.add_row(
+        "Verification dropped (meta/system)",
+        str(quality.verification_dropped_meta_system),
+    )
+    quality_table.add_row(
+        "Verification dropped (stale status)",
+        str(quality.verification_dropped_stale_status),
+    )
+    quality_table.add_row(
+        "Verification dropped (low utility)",
+        str(quality.verification_dropped_low_utility),
+    )
+    quality_table.add_row("Last quality event", _format_dt(quality.last_seen))
+    console.print(quality_table)
+
 
 def _collect_dir_stats(path: Path) -> DirStats:
     file_count = 0
@@ -157,6 +223,80 @@ def _collect_dir_stats(path: Path) -> DirStats:
         total_bytes=total_bytes,
         latest_mtime=latest_mtime,
     )
+
+
+def _collect_memory_quality_stats() -> MemoryQualityStats:
+    stats = MemoryQualityStats()
+    logs_dir = get_logs_path()
+    if not logs_dir.exists():
+        return stats
+
+    log_files = sorted(logs_dir.glob("*.jsonl"), reverse=True)[:7]
+    for path in log_files:
+        try:
+            with path.open() as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+
+                    message = record.get("message")
+                    if message == "memory_extraction_filter_stats":
+                        stats.extraction_runs += 1
+                        stats.extraction_candidates += int(
+                            record.get("fact.total_candidates", 0) or 0
+                        )
+                        stats.extraction_accepted += int(
+                            record.get("fact.accepted_count", 0) or 0
+                        )
+                        stats.extraction_dropped_low_confidence += int(
+                            record.get("fact.dropped_low_confidence", 0) or 0
+                        )
+                        stats.extraction_dropped_secret += int(
+                            record.get("fact.dropped_secret", 0) or 0
+                        )
+                    elif message == "memory_verification_stats":
+                        stats.verification_runs += 1
+                        stats.verification_candidates += int(
+                            record.get("fact.total_candidates", 0) or 0
+                        )
+                        stats.verification_accepted += int(
+                            record.get("fact.accepted_count", 0) or 0
+                        )
+                        stats.verification_rewritten += int(
+                            record.get("fact.rewritten_count", 0) or 0
+                        )
+                        stats.verification_dropped_ambiguous += int(
+                            record.get("fact.dropped_ambiguous", 0) or 0
+                        )
+                        stats.verification_dropped_meta_system += int(
+                            record.get("fact.dropped_meta_system", 0) or 0
+                        )
+                        stats.verification_dropped_stale_status += int(
+                            record.get("fact.dropped_stale_status", 0) or 0
+                        )
+                        stats.verification_dropped_low_utility += int(
+                            record.get("fact.dropped_low_utility", 0) or 0
+                        )
+
+                    ts = record.get("ts")
+                    if isinstance(ts, str):
+                        try:
+                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        except ValueError:
+                            continue
+                        if stats.last_seen is None or dt > stats.last_seen:
+                            stats.last_seen = dt
+        except OSError:
+            continue
+
+    return stats
 
 
 def _format_bytes(value: int) -> str:
