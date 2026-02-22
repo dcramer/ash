@@ -62,6 +62,10 @@ chats_access = "ro"
 max_context_messages = 20
 context_token_budget = 100000
 
+[image]
+enabled = true
+provider = "openai"
+
 [sessions]
 mode = "persistent"
 max_concurrent = 2
@@ -99,6 +103,7 @@ model = "gpt-5.2"
 | `[telegram]` | Telegram provider settings |
 | `[sandbox]` | Sandbox runtime and mount settings |
 | `[memory]` | Memory retention and extraction tuning |
+| `[image]` | Vision/image understanding preprocessing |
 | `[conversation]` | Conversation context behavior |
 | `[sessions]` | Session runtime settings |
 | `[embeddings]` | Embedding provider/model |

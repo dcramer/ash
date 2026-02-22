@@ -132,6 +132,33 @@ extraction_verification_model = null
 | `extraction_verification_enabled` | bool | `true` |
 | `extraction_verification_model` | string \| null | `null` |
 
+## Vision (`[image]`)
+
+```toml
+[image]
+enabled = true
+provider = "openai"
+model = null
+max_images_per_message = 1
+max_image_bytes = 8000000
+request_timeout_seconds = 12.0
+include_ocr_text = true
+inject_position = "prepend"
+no_caption_auto_respond = true
+```
+
+| Key | Type | Default |
+|-----|------|---------|
+| `enabled` | bool | `true` |
+| `provider` | `openai` | `openai` |
+| `model` | string \| null | `null` |
+| `max_images_per_message` | int | `1` |
+| `max_image_bytes` | int | `8000000` |
+| `request_timeout_seconds` | float | `12.0` |
+| `include_ocr_text` | bool | `true` |
+| `inject_position` | `prepend` \| `append` | `prepend` |
+| `no_caption_auto_respond` | bool | `true` |
+
 ## Conversation (`[conversation]`)
 
 ```toml

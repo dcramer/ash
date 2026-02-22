@@ -590,6 +590,38 @@ class TestDoctorCommand:
         assert "invalid JSONL lines" in result.stdout
         assert "Doctor found non-blocking issues" in result.stdout
 
+    def test_doctor_warns_when_image_enabled_without_openai_key(
+        self, cli_runner, monkeypatch, tmp_path
+    ):
+        ash_home = tmp_path / ".ash"
+        ash_home.mkdir(parents=True, exist_ok=True)
+        (ash_home / "config.toml").write_text(
+            "\n".join(
+                [
+                    "[models.default]",
+                    "provider='openai'",
+                    "model='gpt-5.2'",
+                    "",
+                    "[image]",
+                    "enabled=true",
+                    "provider='openai'",
+                ]
+            )
+            + "\n"
+        )
+
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = cli_runner.invoke(app, ["doctor"])
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert result.exit_code == 0
+        assert "OpenAI API key is" in result.stdout
+        assert "OPENAI_API_KEY" in result.stdout
+
 
 class TestStatsCommand:
     """Tests for `ash stats` and `ash info`."""

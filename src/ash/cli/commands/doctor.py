@@ -6,14 +6,16 @@ import json
 import os
 import stat
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 
 from ash.cli.console import console, create_table, dim, error, success, warning
 from ash.cli.doctor_utils import DoctorFinding, DoctorResult
+from ash.config import load_config
 from ash.config.paths import (
     get_ash_home,
+    get_config_path,
     get_graph_dir,
     get_logs_path,
     get_run_path,
@@ -22,6 +24,9 @@ from ash.config.paths import (
 )
 
 SESSION_VERSION = "2"
+
+if TYPE_CHECKING:
+    from ash.config import AshConfig
 
 
 def register(app: typer.Typer) -> None:
@@ -42,6 +47,7 @@ def run_doctor_checks() -> DoctorResult:
 
     findings.extend(_check_home())
     findings.extend(_check_runtime_artifacts())
+    findings.extend(_check_config())
     findings.extend(_check_schedule_file())
     findings.extend(_check_sessions_jsonl())
     findings.extend(_check_graph_state())
@@ -219,6 +225,132 @@ def _check_runtime_artifacts() -> list[DoctorFinding]:
                     detail=f"failed to stat socket path: {sock_path}",
                 )
             )
+
+    return findings
+
+
+def _check_config() -> list[DoctorFinding]:
+    config_path = get_config_path()
+    if not config_path.exists():
+        return [
+            DoctorFinding(
+                level="ok",
+                check="config.file",
+                detail=f"config file not present: {config_path}",
+                repair="Run `ash init` to create a starter config",
+            )
+        ]
+
+    try:
+        config = load_config(config_path)
+    except Exception:
+        return [
+            DoctorFinding(
+                level="warning",
+                check="config.parse",
+                detail=f"failed to parse/validate config: {config_path}",
+                repair=f"Run `ash config validate --path {config_path}`",
+            )
+        ]
+
+    findings: list[DoctorFinding] = [
+        DoctorFinding(
+            level="ok",
+            check="config.parse",
+            detail=f"config parsed successfully: {config_path}",
+        )
+    ]
+    findings.extend(_check_image_config(config))
+    return findings
+
+
+def _check_image_config(config: AshConfig) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    image_cfg = config.image
+
+    if not image_cfg.enabled:
+        findings.append(
+            DoctorFinding(
+                level="ok",
+                check="config.image.enabled",
+                detail="image understanding disabled",
+            )
+        )
+        return findings
+
+    if image_cfg.provider != "openai":
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.image.provider",
+                detail=f"unsupported image provider: {image_cfg.provider}",
+                repair='Set `[image].provider = "openai"`',
+            )
+        )
+        return findings
+
+    api_key = config.resolve_provider_api_key("openai")
+    if not api_key or not api_key.get_secret_value().strip():
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.image.openai_api_key",
+                detail="image enabled but OpenAI API key is missing",
+                repair="Set `[openai].api_key` or `OPENAI_API_KEY`",
+            )
+        )
+    else:
+        findings.append(
+            DoctorFinding(
+                level="ok",
+                check="config.image.openai_api_key",
+                detail="OpenAI API key configured for image understanding",
+            )
+        )
+
+    image_model = (image_cfg.model or "").strip()
+    if image_model:
+        if "/" in image_model:
+            provider, model = image_model.split("/", 1)
+            if provider.lower() != "openai" or not model.strip():
+                findings.append(
+                    DoctorFinding(
+                        level="warning",
+                        check="config.image.model",
+                        detail=f"invalid image model reference: {image_model}",
+                        repair="Use `openai/<model>` or an alias that resolves to OpenAI",
+                    )
+                )
+        elif image_model in config.models:
+            alias_model = config.get_model(image_model)
+            if alias_model.provider != "openai":
+                findings.append(
+                    DoctorFinding(
+                        level="warning",
+                        check="config.image.model",
+                        detail=f"image model alias is not OpenAI-backed: {image_model}",
+                        repair="Point `[image].model` to an OpenAI model/alias",
+                    )
+                )
+
+    if image_cfg.max_images_per_message <= 0:
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.image.max_images_per_message",
+                detail=f"invalid value: {image_cfg.max_images_per_message}",
+                repair="Set `[image].max_images_per_message` to >= 1",
+            )
+        )
+    if image_cfg.max_image_bytes <= 0:
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.image.max_image_bytes",
+                detail=f"invalid value: {image_cfg.max_image_bytes}",
+                repair="Set `[image].max_image_bytes` to a positive integer",
+            )
+        )
 
     return findings
 
