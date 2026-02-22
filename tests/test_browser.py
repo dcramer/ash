@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ash.browser.manager import BrowserManager
+from ash.browser.manager import BrowserManager, create_browser_manager
 from ash.browser.providers.base import (
     ProviderExtractResult,
     ProviderGotoResult,
@@ -347,3 +347,46 @@ async def test_browser_manager_requires_sandbox_runtime_when_enabled(
     )
     assert started.ok is False
     assert started.error_code == "sandbox_runtime_required"
+
+
+@pytest.mark.asyncio
+async def test_create_browser_manager_omits_kernel_when_unconfigured(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("KERNEL_API_KEY", raising=False)
+    cfg = AshConfig(
+        workspace=tmp_path / "workspace",
+        models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
+        browser=BrowserConfig(
+            provider="sandbox",
+            sandbox=BrowserSandboxConfig(runtime_required=False),
+            state_dir=tmp_path / "browser-state",
+        ),
+    )
+    manager = create_browser_manager(cfg)
+
+    attempted = await manager.execute_action(
+        action="session.start",
+        effective_user_id="u1",
+        provider_name="kernel",
+    )
+    assert attempted.ok is False
+    assert attempted.error_code == "invalid_provider"
+
+
+def test_create_browser_manager_includes_kernel_when_default_provider_kernel(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("KERNEL_API_KEY", raising=False)
+    cfg = AshConfig(
+        workspace=tmp_path / "workspace",
+        models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
+        browser=BrowserConfig(
+            provider="kernel",
+            sandbox=BrowserSandboxConfig(runtime_required=False),
+            state_dir=tmp_path / "browser-state",
+        ),
+    )
+    manager = create_browser_manager(cfg)
+
+    assert "kernel" in manager._providers

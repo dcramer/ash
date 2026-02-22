@@ -844,8 +844,11 @@ def create_browser_manager(config: AshConfig) -> BrowserManager:
             browser_channel=config.browser.sandbox.browser_channel,
             viewport_width=config.browser.default_viewport_width,
             viewport_height=config.browser.default_viewport_height,
-        ),
-        "kernel": KernelBrowserProvider(
+        )
+    }
+    # Only expose Kernel when configured explicitly or when credentials exist.
+    if kernel_key or browser_cfg.provider == "kernel":
+        providers["kernel"] = KernelBrowserProvider(
             api_key=kernel_key,
             base_url=config.browser.kernel.base_url
             if config.browser.kernel
@@ -853,8 +856,7 @@ def create_browser_manager(config: AshConfig) -> BrowserManager:
             project_id=config.browser.kernel.project_id
             if config.browser.kernel
             else None,
-        ),
-    }
+        )
     return BrowserManager(config=config, store=store, providers=providers)
 
 
