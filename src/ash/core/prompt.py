@@ -547,16 +547,21 @@ class SystemPromptBuilder:
                     "",
                     "Times default to the user's local timezone. Never convert to UTC.",
                     "If the user specifies a different timezone, use `--tz` to override:",
+                    "- If user asks for UTC specifically, pass `--tz UTC` and use the intended UTC time directly.",
+                    "- Do not silently map UTC requests to local-time cron without explicit confirmation.",
                     "",
                     "One-time: `ash-sb schedule create 'check build' --at 'in 2 hours'`",
                     "Recurring: `ash-sb schedule create 'standup' --cron '0 9 * * 1-5'`",
                     "With timezone: `ash-sb schedule create 'standup' --cron '0 10 * * 1-5' --tz America/New_York`",
+                    "UTC example: `ash-sb schedule create 'review tasks' --cron '0 8 * * *' --tz UTC`",
                     "",
                     "Write task messages as self-contained instructions for a future agent with no conversation history.",
                     "- BAD: 'remind me about buses'",
                     "- GOOD: 'check bus arrivals for route 40 at 3rd & Pike and report them'",
                     "",
                     "Confirm scheduled times in the user's local timezone.",
+                    "If a schedule command fails (non-zero exit code, Usage, or Error output), fix and retry before responding.",
+                    "Never claim a reminder was created unless the command succeeded.",
                 ]
             )
         else:
