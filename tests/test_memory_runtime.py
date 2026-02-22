@@ -147,3 +147,46 @@ async def test_initialize_memory_runtime_tolerates_extractor_init_failure(
 
     assert runtime.store is fake_store
     assert runtime.extractor is None
+
+
+@pytest.mark.asyncio
+async def test_initialize_memory_runtime_can_skip_extractor_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    fake_store = cast(Any, SimpleNamespace())
+
+    monkeypatch.setattr(
+        AshConfig,
+        "resolve_embeddings_api_key",
+        lambda _self: SecretStr("embed-key"),
+    )
+    monkeypatch.setattr(
+        AshConfig,
+        "_resolve_provider_api_key",
+        lambda _self, _provider: None,
+    )
+    monkeypatch.setattr(
+        "ash.memory.runtime.create_registry", lambda **_kwargs: object()
+    )
+
+    async def _fake_create_store(**_kwargs: Any) -> object:
+        return fake_store
+
+    monkeypatch.setattr("ash.memory.runtime.create_store", _fake_create_store)
+    monkeypatch.setattr(
+        AshConfig,
+        "create_llm_provider_for_model",
+        lambda _self, _alias: 1 / 0,
+    )
+
+    runtime = await initialize_memory_runtime(
+        config=config,
+        graph_dir=tmp_path / "graph",
+        model_alias="default",
+        initialize_extractor=False,
+    )
+
+    assert runtime.store is fake_store
+    assert runtime.extractor is None

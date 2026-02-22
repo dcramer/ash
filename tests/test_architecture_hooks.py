@@ -57,6 +57,16 @@ def test_register_schedule_methods_wiring_is_constrained() -> None:
     }
 
 
+def test_create_store_wiring_is_constrained() -> None:
+    files = _python_files_under("src/ash")
+
+    call_sites = _find_call_sites(r"\bcreate_store\(", files)
+    assert call_sites == {
+        Path("src/ash/memory/runtime.py"),
+        Path("src/ash/store/store.py"),
+    }
+
+
 def test_register_config_methods_wiring_is_constrained() -> None:
     files = _python_files_under("src/ash")
 

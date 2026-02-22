@@ -58,33 +58,14 @@ async def get_store(config: AshConfig) -> Store | None:
     Returns None if embeddings are not configured.
     """
     from ash.cli.context import get_graph_dir
-    from ash.llm.registry import create_registry
-    from ash.store import create_store
-
-    if not config.embeddings:
-        return None
-
-    embeddings_key = config.resolve_embeddings_api_key()
-    if not embeddings_key:
-        return None
-
-    # Build registry with embedding provider and default LLM provider keys
-    openai_key = config._resolve_provider_api_key("openai")
-    anthropic_key = config._resolve_provider_api_key("anthropic")
-    if config.embeddings.provider == "openai" and not openai_key:
-        openai_key = embeddings_key
-
-    llm_registry = create_registry(
-        anthropic_api_key=anthropic_key.get_secret_value() if anthropic_key else None,
-        openai_api_key=openai_key.get_secret_value() if openai_key else None,
-    )
+    from ash.memory.runtime import initialize_memory_runtime
 
     graph_dir = get_graph_dir()
-
-    return await create_store(
+    runtime = await initialize_memory_runtime(
+        config=config,
         graph_dir=graph_dir,
-        llm_registry=llm_registry,
-        embedding_model=config.embeddings.model,
-        embedding_provider=config.embeddings.provider,
-        max_entries=config.memory.max_entries,
+        model_alias="default",
+        initialize_extractor=False,
+        logger=logger,
     )
+    return runtime.store

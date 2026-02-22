@@ -29,6 +29,7 @@ async def initialize_memory_runtime(
     config: AshConfig,
     graph_dir: Path | None,
     model_alias: str,
+    initialize_extractor: bool = True,
     logger: logging.Logger | None = None,
 ) -> MemoryRuntime:
     """Initialize graph store and optional extraction runtime for memory subsystem."""
@@ -87,7 +88,7 @@ async def initialize_memory_runtime(
         log.warning("Failed to initialize graph store", exc_info=True)
         return MemoryRuntime()
 
-    if not config.memory.extraction_enabled:
+    if not initialize_extractor or not config.memory.extraction_enabled:
         return MemoryRuntime(store=store)
 
     extraction_model_alias = config.memory.extraction_model or model_alias
