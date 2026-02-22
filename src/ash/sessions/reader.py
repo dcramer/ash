@@ -227,16 +227,18 @@ class SessionReader:
         """Check if a message with the given external ID exists in this session."""
         if await self._find_history_message_by_external_id(external_id) is not None:
             return True
-        for entry in await self.load_entries():
-            if isinstance(entry, MessageEntry) and entry.metadata:
-                if external_id == entry.metadata.get("external_id"):
-                    return True
-        return False
+        return await self._find_context_message_by_external_id(external_id) is not None
 
     async def get_message_by_external_id(self, external_id: str) -> MessageEntry | None:
         history_match = await self._find_history_message_by_external_id(external_id)
         if history_match is not None:
             return history_match
+        return await self._find_context_message_by_external_id(external_id)
+
+    async def _find_context_message_by_external_id(
+        self, external_id: str
+    ) -> MessageEntry | None:
+        """Lookup by external_id in context.jsonl entries."""
         for entry in await self.load_entries():
             if isinstance(entry, MessageEntry) and entry.metadata:
                 if external_id == entry.metadata.get("external_id"):

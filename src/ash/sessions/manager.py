@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -280,7 +281,7 @@ class SessionManager:
         branch_head_id: str | None = None,
         branch_id: str | None = None,
     ) -> tuple[list[Message], list[str]]:
-        try:
+        async def _load() -> tuple[list[Message], list[str]]:
             if branch_head_id is not None:
                 return await self._reader.load_messages_for_branch(
                     branch_head_id,
@@ -292,16 +293,12 @@ class SessionManager:
             return await self._reader.load_messages_for_llm(
                 token_budget, recency_window, include_timestamps
             )
-        except ValueError as e:
-            logger.warning(
-                "session_context_read_failed",
-                extra={
-                    "session.key": self._key,
-                    "session.operation": "load_messages_for_llm",
-                    "error.message": str(e),
-                },
-            )
-            return [], []
+
+        return await self._read_context_fail_open(
+            operation="load_messages_for_llm",
+            default=([], []),
+            read=_load,
+        )
 
     async def get_message_ids(self) -> set[str]:
         return await self._reader.get_message_ids()
@@ -313,32 +310,18 @@ class SessionManager:
         return set(all_ids[max(0, len(all_ids) - recency_window) :])
 
     async def has_message_with_external_id(self, external_id: str) -> bool:
-        try:
-            return await self._reader.has_message_with_external_id(external_id)
-        except ValueError as e:
-            logger.warning(
-                "session_context_read_failed",
-                extra={
-                    "session.key": self._key,
-                    "session.operation": "has_message_with_external_id",
-                    "error.message": str(e),
-                },
-            )
-            return False
+        return await self._read_context_fail_open(
+            operation="has_message_with_external_id",
+            default=False,
+            read=lambda: self._reader.has_message_with_external_id(external_id),
+        )
 
     async def get_message_by_external_id(self, external_id: str) -> MessageEntry | None:
-        try:
-            return await self._reader.get_message_by_external_id(external_id)
-        except ValueError as e:
-            logger.warning(
-                "session_context_read_failed",
-                extra={
-                    "session.key": self._key,
-                    "session.operation": "get_message_by_external_id",
-                    "error.message": str(e),
-                },
-            )
-            return None
+        return await self._read_context_fail_open(
+            operation="get_message_by_external_id",
+            default=None,
+            read=lambda: self._reader.get_message_by_external_id(external_id),
+        )
 
     async def get_messages_around(
         self, message_id: str, window: int = 3
@@ -349,18 +332,11 @@ class SessionManager:
         return await self._reader.search_messages(query, limit)
 
     async def get_last_message_time(self) -> datetime | None:
-        try:
-            entries = await self._reader.load_entries()
-        except ValueError as e:
-            logger.warning(
-                "session_context_read_failed",
-                extra={
-                    "session.key": self._key,
-                    "session.operation": "get_last_message_time",
-                    "error.message": str(e),
-                },
-            )
-            return None
+        entries = await self._read_context_fail_open(
+            operation="get_last_message_time",
+            default=[],
+            read=self._reader.load_entries,
+        )
 
         msg_entries = [e for e in entries if isinstance(e, MessageEntry)]
         return msg_entries[-1].created_at if msg_entries else None
@@ -497,6 +473,26 @@ class SessionManager:
         self.state_path.write_text(
             json.dumps(state.model_dump(mode="json"), indent=2, default=str)
         )
+
+    async def _read_context_fail_open[T](
+        self,
+        *,
+        operation: str,
+        default: T,
+        read: Callable[[], Awaitable[T]],
+    ) -> T:
+        try:
+            return await read()
+        except ValueError as e:
+            logger.warning(
+                "session_context_read_failed",
+                extra={
+                    "session.key": self._key,
+                    "session.operation": operation,
+                    "error.message": str(e),
+                },
+            )
+            return default
 
     async def get_pending_checkpoint_from_log(
         self, truncated_id: str
