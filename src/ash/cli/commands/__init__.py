@@ -2,6 +2,7 @@
 
 from ash.cli.commands import (
     auth,
+    browser,
     chat,
     config,
     doctor,
@@ -21,6 +22,7 @@ from ash.cli.commands import (
 
 __all__ = [
     "auth",
+    "browser",
     "chat",
     "config",
     "doctor",

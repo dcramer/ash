@@ -17,6 +17,7 @@ from ash.llm.types import ToolUse
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor, AgentRegistry
+    from ash.browser import BrowserManager
     from ash.core.agent import Agent
     from ash.core.prompt import PromptContext, SystemPromptBuilder
     from ash.core.session import SessionState
@@ -121,6 +122,7 @@ class AgentComponents:
     skill_registry: SkillRegistry
     memory_manager: Store | None
     memory_extractor: MemoryExtractor | None = None
+    browser_manager: BrowserManager | None = None
     sandbox_executor: SandboxExecutor | None = None
     agent_registry: AgentRegistry | None = None
     agent_executor: AgentExecutor | None = None

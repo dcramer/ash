@@ -987,13 +987,14 @@ async def create_agent(
     # Spec contract: specs/subsystems.md (Integration Hooks).
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.agents.builtin import register_builtin_agents
+    from ash.browser import create_browser_manager
     from ash.core.prompt import RuntimeInfo
     from ash.memory.runtime import initialize_memory_runtime
     from ash.sandbox import SandboxExecutor
     from ash.sandbox.packages import build_setup_command, collect_skill_packages
     from ash.skills import SkillRegistry
     from ash.tools.base import build_sandbox_manager_config
-    from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
+    from ash.tools.builtin import BashTool, BrowserTool, WebFetchTool, WebSearchTool
     from ash.tools.builtin.agents import UseAgentTool
     from ash.tools.builtin.files import ReadFileTool, WriteFileTool
     from ash.tools.builtin.search_cache import SearchCache
@@ -1025,6 +1026,10 @@ async def create_agent(
     tool_registry.register(BashTool(executor=shared_executor))
     tool_registry.register(ReadFileTool(executor=shared_executor))
     tool_registry.register(WriteFileTool(executor=shared_executor))
+
+    browser_manager = create_browser_manager(config)
+    if config.browser.enabled:
+        tool_registry.register(BrowserTool(browser_manager))
 
     # Register interrupt tool for agent checkpointing
     from ash.tools.builtin.complete import CompleteTool
@@ -1146,6 +1151,7 @@ async def create_agent(
         skill_registry=skill_registry,
         memory_manager=graph_store,
         memory_extractor=memory_extractor,
+        browser_manager=browser_manager,
         sandbox_executor=shared_executor,
         agent_registry=agent_registry,
         agent_executor=agent_executor,

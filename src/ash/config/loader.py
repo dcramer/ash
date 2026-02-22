@@ -16,12 +16,19 @@ ENV_VAR_MAPPINGS = {
     "telegram": ("bot_token", "TELEGRAM_BOT_TOKEN"),
     "brave_search": ("api_key", "BRAVE_SEARCH_API_KEY"),
     "sentry": ("dsn", "SENTRY_DSN"),
+    "browser.kernel": ("api_key", "KERNEL_API_KEY"),
 }
 
 
 def _resolve_env_secrets(config: dict[str, Any]) -> dict[str, Any]:
     for section_name, (key, env_var) in ENV_VAR_MAPPINGS.items():
-        if (section := config.get(section_name)) is not None:
+        section: dict[str, Any] | None = config
+        for part in section_name.split("."):
+            if not isinstance(section, dict):
+                section = None
+                break
+            section = section.get(part)
+        if section is not None and isinstance(section, dict):
             if section.get(key) is None and (value := os.environ.get(env_var)):
                 section[key] = SecretStr(value)
 

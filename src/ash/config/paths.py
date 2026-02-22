@@ -163,6 +163,11 @@ def get_schedule_file() -> Path:
     return get_ash_home() / "schedule.jsonl"
 
 
+def get_browser_path() -> Path:
+    """Get the browser subsystem state directory path."""
+    return get_ash_home() / "browser"
+
+
 def get_uv_cache_path() -> Path:
     """Get the uv package cache directory path for sandbox."""
     return get_ash_home() / "cache" / "uv"
@@ -247,6 +252,7 @@ def get_all_paths() -> dict[str, Path | None]:
         "graph": get_graph_dir(),
         "workspace": get_workspace_path(),
         "schedule": get_schedule_file(),
+        "browser": get_browser_path(),
         "logs": get_logs_path(),
         "run": get_run_path(),
         "chats": get_chats_path(),

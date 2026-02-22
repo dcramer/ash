@@ -1,0 +1,44 @@
+---
+title: Browser
+description: Browser integration for session-based page actions
+sidebar:
+  order: 6
+---
+
+Ash exposes a browser subsystem with a session-oriented API.
+
+## What It Does
+
+- Starts and tracks browser sessions per user.
+- Supports deterministic actions: `page.goto`, `page.extract`, `page.click`, `page.type`, `page.wait_for`, `page.screenshot`.
+- Stores session metadata and artifacts under `~/.ash/browser/`.
+- Exposes control surfaces through the `browser` tool, RPC methods, and `ash browser` CLI.
+
+## Providers
+
+- `sandbox` (default): deterministic HTTP + extraction fallback.
+- `kernel`: remote provider adapter for Kernel-backed execution.
+
+## Runtime Integration
+
+Browser is installed through integration composition, not direct ad-hoc wiring in runtime entrypoints.
+
+- Integration: `src/ash/integrations/browser.py`
+- RPC methods: `src/ash/rpc/methods/browser.py`
+- Tool: `src/ash/tools/builtin/browser.py`
+
+This follows the harness contract in `specs/subsystems.md` and `specs/integrations.md`.
+
+## Configuration
+
+```toml
+[browser]
+enabled = true
+provider = "sandbox"
+timeout_seconds = 30.0
+
+[browser.kernel]
+api_key = "${KERNEL_API_KEY}"
+```
+
+Use `uv run ash doctor` to validate browser config and missing credentials.

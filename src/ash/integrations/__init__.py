@@ -3,6 +3,7 @@
 Spec contract: specs/subsystems.md (Integration Hooks).
 """
 
+from ash.integrations.browser import BrowserIntegration
 from ash.integrations.composer import active_integrations, compose_integrations
 from ash.integrations.defaults import DefaultIntegrations, create_default_integrations
 from ash.integrations.image import ImageIntegration
@@ -18,6 +19,7 @@ from ash.integrations.scheduling import SchedulingIntegration
 
 __all__ = [
     "MemoryIntegration",
+    "BrowserIntegration",
     "ImageIntegration",
     "RuntimeRPCIntegration",
     "SchedulingIntegration",

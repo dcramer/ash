@@ -701,6 +701,42 @@ class TestDoctorCommand:
             for finding in result.findings
         )
 
+    def test_doctor_warns_when_kernel_browser_selected_without_api_key(
+        self, monkeypatch, tmp_path
+    ):
+        ash_home = tmp_path / ".ash"
+        ash_home.mkdir(parents=True, exist_ok=True)
+        for name in ("graph", "sessions", "chats", "logs", "run", "workspace"):
+            (ash_home / name).mkdir(exist_ok=True)
+        (ash_home / "config.toml").write_text(
+            "\n".join(
+                [
+                    "[models.default]",
+                    "provider='openai'",
+                    "model='gpt-5.2'",
+                    "",
+                    "[browser]",
+                    "enabled=true",
+                    "provider='kernel'",
+                ]
+            )
+            + "\n"
+        )
+
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = run_doctor_checks()
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert any(
+            finding.check == "config.browser.kernel.api_key"
+            and finding.level == "warning"
+            for finding in result.findings
+        )
+
 
 class TestStatsCommand:
     """Tests for `ash stats` and `ash info`."""
@@ -760,6 +796,11 @@ class TestStatsCommand:
                     '{"ts":"2026-02-22T10:02:01+00:00","message":"image_preprocess_succeeded","image.count":1,"duration_ms":120}',
                     '{"ts":"2026-02-22T10:03:00+00:00","message":"image_preprocess_skipped","skip_reason":"no_usable_images","image.count":1,"duration_ms":4}',
                     '{"ts":"2026-02-22T10:04:00+00:00","message":"image_preprocess_failed","error.message":"timeout","duration_ms":8000}',
+                    '{"ts":"2026-02-22T10:05:00+00:00","message":"browser_action_started","browser.action":"page.goto","browser.provider":"sandbox"}',
+                    '{"ts":"2026-02-22T10:05:01+00:00","message":"browser_action_succeeded","browser.action":"page.goto","browser.provider":"sandbox"}',
+                    '{"ts":"2026-02-22T10:06:00+00:00","message":"browser_session_started","browser.provider":"kernel"}',
+                    '{"ts":"2026-02-22T10:06:20+00:00","message":"browser_session_archived","browser.provider":"kernel"}',
+                    '{"ts":"2026-02-22T10:06:30+00:00","message":"browser_action_failed","browser.action":"page.click","browser.provider":"kernel","error.message":"x"}',
                 ]
             )
             + "\n"
@@ -785,3 +826,7 @@ class TestStatsCommand:
         assert "Runs skipped" in result.stdout
         assert "Avg success latency" in result.stdout
         assert "Skipped (no usable images)" in result.stdout
+        assert "Browser (from logs)" in result.stdout
+        assert "Actions started" in result.stdout
+        assert "Actions succeeded" in result.stdout
+        assert "Sessions started" in result.stdout

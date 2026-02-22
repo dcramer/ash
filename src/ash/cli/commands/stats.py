@@ -27,6 +27,7 @@ DIR_PURPOSES: dict[str, str] = {
     "workspace": "User workspace and skill files",
     "skills": "User-defined skills and skill state",
     "skills.installed": "Installed external skill sources",
+    "browser": "Browser sessions, profiles, and artifacts",
     "cache": "Runtime caches (including uv cache)",
 }
 
@@ -83,6 +84,21 @@ class VisionStats:
     skipped_unsupported_provider: int = 0
     skipped_invalid_image_model_config: int = 0
     skipped_other: int = 0
+    last_seen: datetime | None = None
+
+
+@dataclass
+class BrowserStats:
+    """Aggregated browser action/session counters from logs."""
+
+    actions_started: int = 0
+    actions_succeeded: int = 0
+    actions_failed: int = 0
+    sessions_started: int = 0
+    sessions_archived: int = 0
+    sessions_closed: int = 0
+    provider_sandbox: int = 0
+    provider_kernel: int = 0
     last_seen: datetime | None = None
 
 
@@ -247,6 +263,25 @@ def _render_stats() -> None:
     vision_table.add_row("Skipped (other)", str(vision.skipped_other))
     vision_table.add_row("Last vision event", _format_dt(vision.last_seen))
     console.print(vision_table)
+
+    browser = _collect_browser_stats()
+    browser_table = create_table(
+        "Browser (from logs)",
+        [
+            ("Metric", "cyan"),
+            ("Value", "green"),
+        ],
+    )
+    browser_table.add_row("Actions started", str(browser.actions_started))
+    browser_table.add_row("Actions succeeded", str(browser.actions_succeeded))
+    browser_table.add_row("Actions failed", str(browser.actions_failed))
+    browser_table.add_row("Sessions started", str(browser.sessions_started))
+    browser_table.add_row("Sessions archived", str(browser.sessions_archived))
+    browser_table.add_row("Sessions closed", str(browser.sessions_closed))
+    browser_table.add_row("Provider usage (sandbox)", str(browser.provider_sandbox))
+    browser_table.add_row("Provider usage (kernel)", str(browser.provider_kernel))
+    browser_table.add_row("Last browser event", _format_dt(browser.last_seen))
+    console.print(browser_table)
 
 
 def _collect_dir_stats(path: Path) -> DirStats:
@@ -415,6 +450,62 @@ def _collect_vision_stats() -> VisionStats:
         except OSError:
             continue
 
+    return stats
+
+
+def _collect_browser_stats() -> BrowserStats:
+    stats = BrowserStats()
+    logs_dir = get_logs_path()
+    if not logs_dir.exists():
+        return stats
+
+    log_files = sorted(logs_dir.glob("*.jsonl"), reverse=True)[:7]
+    for path in log_files:
+        try:
+            with path.open() as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+
+                    message = record.get("message")
+                    if message == "browser_action_started":
+                        stats.actions_started += 1
+                    elif message == "browser_action_succeeded":
+                        stats.actions_succeeded += 1
+                    elif message == "browser_action_failed":
+                        stats.actions_failed += 1
+                    elif message == "browser_session_started":
+                        stats.sessions_started += 1
+                    elif message == "browser_session_closed":
+                        stats.sessions_closed += 1
+                    elif message == "browser_session_archived":
+                        stats.sessions_archived += 1
+                    else:
+                        continue
+
+                    provider = str(record.get("browser.provider", "") or "").lower()
+                    if provider == "sandbox":
+                        stats.provider_sandbox += 1
+                    elif provider == "kernel":
+                        stats.provider_kernel += 1
+
+                    ts = record.get("ts")
+                    if isinstance(ts, str):
+                        try:
+                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        except ValueError:
+                            continue
+                        if stats.last_seen is None or dt > stats.last_seen:
+                            stats.last_seen = dt
+        except OSError:
+            continue
     return stats
 
 

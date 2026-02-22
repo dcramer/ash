@@ -66,6 +66,10 @@ context_token_budget = 100000
 enabled = true
 provider = "openai"
 
+[browser]
+enabled = true
+provider = "sandbox"
+
 [sessions]
 mode = "persistent"
 max_concurrent = 2
@@ -91,6 +95,7 @@ model = "gpt-5.2"
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
 | `BRAVE_SEARCH_API_KEY` | Brave Search API key |
+| `KERNEL_API_KEY` | Kernel API key (when `[browser].provider = "kernel"`) |
 | `SENTRY_DSN` | Sentry DSN |
 
 ## Configuration Sections
@@ -104,6 +109,7 @@ model = "gpt-5.2"
 | `[sandbox]` | Sandbox runtime and mount settings |
 | `[memory]` | Memory retention and extraction tuning |
 | `[image]` | Vision/image understanding preprocessing |
+| `[browser]` | Browser sessions and page actions |
 | `[conversation]` | Conversation context behavior |
 | `[sessions]` | Session runtime settings |
 | `[embeddings]` | Embedding provider/model |

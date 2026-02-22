@@ -159,6 +159,45 @@ no_caption_auto_respond = true
 | `inject_position` | `prepend` \| `append` | `prepend` |
 | `no_caption_auto_respond` | bool | `true` |
 
+## Browser (`[browser]`)
+
+```toml
+[browser]
+enabled = true
+provider = "sandbox"
+timeout_seconds = 30.0
+max_session_minutes = 20
+artifacts_retention_days = 7
+state_dir = null
+default_viewport_width = 1280
+default_viewport_height = 720
+
+[browser.sandbox]
+headless = true
+browser_channel = "chromium"
+
+[browser.kernel]
+api_key = null
+base_url = "https://api.kernel.sh"
+project_id = null
+```
+
+| Key | Type | Default |
+|-----|------|---------|
+| `enabled` | bool | `true` |
+| `provider` | `sandbox` \| `kernel` | `sandbox` |
+| `timeout_seconds` | float | `30.0` |
+| `max_session_minutes` | int | `20` |
+| `artifacts_retention_days` | int | `7` |
+| `state_dir` | path \| null | `null` |
+| `default_viewport_width` | int | `1280` |
+| `default_viewport_height` | int | `720` |
+| `browser.sandbox.headless` | bool | `true` |
+| `browser.sandbox.browser_channel` | `chromium` | `chromium` |
+| `browser.kernel.api_key` | secret \| null | `null` |
+| `browser.kernel.base_url` | string | `https://api.kernel.sh` |
+| `browser.kernel.project_id` | string \| null | `null` |
+
 ## Conversation (`[conversation]`)
 
 ```toml

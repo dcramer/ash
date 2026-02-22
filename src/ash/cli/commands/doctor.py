@@ -261,7 +261,91 @@ def _check_config() -> list[DoctorFinding]:
             detail=f"config parsed successfully: {config_path}",
         )
     ]
+    findings.extend(_check_browser_config(config))
     findings.extend(_check_image_config(config))
+    return findings
+
+
+def _check_browser_config(config: AshConfig) -> list[DoctorFinding]:
+    findings: list[DoctorFinding] = []
+    browser_cfg = config.browser
+
+    if not browser_cfg.enabled:
+        findings.append(
+            DoctorFinding(
+                level="ok",
+                check="config.browser.enabled",
+                detail="browser integration disabled",
+            )
+        )
+        return findings
+
+    if browser_cfg.provider not in {"sandbox", "kernel"}:
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.browser.provider",
+                detail=f"unsupported browser provider: {browser_cfg.provider}",
+                repair='Set `[browser].provider` to "sandbox" or "kernel"',
+            )
+        )
+        return findings
+
+    if browser_cfg.timeout_seconds <= 0:
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.browser.timeout_seconds",
+                detail=f"invalid value: {browser_cfg.timeout_seconds}",
+                repair="Set `[browser].timeout_seconds` to > 0",
+            )
+        )
+    if browser_cfg.max_session_minutes <= 0:
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.browser.max_session_minutes",
+                detail=f"invalid value: {browser_cfg.max_session_minutes}",
+                repair="Set `[browser].max_session_minutes` to > 0",
+            )
+        )
+    if browser_cfg.artifacts_retention_days < 0:
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.browser.artifacts_retention_days",
+                detail=f"invalid value: {browser_cfg.artifacts_retention_days}",
+                repair="Set `[browser].artifacts_retention_days` to >= 0",
+            )
+        )
+
+    if browser_cfg.provider == "kernel":
+        if not browser_cfg.kernel.api_key and not os.environ.get("KERNEL_API_KEY"):
+            findings.append(
+                DoctorFinding(
+                    level="warning",
+                    check="config.browser.kernel.api_key",
+                    detail="kernel provider selected but KERNEL_API_KEY is missing",
+                    repair="Set `[browser.kernel].api_key` or `KERNEL_API_KEY`",
+                )
+            )
+        else:
+            findings.append(
+                DoctorFinding(
+                    level="ok",
+                    check="config.browser.kernel.api_key",
+                    detail="Kernel API key configured",
+                )
+            )
+
+    if not findings:
+        findings.append(
+            DoctorFinding(
+                level="ok",
+                check="config.browser",
+                detail=f"browser config valid (provider={browser_cfg.provider})",
+            )
+        )
     return findings
 
 

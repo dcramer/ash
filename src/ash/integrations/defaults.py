@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ash.integrations.browser import BrowserIntegration
 from ash.integrations.image import ImageIntegration
 from ash.integrations.memory import MemoryIntegration
 from ash.integrations.runtime import IntegrationMode
@@ -27,11 +28,13 @@ class DefaultIntegrations:
 
 
 def _create_chat_integrations(
-    *, include_memory: bool, include_image: bool
+    *, include_memory: bool, include_image: bool, include_browser: bool
 ) -> DefaultIntegrations:
     contributors: list[IntegrationContributor] = []
     if include_image:
         contributors.append(ImageIntegration())
+    if include_browser:
+        contributors.append(BrowserIntegration())
     if include_memory:
         contributors.append(MemoryIntegration())
     return DefaultIntegrations(contributors=contributors)
@@ -41,6 +44,7 @@ def _create_eval_integrations(
     *,
     include_memory: bool,
     include_image: bool,
+    include_browser: bool,
     schedule_file: Path | None,
 ) -> DefaultIntegrations:
     if schedule_file is None:
@@ -50,6 +54,8 @@ def _create_eval_integrations(
     contributors: list[IntegrationContributor] = [scheduling]
     if include_image:
         contributors.append(ImageIntegration())
+    if include_browser:
+        contributors.append(BrowserIntegration())
     if include_memory:
         contributors.append(MemoryIntegration())
     return DefaultIntegrations(contributors=contributors, scheduling=scheduling)
@@ -59,6 +65,7 @@ def _create_serve_integrations(
     *,
     include_memory: bool,
     include_image: bool,
+    include_browser: bool,
     schedule_file: Path | None,
     logs_path: Path | None,
     timezone: str,
@@ -80,6 +87,8 @@ def _create_serve_integrations(
     contributors: list[IntegrationContributor] = [RuntimeRPCIntegration(logs_path)]
     if include_image:
         contributors.append(ImageIntegration())
+    if include_browser:
+        contributors.append(BrowserIntegration())
     if include_memory:
         contributors.append(MemoryIntegration())
     contributors.append(scheduling)
@@ -91,6 +100,7 @@ def create_default_integrations(
     mode: IntegrationMode,
     include_memory: bool = True,
     include_image: bool = True,
+    include_browser: bool = True,
     schedule_file: Path | None = None,
     logs_path: Path | None = None,
     timezone: str = "UTC",
@@ -103,6 +113,7 @@ def create_default_integrations(
         return _create_serve_integrations(
             include_memory=include_memory,
             include_image=include_image,
+            include_browser=include_browser,
             schedule_file=schedule_file,
             logs_path=logs_path,
             timezone=timezone,
@@ -114,11 +125,13 @@ def create_default_integrations(
         return _create_chat_integrations(
             include_memory=include_memory,
             include_image=include_image,
+            include_browser=include_browser,
         )
     if mode == "eval":
         return _create_eval_integrations(
             include_memory=include_memory,
             include_image=include_image,
+            include_browser=include_browser,
             schedule_file=schedule_file,
         )
     raise ValueError(f"unsupported integration mode: {mode}")

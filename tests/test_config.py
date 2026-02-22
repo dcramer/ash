@@ -6,6 +6,7 @@ from pydantic import SecretStr, ValidationError
 from ash.config.loader import _resolve_env_secrets, get_default_config, load_config
 from ash.config.models import (
     AshConfig,
+    BrowserConfig,
     ConfigError,
     EmbeddingsConfig,
     MemoryConfig,
@@ -101,6 +102,16 @@ class TestMemoryConfig:
     def test_defaults(self):
         config = MemoryConfig()
         assert config.max_context_messages == 20
+
+
+class TestBrowserConfig:
+    """Tests for BrowserConfig model."""
+
+    def test_defaults(self):
+        config = BrowserConfig()
+        assert config.enabled is True
+        assert config.provider == "sandbox"
+        assert config.timeout_seconds == 30.0
 
 
 class TestAshConfig:
@@ -393,6 +404,15 @@ class TestResolveEnvSecrets:
         config = {"openai": {}}
         result = _resolve_env_secrets(config)
         assert result["openai"]["api_key"].get_secret_value() == "test-openai-key"
+
+    def test_resolves_kernel_api_key(self, monkeypatch):
+        monkeypatch.setenv("KERNEL_API_KEY", "kernel-test-key")
+        config = {"browser": {"kernel": {"api_key": None}}}
+        result = _resolve_env_secrets(config)
+        assert (
+            result["browser"]["kernel"]["api_key"].get_secret_value()
+            == "kernel-test-key"
+        )
 
     def test_resolves_telegram_token(self, monkeypatch):
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")

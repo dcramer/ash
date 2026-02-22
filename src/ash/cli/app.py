@@ -4,6 +4,7 @@ import typer
 
 from ash.cli.commands import (
     auth,
+    browser,
     chat,
     config,
     doctor,
@@ -40,6 +41,7 @@ def help(ctx: typer.Context) -> None:
 auth.register(app)
 init.register(app)
 doctor.register(app)
+browser.register(app)
 serve.register(app)
 chat.register(app)
 config.register(app)

@@ -10,12 +10,14 @@ All tools are also exported from ash.tools for convenience.
 """
 
 from ash.tools.builtin.bash import BashTool
+from ash.tools.builtin.browser import BrowserTool
 from ash.tools.builtin.files import ReadFileTool, WriteFileTool
 from ash.tools.builtin.web_fetch import WebFetchTool
 from ash.tools.builtin.web_search import WebSearchTool
 
 __all__ = [
     "BashTool",
+    "BrowserTool",
     "ReadFileTool",
     "WebFetchTool",
     "WebSearchTool",

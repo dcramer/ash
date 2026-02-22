@@ -213,6 +213,36 @@ class ImageConfig(BaseModel):
     no_caption_auto_respond: bool = True
 
 
+class BrowserSandboxConfig(BaseModel):
+    """Sandbox provider config for browser integration."""
+
+    headless: bool = True
+    browser_channel: Literal["chromium"] = "chromium"
+
+
+class BrowserKernelConfig(BaseModel):
+    """Kernel provider config for browser integration."""
+
+    api_key: SecretStr | None = None
+    base_url: str = "https://api.kernel.sh"
+    project_id: str | None = None
+
+
+class BrowserConfig(BaseModel):
+    """Configuration for browser integration."""
+
+    enabled: bool = True
+    provider: Literal["sandbox", "kernel"] = "sandbox"
+    timeout_seconds: float = 30.0
+    max_session_minutes: int = 20
+    artifacts_retention_days: int = 7
+    state_dir: Path | None = None
+    default_viewport_width: int = 1280
+    default_viewport_height: int = 720
+    sandbox: BrowserSandboxConfig = Field(default_factory=BrowserSandboxConfig)
+    kernel: BrowserKernelConfig = Field(default_factory=BrowserKernelConfig)
+
+
 class ConversationConfig(BaseModel):
     """Configuration for conversation context management."""
 
@@ -350,6 +380,7 @@ class AshConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     image: ImageConfig = Field(default_factory=ImageConfig)
+    browser: BrowserConfig = Field(default_factory=BrowserConfig)
     conversation: ConversationConfig = Field(default_factory=ConversationConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     embeddings: EmbeddingsConfig | None = None
