@@ -33,7 +33,7 @@ class MemoryIntegration(IntegrationContributor):
         memory_config = context.config.memory
         self._postprocess = MemoryPostprocessService(
             store=components.memory_manager,
-            people_store=components.person_manager,
+            people_store=components.memory_manager,
             extractor=components.memory_extractor,
             extraction_enabled=memory_config.extraction_enabled,
             min_message_length=memory_config.extraction_min_message_length,
@@ -50,7 +50,7 @@ class MemoryIntegration(IntegrationContributor):
         register_memory_methods(
             server,
             components.memory_manager,
-            components.person_manager,
+            components.memory_manager,
             memory_extractor=components.memory_extractor,
             sessions_path=context.sessions_path,
         )

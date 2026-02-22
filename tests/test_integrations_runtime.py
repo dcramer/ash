@@ -467,7 +467,6 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
         SimpleNamespace(
             agent=fake_agent,
             memory_manager=object(),
-            person_manager=object(),
             memory_extractor=None,
         ),
     )

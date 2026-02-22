@@ -492,8 +492,8 @@ async def dump_state(components: "AgentComponents") -> None:
                 chat.chat_type,
             )
 
-    if components.person_manager:
-        people = await components.person_manager.list_people()
+    if components.memory_manager:
+        people = await components.memory_manager.list_people()
         logger.info("=== People records (%d) ===", len(people))
         for p in people:
             alias_strs = [a.value if hasattr(a, "value") else str(a) for a in p.aliases]

@@ -186,7 +186,6 @@ class TestMemoryExtract:
         )
         components = SimpleNamespace(
             memory_manager=graph_store,
-            person_manager=graph_store,
             memory_extractor=extractor,
         )
         context = IntegrationContext(

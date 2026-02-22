@@ -1120,7 +1120,6 @@ async def create_agent(
         prompt_builder=prompt_builder,
         skill_registry=skill_registry,
         memory_manager=graph_store,
-        person_manager=graph_store,
         memory_extractor=memory_extractor,
         sandbox_executor=shared_executor,
         agent_registry=agent_registry,

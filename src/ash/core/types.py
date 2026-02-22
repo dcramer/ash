@@ -116,7 +116,6 @@ class AgentComponents:
     prompt_builder: SystemPromptBuilder
     skill_registry: SkillRegistry
     memory_manager: Store | None
-    person_manager: Store | None = None
     memory_extractor: MemoryExtractor | None = None
     sandbox_executor: SandboxExecutor | None = None
     agent_registry: AgentRegistry | None = None
