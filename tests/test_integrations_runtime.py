@@ -428,6 +428,7 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
             extraction_enabled: bool,
             min_message_length: int,
             debounce_seconds: int,
+            context_messages: int,
             confidence_threshold: float,
         ) -> None:
             _ = (
@@ -436,6 +437,7 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
                 extraction_enabled,
                 min_message_length,
                 debounce_seconds,
+                context_messages,
                 confidence_threshold,
             )
             events.append(("memory_postprocess_init", "ok"))

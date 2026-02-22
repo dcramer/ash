@@ -83,11 +83,13 @@ async def test_initialize_memory_runtime_builds_store_and_extractor(
             llm: object,
             model: str,
             confidence_threshold: float,
+            grounding_enabled: bool,
         ) -> None:
             calls["extractor_args"] = {
                 "llm": llm,
                 "model": model,
                 "confidence_threshold": confidence_threshold,
+                "grounding_enabled": grounding_enabled,
             }
 
     monkeypatch.setattr("ash.memory.runtime.MemoryExtractor", _FakeExtractor)

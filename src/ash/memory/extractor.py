@@ -284,6 +284,37 @@ Return ONLY valid JSON, no other text. Example:
 {{"subjects": ["Sarah"], "type": "relationship", "sensitivity": "public", "portable": true, "shared": false, "aliases": {{}}}}"""
 
 
+GROUNDING_PROMPT = """You are a memory grounding system.
+
+You are given:
+1) A conversation transcript
+2) Candidate extracted facts
+
+For each fact:
+- grounded=true if the fact is supported by the transcript and is self-contained
+- grounded=false if unsupported, ambiguous, or missing critical context
+- content should be a rewritten self-contained version when needed
+
+CRITICAL:
+- Keep meaning faithful to the transcript. Do not invent new facts.
+- If a fact says "going in May" but transcript clearly says "going to Tokyo in May",
+  rewrite content to include "Tokyo".
+- If a fact cannot be grounded precisely, mark grounded=false.
+
+Return ONLY valid JSON as an array:
+[
+  {{"index": 0, "grounded": true, "content": "Rewritten fact"}},
+  {{"index": 1, "grounded": false}}
+]
+
+## Conversation
+{conversation}
+
+## Candidate facts
+{facts}
+"""
+
+
 class MemoryExtractor:
     """Extracts memorable facts from conversations using a secondary LLM.
 
@@ -297,6 +328,7 @@ class MemoryExtractor:
         model: str | None = None,
         max_tokens: int = 1024,
         confidence_threshold: float = 0.7,
+        grounding_enabled: bool = True,
     ):
         """Initialize memory extractor.
 
@@ -305,11 +337,13 @@ class MemoryExtractor:
             model: Model to use (defaults to provider default).
             max_tokens: Maximum tokens for extraction response.
             confidence_threshold: Minimum confidence to include a fact.
+            grounding_enabled: Whether to run second-pass grounding/rewriting.
         """
         self._llm = llm
         self._model = model
         self._max_tokens = max_tokens
         self._confidence_threshold = confidence_threshold
+        self._grounding_enabled = grounding_enabled
 
     async def classify_fact(self, content: str) -> ExtractedFact | None:
         """Classify a pre-formed fact using LLM.
@@ -411,11 +445,96 @@ class MemoryExtractor:
             )
 
             # Parse the response
-            return self._parse_extraction_response(response.message.get_text())
+            facts = self._parse_extraction_response(response.message.get_text())
+            if not self._grounding_enabled or not facts or len(messages) <= 1:
+                return facts
+            return await self._ground_facts_with_context(
+                facts=facts,
+                conversation_text=conversation_text,
+            )
 
         except Exception as e:
             logger.warning("memory_extraction_failed", extra={"error.message": str(e)})
             return []
+
+    async def _ground_facts_with_context(
+        self,
+        *,
+        facts: list[ExtractedFact],
+        conversation_text: str,
+    ) -> list[ExtractedFact]:
+        """Run second-pass LLM grounding/rewrite against broader context."""
+        fact_lines = []
+        for idx, fact in enumerate(facts):
+            fact_lines.append(
+                json.dumps(
+                    {
+                        "index": idx,
+                        "content": fact.content,
+                        "subjects": fact.subjects,
+                        "speaker": fact.speaker,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+        prompt = GROUNDING_PROMPT.format(
+            conversation=conversation_text,
+            facts="\n".join(fact_lines),
+        )
+
+        try:
+            response = await self._llm.complete(
+                messages=[Message(role=Role.USER, content=prompt)],
+                model=self._model,
+                max_tokens=512,
+                temperature=0.0,
+            )
+            decisions = self._parse_grounding_response(response.message.get_text())
+            if not decisions:
+                return facts
+
+            grounded_facts: list[ExtractedFact] = []
+            saw_valid_decision = False
+            for decision in decisions:
+                idx = decision.get("index")
+                grounded = decision.get("grounded")
+                if not isinstance(idx, int) or idx < 0 or idx >= len(facts):
+                    continue
+                saw_valid_decision = True
+                if grounded is not True:
+                    continue
+
+                content = decision.get("content")
+                if isinstance(content, str) and content.strip():
+                    facts[idx].content = content.strip()
+                grounded_facts.append(facts[idx])
+
+            # Fail open only when grounding output had no usable decisions.
+            if not saw_valid_decision:
+                return facts
+            return grounded_facts
+        except Exception:
+            logger.warning("memory_grounding_failed", exc_info=True)
+            return facts
+
+    def _parse_grounding_response(self, response_text: str) -> list[dict[str, Any]]:
+        """Parse the LLM grounding response."""
+        text = response_text.strip()
+        match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
+        if match:
+            text = match.group(1).strip()
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            logger.debug("Failed to parse grounding response as JSON: %s", text[:200])
+            return []
+
+        if not isinstance(data, list):
+            return []
+
+        return [item for item in data if isinstance(item, dict)]
 
     @staticmethod
     def _build_owner_section(owner_names: list[str] | None) -> str:

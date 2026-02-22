@@ -28,8 +28,6 @@ logger = logging.getLogger(__name__)
 class MemoryPostprocessService:
     """Runs asynchronous memory extraction after a user turn."""
 
-    _EXTRACTION_CONTEXT_MESSAGES = 8
-
     def __init__(
         self,
         *,
@@ -38,6 +36,7 @@ class MemoryPostprocessService:
         extraction_enabled: bool,
         min_message_length: int,
         debounce_seconds: int,
+        context_messages: int,
         confidence_threshold: float,
     ) -> None:
         self._store = store
@@ -45,6 +44,7 @@ class MemoryPostprocessService:
         self._extraction_enabled = extraction_enabled
         self._min_message_length = min_message_length
         self._debounce_seconds = debounce_seconds
+        self._context_messages = context_messages
         self._confidence_threshold = confidence_threshold
         self._last_extraction_time: float | None = None
 
@@ -113,12 +113,15 @@ class MemoryPostprocessService:
                     "Failed to get existing memories for extraction", exc_info=True
                 )
 
-            all_messages: list[LLMMessage] = [
+            thread_messages: list[LLMMessage] = [
                 msg
                 for msg in session.messages
                 if msg.role in (Role.USER, Role.ASSISTANT) and msg.get_text().strip()
             ]
-            llm_messages = all_messages[-self._EXTRACTION_CONTEXT_MESSAGES :]
+            history_messages = self._load_recent_chat_history_messages(session)
+            llm_messages = (history_messages + thread_messages)[
+                -self._context_messages :
+            ]
             if not llm_messages:
                 return
 
@@ -211,6 +214,40 @@ class MemoryPostprocessService:
             )
         except Exception:
             logger.warning("Background memory extraction failed", exc_info=True)
+
+    def _load_recent_chat_history_messages(
+        self,
+        session: SessionState,
+    ) -> list[LLMMessage]:
+        """Load recent chat history as extraction context."""
+        if not session.provider or not session.chat_id:
+            return []
+
+        from ash.chats.history import read_recent_chat_history
+
+        entries = read_recent_chat_history(
+            session.provider,
+            session.chat_id,
+            limit=self._context_messages * 2,
+        )
+        messages: list[LLMMessage] = []
+        for entry in entries:
+            content = entry.content.strip()
+            if not content:
+                continue
+            if entry.role == "user":
+                prefix = ""
+                if entry.username:
+                    display = f" ({entry.display_name})" if entry.display_name else ""
+                    prefix = f"@{entry.username}{display}: "
+                elif entry.display_name:
+                    prefix = f"{entry.display_name}: "
+                messages.append(
+                    LLMMessage(role=Role.USER, content=f"{prefix}{content}")
+                )
+            else:
+                messages.append(LLMMessage(role=Role.ASSISTANT, content=content))
+        return messages
 
     async def _ensure_self_person(
         self,

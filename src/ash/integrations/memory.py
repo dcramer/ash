@@ -37,6 +37,7 @@ class MemoryIntegration(IntegrationContributor):
             extraction_enabled=memory_config.extraction_enabled,
             min_message_length=memory_config.extraction_min_message_length,
             debounce_seconds=memory_config.extraction_debounce_seconds,
+            context_messages=memory_config.extraction_context_messages,
             confidence_threshold=memory_config.extraction_confidence_threshold,
         )
 

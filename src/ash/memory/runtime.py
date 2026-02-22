@@ -99,6 +99,7 @@ async def initialize_memory_runtime(
             llm=extraction_llm,
             model=extraction_model_config.model,
             confidence_threshold=config.memory.extraction_confidence_threshold,
+            grounding_enabled=config.memory.extraction_grounding_enabled,
         )
         log.debug(
             "Memory extractor initialized (model=%s)", extraction_model_config.model

@@ -187,7 +187,13 @@ class MemoryConfig(BaseModel):
     )
     extraction_min_message_length: int = 20  # Skip extraction for short messages
     extraction_debounce_seconds: int = 30  # Minimum seconds between extractions
+    extraction_context_messages: int = (
+        8  # Number of recent messages to include in extraction context
+    )
     extraction_confidence_threshold: float = 0.7  # Minimum confidence to store
+    extraction_grounding_enabled: bool = (
+        True  # Run second-pass LLM grounding/rewriting of extracted facts
+    )
 
 
 class ConversationConfig(BaseModel):

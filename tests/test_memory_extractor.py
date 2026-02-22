@@ -624,6 +624,82 @@ class TestClassifyFact:
         assert result.aliases == {"Sukhpreet": ["SK"]}
 
 
+class TestGroundingPass:
+    """Tests for optional second-pass grounding/rewriting."""
+
+    @pytest.fixture
+    def mock_llm(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def extractor(self, mock_llm):
+        return MemoryExtractor(
+            llm=mock_llm,
+            model="test-model",
+            confidence_threshold=0.7,
+            grounding_enabled=True,
+        )
+
+    async def test_grounding_rewrites_incomplete_fact(self, extractor, mock_llm):
+        mock_llm.complete = AsyncMock(
+            side_effect=[
+                CompletionResponse(
+                    message=Message(
+                        role=Role.ASSISTANT,
+                        content='[{"content":"Randolf is going in May","subjects":["Randolf"],"shared":false,"confidence":0.9}]',
+                    ),
+                    usage=Usage(input_tokens=100, output_tokens=40),
+                ),
+                CompletionResponse(
+                    message=Message(
+                        role=Role.ASSISTANT,
+                        content='[{"index":0,"grounded":true,"content":"Randolf is going to Tokyo in May"}]',
+                    ),
+                    usage=Usage(input_tokens=120, output_tokens=25),
+                ),
+            ]
+        )
+
+        facts = await extractor.extract_from_conversation(
+            [
+                Message(role=Role.USER, content="Randolf is going to Tokyo in May"),
+                Message(role=Role.USER, content="he's still going in May"),
+            ]
+        )
+
+        assert len(facts) == 1
+        assert facts[0].content == "Randolf is going to Tokyo in May"
+
+    async def test_grounding_can_drop_ungrounded_fact(self, extractor, mock_llm):
+        mock_llm.complete = AsyncMock(
+            side_effect=[
+                CompletionResponse(
+                    message=Message(
+                        role=Role.ASSISTANT,
+                        content='[{"content":"Spent money on something","subjects":[],"shared":false,"confidence":0.9}]',
+                    ),
+                    usage=Usage(input_tokens=80, output_tokens=25),
+                ),
+                CompletionResponse(
+                    message=Message(
+                        role=Role.ASSISTANT,
+                        content='[{"index":0,"grounded":false}]',
+                    ),
+                    usage=Usage(input_tokens=100, output_tokens=15),
+                ),
+            ]
+        )
+
+        facts = await extractor.extract_from_conversation(
+            [
+                Message(role=Role.USER, content="I spent money on something"),
+                Message(role=Role.ASSISTANT, content="what did you buy?"),
+            ]
+        )
+
+        assert facts == []
+
+
 class TestAliasParsing:
     """Tests for alias parsing in extraction."""
 
