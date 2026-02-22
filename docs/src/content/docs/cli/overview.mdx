@@ -5,91 +5,53 @@ sidebar:
   order: 1
 ---
 
-Ash provides a comprehensive CLI for interacting with your assistant.
+Ash CLI command surface (`uv run ash --help`):
 
 ## Usage
 
 ```bash
-uv run ash [OPTIONS] COMMAND [ARGS]
+uv run ash [OPTIONS] COMMAND [ARGS]...
 ```
 
-## Global Options
-
-| Option | Description |
-|--------|-------------|
-| `--help` | Show help message |
-| `--version` | Show version |
-
-## Commands
+## Top-Level Commands
 
 | Command | Description |
 |---------|-------------|
-| [`init`](/cli/init/) | Initialize configuration file |
+| [`auth`](/cli/auth/) | OAuth authentication |
 | [`chat`](/cli/chat/) | Interactive chat or single prompt |
-| [`serve`](/cli/serve/) | Start the server |
 | [`config`](/cli/config/) | Configuration management |
+| [`doctor`](/cli/doctor/) | Read-only operational checks |
+| [`graph`](/cli/graph/) | Graph inspection utilities |
+| [`init`](/cli/init/) | Create starter configuration |
+| [`logs`](/cli/logs/) | View/search logs |
 | [`memory`](/cli/memory/) | Memory management |
-| [`sessions`](/cli/sessions/) | Session management |
-| [`schedule`](/cli/schedule/) | Scheduled task management |
-| [`skill`](/cli/skill/) | Skill management |
+| [`people`](/cli/people/) | Person record management |
 | [`sandbox`](/cli/sandbox/) | Sandbox management |
-| [`db`](/cli/db/) | Database operations |
-| [`upgrade`](/cli/upgrade/) | Run migrations and checks |
-| [`service`](/cli/service/) | Service management |
+| [`schedule`](/cli/schedule/) | Scheduled task management |
+| [`serve`](/cli/serve/) | Start server |
+| [`service`](/cli/service/) | Background service management |
+| [`sessions`](/cli/sessions/) | Session inspection/debugging |
+| [`skill`](/cli/skill/) | Skill management |
+| [`stats`](/cli/stats/) | Operational stats |
+| [`upgrade`](/cli/upgrade/) | Upgrade checks/build |
 
-## Getting Help
-
-Get help for any command:
-
-```bash
-uv run ash --help
-uv run ash chat --help
-uv run ash memory --help
-```
-
-## Environment Variables
+## Key Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `ASH_CONFIG` | Config file path |
-| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `ASH_HOME` | Base state directory (`config.toml`, logs, sessions, auth) |
 | `OPENAI_API_KEY` | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
 | `BRAVE_SEARCH_API_KEY` | Brave Search API key |
 | `SENTRY_DSN` | Sentry DSN |
 
-## Quick Start
-
-1. Initialize configuration:
-   ```bash
-   uv run ash init
-   ```
-
-2. Add your API keys to `~/.ash/config.toml`
-
-3. Run setup tasks:
-   ```bash
-   uv run ash upgrade
-   ```
-
-4. Start chatting:
-   ```bash
-   uv run ash chat
-   ```
-
-## Running as a Service
-
-For persistent operation with Telegram:
+## Bootstrap Sequence
 
 ```bash
-# Install as system service
-uv run ash service install
-
-# Start the service
-uv run ash service start
-
-# View logs
-uv run ash service logs
+uv run ash init
+uv run ash auth login
+uv run ash config validate
+uv run ash upgrade
+uv run ash chat
 ```
-
-See [`service`](/cli/service/) for details.

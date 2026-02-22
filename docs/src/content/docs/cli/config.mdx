@@ -2,10 +2,10 @@
 title: ash config
 description: Configuration management commands
 sidebar:
-  order: 6
+  order: 5
 ---
 
-Manage Ash configuration.
+Manage Ash configuration files.
 
 ## Usage
 
@@ -15,47 +15,38 @@ uv run ash config ACTION [OPTIONS]
 
 ## Actions
 
-### show
+### `show`
 
-Display current configuration:
+Print the config file currently in use.
 
 ```bash
 uv run ash config show
+uv run ash config show --path ~/.ash/config.toml
 ```
 
-Options:
+### `validate`
+
+Load and validate config against the current schema.
+
+```bash
+uv run ash config validate
+uv run ash config validate --path ~/.ash/config.toml
+```
+
+Validation includes:
+
+- TOML parsing
+- Required model alias checks (`[models.default]`)
+- Type/schema validation for sections and fields
+- Provider/model summary output
+
+## Option
+
 | Option | Description |
 |--------|-------------|
-| `--path`, `-p` | Path to config file |
-
-### validate
-
-Validate configuration file:
-
-```bash
-uv run ash config validate
-```
-
-Checks:
-- TOML syntax
-- Required fields
-- Type correctness
-- API key availability
-
-## Examples
-
-Check configuration:
-
-```bash
-uv run ash config validate
-```
-
-View current settings (redacts secrets):
-
-```bash
-uv run ash config show
-```
+| `--path`, `-p` | Path to config file (default `$ASH_HOME/config.toml`) |
 
 ## See Also
 
-- [`ash init`](/cli/init/) - Create new configuration file
+- [`ash init`](/cli/init/) to generate a starter config
+- [`Configuration Overview`](/configuration/overview/) for config structure

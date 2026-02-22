@@ -1,0 +1,42 @@
+---
+title: ash people
+description: Manage person records
+sidebar:
+  order: 11
+---
+
+Manage person entities and cleanups.
+
+## Usage
+
+```bash
+uv run ash people [ACTION] [TARGET] [TARGET2] [OPTIONS]
+```
+
+## Actions
+
+| Action | Description |
+|--------|-------------|
+| `list` | List people |
+| `show <id>` | Show person details |
+| `search <query>` | Search by name/alias |
+| `merge <id1> <id2>` | Merge duplicate people |
+| `delete <id>` | Delete a person |
+| `doctor ...` | Run people doctor checks |
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--config`, `-c` | Path to config file |
+| `--force`, `-f` | Skip confirmation prompts |
+
+## Examples
+
+```bash
+uv run ash people list
+uv run ash people show <id>
+uv run ash people search "david"
+uv run ash people merge <id1> <id2>
+uv run ash people doctor
+```

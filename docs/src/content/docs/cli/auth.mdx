@@ -1,0 +1,35 @@
+---
+title: ash auth
+description: Manage OAuth authentication
+sidebar:
+  order: 3
+---
+
+Manage OAuth credentials (currently `openai-oauth`).
+
+## Usage
+
+```bash
+uv run ash auth COMMAND [ARGS]
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `login [provider]` | Start OAuth login flow |
+| `status` | Show authenticated providers and expiry |
+| `logout [provider]` | Remove stored credentials |
+
+## Examples
+
+```bash
+uv run ash auth login
+uv run ash auth status
+uv run ash auth logout
+```
+
+## Notes
+
+- Default provider is `openai-oauth`
+- Credentials are stored in `~/.ash/auth.json`

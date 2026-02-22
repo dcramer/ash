@@ -1,0 +1,22 @@
+---
+title: ash doctor
+description: Run read-only operational health checks
+sidebar:
+  order: 7
+---
+
+Run diagnostics for local Ash setup and runtime dependencies.
+
+## Usage
+
+```bash
+uv run ash doctor
+```
+
+## What It Checks
+
+- Ash home/config presence
+- Docker availability
+- Environment/runtime readiness
+
+`ash doctor` is read-only and does not mutate state.

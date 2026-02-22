@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Detailed installation methods for Ash
+description: Detailed installation and bootstrap guide
 sidebar:
   order: 1
 ---
@@ -12,20 +12,8 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 | Requirement | Version | Notes |
 |-------------|---------|-------|
 | Python | 3.12+ | Required |
-| Docker | 20.10+ | For sandbox execution |
+| Docker | 20.10+ | Required for sandbox tools |
 | uv | Latest | Recommended package manager |
-
-## API Keys
-
-Ash requires an OpenAI API key for the full experience:
-
-| Provider | Purpose | Get a key |
-|----------|---------|-----------|
-| **OpenAI** | LLM (GPT-5 powers the chat) + Memory embeddings | [platform.openai.com](https://platform.openai.com/) |
-
-<Aside type="tip">
-  Store your key in your `~/.ash/config.toml` file. You can also export it as `OPENAI_API_KEY` environment variable.
-</Aside>
 
 ## Install from Source
 
@@ -38,13 +26,13 @@ Ash requires an OpenAI API key for the full experience:
    cd ash
    ```
 
-2. **Install with uv**
+2. **Install dependencies**
 
    ```bash
    uv sync --all-groups
    ```
 
-3. **Verify installation**
+3. **Verify CLI**
 
    ```bash
    uv run ash --help
@@ -52,15 +40,59 @@ Ash requires an OpenAI API key for the full experience:
 
 </Steps>
 
-## Configuration
+## Bootstrap Configuration
 
-Create your configuration file:
+Create a starter config:
 
 ```bash
 uv run ash init
 ```
 
-This creates `~/.ash/config.toml` with a template configuration. Edit it to add your API key:
+By default this writes `~/.ash/config.toml` (or `$ASH_HOME/config.toml` when `ASH_HOME` is set).
+
+Inspect what is currently configured:
+
+```bash
+uv run ash config show
+```
+
+Validate config:
+
+```bash
+uv run ash config validate
+```
+
+## Recommended Auth Path (OAuth)
+
+Authenticate with OpenAI OAuth:
+
+```bash
+uv run ash auth login
+```
+
+Use `openai-oauth` providers in your model aliases:
+
+```toml
+[models.default]
+provider = "openai-oauth"
+model = "gpt-5.2"
+
+[models.codex]
+provider = "openai-oauth"
+model = "gpt-5.2-codex"
+```
+
+Check auth status:
+
+```bash
+uv run ash auth status
+```
+
+<Aside type="note">
+  OAuth credentials are stored in `~/.ash/auth.json`.
+</Aside>
+
+## Alternative Auth Path (API Key)
 
 ```toml
 [openai]
@@ -69,94 +101,43 @@ api_key = "sk-..."
 [models.default]
 provider = "openai"
 model = "gpt-5.2"
-
-[models.mini]
-provider = "openai"
-model = "gpt-5-mini"
-
-[embeddings]
-provider = "openai"
-model = "text-embedding-3-small"
 ```
 
-See [Configuration Overview](/configuration/overview/) for all options.
-
-## Docker Sandbox
-
-The sandbox isolates command execution. Build the image:
+## Build Sandbox and Run Upgrade
 
 ```bash
 uv run ash sandbox build
-```
-
-Check status:
-
-```bash
-uv run ash sandbox status
-```
-
-## Database Setup
-
-Initialize the SQLite database:
-
-```bash
 uv run ash upgrade
 ```
 
-This runs migrations and verifies everything is ready.
-
-## Workspace
-
-Ash uses a workspace directory for personality:
-
-```
-~/.ash/workspace/
-├── SOUL.md    # Assistant personality
-├── USER.md    # User profile (optional)
-└── skills/    # Custom skills
-```
-
-These are created automatically on first run. Edit `SOUL.md` to customize how Ash behaves.
-
-## Upgrading
+## Start Chat
 
 ```bash
-cd ash
-git pull
-uv sync --all-groups
-uv run ash upgrade
+uv run ash chat
 ```
 
 ## Troubleshooting
 
-### Docker not found
+### Config not found
+
+Run:
+
+```bash
+uv run ash init
+```
+
+### OAuth missing
+
+Run:
+
+```bash
+uv run ash auth login
+```
+
+### Docker unavailable
+
+Check:
 
 ```bash
 docker info
-```
-
-If this fails, install Docker and ensure the daemon is running.
-
-### Permission denied
-
-Add your user to the docker group:
-
-```bash
-sudo usermod -aG docker $USER
-```
-
-Log out and back in.
-
-### Config issues
-
-Check your config:
-
-```bash
-uv run ash config show
-```
-
-Validate it:
-
-```bash
-uv run ash config validate
 ```

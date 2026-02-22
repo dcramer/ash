@@ -18,64 +18,24 @@ uv run ash init [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--path`, `-p` | Custom config file path (default: `~/.ash/config.toml`) |
-| `--help` | Show help message |
-
-## Examples
-
-Create default config file:
-
-```bash
-uv run ash init
-```
-
-Create config at custom path:
-
-```bash
-uv run ash init --path ~/my-ash-config.toml
-```
 
 ## Behavior
 
-- Creates `~/.ash/config.toml` (or specified path)
-- Fails if config already exists (use `--path` for different location)
-- Generates a template with commented examples
-- After creation, add your API key and run `ash upgrade`
+- Creates config file at `~/.ash/config.toml` (or custom `--path`)
+- Fails if the target file already exists
+- Creates workspace defaults under `~/.ash/workspace`
+- Prints next step: run `ash upgrade` after adding auth/config
 
-## What's Created
+## Examples
 
-The generated config includes:
-
-```toml
-# API Keys - set these or use environment variables
-[openai]
-# api_key = "sk-..."
-
-[anthropic]
-# api_key = "sk-ant-..."
-
-# Default model configuration
-[models.default]
-provider = "openai"
-model = "gpt-5.2"
-
-# Optional: Fast model for simple tasks
-# [models.mini]
-# provider = "openai"
-# model = "gpt-5-mini"
-
-# See docs for more configuration options
+```bash
+uv run ash init
+uv run ash init --path ~/my-ash-config.toml
 ```
 
 ## Next Steps
 
-After running `ash init`:
-
-1. Edit `~/.ash/config.toml` and add your API keys
-2. Run `uv run ash upgrade` to set up the database and sandbox
-3. Start chatting with `uv run ash chat`
-
-## See Also
-
-- [`setup`](/cli/setup/) - Interactive configuration wizard
-- [`config`](/cli/config/) - View and validate configuration
-- [`upgrade`](/cli/upgrade/) - Run migrations and verify sandbox
+1. Configure model provider entries in config (`openai-oauth` recommended)
+2. Run `uv run ash auth login` for OAuth provider setup
+3. Run `uv run ash config validate`
+4. Run `uv run ash upgrade`

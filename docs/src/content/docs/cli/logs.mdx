@@ -1,0 +1,37 @@
+---
+title: ash logs
+description: View and search Ash logs
+sidebar:
+  order: 9
+---
+
+View JSONL logs stored in `~/.ash/logs/`.
+
+## Usage
+
+```bash
+uv run ash logs [QUERY]... [OPTIONS]
+```
+
+## Common Options
+
+| Option | Description |
+|--------|-------------|
+| `--since`, `-s` | Time range like `1h`, `30m`, `1d`, or ISO timestamp |
+| `--until`, `-u` | End time |
+| `--level`, `-l` | Minimum level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `--component`, `-c` | Filter by component |
+| `--limit`, `-n` | Max entries (default `50`) |
+| `--follow`, `-f` | Follow mode |
+| `--json` | Machine-readable output |
+
+## Examples
+
+```bash
+uv run ash logs
+uv run ash logs "schedule"
+uv run ash logs --level ERROR
+uv run ash logs --since 1h "failed"
+uv run ash logs --component events
+uv run ash logs -f
+```

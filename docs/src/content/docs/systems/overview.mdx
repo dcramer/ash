@@ -7,59 +7,30 @@ sidebar:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-Ash is a Python-based personal assistant agent with modular architecture.
+Ash is a Python-based personal assistant with modular subsystems.
 
 ## System Components
 
 <CardGrid>
   <Card title="Agent Core" icon="puzzle">
-    Orchestrates conversations, manages context, and coordinates tool execution.
+    Orchestrates conversations, context assembly, and tool usage.
   </Card>
   <Card title="LLM Providers" icon="rocket">
-    Abstraction layer for Anthropic Claude and OpenAI models.
+    Unified interface for `openai`, `openai-oauth`, and `anthropic` models.
   </Card>
-  <Card title="Tool System" icon="setting">
-    Extensible tools including sandboxed bash and web search.
+  <Card title="Tools + Sandbox" icon="shield">
+    Tool execution with Docker sandbox isolation and runtime controls.
   </Card>
   <Card title="Memory" icon="document">
-    SQLite-based storage with semantic search via embeddings.
-  </Card>
-  <Card title="Sandbox" icon="shield">
-    Docker containers for secure command execution.
+    Context retention, extraction, and optional semantic retrieval.
   </Card>
   <Card title="Providers" icon="telegram">
-    Communication channels (Telegram, CLI).
+    Interfaces like CLI and Telegram.
+  </Card>
+  <Card title="Skills" icon="setting">
+    Local and external skill discovery/execution.
   </Card>
 </CardGrid>
-
-## Data Flow
-
-```
-User Message
-     │
-     ▼
-┌─────────────┐
-│  Provider   │  (Telegram, CLI)
-└─────┬───────┘
-      │
-      ▼
-┌─────────────┐
-│   Agent     │  Orchestrator
-└─────┬───────┘
-      │
-      ├──────────────┐
-      │              │
-      ▼              ▼
-┌─────────────┐ ┌─────────────┐
-│    LLM      │ │   Memory    │
-│  Provider   │ │   Store     │
-└─────────────┘ └─────────────┘
-      │
-      ▼
-┌─────────────┐
-│   Tools     │ ──► Sandbox
-└─────────────┘
-```
 
 ## Tech Stack
 
@@ -67,48 +38,19 @@ User Message
 |-----------|------------|
 | Language | Python 3.12+ |
 | CLI | Typer |
-| HTTP Server | FastAPI + Uvicorn |
+| Server | FastAPI + Uvicorn |
 | Telegram | aiogram 3.x |
-| Database | SQLite + sqlite-vec |
-| ORM | SQLAlchemy 2.0 (async) |
-| LLM SDKs | anthropic, openai |
-| Container | docker-py |
-| Validation | Pydantic |
-
-## Directory Structure
-
-```
-src/ash/
-├── cli/           # Typer CLI
-├── config/        # Configuration loading
-├── core/          # Agent orchestrator
-├── llm/           # LLM abstraction
-├── providers/     # Communication providers
-├── tools/         # Tool system
-├── sandbox/       # Docker sandboxing
-├── db/            # Database layer
-├── memory/        # Memory + retrieval
-├── skills/        # Skill system
-├── server/        # FastAPI server
-└── service/       # Background service
-```
-
-## Key Design Principles
-
-1. **Async everywhere** - All I/O is async using asyncio
-2. **Type hints required** - Full type coverage with Pydantic validation
-3. **ABC for interfaces** - Abstract base classes define contracts
-4. **Registry pattern** - Dynamic discovery for tools, skills, providers
-5. **Security first** - All command execution is sandboxed
+| Config/validation | Pydantic |
+| Container runtime | docker-py |
 
 ## Systems Documentation
 
 | Section | Description |
 |---------|-------------|
-| [LLM](/systems/llm/) | LLM providers and model configuration |
-| [Tools](/systems/tools/) | Tool system and execution |
-| [Skills](/systems/skills/) | Configurable skill system |
-| [Agents](/systems/agents/) | Built-in subagents |
-| [Memory](/systems/memory/) | Storage and semantic search |
-| [Sandbox](/systems/sandbox/) | Docker container isolation |
-| [Providers](/systems/providers/) | Communication channels |
+| [LLM](/systems/llm/) | Model/provider configuration |
+| [Tools](/systems/tools/) | Tool execution patterns |
+| [Skills](/systems/skills/) | Skill sources and runtime behavior |
+| [Agents](/systems/agents/) | Agent architecture |
+| [Memory](/systems/memory/) | Context and memory pipeline |
+| [Sandbox](/systems/sandbox/) | Container isolation and mounts |
+| [Providers](/systems/providers/) | Transport/provider integrations |

@@ -1,0 +1,38 @@
+---
+title: ash graph
+description: Inspect graph structure
+sidebar:
+  order: 8
+---
+
+Inspect graph entities and edges.
+
+## Usage
+
+```bash
+uv run ash graph [ACTION] [TARGET] [OPTIONS]
+```
+
+## Actions
+
+| Action | Description |
+|--------|-------------|
+| `users` | List user nodes |
+| `chats` | List chat nodes |
+| `edges <id>` | Show edges for a node |
+| `stats` | Show graph counts |
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--config`, `-c` | Path to config file |
+
+## Examples
+
+```bash
+uv run ash graph users
+uv run ash graph chats
+uv run ash graph edges <node-id>
+uv run ash graph stats
+```

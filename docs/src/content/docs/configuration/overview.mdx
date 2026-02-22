@@ -1,127 +1,73 @@
 ---
 title: Configuration Overview
-description: Configure Ash with TOML configuration files
+description: Configure Ash with config.toml
 sidebar:
   order: 1
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Ash uses TOML configuration files to define models, providers, and behavior.
+Ash configuration is loaded from a single TOML file.
 
-## Configuration File Location
+## Config File Location
 
-Ash looks for configuration in this order:
+Default location:
 
-1. `./config.toml` (current directory)
-2. `~/.ash/config.toml` (user home)
-3. `/etc/ash/config.toml` (system-wide)
+- `~/.ash/config.toml`
 
-Run `ash init` to create your configuration file.
+If `ASH_HOME` is set, config path becomes:
 
-## Full Example Configuration
+- `$ASH_HOME/config.toml`
 
-```toml
-# Workspace directory for SOUL.md and USER.md
-workspace = "~/.ash/workspace"
+Create a starter config:
 
-# LLM Provider API Keys
-[openai]
-api_key = "sk-..."  # Or use OPENAI_API_KEY env var
-
-# Named model configurations
-[models.default]
-provider = "openai"
-model = "gpt-5.2"
-temperature = 0.7
-max_tokens = 4096
-
-[models.mini]
-provider = "openai"
-model = "gpt-5-mini"
-max_tokens = 4096
-
-[models.codex]
-provider = "openai"
-model = "gpt-5.2-codex"
-max_tokens = 8192
-
-# Telegram bot integration
-[telegram]
-bot_token = "123456:ABC..."  # Or use TELEGRAM_BOT_TOKEN env var
-allowed_users = ["@yourusername", "123456789"]
-allowed_groups = []
-group_mode = "mention"
-
-# Docker sandbox settings
-[sandbox]
-image = "ash-sandbox:latest"
-timeout = 60
-memory_limit = "512m"
-cpu_limit = 1.0
-runtime = "runc"
-network_mode = "bridge"
-workspace_access = "rw"
-
-# HTTP server settings
-[server]
-host = "127.0.0.1"
-port = 8080
-webhook_path = "/webhook"
-
-# Memory and context settings
-[memory]
-database_path = "~/.ash/memory.db"
-max_context_messages = 20
-context_token_budget = 100000
-recency_window = 10
-system_prompt_buffer = 8000
-compaction_enabled = true
-extraction_enabled = true
-
-# Session management
-[sessions]
-mode = "persistent"  # "persistent" or "fresh"
-max_concurrent = 2   # Parallel session processing limit
-
-# Agent-specific overrides
-[agents.research]
-model = "codex"
-max_iterations = 50
-
-# Embeddings for semantic search
-[embeddings]
-provider = "openai"
-model = "text-embedding-3-small"
-
-# Web search integration
-[brave_search]
-api_key = "..."  # Or use BRAVE_SEARCH_API_KEY env var
-
-# Error tracking (optional)
-[sentry]
-dsn = "https://..."  # Or use SENTRY_DSN env var
-environment = "production"
-traces_sample_rate = 0.1
+```bash
+uv run ash init
 ```
 
-## Environment Variables
+## Bootstrap Workflow
 
-API keys can be set via environment variables instead of the config file:
+```bash
+uv run ash init
+uv run ash config show
+uv run ash config validate
+uv run ash auth login
+uv run ash upgrade
+```
 
-| Variable | Config Path |
-|----------|-------------|
-| `OPENAI_API_KEY` | `[openai].api_key` |
-| `ANTHROPIC_API_KEY` | `[anthropic].api_key` |
-| `TELEGRAM_BOT_TOKEN` | `[telegram].bot_token` |
-| `BRAVE_SEARCH_API_KEY` | `[brave_search].api_key` |
-| `SENTRY_DSN` | `[sentry].dsn` |
+## Core Example (OAuth-first)
 
-Environment variables take precedence over config file values.
+```toml
+workspace = "~/.ash/workspace"
+timezone = "America/Los_Angeles"
 
-## Minimal Configuration
+[models.default]
+provider = "openai-oauth"
+model = "gpt-5.2"
 
-Ash requires an OpenAI API key for both the LLM and memory embeddings. The minimal config:
+[models.mini]
+provider = "openai-oauth"
+model = "gpt-5-mini"
+
+[models.codex]
+provider = "openai-oauth"
+model = "gpt-5.2-codex"
+
+[sandbox]
+workspace_access = "rw"
+sessions_access = "ro"
+chats_access = "ro"
+
+[memory]
+max_context_messages = 20
+context_token_budget = 100000
+
+[sessions]
+mode = "persistent"
+max_concurrent = 2
+```
+
+## API Key Example (alternative)
 
 ```toml
 [openai]
@@ -130,63 +76,37 @@ api_key = "sk-..."
 [models.default]
 provider = "openai"
 model = "gpt-5.2"
-
-[embeddings]
-provider = "openai"
-model = "text-embedding-3-small"
 ```
 
-For a better experience, add a "mini" alias for lightweight tasks and "codex" for coding:
+## Environment Variables
 
-```toml
-[models.mini]
-provider = "openai"
-model = "gpt-5-mini"
-
-[models.codex]
-provider = "openai"
-model = "gpt-5.2-codex"
-```
-
-## Configuration Commands
-
-Create configuration file:
-
-```bash
-uv run ash init
-```
-
-View current configuration:
-
-```bash
-uv run ash config show
-```
-
-Validate configuration:
-
-```bash
-uv run ash config validate
-```
+| Variable | Purpose |
+|----------|---------|
+| `ASH_HOME` | Base directory for Ash state (`config.toml`, logs, sessions, auth) |
+| `OPENAI_API_KEY` | OpenAI API key (for `provider = "openai"`) |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API key |
+| `SENTRY_DSN` | Sentry DSN |
 
 ## Configuration Sections
 
-Each section has full documentation in the Systems pages:
-
-| Section | Purpose | Documentation |
-|---------|---------|---------------|
-| `[models.*]` | LLM model definitions | [LLM Providers](/systems/llm/) |
-| `[telegram]` | Telegram bot settings | [Providers](/systems/providers/) |
-| `[sandbox]` | Docker sandbox settings | [Sandbox](/systems/sandbox/) |
-| `[server]` | HTTP server settings | [Providers](/systems/providers/) |
-| `[memory]` | Memory and context | [Memory](/systems/memory/) |
-| `[sessions]` | Session management | [Providers](/systems/providers/) |
-| `[embeddings]` | Semantic search | [Memory](/systems/memory/) |
-| `[skills]` | Skill sources and config | [Skills](/systems/skills/) |
-| `[agents.*]` | Agent overrides | [Agents](/systems/agents/) |
-| `[brave_search]` | Web search | [Configuration Reference](/configuration/reference/) |
-| `[sentry]` | Error tracking | [Configuration Reference](/configuration/reference/) |
+| Section | Purpose |
+|---------|---------|
+| `workspace`, `timezone` | Global behavior |
+| `[models.*]` | Named model aliases (must include `default`) |
+| `[openai]`, `[anthropic]` | Provider API key config |
+| `[telegram]` | Telegram provider settings |
+| `[sandbox]` | Sandbox runtime and mount settings |
+| `[memory]` | Memory retention and extraction tuning |
+| `[conversation]` | Conversation context behavior |
+| `[sessions]` | Session runtime settings |
+| `[embeddings]` | Embedding provider/model |
+| `[agents.*]` | Per-agent overrides |
+| `[skills]` / `[[skills.sources]]` / `[skills.<name>]` | Skill source and per-skill settings |
+| `[env]` | Environment variables injected into runtime |
+| `[brave_search]`, `[sentry]`, `[server]` | Optional subsystem config |
 
 <Aside type="tip">
-  Use `ash init` to create a configuration file, then edit it manually.
-  Use `ash config validate` to check your configuration is correct.
+  Keep at least one working model alias in `[models.default]` and run `uv run ash config validate` after edits.
 </Aside>

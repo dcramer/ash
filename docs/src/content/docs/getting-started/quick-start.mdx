@@ -1,33 +1,25 @@
 ---
 title: Quick Start
-description: Get Ash running in 5 minutes
+description: Get Ash running in a few minutes
 sidebar:
   order: 2
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
-Get Ash up and running with these steps.
-
 ## Prerequisites
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/) package manager
+- [uv](https://docs.astral.sh/uv/)
 - Docker (for sandboxed command execution)
 
-**API Keys Required:**
-- **Anthropic** — Powers the LLM (Claude)
-- **OpenAI** — Powers memory embeddings
+## Recommended: OAuth-First Setup
 
-<Aside type="note">
-  You'll need both API keys for the full experience. Anthropic handles chat, OpenAI handles semantic memory search.
-</Aside>
-
-## Installation
+Use OpenAI OAuth if you have ChatGPT Plus/Pro. This avoids storing an OpenAI API key in config.
 
 <Steps>
 
-1. **Clone and install**
+1. **Install dependencies**
 
    ```bash
    git clone https://github.com/dcramer/ash.git
@@ -35,52 +27,69 @@ Get Ash up and running with these steps.
    uv sync --all-groups
    ```
 
-2. **Configure**
+2. **Create config**
 
    ```bash
    uv run ash init
    ```
 
-   This creates `~/.ash/config.toml` with a template. Edit it to add your API keys.
-
-3. **Build the sandbox**
+3. **Authenticate with OAuth**
 
    ```bash
-   uv run ash sandbox build
+   uv run ash auth login
    ```
 
-4. **Initialize the database**
+4. **Run first-time upgrade checks**
 
    ```bash
    uv run ash upgrade
    ```
 
+5. **Start chatting**
+
+   ```bash
+   uv run ash chat
+   ```
+
 </Steps>
 
-## Start Chatting
+## Minimal OAuth Config Example
 
-```bash
-uv run ash chat
+`ash init` generates a starter config at `~/.ash/config.toml` (or `$ASH_HOME/config.toml` if `ASH_HOME` is set).
+
+```toml
+[models.default]
+provider = "openai-oauth"
+model = "gpt-5.2"
+
+[models.mini]
+provider = "openai-oauth"
+model = "gpt-5-mini"
+
+[models.codex]
+provider = "openai-oauth"
+model = "gpt-5.2-codex"
 ```
 
-Or run a single prompt:
+<Aside type="tip">
+  Verify what Ash is loading with `uv run ash config show` and validate with `uv run ash config validate`.
+</Aside>
 
-```bash
-uv run ash chat "Find all TODO comments in my codebase"
+## Alternative: API Key Setup
+
+If you prefer API keys instead of OAuth:
+
+```toml
+[openai]
+api_key = "sk-..."
+
+[models.default]
+provider = "openai"
+model = "gpt-5.2"
 ```
-
-## Run as a Server
-
-For Telegram integration or API access:
-
-```bash
-uv run ash serve
-```
-
-Runs on `http://127.0.0.1:8080` by default.
 
 ## Next Steps
 
-- [Installation](/getting-started/installation/) — Detailed setup options
-- [Configuration](/configuration/overview/) — All the knobs you can turn
-- [CLI Reference](/cli/overview/) — Full command reference
+- [Installation](/getting-started/installation/) for detailed setup and troubleshooting
+- [Configuration Overview](/configuration/overview/) for config paths, schema, and examples
+- [CLI Overview](/cli/overview/) for full command reference

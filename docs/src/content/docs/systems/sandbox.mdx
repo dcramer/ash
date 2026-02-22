@@ -7,45 +7,7 @@ sidebar:
 
 import { Aside } from '@astrojs/starlight/components';
 
-All bash commands from the LLM run in isolated Docker containers. The sandbox is **mandatory** - there is no option to run commands directly on the host.
-
-## Overview
-
-The sandbox protects against:
-
-- **Malicious commands** - LLM generating harmful commands (intentional or via prompt injection)
-- **Accidental damage** - Commands that could damage the host system
-- **Resource exhaustion** - Fork bombs, memory exhaustion, disk filling
-- **Data exfiltration** - Unauthorized access to host files or secrets
-- **Privilege escalation** - Attempts to gain root or host access
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     HOST SYSTEM                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │                   Ash Agent                             │ │
-│  │  - Runs on host                                         │ │
-│  │  - Has access to config (~/.ash/)                       │ │
-│  │  - Has access to SQLite database                        │ │
-│  │  - Communicates with LLM API                            │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                            │                                 │
-│                    Tool Execution                            │
-│                            ▼                                 │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │              Docker Container (Sandbox)                 │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │  Bash commands execute here                       │  │ │
-│  │  │  - Isolated filesystem                            │  │ │
-│  │  │  - Limited resources                              │  │ │
-│  │  │  - Unprivileged user                              │  │ │
-│  │  │  - Optional network access                        │  │ │
-│  │  └──────────────────────────────────────────────────┘  │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
+Ash executes bash commands inside Docker sandboxes. Host command execution is not used for tool calls.
 
 ## Configuration
 
@@ -60,279 +22,35 @@ network_mode = "bridge"
 dns_servers = []
 http_proxy = ""
 workspace_access = "rw"
-sessions_access = "none"
+sessions_access = "ro"
+chats_access = "ro"
+source_access = "none"
+mount_prefix = "/ash"
+apt_packages = []
+python_packages = []
+setup_command = ""
 ```
 
-### Options
+## Key Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `image` | string | `"ash-sandbox:latest"` | Docker image name |
-| `timeout` | int | `60` | Command timeout in seconds |
-| `memory_limit` | string | `"512m"` | Container memory limit |
-| `cpu_limit` | float | `1.0` | CPU cores allowed |
-| `runtime` | string | `"runc"` | Container runtime |
-| `network_mode` | string | `"bridge"` | Network isolation mode |
-| `dns_servers` | list | `[]` | Custom DNS servers |
-| `http_proxy` | string | `""` | HTTP proxy URL |
-| `workspace_access` | string | `"rw"` | Workspace mount mode |
-| `sessions_access` | string | `"none"` | Sessions directory mount mode |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `runtime` | `runc` | Container runtime (`runc` or `runsc`) |
+| `network_mode` | `bridge` | Network mode (`bridge` or `none`) |
+| `workspace_access` | `rw` | Workspace mount mode (`none`, `ro`, `rw`) |
+| `sessions_access` | `ro` | Sessions mount mode (`none`, `ro`) |
+| `chats_access` | `ro` | Chats mount mode (`none`, `ro`) |
+| `source_access` | `none` | Source mount mode (`none`, `ro`) |
+| `mount_prefix` | `/ash` | Prefix for internal bind mount paths |
 
 ## Security Controls
 
-### Container Isolation
-
-| Control | Implementation | Purpose |
-|---------|----------------|---------|
-| Read-only root filesystem | `--read-only` | Prevent persistent changes |
-| Dropped capabilities | `cap_drop: ALL` | Remove Linux capabilities |
-| No privilege escalation | `no-new-privileges` | Prevent setuid exploitation |
-| Process limit | `pids_limit: 100` | Fork bomb protection |
-| Memory limit | `mem_limit: 512m` | Memory exhaustion protection |
-| CPU limit | `cpu_limit: 1.0` | CPU exhaustion protection |
-| Non-root user | `USER sandbox` | Reduced privilege |
-| Removed setuid binaries | Dockerfile cleanup | Prevent privilege escalation |
-
-### Filesystem Access
-
-| Path | Access | Notes |
-|------|--------|-------|
-| `/` (root) | Read-only | Immutable base system |
-| `/etc`, `/usr`, `/bin` | Read-only | System directories protected |
-| `/workspace` | Configurable (none/ro/rw) | Mounted from host workspace |
-| `/tmp` | Read-write (tmpfs, 64MB) | Temporary files, noexec |
-| `/home/sandbox` | Read-write (tmpfs, 64MB) | User home, noexec |
-| `/var/tmp` | Read-write (tmpfs, 32MB) | Temporary files, noexec |
-| `/run` | Read-write (tmpfs, 16MB) | Runtime files, noexec |
-| `/root` | No access | Root home inaccessible |
-
-### Network Isolation
-
-| Mode | Behavior |
-|------|----------|
-| `none` | Completely isolated, no network |
-| `bridge` | Standard Docker networking, can reach internet |
-
-```toml
-[sandbox]
-network_mode = "none"  # Fully isolated
-```
-
-#### DNS Filtering
-
-Use filtered DNS servers:
-
-```toml
-[sandbox]
-network_mode = "bridge"
-dns_servers = ["9.9.9.9", "149.112.112.112"]  # Quad9 filtered DNS
-```
-
-#### HTTP Proxy
-
-Route traffic through a proxy for monitoring:
-
-```toml
-[sandbox]
-http_proxy = "http://localhost:8888"
-```
-
-### Workspace Access
-
-Control how the workspace is mounted:
-
-| Mode | Description |
-|------|-------------|
-| `none` | Workspace not mounted |
-| `ro` | Read-only access |
-| `rw` | Read-write access |
-
-```toml
-[sandbox]
-workspace_access = "ro"  # Read-only for safety
-```
+- Read-only root filesystem
+- Dropped Linux capabilities
+- No-new-privileges
+- Resource limits (CPU, memory, process count)
+- Configurable network isolation
 
 <Aside type="caution">
-  With `workspace_access = "rw"`, commands can modify files in your workspace.
+  `workspace_access = "rw"` allows tool commands to modify files in your mounted workspace.
 </Aside>
-
-### Sessions Access
-
-Control whether the agent can read session history from the sandbox:
-
-| Mode | Description |
-|------|-------------|
-| `none` | Sessions not mounted (default) |
-| `ro` | Read-only access to session transcripts |
-
-```toml
-[sandbox]
-sessions_access = "ro"  # Allow reading past conversations
-```
-
-## Container Runtime
-
-### runc (Default)
-
-Standard OCI runtime:
-
-```toml
-[sandbox]
-runtime = "runc"
-```
-
-### gVisor (runsc)
-
-Enhanced isolation with gVisor:
-
-```toml
-[sandbox]
-runtime = "runsc"
-```
-
-<Aside type="tip">
-  gVisor provides stronger isolation but may have compatibility issues with some commands.
-</Aside>
-
-## Components
-
-### Sandbox Manager
-
-Location: `src/ash/sandbox/manager.py`
-
-Manages container lifecycle:
-
-```python
-class SandboxManager:
-    async def create(self) -> Container:
-        """Create a new sandbox container."""
-
-    async def execute(
-        self,
-        command: str,
-        timeout: int = 60,
-    ) -> ExecutionResult:
-        """Execute command in sandbox."""
-
-    async def cleanup(self) -> None:
-        """Remove stopped containers."""
-```
-
-### Sandbox Executor
-
-Location: `src/ash/sandbox/executor.py`
-
-Handles command execution:
-
-```python
-class SandboxExecutor:
-    async def run(
-        self,
-        command: str,
-        *,
-        timeout: int,
-        working_dir: str = "/workspace",
-    ) -> ExecutionResult:
-        """Run command with resource limits."""
-```
-
-## Expected Behaviors
-
-### MUST Allow
-
-1. **Command execution** - Bash commands run and return output
-2. **Python execution** - `python3` available for scripting
-3. **Common tools** - `git`, `curl`, `jq`, `vim`, `less`, `tree` available
-4. **Workspace access** - Read/write to `/workspace` when configured
-5. **Temp file creation** - Write to `/tmp` for temporary files
-6. **Network requests** - HTTP/HTTPS when `network_mode: bridge`
-7. **Exit codes** - Non-zero exit codes preserved and reported
-8. **Stderr capture** - Error output captured and returned
-
-### MUST Block
-
-1. **System modification** - Writing to `/etc`, `/usr`, `/bin`, etc.
-2. **Privilege escalation** - `sudo`, `su`, setuid binaries
-3. **Container escape** - Access to host filesystem outside mounts
-4. **Resource exhaustion** - Fork bombs, memory bombs limited
-5. **Persistent malware** - Read-only filesystem prevents persistence
-6. **Host secret access** - No access to host environment variables
-7. **Unlimited execution** - Commands timeout after configured limit
-
-## CLI Commands
-
-### Building the Sandbox
-
-```bash
-uv run ash sandbox build
-```
-
-### Managing Containers
-
-```bash
-# Clean up stopped containers
-uv run ash sandbox clean
-```
-
-## Verification
-
-### Automated Tests
-
-Run the security verification suite with pytest:
-
-```bash
-uv run pytest tests/test_sandbox_verify.py -v
-```
-
-This runs tests across 5 categories:
-- **SECURITY** - User isolation, filesystem restrictions
-- **RESOURCES** - Timeouts, tmpfs, noexec
-- **NETWORK** - DNS, HTTP, HTTPS connectivity (use `-m "not network"` to skip)
-- **FUNCTIONAL** - Available tools and utilities
-- **EDGE_CASES** - Special characters, output handling
-
-### Manual Prompt Tests
-
-Use the `/test-sandbox` skill for manual verification prompts. Key scenarios:
-
-1. `rm -rf /` -> "Read-only file system"
-2. `sudo whoami` -> "command not found" or "permission denied"
-3. Fork bomb `:(){ :|:& };:` -> Contained by pids limit
-4. Memory bomb -> Killed by memory limit
-
-## Troubleshooting
-
-### Container fails to start
-
-Check Docker is running:
-
-```bash
-docker info
-```
-
-### Command timeout
-
-Increase the timeout:
-
-```toml
-[sandbox]
-timeout = 120
-```
-
-### Out of memory
-
-Increase memory limit:
-
-```toml
-[sandbox]
-memory_limit = "1g"
-```
-
-## Incident Response
-
-If a sandbox escape or security issue is discovered:
-
-1. **Stop the service** - `ash sandbox clean` removes all containers
-2. **Review logs** - Check what commands were executed
-3. **Update image** - `ash sandbox build --force` rebuilds with fixes
-4. **Report issue** - File security issue in repository
