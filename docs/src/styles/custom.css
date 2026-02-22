@@ -21,6 +21,8 @@
   --sl-color-bg-nav: #fbf4e4;
   --sl-color-bg-sidebar: #f4ebd8;
   --sl-color-bg-inline-code: #ece2cf;
+  --sl-sidebar-width: 16.75rem;
+  --sl-sidebar-pad-x: 0.9rem;
 
   --sl-font: 'Sora', 'Avenir Next', 'Segoe UI', sans-serif;
   --sl-font-mono: 'IBM Plex Mono', 'SFMono-Regular', ui-monospace, monospace;
@@ -127,7 +129,7 @@ h6,
 }
 
 h1 {
-  font-size: clamp(2.4rem, 6vw, 3.8rem);
+  font-size: clamp(2.05rem, 5.2vw, 3.15rem);
 }
 
 h2 {
