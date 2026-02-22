@@ -66,6 +66,7 @@ sentry = [
 
 [project.scripts]
 ash = "ash.cli:app"
+evals = "ash.evals_cli:main"
 
 # ============== UV CONFIGURATION ==============
 

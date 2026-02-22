@@ -46,7 +46,7 @@ def _record_eval_user_message(
     from ash.chats import ChatHistoryWriter
 
     writer = ChatHistoryWriter(provider=session.provider, chat_id=session.chat_id)
-    writer.record_user_message(
+    message_id = writer.record_user_message(
         content=user_message,
         created_at=datetime.now(UTC),
         user_id=user_id,
@@ -54,6 +54,7 @@ def _record_eval_user_message(
         display_name=session.context.display_name,
         metadata={"was_processed": True, "processing_mode": "active"},
     )
+    session.context.current_message_id = message_id
 
 
 def _record_eval_assistant_message(

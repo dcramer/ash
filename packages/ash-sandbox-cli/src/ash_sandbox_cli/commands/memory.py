@@ -166,37 +166,49 @@ def extract_memories(
     No arguments needed — reads the triggering message from the session
     and runs full extraction (subject linking, type classification, etc.).
     """
+
+    def _extract_from_explicit_message(
+        context: dict[str, str | None], current_user_message: str
+    ) -> dict[str, object]:
+        return rpc_call(
+            "memory.extract_from_messages",
+            {
+                "shared": shared,
+                "provider": context.get("provider"),
+                "user_id": context.get("user_id"),
+                "chat_id": context.get("chat_id"),
+                "chat_type": context.get("chat_type"),
+                "source_username": context.get("source_username"),
+                "source_display_name": context.get("source_display_name"),
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": current_user_message,
+                        "user_id": context.get("user_id"),
+                        "username": context.get("source_username"),
+                        "display_name": context.get("source_display_name"),
+                    }
+                ],
+            },
+        )
+
     try:
         context = get_context_params()
         current_user_message = context.get("current_user_message")
         params = {"shared": shared, **context}
 
         # Prefer session-backed extraction when message_id is available.
-        # Fall back to deterministic explicit-message extraction for harnesses.
+        # If session lookup misses and we have the explicit current message,
+        # deterministically retry via explicit-message extraction.
         if context.get("message_id"):
             result = rpc_call("memory.extract", params)
+            if (
+                result.get("error") == "Message not found in session"
+                and current_user_message
+            ):
+                result = _extract_from_explicit_message(context, current_user_message)
         elif current_user_message:
-            result = rpc_call(
-                "memory.extract_from_messages",
-                {
-                    "shared": shared,
-                    "provider": context.get("provider"),
-                    "user_id": context.get("user_id"),
-                    "chat_id": context.get("chat_id"),
-                    "chat_type": context.get("chat_type"),
-                    "source_username": context.get("source_username"),
-                    "source_display_name": context.get("source_display_name"),
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": current_user_message,
-                            "user_id": context.get("user_id"),
-                            "username": context.get("source_username"),
-                            "display_name": context.get("source_display_name"),
-                        }
-                    ],
-                },
-            )
+            result = _extract_from_explicit_message(context, current_user_message)
         else:
             result = rpc_call("memory.extract", params)
     except ConnectionError as e:

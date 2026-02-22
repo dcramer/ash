@@ -52,7 +52,7 @@ class ChatHistoryWriter:
         username: str | None = None,
         display_name: str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> str:
         """Record a user message to chat history."""
         entry = HistoryEntry(
             id=str(uuid.uuid4()),
@@ -65,6 +65,7 @@ class ChatHistoryWriter:
             metadata=metadata,
         )
         self._append(entry)
+        return entry.id
 
     def record_bot_message(
         self,

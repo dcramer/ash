@@ -99,6 +99,45 @@ class TestMemoryExtract:
             }
         ]
 
+    def test_extract_retries_with_explicit_message_when_session_lookup_misses(self):
+        """When session lookup misses, command should retry using explicit message."""
+        runner = _runner(
+            {
+                "ASH_USER_ID": "user-1",
+                "ASH_CHAT_ID": "chat-1",
+                "ASH_CHAT_TYPE": "group",
+                "ASH_PROVIDER": "telegram",
+                "ASH_USERNAME": "alice",
+                "ASH_DISPLAY_NAME": "Alice",
+                "ASH_MESSAGE_ID": "missing-123",
+                "ASH_CURRENT_USER_MESSAGE": "remember i need to buy coffee",
+            }
+        )
+
+        with patch("ash_sandbox_cli.commands.memory.rpc_call") as mock_rpc:
+            mock_rpc.side_effect = [
+                {"stored": 0, "error": "Message not found in session"},
+                {"stored": 1},
+            ]
+            result = runner.invoke(app, ["extract"])
+
+        assert result.exit_code == 0
+        assert "Extracted 1 memory(ies)" in result.stdout
+        assert mock_rpc.call_count == 2
+        first_call_args = mock_rpc.call_args_list[0][0]
+        second_call_args = mock_rpc.call_args_list[1][0]
+        assert first_call_args[0] == "memory.extract"
+        assert second_call_args[0] == "memory.extract_from_messages"
+        assert second_call_args[1]["messages"] == [
+            {
+                "role": "user",
+                "content": "remember i need to buy coffee",
+                "user_id": "user-1",
+                "username": "alice",
+                "display_name": "Alice",
+            }
+        ]
+
     @pytest.mark.asyncio
     async def test_extract_end_to_end_via_real_rpc_server(
         self, graph_store, tmp_path: Path

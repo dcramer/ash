@@ -18,6 +18,7 @@ def test_eval_runner_records_chat_history_entries() -> None:
         user_message="first message",
         user_id="user-1",
     )
+    assert session.context.current_message_id is not None
     _record_eval_assistant_message(
         session,
         assistant_message="first response",
