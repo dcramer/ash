@@ -6,6 +6,7 @@ can share the same isolation and agent-creation logic.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -26,6 +27,8 @@ from ash.core.agent import AgentComponents, create_agent
 from evals.types import EvalCase, EvalSuite
 
 logger = logging.getLogger(__name__)
+_EVAL_SANDBOX_READY = False
+_EVAL_SANDBOX_LOCK = asyncio.Lock()
 
 SOUL_CONTENT = """\
 # Eval Assistant
@@ -39,6 +42,57 @@ You are a helpful AI assistant being evaluated.
 - Provide clear, concise responses
 - When asked to schedule reminders, use the bash tool with the `ash schedule` command
 """
+
+
+async def ensure_eval_sandbox_image() -> None:
+    """Build eval sandbox image once per process for source-accurate evals.
+
+    Evals should run against the current sandbox CLI implementation, not a stale
+    prebuilt image. This rebuild happens once per eval process by default.
+
+    Set ASH_EVAL_REBUILD_SANDBOX=0 to skip rebuilding.
+    """
+    global _EVAL_SANDBOX_READY
+    if _EVAL_SANDBOX_READY:
+        return
+
+    if os.getenv("ASH_EVAL_REBUILD_SANDBOX", "1").strip().lower() in {
+        "0",
+        "false",
+        "no",
+    }:
+        logger.info("eval_sandbox_rebuild_skipped")
+        _EVAL_SANDBOX_READY = True
+        return
+
+    async with _EVAL_SANDBOX_LOCK:
+        if _EVAL_SANDBOX_READY:
+            return
+
+        project_root = Path(__file__).resolve().parent.parent
+        dockerfile = project_root / "docker" / "Dockerfile.sandbox"
+        if not dockerfile.exists():
+            raise RuntimeError(f"Dockerfile.sandbox not found: {dockerfile}")
+
+        logger.info("eval_sandbox_rebuild_start", extra={"file.path": str(dockerfile)})
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "build",
+            "-t",
+            "ash-sandbox:latest",
+            "-f",
+            str(dockerfile),
+            str(project_root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            message = stderr.decode().strip() or stdout.decode().strip()
+            raise RuntimeError(f"Failed to build eval sandbox image: {message}")
+
+        logger.info("eval_sandbox_rebuild_complete")
+        _EVAL_SANDBOX_READY = True
 
 
 def _build_config(agent_type: str, workspace_path: Path) -> AshConfig:
@@ -131,6 +185,8 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
     # Eval harness boundary.
     # Spec contract: specs/subsystems.md (Integration Hooks).
     async with isolated_ash_home() as _home:
+        await ensure_eval_sandbox_image()
+
         # Workspace
         workspace_id = uuid.uuid4().hex[:8]
         workspace_path = _home / f"ash-evals-{workspace_id}"
