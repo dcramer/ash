@@ -20,6 +20,14 @@ if TYPE_CHECKING:
     from ash.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
+_GROUNDING_DROP_REASONS = {
+    "unsupported",
+    "ambiguous",
+    "meta_system",
+    "stale_status",
+    "low_utility",
+    "unsafe",
+}
 
 
 @dataclass
@@ -310,10 +318,15 @@ You are given:
 1) A conversation transcript
 2) Candidate extracted facts
 
+Primary objective:
+- Keep only facts that are grounded in the transcript and worth storing long-term.
+- Prioritize precision and future utility over recall.
+
 For each fact:
-- grounded=true if the fact is supported by the transcript and is self-contained
-- grounded=false if unsupported, ambiguous, or missing critical context
+- grounded=true if supported, self-contained, and useful
+- grounded=false if unsupported, ambiguous, stale, low-utility, or policy-disallowed
 - content should be a rewritten self-contained version when needed
+- drop_reason is required when grounded=false
 
 CRITICAL:
 - Keep meaning faithful to the transcript. Do not invent new facts.
@@ -322,18 +335,27 @@ CRITICAL:
 - If a fact cannot be grounded precisely, mark grounded=false.
 - If key slots are missing (subject/action/object/time/location where relevant), mark grounded=false unless transcript supports a precise rewrite.
 - Example: "User is going in May" is NOT grounded unless destination/context can be resolved from transcript.
+- Drop meta/system facts even if true ("refactored bot", "updated prompt", "wiped session history").
+- Drop low-value transient status snapshots unless clearly useful for future planning.
 
 Return ONLY valid JSON as an array:
 [
   {{"index": 0, "grounded": true, "content": "Rewritten fact"}},
-  {{"index": 1, "grounded": false}}
+  {{"index": 1, "grounded": false, "drop_reason": "ambiguous"}}
 ]
 
 Rules:
 - Process every input index exactly once.
 - grounded must be a JSON boolean (true/false), not a string.
 - If grounded=true and content is omitted, the original content will be kept.
-- Do not output extra keys beyond: index, grounded, content.
+- Do not output extra keys beyond: index, grounded, content, drop_reason.
+- Allowed drop_reason values:
+  - "unsupported"
+  - "ambiguous"
+  - "meta_system"
+  - "stale_status"
+  - "low_utility"
+  - "unsafe"
 
 ## Conversation
 {conversation}
@@ -563,6 +585,7 @@ class MemoryExtractor:
             grounded_facts: list[ExtractedFact] = []
             dropped_count = 0
             rewritten_count = 0
+            drop_reason_counts: Counter[str] = Counter()
             for idx, fact in enumerate(facts):
                 decision = decisions_by_index.get(idx)
                 if decision is None:
@@ -571,6 +594,11 @@ class MemoryExtractor:
 
                 if decision["grounded"] is not True:
                     dropped_count += 1
+                    reason = decision.get("drop_reason")
+                    if isinstance(reason, str) and reason in _GROUNDING_DROP_REASONS:
+                        drop_reason_counts[reason] += 1
+                    else:
+                        drop_reason_counts["unknown"] += 1
                     continue
 
                 content = decision.get("content")
@@ -582,6 +610,7 @@ class MemoryExtractor:
                             extra={"content_preview": rewritten_content[:30]},
                         )
                         dropped_count += 1
+                        drop_reason_counts["unsafe"] += 1
                         continue
                     if rewritten_content != fact.content:
                         rewritten_count += 1
@@ -596,6 +625,21 @@ class MemoryExtractor:
                     "fact.rewritten_count": rewritten_count,
                     "fact.dropped_count": dropped_count,
                     "fact.decision_count": len(decisions_by_index),
+                    "fact.dropped_unsupported": drop_reason_counts.get(
+                        "unsupported", 0
+                    ),
+                    "fact.dropped_ambiguous": drop_reason_counts.get("ambiguous", 0),
+                    "fact.dropped_meta_system": drop_reason_counts.get(
+                        "meta_system", 0
+                    ),
+                    "fact.dropped_stale_status": drop_reason_counts.get(
+                        "stale_status", 0
+                    ),
+                    "fact.dropped_low_utility": drop_reason_counts.get(
+                        "low_utility", 0
+                    ),
+                    "fact.dropped_unsafe": drop_reason_counts.get("unsafe", 0),
+                    "fact.dropped_unknown_reason": drop_reason_counts.get("unknown", 0),
                 },
             )
             return grounded_facts

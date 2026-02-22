@@ -844,6 +844,11 @@ class TestGroundingPromptContent:
         assert "key slots are missing" in prompt
         assert '"user is going in may"' in prompt
 
+    def test_prompt_includes_drop_reason_taxonomy(self, prompt):
+        assert "drop_reason is required when grounded=false" in prompt
+        assert '"meta_system"' in prompt
+        assert '"low_utility"' in prompt
+
 
 class TestAliasParsing:
     """Tests for alias parsing in extraction."""
