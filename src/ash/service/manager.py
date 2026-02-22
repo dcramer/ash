@@ -1,7 +1,7 @@
 """High-level service management interface."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 from ash.service.backends import detect_backend
@@ -44,26 +44,26 @@ class ServiceManager:
         Returns:
             Tuple of (success, message).
         """
-        try:
+
+        async def _start() -> tuple[bool, str]:
             # Check if already running
             status = await self._backend.status()
             if status.state == ServiceState.RUNNING:
                 return False, f"Service already running (PID {status.pid})"
 
             success = await self._backend.start()
-            if success:
-                # Wait a moment and check status
-                await asyncio.sleep(0.5)
-                status = await self._backend.status()
-                if status.state == ServiceState.RUNNING:
-                    return (
-                        True,
-                        f"Service started using {self.backend_name} (PID {status.pid})",
-                    )
-                return True, f"Service started using {self.backend_name}"
-            return False, "Service failed to start"
-        except Exception as e:
-            return False, f"Error starting service: {e}"
+            if not success:
+                return False, "Service failed to start"
+
+            status = await self._status_after_delay()
+            if status.state == ServiceState.RUNNING:
+                return (
+                    True,
+                    f"Service started using {self.backend_name} (PID {status.pid})",
+                )
+            return True, f"Service started using {self.backend_name}"
+
+        return await self._run_action(_start, "starting service")
 
     async def stop(self) -> tuple[bool, str]:
         """Stop the service.
@@ -71,7 +71,8 @@ class ServiceManager:
         Returns:
             Tuple of (success, message).
         """
-        try:
+
+        async def _stop() -> tuple[bool, str]:
             # Check if running
             status = await self._backend.status()
             if status.state == ServiceState.STOPPED:
@@ -81,8 +82,8 @@ class ServiceManager:
             if success:
                 return True, "Service stopped"
             return False, "Service failed to stop"
-        except Exception as e:
-            return False, f"Error stopping service: {e}"
+
+        return await self._run_action(_stop, "stopping service")
 
     async def restart(self) -> tuple[bool, str]:
         """Restart the service.
@@ -90,17 +91,18 @@ class ServiceManager:
         Returns:
             Tuple of (success, message).
         """
-        try:
+
+        async def _restart() -> tuple[bool, str]:
             success = await self._backend.restart()
-            if success:
-                await asyncio.sleep(0.5)
-                status = await self._backend.status()
-                if status.state == ServiceState.RUNNING:
-                    return True, f"Service restarted (PID {status.pid})"
-                return True, "Service restarted"
-            return False, "Service failed to restart"
-        except Exception as e:
-            return False, f"Error restarting service: {e}"
+            if not success:
+                return False, "Service failed to restart"
+
+            status = await self._status_after_delay()
+            if status.state == ServiceState.RUNNING:
+                return True, f"Service restarted (PID {status.pid})"
+            return True, "Service restarted"
+
+        return await self._run_action(_restart, "restarting service")
 
     async def status(self) -> ServiceStatus:
         """Get current service status.
@@ -141,13 +143,14 @@ class ServiceManager:
         Returns:
             Tuple of (success, message).
         """
-        try:
+
+        async def _uninstall() -> tuple[bool, str]:
             success = await self._backend.uninstall()
             if success:
                 return True, "Service uninstalled"
             return False, "Uninstallation failed"
-        except Exception as e:
-            return False, f"Error uninstalling service: {e}"
+
+        return await self._run_action(_uninstall, "uninstalling service")
 
     async def logs(self, follow: bool = False, lines: int = 50) -> AsyncIterator[str]:
         """Stream service logs.
@@ -230,3 +233,19 @@ class ServiceManager:
         if proc.stdout:
             async for line in proc.stdout:
                 yield line.decode().rstrip()
+
+    async def _status_after_delay(self, delay: float = 0.5) -> ServiceStatus:
+        """Wait briefly before re-checking backend status."""
+        await asyncio.sleep(delay)
+        return await self._backend.status()
+
+    async def _run_action(
+        self,
+        action: Callable[[], Awaitable[tuple[bool, str]]],
+        action_name: str,
+    ) -> tuple[bool, str]:
+        """Execute an action with consistent error reporting."""
+        try:
+            return await action()
+        except Exception as e:
+            return False, f"Error {action_name}: {e}"
