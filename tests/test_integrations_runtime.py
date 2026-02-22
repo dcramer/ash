@@ -424,7 +424,6 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
             self,
             *,
             store: object | None,
-            people_store: object | None,
             extractor: object | None,
             extraction_enabled: bool,
             min_message_length: int,
@@ -433,7 +432,6 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
         ) -> None:
             _ = (
                 store,
-                people_store,
                 extractor,
                 extraction_enabled,
                 min_message_length,

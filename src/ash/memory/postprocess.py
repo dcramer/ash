@@ -32,7 +32,6 @@ class MemoryPostprocessService:
         self,
         *,
         store: Store | None,
-        people_store: Store | None,
         extractor: MemoryExtractor | None,
         extraction_enabled: bool,
         min_message_length: int,
@@ -40,7 +39,6 @@ class MemoryPostprocessService:
         confidence_threshold: float,
     ) -> None:
         self._store = store
-        self._people_store = people_store
         self._extractor = extractor
         self._extraction_enabled = extraction_enabled
         self._min_message_length = min_message_length
@@ -146,9 +144,9 @@ class MemoryPostprocessService:
                     display_name=effective_display,
                 )
 
-            if speaker_person_id and self._people_store:
+            if speaker_person_id and self._store:
                 await enrich_owner_names(
-                    self._people_store,
+                    self._store,
                     owner_names,
                     speaker_person_id,
                 )
@@ -219,10 +217,10 @@ class MemoryPostprocessService:
         username: str,
         display_name: str,
     ) -> str | None:
-        if not self._people_store:
+        if not self._store:
             return None
         return await ensure_self_person(
-            self._people_store,
+            self._store,
             user_id,
             username,
             display_name,
@@ -235,7 +233,7 @@ class MemoryPostprocessService:
         username: str,
         display_name: str,
     ) -> str | None:
-        """Public wrapper used by tests and agent compatibility shims."""
+        """Public wrapper used by tests."""
         return await self._ensure_self_person(
             user_id=user_id,
             username=username,
