@@ -71,3 +71,13 @@ async def test_schedule_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
         assert list_result.exit_code == 0
         assert "take out trash" in list_result.stdout
         assert match.group(1) in list_result.stdout
+
+        cancel_result = await asyncio.to_thread(
+            runner.invoke, app, ["cancel", "--id", match.group(1)]
+        )
+        assert cancel_result.exit_code == 0
+        assert "Cancelled task" in cancel_result.stdout
+
+        list_after_cancel = await asyncio.to_thread(runner.invoke, app, ["list"])
+        assert list_after_cancel.exit_code == 0
+        assert "No scheduled tasks found." in list_after_cancel.stdout

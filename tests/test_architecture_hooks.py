@@ -164,6 +164,21 @@ def test_scheduling_lifecycle_wiring_is_owned_by_scheduling_integration() -> Non
     }
 
 
+def test_scheduling_runtime_instantiation_is_constrained() -> None:
+    files = _python_files_under("src/ash")
+
+    watcher_call_sites = _find_call_sites(r"\bScheduleWatcher\(", files)
+    assert watcher_call_sites == {
+        Path("src/ash/integrations/scheduling.py"),
+        Path("src/ash/scheduling/watcher.py"),
+    }
+
+    handler_call_sites = _find_call_sites(r"\bScheduledTaskHandler\(", files)
+    assert handler_call_sites == {
+        Path("src/ash/integrations/scheduling.py"),
+    }
+
+
 def test_harness_boundaries_reference_integration_hooks_spec() -> None:
     expected_comment = "specs/subsystems.md (Integration Hooks)"
     boundary_files = [
@@ -216,6 +231,31 @@ def test_entrypoints_use_default_integration_builder() -> None:
         assert "create_default_integrations(" in text, (
             f"Expected shared default integration builder in {path.relative_to(ROOT)}"
         )
+
+
+def test_entrypoints_import_integrations_from_package_root() -> None:
+    entrypoint_files = [
+        ROOT / "src/ash/cli/commands/serve.py",
+        ROOT / "src/ash/cli/commands/chat.py",
+        ROOT / "evals/harness.py",
+    ]
+    disallowed = (
+        "from ash.integrations.defaults import",
+        "from ash.integrations.memory import",
+        "from ash.integrations.scheduling import",
+        "from ash.integrations.runtime_rpc import",
+        "from ash.integrations.composer import",
+        "from ash.integrations.rpc import",
+    )
+    for path in entrypoint_files:
+        text = path.read_text(encoding="utf-8")
+        assert "from ash.integrations import " in text, (
+            f"Expected root integration imports in {path.relative_to(ROOT)}"
+        )
+        for pattern in disallowed:
+            assert pattern not in text, (
+                f"Disallowed direct integration module import in {path.relative_to(ROOT)}: {pattern}"
+            )
 
 
 def test_entrypoints_use_shared_rpc_lifecycle_helper() -> None:
