@@ -1,0 +1,39 @@
+schema_version: "2.0"
+name: Image Behaviors
+description: Single cheap eval validating assistant behavior when image context is injected
+
+defaults:
+  agent: default
+  drain_extraction: false
+  session:
+    provider: telegram
+    chat_id: eval-image-behaviors
+    chat_type: supergroup
+    chat_title: "Image Behaviors Eval Group"
+    user_id: eval-user-alice
+    username: alice
+    display_name: "Alice"
+
+cases:
+  - id: image_context_no_caption_describe_and_clarify
+    description: Assistant should use injected image context and ask a clarifying question
+    prompt: |
+      [IMAGE_CONTEXT]
+      - summary: A whiteboard with a handwritten task list.
+      - salient_text: laundry, put away closet stuff, bathrooms
+      - uncertainty: low
+      [/IMAGE_CONTEXT]
+
+      The user sent image(s) without caption. Respond with a concise description and one clarifying follow-up question.
+    expected_behavior: |
+      The assistant should describe the visible image context concisely and ask
+      one clarifying question about what the user wants to know.
+    criteria:
+      - Mentions the whiteboard/task-list context or at least one task from salient_text
+      - Includes a clear follow-up question
+      - Does not claim to see details not present in IMAGE_CONTEXT
+      - Response is concise and conversational
+    tags:
+      - image
+      - telegram
+      - smoke

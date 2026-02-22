@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -302,7 +303,16 @@ class TelegramMessageHandler:
     ) -> None:
         """Inner implementation of _process_single_message (runs with log context)."""
         await self._provider.set_reaction(message.chat_id, message.id, "👀")
-        message = await self._agent.run_incoming_message_preprocessors(message)
+        preprocess_fn = getattr(self._agent, "run_incoming_message_preprocessors", None)
+        if callable(preprocess_fn):
+            preprocessed = preprocess_fn(message)
+            candidate = (
+                await preprocessed
+                if inspect.isawaitable(preprocessed)
+                else preprocessed
+            )
+            if isinstance(candidate, IncomingMessage):
+                message = candidate
 
         # Check if there's an active interactive subagent stack for this session
         thread_id = message.metadata.get("thread_id")
