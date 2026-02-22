@@ -37,25 +37,38 @@ cases:
       - memory
       - extraction
 
-  - id: extraction_preference_stored
-    description: Remember I prefer X should use memory extract to store a preference memory
-    prompt: "Remember that I prefer dark mode in all apps"
-    expected_behavior: |
-      The agent should use `ash-sb memory extract` (not memory add) to store
-      a preference-typed memory about the user preferring dark mode.
-    criteria:
-      - The agent runs ash-sb memory extract
-      - A memory about dark mode preference is stored
-      - The memory has preference type
+  - id: extraction_grounding_contextual_rewrite
+    description: Multi-turn extraction should ground vague follow-up facts using broader context
+    turns:
+      - prompt: "Remember this: Randolf is going to Tokyo in May."
+        expected_behavior: |
+          The assistant should acknowledge and store this memory via extraction.
+        criteria:
+          - The assistant acknowledges the remember request naturally
+          - The assistant does not claim a failure
+      - prompt: "Also remember he's still going in May."
+        expected_behavior: |
+          The assistant should still rely on extraction, and resulting memory content
+          should stay grounded to the earlier Tokyo context.
+        criteria:
+          - The assistant acknowledges the remember request naturally
+          - The assistant does not claim a failure
+      - prompt: "What did you remember?"
+        expected_behavior: |
+          The assistant should recall the memory with full context: Randolf going to Tokyo in May.
+        criteria:
+          - Mentions Randolf
+          - Mentions Tokyo
+          - Mentions May
     expected_tools:
       - bash
     assertions:
       memories:
-        - content_contains: [dark mode]
-          memory_type: preference
+        - content_contains: [Randolf, Tokyo, May]
     tags:
       - memory
       - extraction
+      - grounding
 
   - id: extraction_recall_after_store
     description: A fact stored via explicit remember is recallable in a new session
