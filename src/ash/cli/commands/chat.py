@@ -1,5 +1,7 @@
 """Chat command for interactive CLI sessions."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -8,6 +10,7 @@ from typing import TYPE_CHECKING, Annotated
 
 if TYPE_CHECKING:
     from ash.agents.types import StackFrame
+    from ash.config import AshConfig
 
 import typer
 
@@ -21,7 +24,7 @@ def _resolve_model_alias(model_alias: str | None) -> str:
     return model_alias or os.environ.get("ASH_MODEL") or "default"
 
 
-def _validate_model_alias(ash_config, alias: str) -> None:  # noqa: ANN001
+def _validate_model_alias(ash_config: AshConfig, alias: str) -> None:
     """Validate a model alias exists, raising typer.Exit on failure."""
     from ash.config import ConfigError
 
@@ -32,7 +35,7 @@ def _validate_model_alias(ash_config, alias: str) -> None:  # noqa: ANN001
         raise typer.Exit(1) from None
 
 
-def _validate_model_credentials(ash_config, alias: str) -> None:  # noqa: ANN001
+def _validate_model_credentials(ash_config: AshConfig, alias: str) -> None:
     """Validate provider credentials exist for the selected model alias."""
     model_config = ash_config.get_model(alias)
     if model_config.provider == "openai-oauth":
@@ -229,8 +232,8 @@ async def _run_chat(
                     )
 
                 async def _run_skill_loop(
-                    main_frame: "StackFrame",
-                    child_frame: "StackFrame",
+                    main_frame: StackFrame,
+                    child_frame: StackFrame,
                 ) -> str | None:
                     """Run a subagent skill loop to completion in CLI mode."""
                     from ash.agents.types import AgentStack, TurnAction
