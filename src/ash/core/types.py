@@ -78,11 +78,6 @@ class AgentConfig:
     compaction_reserve_tokens: int = 16384  # Buffer to trigger compaction
     compaction_keep_recent_tokens: int = 20000  # Always keep recent context
     compaction_summary_max_tokens: int = 2000  # Max tokens for summary
-    # Memory extraction configuration
-    extraction_enabled: bool = True  # Enable background memory extraction
-    extraction_min_message_length: int = 20  # Skip for short messages
-    extraction_debounce_seconds: int = 30  # Min seconds between extractions
-    extraction_confidence_threshold: float = 0.7  # Min confidence to store
 
 
 @dataclass

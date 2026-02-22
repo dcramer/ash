@@ -1190,10 +1190,6 @@ async def create_agent(
             compaction_reserve_tokens=config.memory.compaction_reserve_tokens,
             compaction_keep_recent_tokens=config.memory.compaction_keep_recent_tokens,
             compaction_summary_max_tokens=config.memory.compaction_summary_max_tokens,
-            extraction_enabled=config.memory.extraction_enabled,
-            extraction_min_message_length=config.memory.extraction_min_message_length,
-            extraction_debounce_seconds=config.memory.extraction_debounce_seconds,
-            extraction_confidence_threshold=config.memory.extraction_confidence_threshold,
         ),
     )
 
