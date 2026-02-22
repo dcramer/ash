@@ -1,0 +1,109 @@
+---
+title: Uninstall
+description: Remove Ash and local Ash data from your system
+sidebar:
+  order: 3
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+This guide covers a full cleanup of Ash.
+
+## What This Removes
+
+- Ash background service registration (if installed)
+- Running Ash service processes
+- Sandbox containers and optional sandbox image
+- Ash state directory: `ASH_HOME` (or `~/.ash` by default)
+- Optional source checkout and environment
+- Optional package-managed CLI install
+
+<Aside type="caution">
+  Removing `ASH_HOME` deletes config, auth credentials, chats, sessions, logs, schedule, and local skill state.
+</Aside>
+
+## Resolve Your Ash Home Path
+
+Ash stores state under:
+
+- `$ASH_HOME` if set
+- Otherwise `~/.ash`
+
+Check the exact directory before deletion:
+
+```bash
+echo "${ASH_HOME:-$HOME/.ash}"
+```
+
+## Full Uninstall Steps
+
+<Steps>
+
+1. **Stop Ash service/processes**
+
+   ```bash
+   uv run ash service stop
+   uv run ash service status
+   ```
+
+2. **Uninstall auto-start service registration**
+
+   ```bash
+   uv run ash service uninstall
+   ```
+
+3. **Clean sandbox artifacts**
+
+   ```bash
+   uv run ash sandbox clean --force
+   ```
+
+4. **Remove Ash state directory (guarded)**
+
+   ```bash
+   TARGET="${ASH_HOME:-$HOME/.ash}"
+   test -d "$TARGET" && printf 'Removing %s\n' "$TARGET"
+   rm -rf -- "$TARGET"
+   ```
+
+</Steps>
+
+## Optional: Remove Source Checkout + Virtual Environment
+
+If you installed from source and no longer want the checkout:
+
+```bash
+# Example only: replace with your actual checkout path
+REPO_DIR="$HOME/src/ash"
+test -d "$REPO_DIR" && printf 'Removing %s\n' "$REPO_DIR"
+rm -rf -- "$REPO_DIR"
+```
+
+## Optional: Remove Package-Managed Install
+
+If you installed `ash` as a tool or package (instead of source checkout), remove it with the same tool you used to install:
+
+```bash
+# uv tool flow
+uv tool uninstall ash
+
+# pip/pipx flow
+pip uninstall ash
+pipx uninstall ash
+```
+
+## Verify Cleanup
+
+Run these checks:
+
+```bash
+uv run ash service status
+uv run ash sandbox status
+test -d "${ASH_HOME:-$HOME/.ash}" || echo "Ash state removed"
+```
+
+Expected outcomes:
+
+- Service is stopped/uninstalled
+- Sandbox containers/image are removed (or not present)
+- Ash state directory no longer exists

@@ -103,11 +103,16 @@ provider = "openai"
 model = "gpt-5.2"
 ```
 
-## Build Sandbox and Run Upgrade
+## Run Upgrade (Builds Sandbox)
+
+```bash
+uv run ash upgrade
+```
+
+If you need to rebuild sandbox artifacts manually:
 
 ```bash
 uv run ash sandbox build
-uv run ash upgrade
 ```
 
 ## Start Chat
@@ -115,6 +120,12 @@ uv run ash upgrade
 ```bash
 uv run ash chat
 ```
+
+## Uninstall / Cleanup
+
+For full removal (service, sandbox artifacts, Ash data, and optional install cleanup), see:
+
+- [Uninstall](/getting-started/uninstall/)
 
 ## Troubleshooting
 
