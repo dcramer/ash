@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
-from ash.config import AshConfig, WorkspaceLoader
+from ash.config import AshConfig, Workspace, WorkspaceLoader
 from ash.config.paths import get_graph_dir
 from ash.core import AgentComponents, create_agent
 
@@ -15,7 +14,7 @@ class RuntimeBootstrap:
     """Composed runtime dependencies for CLI command handlers."""
 
     components: AgentComponents
-    workspace: Any
+    workspace: Workspace
     sentry_initialized: bool = False
 
 
