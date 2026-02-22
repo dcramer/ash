@@ -52,6 +52,42 @@ extraction_grounding_model = null
 | `extraction_grounding_model` | `null` | Grounding model selector. `null` uses `[models.default]`; accepts alias (`"mini"`) or provider model (`"openai:gpt-5.2"` / `"gpt-5.2"`). |
 | `extraction_confidence_threshold` | `0.7` | Minimum confidence to store extracted facts |
 
+### Recommended Setups
+
+Use a cheaper extraction model and a stronger grounding model:
+
+```toml
+[models.default]
+provider = "openai-oauth"
+model = "gpt-5.2"
+
+[models.mini]
+provider = "openai-oauth"
+model = "gpt-5-mini"
+
+[memory]
+extraction_model = "mini"
+extraction_grounding_enabled = true
+extraction_grounding_model = "default"
+```
+
+Use a provider-qualified grounding model directly:
+
+```toml
+[memory]
+extraction_model = "mini"
+extraction_grounding_enabled = true
+extraction_grounding_model = "openai:gpt-5.2"
+```
+
+Use a plain model name (resolved against the default model's provider):
+
+```toml
+[memory]
+extraction_grounding_enabled = true
+extraction_grounding_model = "gpt-5.2"
+```
+
 ## Embeddings
 
 Enable semantic retrieval with:
