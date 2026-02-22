@@ -17,6 +17,8 @@ defaults:
 cases:
   - id: memory_schedule_recall_smoke
     description: One conversation that asks to remember tasks, set a reminder, and recall both
+    disallowed_tool_result_substrings:
+      - "Extraction failed: Message not found in session"
     turns:
       - prompt: "Please remember my tasks for today: laundry, put away closet stuff, and bathrooms."
         expected_behavior: |

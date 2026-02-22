@@ -12,7 +12,11 @@ import yaml
 from ash.core.agent import Agent
 from ash.core.session import SessionState
 from ash.llm.base import LLMProvider
-from evals.judge import LLMJudge, check_forbidden_tools
+from evals.judge import (
+    LLMJudge,
+    check_disallowed_tool_result_substrings,
+    check_forbidden_tools,
+)
 from evals.types import (
     Assertions,
     EvalCase,
@@ -272,6 +276,16 @@ async def run_eval_case(
                 response_text=response.text,
                 tool_calls=response.tool_calls,
                 judge_result=forbidden_result,
+            )
+        disallowed_result = check_disallowed_tool_result_substrings(
+            case, response.tool_calls
+        )
+        if disallowed_result:
+            return EvalResult(
+                case=case,
+                response_text=response.text,
+                tool_calls=response.tool_calls,
+                judge_result=disallowed_result,
             )
 
         # Judge the response with LLM
@@ -668,6 +682,9 @@ async def run_yaml_eval_case(
                 prompt=turn.prompt,
                 expected_behavior=turn.expected_behavior,
                 criteria=turn.criteria,
+                expected_tools=case.expected_tools,
+                forbidden_tools=case.forbidden_tools,
+                disallowed_tool_result_substrings=case.disallowed_tool_result_substrings,
             )
 
             result = await _execute_and_judge(
@@ -765,6 +782,16 @@ async def _execute_and_judge(
                 response_text=response.text,
                 tool_calls=response.tool_calls,
                 judge_result=forbidden_result,
+            )
+        disallowed_result = check_disallowed_tool_result_substrings(
+            case, response.tool_calls
+        )
+        if disallowed_result:
+            return EvalResult(
+                case=case,
+                response_text=response.text,
+                tool_calls=response.tool_calls,
+                judge_result=disallowed_result,
             )
 
         # LLM judge

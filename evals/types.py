@@ -151,6 +151,10 @@ class EvalCase(BaseModel):
         default_factory=list,
         description="Tools that MUST NOT be called (auto-fail if used)",
     )
+    disallowed_tool_result_substrings: list[str] = Field(
+        default_factory=list,
+        description="Tool result substrings that MUST NOT appear (auto-fail if seen)",
+    )
     phase_constraints: dict[str, PhaseConstraint] | None = Field(
         default=None,
         description="Per-phase tool constraints for multi-turn evals",
