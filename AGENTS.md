@@ -78,8 +78,9 @@ Use `/dex-plan` to create tasks from planning docs (specs, roadmaps).
 Evals are **end-to-end behavioral tests** using real LLM calls — they're slow and expensive. **Do not run evals unless explicitly asked.** They are never part of the normal "after changes" workflow. Use `/eval` to run or write them.
 
 - Cases: `evals/cases/*.yaml` — Tests: `evals/test_*.py` (`@pytest.mark.eval`)
-- Run: `uv run pytest evals/ -v -s -m eval` (requires `ANTHROPIC_API_KEY` + `OPENAI_API_KEY`)
-- Run negative-tag evals only: `uv run python -m evals run --tag negative`
+- Run all evals: `uv run evals run` (requires `ANTHROPIC_API_KEY` + `OPENAI_API_KEY`)
+- Run a single case: `uv run evals run <suite>::<case>`
+- Run negative-tag evals only: `uv run evals run --tag negative`
 
 ## Plan Mode
 
