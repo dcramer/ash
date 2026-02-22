@@ -14,6 +14,8 @@ from ash.integrations import (
     IntegrationContext,
     IntegrationContributor,
     IntegrationRuntime,
+    MemoryIntegration,
+    SchedulingIntegration,
     active_integrations,
     compose_integrations,
 )
@@ -259,3 +261,74 @@ async def test_active_integrations_runs_full_lifecycle() -> None:
         ("inside", "ok"),
         ("shutdown", "x"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
+    tmp_path: Path,
+) -> None:
+    events: list[tuple[str, str]] = []
+
+    class _FakeAgent:
+        def __init__(self) -> None:
+            self.postprocess_hooks = None
+
+        def install_integration_hooks(
+            self,
+            *,
+            prompt_context_augmenters=None,
+            sandbox_env_augmenters=None,
+            message_postprocess_hooks=None,
+        ) -> None:
+            _ = (prompt_context_augmenters, sandbox_env_augmenters)
+            self.postprocess_hooks = message_postprocess_hooks
+
+        def run_memory_postprocess(
+            self,
+            user_message: str,
+            session: SessionState,
+            effective_user_id: str,
+        ) -> None:
+            events.append(("memory_postprocess", effective_user_id))
+
+    config = AshConfig(
+        workspace=tmp_path / "workspace",
+        models={"default": ModelConfig(provider="openai", model="gpt-5-mini")},
+    )
+    fake_agent = _FakeAgent()
+    components = cast(
+        Any,
+        SimpleNamespace(
+            agent=fake_agent,
+            memory_manager=object(),
+            person_manager=object(),
+            memory_extractor=None,
+        ),
+    )
+
+    runtime, context = await compose_integrations(
+        config=config,
+        components=components,
+        mode="eval",
+        contributors=[
+            SchedulingIntegration(tmp_path / "schedule.jsonl"),
+            MemoryIntegration(),
+        ],
+    )
+
+    # Memory runs before scheduling by priority.
+    assert [c.name for c in runtime.contributors] == ["memory", "scheduling"]
+    assert fake_agent.postprocess_hooks is not None
+    assert len(fake_agent.postprocess_hooks) == 2
+
+    session = SessionState(
+        session_id="s-1",
+        provider="telegram",
+        chat_id="c-1",
+        user_id="u-1",
+    )
+    for hook in runtime.message_postprocess_hooks(context):
+        await hook("remember this", session, "user-123")
+
+    # Only memory integration should produce postprocess side effects.
+    assert events == [("memory_postprocess", "user-123")]

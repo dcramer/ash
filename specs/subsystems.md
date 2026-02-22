@@ -166,6 +166,10 @@ Integration contributors SHOULD expose one or more of:
 - `register_rpc_methods`: register RPC handlers.
 - `on_message_postprocess`: run post-turn integration work.
 
+If an integration has post-turn behavior, it MUST be implemented via
+`on_message_postprocess` in the integration runtime pipeline. Core agent/provider
+entrypoints MUST NOT call integration-specific post-turn logic directly.
+
 ### Prompt integration rule (MUST)
 
 Prompt hooks MUST contribute structured data only. Prompt rendering remains centralized
@@ -199,3 +203,13 @@ For each new capability/integration:
 - [ ] Includes unit tests for hook logic.
 - [ ] Includes/updates architecture guard tests.
 - [ ] Adds code comments at boundaries referencing this spec.
+
+## Adding An Integration
+
+When introducing a new integration:
+
+1. Define the contributor with explicit `name` and `priority`.
+2. Implement only the hooks it needs (`setup`, lifecycle, prompt/env, postprocess, RPC).
+3. Register it through shared composition (`create_default_integrations` + `compose_integrations`).
+4. Add a runtime test that validates hook order and side effects.
+5. Add or update architecture guard tests if ownership boundaries change.
