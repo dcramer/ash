@@ -1,15 +1,29 @@
 """Session management commands."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 
 from ash.cli.console import console, dim, error, success, warning
+
+if TYPE_CHECKING:
+    from ash.sessions.types import (
+        AgentSessionEntry,
+        Entry,
+        ToolResultEntry,
+        ToolUseEntry,
+    )
+
+    ToolCallTuple = tuple[
+        ToolUseEntry, ToolResultEntry | None, AgentSessionEntry | None
+    ]
 
 
 def _extract_message_text(content: str | list) -> str:
@@ -38,7 +52,7 @@ def _extract_message_text(content: str | list) -> str:
 class TimelineEntry:
     """A single entry in the timeline with nesting info."""
 
-    entry: Any  # One of the Entry types
+    entry: Entry
     timestamp: datetime
     agent_session_id: str | None = None
     depth: int = 0  # Nesting level for subagents
@@ -140,8 +154,8 @@ async def _load_timeline(session_dir: Path) -> list[TimelineEntry]:
 
 
 def _matches_tool_filters(
-    tool_use: Any,
-    result: Any | None,
+    tool_use: ToolUseEntry,
+    result: ToolResultEntry | None,
     tool_filter: str | None,
     failed_only: bool,
     slow_threshold_ms: int | None,
@@ -158,7 +172,7 @@ def _matches_tool_filters(
 
 
 def _compute_tool_stats_from_lookups(
-    lookups: "EntryLookups",
+    lookups: EntryLookups,
     tool_filter: str | None = None,
     failed_only: bool = False,
     slow_threshold_ms: int | None = None,
@@ -195,16 +209,16 @@ def _compute_tool_stats_from_lookups(
 
 
 def _get_tool_calls_from_lookups(
-    lookups: "EntryLookups",
+    lookups: EntryLookups,
     tool_filter: str | None = None,
     failed_only: bool = False,
     slow_threshold_ms: int | None = None,
-) -> list[tuple[Any, Any, Any]]:
+) -> list[ToolCallTuple]:
     """Get filtered tool calls from prebuilt lookups.
 
     Returns list of (ToolUseEntry, ToolResultEntry|None, AgentSessionEntry|None).
     """
-    results: list[tuple[Any, Any, Any]] = []
+    results: list[ToolCallTuple] = []
 
     for tool_use in lookups.tool_uses.values():
         result = lookups.tool_results.get(tool_use.id)
@@ -227,10 +241,10 @@ def _get_tool_calls_from_lookups(
 class EntryLookups:
     """Prebuilt lookup dictionaries for session entries."""
 
-    entries: list[Any]
-    tool_uses: dict[str, Any]
-    tool_results: dict[str, Any]
-    agent_sessions: dict[str, Any]
+    entries: list[Entry]
+    tool_uses: dict[str, ToolUseEntry]
+    tool_results: dict[str, ToolResultEntry]
+    agent_sessions: dict[str, AgentSessionEntry]
 
 
 async def _load_entries_with_lookups(session_dir: Path) -> EntryLookups:
@@ -948,10 +962,10 @@ def _print_output_lines(output_text: str, verbose: bool) -> None:
 def _print_tool_call(
     name: str,
     input_data: dict[str, Any],
-    result: Any | None,
+    result: ToolResultEntry | None,
     verbose: bool,
     show_timing: bool = False,
-    subagent: Any | None = None,
+    subagent: AgentSessionEntry | None = None,
     lookups: EntryLookups | None = None,
 ) -> None:
     """Print a tool call with its result and optional subagent box."""
@@ -991,7 +1005,7 @@ def _print_tool_call(
 
 
 def _print_subagent_box(
-    agent: Any,
+    agent: AgentSessionEntry,
     lookups: EntryLookups,
     verbose: bool,
     show_timing: bool,
