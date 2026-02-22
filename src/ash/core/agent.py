@@ -227,7 +227,7 @@ class Agent:
             current = hook(current, session, effective_user_id)
         return current
 
-    async def _run_message_postprocess_hooks(
+    async def run_message_postprocess_hooks(
         self,
         user_message: str,
         session: SessionState,
@@ -247,19 +247,6 @@ class Agent:
     ) -> None:
         """Default memory postprocess behavior for integration hooks."""
         self._memory_postprocess.maybe_schedule(
-            user_message=user_message,
-            session=session,
-            effective_user_id=effective_user_id,
-        )
-
-    async def run_message_postprocess_hooks(
-        self,
-        user_message: str,
-        session: SessionState,
-        effective_user_id: str,
-    ) -> None:
-        """Public entrypoint for integration-driven post-turn work."""
-        await self._run_message_postprocess_hooks(
             user_message=user_message,
             session=session,
             effective_user_id=effective_user_id,
@@ -824,7 +811,7 @@ class Agent:
                 )
 
                 if not pending_tools:
-                    await self._run_message_postprocess_hooks(
+                    await self.run_message_postprocess_hooks(
                         user_message=user_message,
                         session=session,
                         effective_user_id=setup.effective_user_id,
@@ -864,7 +851,7 @@ class Agent:
                 # Check if any tool returned a checkpoint - stop loop to wait for user input
                 checkpoint = _extract_checkpoint(tool_calls)
                 if checkpoint:
-                    await self._run_message_postprocess_hooks(
+                    await self.run_message_postprocess_hooks(
                         user_message=user_message,
                         session=session,
                         effective_user_id=setup.effective_user_id,
@@ -886,7 +873,7 @@ class Agent:
                 "max_tool_iterations",
                 extra={"agent.max_iterations": self._config.max_tool_iterations},
             )
-            await self._run_message_postprocess_hooks(
+            await self.run_message_postprocess_hooks(
                 user_message=user_message,
                 session=session,
                 effective_user_id=setup.effective_user_id,
@@ -962,7 +949,7 @@ class Agent:
                     content_blocks.insert(0, TextContent(text=current_text))
 
                 if not content_blocks:
-                    await self._run_message_postprocess_hooks(
+                    await self.run_message_postprocess_hooks(
                         user_message=user_message,
                         session=session,
                         effective_user_id=setup.effective_user_id,
@@ -973,7 +960,7 @@ class Agent:
 
                 pending_tools = [b for b in content_blocks if isinstance(b, ToolUse)]
                 if not pending_tools:
-                    await self._run_message_postprocess_hooks(
+                    await self.run_message_postprocess_hooks(
                         user_message=user_message,
                         session=session,
                         effective_user_id=setup.effective_user_id,
@@ -1004,7 +991,7 @@ class Agent:
                         if msg.text:
                             session.add_user_message(msg.text)
 
-            await self._run_message_postprocess_hooks(
+            await self.run_message_postprocess_hooks(
                 user_message=user_message,
                 session=session,
                 effective_user_id=setup.effective_user_id,
