@@ -11,6 +11,7 @@ from ash.integrations.runtime import IntegrationContext, IntegrationContributor
 
 if TYPE_CHECKING:
     from ash.core.session import SessionState
+    from ash.memory.postprocess import MemoryPostprocessService
 
 
 class MemoryIntegration(IntegrationContributor):
@@ -18,6 +19,27 @@ class MemoryIntegration(IntegrationContributor):
 
     name = "memory"
     priority = 200
+
+    def __init__(self) -> None:
+        self._postprocess: MemoryPostprocessService | None = None
+
+    async def setup(self, context: IntegrationContext) -> None:
+        from ash.memory.postprocess import MemoryPostprocessService
+
+        components = context.components
+        if not components.memory_manager:
+            return
+
+        memory_config = context.config.memory
+        self._postprocess = MemoryPostprocessService(
+            store=components.memory_manager,
+            people_store=components.person_manager,
+            extractor=components.memory_extractor,
+            extraction_enabled=memory_config.extraction_enabled,
+            min_message_length=memory_config.extraction_min_message_length,
+            debounce_seconds=memory_config.extraction_debounce_seconds,
+            confidence_threshold=memory_config.extraction_confidence_threshold,
+        )
 
     def register_rpc_methods(self, server, context: IntegrationContext) -> None:
         from ash.rpc.methods.memory import register_memory_methods
@@ -40,7 +62,9 @@ class MemoryIntegration(IntegrationContributor):
         effective_user_id: str,
         context: IntegrationContext,
     ) -> None:
-        context.components.agent.run_memory_postprocess(
+        if self._postprocess is None:
+            return
+        self._postprocess.maybe_schedule(
             user_message=user_message,
             session=session,
             effective_user_id=effective_user_id,

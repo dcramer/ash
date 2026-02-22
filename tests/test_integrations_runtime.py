@@ -401,6 +401,7 @@ async def test_active_integrations_runs_full_lifecycle() -> None:
 @pytest.mark.asyncio
 async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[tuple[str, str]] = []
 
@@ -418,13 +419,43 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
             _ = (prompt_context_augmenters, sandbox_env_augmenters)
             self.postprocess_hooks = message_postprocess_hooks
 
-        def run_memory_postprocess(
+    class _FakeMemoryPostprocessService:
+        def __init__(
             self,
+            *,
+            store: object | None,
+            people_store: object | None,
+            extractor: object | None,
+            extraction_enabled: bool,
+            min_message_length: int,
+            debounce_seconds: int,
+            confidence_threshold: float,
+        ) -> None:
+            _ = (
+                store,
+                people_store,
+                extractor,
+                extraction_enabled,
+                min_message_length,
+                debounce_seconds,
+                confidence_threshold,
+            )
+            events.append(("memory_postprocess_init", "ok"))
+
+        def maybe_schedule(
+            self,
+            *,
             user_message: str,
             session: SessionState,
             effective_user_id: str,
         ) -> None:
+            _ = (user_message, session)
             events.append(("memory_postprocess", effective_user_id))
+
+    monkeypatch.setattr(
+        "ash.memory.postprocess.MemoryPostprocessService",
+        _FakeMemoryPostprocessService,
+    )
 
     config = AshConfig(
         workspace=tmp_path / "workspace",
@@ -466,4 +497,7 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
         await hook("remember this", session, "user-123")
 
     # Only memory integration should produce postprocess side effects.
-    assert events == [("memory_postprocess", "user-123")]
+    assert events == [
+        ("memory_postprocess_init", "ok"),
+        ("memory_postprocess", "user-123"),
+    ]

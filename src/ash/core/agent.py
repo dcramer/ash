@@ -49,7 +49,6 @@ if TYPE_CHECKING:
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
     from ash.memory.extractor import MemoryExtractor
-    from ash.memory.postprocess import MemoryPostprocessService
     from ash.providers.base import IncomingMessage
     from ash.store.store import Store
     from ash.store.types import PersonEntry, RetrievedContext
@@ -175,24 +174,13 @@ class Agent:
         self._runtime = runtime
         self._graph_store = graph_store
         self._memory: Store | None = graph_store
-        self._extractor = memory_extractor
+        self._memory_extractor = memory_extractor
         self._people: Store | None = graph_store
         self._config = config or AgentConfig()
         self._mount_prefix = mount_prefix
         self._prompt_context_augmenters = tuple(prompt_context_augmenters or [])
         self._sandbox_env_augmenters = tuple(sandbox_env_augmenters or [])
         self._message_postprocess_hooks = tuple(message_postprocess_hooks or [])
-        from ash.memory.postprocess import MemoryPostprocessService
-
-        self._memory_postprocess: MemoryPostprocessService = MemoryPostprocessService(
-            store=self._memory,
-            people_store=self._people,
-            extractor=self._extractor,
-            extraction_enabled=self._config.extraction_enabled,
-            min_message_length=self._config.extraction_min_message_length,
-            debounce_seconds=self._config.extraction_debounce_seconds,
-            confidence_threshold=self._config.extraction_confidence_threshold,
-        )
 
     def install_integration_hooks(
         self,
@@ -239,41 +227,22 @@ class Agent:
             except Exception:
                 logger.warning("message_postprocess_hook_failed", exc_info=True)
 
-    def run_memory_postprocess(
-        self,
-        user_message: str,
-        session: SessionState,
-        effective_user_id: str,
-    ) -> None:
-        """Default memory postprocess behavior for integration hooks."""
-        self._memory_postprocess.maybe_schedule(
-            user_message=user_message,
-            session=session,
-            effective_user_id=effective_user_id,
-        )
-
     async def _ensure_self_person(
         self,
         user_id: str,
         username: str,
         display_name: str,
     ) -> str | None:
-        """Compatibility shim for tests; delegates to memory postprocess service."""
-        if not hasattr(self, "_memory_postprocess"):
-            if not self._people:
-                return None
-            from ash.memory.processing import ensure_self_person
+        """Compatibility shim for tests."""
+        if not self._people:
+            return None
+        from ash.memory.processing import ensure_self_person
 
-            return await ensure_self_person(
-                self._people,
-                user_id,
-                username,
-                display_name,
-            )
-        return await self._memory_postprocess.ensure_self_person(
-            user_id=user_id,
-            username=username,
-            display_name=display_name,
+        return await ensure_self_person(
+            self._people,
+            user_id,
+            username,
+            display_name,
         )
 
     @property
