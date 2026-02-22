@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 class MemoryPostprocessService:
     """Runs asynchronous memory extraction after a user turn."""
 
+    _EXTRACTION_CONTEXT_MESSAGES = 8
+
     def __init__(
         self,
         *,
@@ -116,7 +118,7 @@ class MemoryPostprocessService:
                 for msg in session.messages
                 if msg.role in (Role.USER, Role.ASSISTANT) and msg.get_text().strip()
             ]
-            llm_messages = all_messages[-4:]
+            llm_messages = all_messages[-self._EXTRACTION_CONTEXT_MESSAGES :]
             if not llm_messages:
                 return
 

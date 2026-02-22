@@ -906,3 +906,57 @@ class TestTelegramMessageHandler:
         await handler.handle_passive_message(passive_message)
 
         mock_throttler.should_consider.assert_called_once_with("group_123")
+
+    async def test_passive_extraction_includes_recent_same_user_context(
+        self, mock_provider, mock_agent
+    ):
+        """Passive extraction should include recent same-speaker user context."""
+        from ash.chats.history import ChatHistoryWriter
+        from ash.llm.types import Role
+        from ash.providers.base import IncomingMessage
+        from ash.providers.telegram.handlers import TelegramMessageHandler
+
+        handler = TelegramMessageHandler(
+            provider=mock_provider,
+            agent=mock_agent,
+            streaming=False,
+        )
+
+        mock_extractor = MagicMock()
+        mock_extractor.extract_from_message = AsyncMock(return_value=0)
+        handler._passive_handler._passive_extractor = mock_extractor  # type: ignore[union-attr]
+
+        writer = ChatHistoryWriter("telegram", "group_123")
+        writer.record_user_message(
+            content="Randolf is going to Tokyo in May",
+            user_id="user_456",
+            username="randolf",
+            display_name="Randolf",
+            metadata={"external_id": "100"},
+        )
+        writer.record_user_message(
+            content="I think the flights are expensive",
+            user_id="user_456",
+            username="randolf",
+            display_name="Randolf",
+            metadata={"external_id": "101"},
+        )
+
+        passive_message = IncomingMessage(
+            id="102",
+            chat_id="group_123",
+            user_id="user_456",
+            text="he's still going in May",
+            username="randolf",
+            display_name="Randolf",
+        )
+
+        await handler._passive_handler._extract_passive_memories(passive_message)  # type: ignore[union-attr]
+
+        mock_extractor.extract_from_message.assert_awaited_once()
+        call = mock_extractor.extract_from_message.call_args.kwargs
+        recent_messages = call["recent_user_messages"]
+        assert len(recent_messages) >= 2
+        assert any("Tokyo in May" in m.content for m in recent_messages)
+        assert recent_messages[-1].role == Role.USER
+        assert "he's still going in May" in recent_messages[-1].content

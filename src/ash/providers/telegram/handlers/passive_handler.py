@@ -8,6 +8,8 @@ is not directly mentioned or replied to. It orchestrates:
 - Promotion to active processing when engagement is warranted
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
@@ -17,6 +19,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ash.config import AshConfig
     from ash.llm import LLMProvider
+    from ash.llm.types import Message
     from ash.memory.extractor import MemoryExtractor
     from ash.providers.telegram.passive import (
         PassiveEngagementDecider,
@@ -40,11 +43,11 @@ class PassiveHandler:
 
     def __init__(
         self,
-        provider: "TelegramProvider",
-        config: "AshConfig | None",
-        llm_provider: "LLMProvider | None",
-        memory_manager: "Store | None",
-        memory_extractor: "MemoryExtractor | None",
+        provider: TelegramProvider,
+        config: AshConfig | None,
+        llm_provider: LLMProvider | None,
+        memory_manager: Store | None,
+        memory_extractor: MemoryExtractor | None,
         handle_message: Callable[[IncomingMessage], Awaitable[None]],
     ):
         """Initialize passive handler.
@@ -309,10 +312,12 @@ class PassiveHandler:
                 display_name=message.display_name,
             )
 
-            # Run extraction on just this message (same as active extraction)
+            recent_user_messages = self._build_recent_user_extraction_messages(message)
+
             count = await self._passive_extractor.extract_from_message(
                 message=message,
                 speaker_info=speaker_info,
+                recent_user_messages=recent_user_messages,
             )
 
             if count > 0:
@@ -326,6 +331,50 @@ class PassiveHandler:
             logger.warning(
                 "passive_memory_extraction_failed", extra={"error.message": str(e)}
             )
+
+    def _build_recent_user_extraction_messages(
+        self,
+        message: IncomingMessage,
+        *,
+        limit: int = 8,
+    ) -> list[Message]:
+        """Build recent same-speaker user transcript for memory extraction.
+
+        Keeps context constrained to the current speaker to avoid misattribution,
+        while including enough prior turns to resolve references.
+        """
+        from ash.chats.history import read_recent_chat_history
+        from ash.llm.types import Message, Role
+        from ash.providers.telegram.passive import _format_speaker_label
+
+        entries = read_recent_chat_history(
+            self._provider.name,
+            message.chat_id,
+            limit=limit * 2,
+        )
+
+        user_entries = [
+            entry
+            for entry in entries
+            if entry.role == "user"
+            and entry.user_id == message.user_id
+            and entry.content.strip()
+        ]
+
+        messages: list[Message] = []
+        has_current = False
+        for entry in user_entries[-limit:]:
+            label = _format_speaker_label(entry.username, entry.display_name)
+            messages.append(Message(role=Role.USER, content=f"{label}{entry.content}"))
+            metadata = entry.metadata or {}
+            if str(metadata.get("external_id")) == message.id:
+                has_current = True
+
+        if not has_current and message.text:
+            label = _format_speaker_label(message.username, message.display_name)
+            messages.append(Message(role=Role.USER, content=f"{label}{message.text}"))
+
+        return messages
 
     async def _is_direct_followup_after_bot_reply(
         self, message: IncomingMessage

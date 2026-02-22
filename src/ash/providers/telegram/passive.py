@@ -421,6 +421,7 @@ class PassiveMemoryExtractor:
         self,
         message: IncomingMessage,
         speaker_info: SpeakerInfo | None = None,
+        recent_user_messages: list[Message] | None = None,
     ) -> int:
         """Extract memories from a passive message.
 
@@ -430,6 +431,8 @@ class PassiveMemoryExtractor:
         Args:
             message: The current message.
             speaker_info: Information about the message sender.
+            recent_user_messages: Recent same-speaker user messages (including
+                current message) to provide broader extraction context.
 
         Returns:
             Number of facts extracted and stored.
@@ -443,9 +446,10 @@ class PassiveMemoryExtractor:
         if not message.text:
             return 0
 
-        # Only extract from the current message (same as active extraction)
         label = _format_speaker_label(message.username, message.display_name)
-        messages = [Message(role=Role.USER, content=f"{label}{message.text}")]
+        messages = recent_user_messages or [
+            Message(role=Role.USER, content=f"{label}{message.text}")
+        ]
 
         try:
             # Build owner names for filtering
