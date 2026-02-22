@@ -16,6 +16,42 @@ from ash.cli.console import console, error
 logger = logging.getLogger(__name__)
 
 
+def _resolve_model_alias(model_alias: str | None) -> str:
+    """Resolve model alias with CLI/env/default precedence."""
+    return model_alias or os.environ.get("ASH_MODEL") or "default"
+
+
+def _validate_model_alias(ash_config, alias: str) -> None:  # noqa: ANN001
+    """Validate a model alias exists, raising typer.Exit on failure."""
+    from ash.config import ConfigError
+
+    try:
+        ash_config.get_model(alias)
+    except ConfigError as e:
+        error(str(e))
+        raise typer.Exit(1) from None
+
+
+def _validate_model_credentials(ash_config, alias: str) -> None:  # noqa: ANN001
+    """Validate provider credentials exist for the selected model alias."""
+    model_config = ash_config.get_model(alias)
+    if model_config.provider == "openai-oauth":
+        oauth_creds = ash_config.resolve_oauth_credentials("openai-oauth")
+        if oauth_creds is None:
+            error("No OAuth credentials for openai-oauth. Run 'ash auth login' first.")
+            raise typer.Exit(1) from None
+        return
+
+    api_key = ash_config.resolve_api_key(alias)
+    if api_key is None:
+        provider = model_config.provider
+        env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+        error(
+            f"No API key for provider '{provider}'. Set {env_var} or api_key in config"
+        )
+        raise typer.Exit(1) from None
+
+
 def register(app: typer.Typer) -> None:
     """Register the chat command."""
 
@@ -89,7 +125,7 @@ async def _run_chat(
     from rich.panel import Panel
 
     from ash.cli.runtime import bootstrap_runtime
-    from ash.config import ConfigError, load_config
+    from ash.config import load_config
     from ash.config.paths import get_rpc_socket_path, get_sessions_path
     from ash.logging import configure_logging
 
@@ -110,34 +146,9 @@ async def _run_chat(
         error("No configuration found. Run 'ash config init' first.")
         raise typer.Exit(1) from None
 
-    # Resolve model alias: CLI flag > ASH_MODEL env > "default"
-    resolved_alias = model_alias or os.environ.get("ASH_MODEL") or "default"
-
-    # Validate model configuration early
-    try:
-        ash_config.get_model(resolved_alias)
-    except ConfigError as e:
-        error(str(e))
-        raise typer.Exit(1) from None
-
-    # Check credentials early
-    model_config = ash_config.get_model(resolved_alias)
-    if model_config.provider == "openai-oauth":
-        oauth_creds = ash_config.resolve_oauth_credentials("openai-oauth")
-        if oauth_creds is None:
-            error("No OAuth credentials for openai-oauth. Run 'ash auth login' first.")
-            raise typer.Exit(1) from None
-    else:
-        api_key = ash_config.resolve_api_key(resolved_alias)
-        if api_key is None:
-            provider = model_config.provider
-            env_var = (
-                "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
-            )
-            error(
-                f"No API key for provider '{provider}'. Set {env_var} or api_key in config"
-            )
-            raise typer.Exit(1) from None
+    resolved_alias = _resolve_model_alias(model_alias)
+    _validate_model_alias(ash_config, resolved_alias)
+    _validate_model_credentials(ash_config, resolved_alias)
 
     components = None
     try:
