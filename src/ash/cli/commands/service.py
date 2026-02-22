@@ -1,11 +1,34 @@
 """Service management commands."""
 
 import asyncio
-from typing import Annotated
+from collections.abc import Coroutine
+from typing import Annotated, Any
 
 import typer
 
 from ash.cli.console import console, error, success
+
+
+def _run_async(
+    coro: Coroutine[Any, Any, Any], *, interrupt_message: str | None = None
+) -> None:
+    """Run an async command and handle Ctrl+C consistently."""
+    try:
+        asyncio.run(coro)
+    except KeyboardInterrupt:
+        if interrupt_message:
+            console.print(interrupt_message)
+
+
+def _format_uptime(uptime_seconds: float) -> str:
+    """Format uptime seconds into a compact display string."""
+    if uptime_seconds < 60:
+        return f"{uptime_seconds:.0f}s"
+    if uptime_seconds < 3600:
+        return f"{uptime_seconds / 60:.0f}m"
+    if uptime_seconds < 86400:
+        return f"{uptime_seconds / 3600:.1f}h"
+    return f"{uptime_seconds / 86400:.1f}d"
 
 
 def _run_service_action(action_name: str) -> None:
@@ -60,10 +83,10 @@ def register(app: typer.Typer) -> None:
         if foreground:
             from ash.cli.commands.serve import _run_server
 
-            try:
-                asyncio.run(_run_server())
-            except KeyboardInterrupt:
-                console.print("\n[bold yellow]Server stopped[/bold yellow]")
+            _run_async(
+                _run_server(),
+                interrupt_message="\n[bold yellow]Server stopped[/bold yellow]",
+            )
             return
 
         _run_service_action("start")
@@ -115,17 +138,7 @@ def register(app: typer.Typer) -> None:
             table.add_row("PID", str(status.pid))
 
         if status.uptime_seconds is not None:
-            # Format uptime
-            uptime = status.uptime_seconds
-            if uptime < 60:
-                uptime_str = f"{uptime:.0f}s"
-            elif uptime < 3600:
-                uptime_str = f"{uptime / 60:.0f}m"
-            elif uptime < 86400:
-                uptime_str = f"{uptime / 3600:.1f}h"
-            else:
-                uptime_str = f"{uptime / 86400:.1f}d"
-            table.add_row("Uptime", uptime_str)
+            table.add_row("Uptime", _format_uptime(status.uptime_seconds))
 
         if status.memory_mb is not None:
             table.add_row("Memory", f"{status.memory_mb:.1f} MB")
@@ -179,16 +192,10 @@ def register(app: typer.Typer) -> None:
         manager = ServiceManager()
 
         async def do_logs():
-            try:
-                async for line in manager.logs(follow=follow, lines=lines):
-                    console.print(line)
-            except KeyboardInterrupt:
-                pass
+            async for line in manager.logs(follow=follow, lines=lines):
+                console.print(line)
 
-        try:
-            asyncio.run(do_logs())
-        except KeyboardInterrupt:
-            pass
+        _run_async(do_logs())
 
     @service_app.command("install")
     def service_install() -> None:
