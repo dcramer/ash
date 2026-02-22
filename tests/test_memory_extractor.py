@@ -522,6 +522,24 @@ class TestExtractionPromptContent:
         assert "just arrived at a location" in prompt
         assert "fixed some issues" in prompt
 
+    def test_prompt_includes_long_term_utility_gate(self, prompt):
+        """Extraction prompt should enforce long-term utility over chat noise."""
+        assert "primary objective: long-term utility" in prompt
+        assert "30+ days later" in prompt
+        assert "personalization, planning, or relationship context" in prompt
+
+    def test_prompt_rejects_system_operational_noise(self, prompt):
+        """Extraction prompt should explicitly reject system/dev operational details."""
+        assert "refactored the bot" in prompt
+        assert "wiped session history" in prompt
+        assert "assistant/harness/eval internals" in prompt
+
+    def test_prompt_enforces_ephemeral_quality_gate(self, prompt):
+        """Extraction prompt should gate low-value ephemeral facts."""
+        assert "ephemeral quality gate" in prompt
+        assert "trivial, stale, or purely situational status" in prompt
+        assert '"going in may"' in prompt
+
 
 class TestClassifyFact:
     """Tests for classify_fact() method."""
@@ -808,6 +826,23 @@ class TestGroundingPass:
         assert grounding_llm.complete.await_count == 1
         assert extraction_llm.complete.call_args.kwargs["model"] == "extract-model"
         assert grounding_llm.complete.call_args.kwargs["model"] == "ground-model"
+
+
+class TestGroundingPromptContent:
+    """Tests verifying grounding prompt contains key guardrails."""
+
+    @pytest.fixture
+    def prompt(self):
+        from ash.memory.extractor import GROUNDING_PROMPT
+
+        return GROUNDING_PROMPT.lower()
+
+    def test_prompt_requires_decision_for_every_index(self, prompt):
+        assert "process every input index exactly once" in prompt
+
+    def test_prompt_rejects_missing_slots(self, prompt):
+        assert "key slots are missing" in prompt
+        assert '"user is going in may"' in prompt
 
 
 class TestAliasParsing:

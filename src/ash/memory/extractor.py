@@ -62,6 +62,16 @@ The conversation uses XML tags to clearly separate speakers:
 - If the assistant says "You mentioned you like pizza", do NOT extract that
 - Only the user's own words inside <user> tags are valid sources
 
+## PRIMARY OBJECTIVE: Long-term utility
+Store only facts that will likely improve future assistance. Prefer durable,
+high-signal personal information over low-value chat noise.
+
+Utility check before storing:
+- Will this still be useful or unambiguous 30+ days later?
+- Does it materially help personalization, planning, or relationship context?
+- Is it specific enough to act on without the original conversation?
+If any answer is no, do not extract.
+
 ## What to extract:
 - User preferences (likes, dislikes, habits)
 - Facts about people in their life (names, relationships, details)
@@ -82,6 +92,9 @@ The conversation uses XML tags to clearly separate speakers:
 - Negative knowledge — only store what IS known, not what is unknown ("blood type is unknown", "hasn't explored X yet", "doesn't know their schedule")
 - Vague relationships without context ("knows someone named David" — who is David and why does it matter?)
 - Actions without specifics ("just arrived at a location" — WHERE?, "fixed some issues" — WHAT issues?)
+- Engineering/system operations details ("refactored the bot", "wiped session history", "fixed extraction bug")
+- Assistant/harness/eval internals ("scheduler hooks", "memory interface", "prompt updated")
+- Short-lived status snapshots ("is not in Tokyo right now", "can't type well today") unless they are explicitly important to future planning
 
 ## CRITICAL: Never store secrets or credentials
 NEVER extract the following - reject with confidence 0.0:
@@ -107,6 +120,7 @@ Only extract facts that are COMPLETE and USEFUL on their own:
 - Reject if it contains unresolved words: "something", "somewhere", "someone", "that thing", "the thing", "it"
 - Reject if recalling this fact months later would be meaningless without conversation context
 - Facts must be actionable - "Spent $100 on something" is useless; "Spent $100 on a watch" is useful
+- Facts must pass a "30-day recall" test: if future recall would confuse the assistant, reject it
 
 ## CRITICAL: Content must be self-contained
 The "content" field must be understandable on its own, without the subjects array:
@@ -237,6 +251,11 @@ Ephemeral (decay over time):
 - task: things to do (e.g., "needs to call dentist")
 - observation: fleeting observations (e.g., "seemed tired today")
 
+Ephemeral quality gate:
+- Do not store ephemeral facts that are trivial, stale, or purely situational status.
+- For events/tasks/context/observations, require concrete details (who/what/where/when).
+- Reject ambiguous time/location statements like "going in May" unless destination/subject is explicit.
+
 ## Sensitivity Classification:
 Classify each fact's privacy level for sharing decisions:
 - "public": Can be shared anywhere. General facts, preferences, work info.
@@ -300,6 +319,8 @@ CRITICAL:
 - If a fact says "going in May" but transcript clearly says "going to Tokyo in May",
   rewrite content to include "Tokyo".
 - If a fact cannot be grounded precisely, mark grounded=false.
+- If key slots are missing (subject/action/object/time/location where relevant), mark grounded=false unless transcript supports a precise rewrite.
+- Example: "User is going in May" is NOT grounded unless destination/context can be resolved from transcript.
 
 Return ONLY valid JSON as an array:
 [
@@ -308,9 +329,10 @@ Return ONLY valid JSON as an array:
 ]
 
 Rules:
-- Use each fact index at most once.
+- Process every input index exactly once.
 - grounded must be a JSON boolean (true/false), not a string.
 - If grounded=true and content is omitted, the original content will be kept.
+- Do not output extra keys beyond: index, grounded, content.
 
 ## Conversation
 {conversation}
