@@ -194,6 +194,9 @@ class MemoryConfig(BaseModel):
     extraction_grounding_enabled: bool = (
         True  # Run second-pass LLM grounding/rewriting of extracted facts
     )
+    extraction_grounding_model: str | None = (
+        None  # Grounding model alias or provider model name (None = use default)
+    )
 
 
 class ConversationConfig(BaseModel):
@@ -489,6 +492,33 @@ class AshConfig(BaseModel):
         api_key = self._resolve_provider_api_key(model_config.provider)
         return create_llm_provider(
             model_config.provider,
+            api_key=api_key.get_secret_value() if api_key else None,
+        )
+
+    def create_llm_provider_for_provider(
+        self, provider: Literal["anthropic", "openai", "openai-oauth"]
+    ):
+        """Create an LLM provider instance directly from a provider id."""
+        from ash.llm.registry import create_llm_provider
+
+        if provider == "openai-oauth":
+            from ash.auth.storage import AuthStorage
+
+            oauth_creds = self.resolve_oauth_credentials("openai-oauth")
+            if not oauth_creds:
+                raise ValueError(
+                    "No OAuth credentials for openai-oauth. Run 'ash auth login' first."
+                )
+            return create_llm_provider(
+                "openai-oauth",
+                access_token=oauth_creds.access,
+                account_id=oauth_creds.account_id,
+                auth_storage=AuthStorage(),
+            )
+
+        api_key = self._resolve_provider_api_key(provider)
+        return create_llm_provider(
+            provider,
             api_key=api_key.get_secret_value() if api_key else None,
         )
 

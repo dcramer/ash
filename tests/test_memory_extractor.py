@@ -764,6 +764,51 @@ class TestGroundingPass:
         assert len(facts) == 1
         assert facts[0].content == "Randolf is going to Tokyo in May"
 
+    async def test_grounding_can_use_dedicated_provider_and_model(self):
+        extraction_llm = MagicMock()
+        grounding_llm = MagicMock()
+        extractor = MemoryExtractor(
+            llm=extraction_llm,
+            model="extract-model",
+            confidence_threshold=0.7,
+            grounding_enabled=True,
+            grounding_llm=grounding_llm,
+            grounding_model="ground-model",
+        )
+
+        extraction_llm.complete = AsyncMock(
+            return_value=CompletionResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content='[{"content":"Randolf is going in May","subjects":["Randolf"],"shared":false,"confidence":0.9}]',
+                ),
+                usage=Usage(input_tokens=100, output_tokens=40),
+            )
+        )
+        grounding_llm.complete = AsyncMock(
+            return_value=CompletionResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content='[{"index":0,"grounded":true,"content":"Randolf is going to Tokyo in May"}]',
+                ),
+                usage=Usage(input_tokens=120, output_tokens=25),
+            )
+        )
+
+        facts = await extractor.extract_from_conversation(
+            [
+                Message(role=Role.USER, content="Randolf is going to Tokyo in May"),
+                Message(role=Role.USER, content="he's still going in May"),
+            ]
+        )
+
+        assert len(facts) == 1
+        assert facts[0].content == "Randolf is going to Tokyo in May"
+        assert extraction_llm.complete.await_count == 1
+        assert grounding_llm.complete.await_count == 1
+        assert extraction_llm.complete.call_args.kwargs["model"] == "extract-model"
+        assert grounding_llm.complete.call_args.kwargs["model"] == "ground-model"
+
 
 class TestAliasParsing:
     """Tests for alias parsing in extraction."""

@@ -334,6 +334,8 @@ class MemoryExtractor:
         max_tokens: int = 1024,
         confidence_threshold: float = 0.7,
         grounding_enabled: bool = True,
+        grounding_llm: "LLMProvider | None" = None,
+        grounding_model: str | None = None,
     ):
         """Initialize memory extractor.
 
@@ -343,12 +345,16 @@ class MemoryExtractor:
             max_tokens: Maximum tokens for extraction response.
             confidence_threshold: Minimum confidence to include a fact.
             grounding_enabled: Whether to run second-pass grounding/rewriting.
+            grounding_llm: Optional LLM provider for grounding calls.
+            grounding_model: Optional model name for grounding calls.
         """
         self._llm = llm
         self._model = model
         self._max_tokens = max_tokens
         self._confidence_threshold = confidence_threshold
         self._grounding_enabled = grounding_enabled
+        self._grounding_llm = grounding_llm or llm
+        self._grounding_model = grounding_model or model
 
     async def classify_fact(self, content: str) -> ExtractedFact | None:
         """Classify a pre-formed fact using LLM.
@@ -489,9 +495,9 @@ class MemoryExtractor:
         )
 
         try:
-            response = await self._llm.complete(
+            response = await self._grounding_llm.complete(
                 messages=[Message(role=Role.USER, content=prompt)],
-                model=self._model,
+                model=self._grounding_model,
                 max_tokens=512,
                 temperature=0.0,
             )

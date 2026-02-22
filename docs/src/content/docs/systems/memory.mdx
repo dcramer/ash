@@ -31,6 +31,7 @@ extraction_debounce_seconds = 30
 extraction_confidence_threshold = 0.7
 extraction_context_messages = 8
 extraction_grounding_enabled = true
+extraction_grounding_model = null
 ```
 
 ### Key Options
@@ -48,6 +49,7 @@ extraction_grounding_enabled = true
 | `extraction_model` | `null` | Optional model alias override |
 | `extraction_context_messages` | `8` | Message window used when building extraction context |
 | `extraction_grounding_enabled` | `true` | Run second LLM pass to ground/rewrite extracted facts |
+| `extraction_grounding_model` | `null` | Grounding model selector. `null` uses `[models.default]`; accepts alias (`"mini"`) or provider model (`"openai:gpt-5.2"` / `"gpt-5.2"`). |
 | `extraction_confidence_threshold` | `0.7` | Minimum confidence to store extracted facts |
 
 ## Embeddings
