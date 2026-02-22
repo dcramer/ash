@@ -29,7 +29,7 @@ def test_register_memory_methods_wiring_is_constrained() -> None:
 
     call_sites = _find_call_sites(r"\bregister_memory_methods\(", files)
     assert call_sites == {
-        Path("src/ash/integrations/builtin.py"),
+        Path("src/ash/integrations/memory.py"),
         Path("src/ash/rpc/methods/memory.py"),
     }
 
@@ -40,7 +40,7 @@ def test_register_schedule_methods_wiring_is_constrained() -> None:
 
     call_sites = _find_call_sites(r"\bregister_schedule_methods\(", files)
     assert call_sites == {
-        Path("src/ash/integrations/builtin.py"),
+        Path("src/ash/integrations/scheduling.py"),
         Path("src/ash/rpc/methods/schedule.py"),
     }
 
@@ -50,7 +50,7 @@ def test_register_config_methods_wiring_is_constrained() -> None:
 
     call_sites = _find_call_sites(r"\bregister_config_methods\(", files)
     assert call_sites == {
-        Path("src/ash/integrations/builtin.py"),
+        Path("src/ash/integrations/runtime_rpc.py"),
         Path("src/ash/rpc/methods/config.py"),
     }
 
@@ -60,7 +60,7 @@ def test_register_log_methods_wiring_is_constrained() -> None:
 
     call_sites = _find_call_sites(r"\bregister_log_methods\(", files)
     assert call_sites == {
-        Path("src/ash/integrations/builtin.py"),
+        Path("src/ash/integrations/runtime_rpc.py"),
         Path("src/ash/rpc/methods/logs.py"),
     }
 

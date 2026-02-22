@@ -6,11 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from ash.integrations.builtin import (
-    MemoryIntegration,
-    RuntimeRPCIntegration,
-    SchedulingIntegration,
-)
+from ash.integrations.memory import MemoryIntegration
+from ash.integrations.runtime_rpc import RuntimeRPCIntegration
+from ash.integrations.scheduling import SchedulingIntegration
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor
