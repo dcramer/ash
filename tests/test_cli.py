@@ -1,6 +1,7 @@
 """Tests for CLI commands."""
 
 from ash.cli.app import app
+from ash.cli.commands.doctor import run_doctor_checks
 from ash.config.paths import ENV_VAR, get_ash_home
 
 
@@ -621,6 +622,84 @@ class TestDoctorCommand:
         assert result.exit_code == 0
         assert "OpenAI API key is" in result.stdout
         assert "OPENAI_API_KEY" in result.stdout
+
+    def test_doctor_warns_on_invalid_image_model_resolution(
+        self, monkeypatch, tmp_path
+    ):
+        ash_home = tmp_path / ".ash"
+        ash_home.mkdir(parents=True, exist_ok=True)
+        for name in ("graph", "sessions", "chats", "logs", "run", "workspace"):
+            (ash_home / name).mkdir(exist_ok=True)
+        (ash_home / "config.toml").write_text(
+            "\n".join(
+                [
+                    "[models.default]",
+                    "provider='openai'",
+                    "model='gpt-5.2'",
+                    "",
+                    "[openai]",
+                    "api_key='sk-test'",
+                    "",
+                    "[image]",
+                    "enabled=true",
+                    "provider='openai'",
+                    "model='openai/'",
+                ]
+            )
+            + "\n"
+        )
+
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = run_doctor_checks()
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert any(
+            finding.check == "config.image.model_resolution"
+            and "failed to resolve image model" in finding.detail
+            for finding in result.findings
+        )
+
+    def test_doctor_warns_on_invalid_image_timeout(self, monkeypatch, tmp_path):
+        ash_home = tmp_path / ".ash"
+        ash_home.mkdir(parents=True, exist_ok=True)
+        for name in ("graph", "sessions", "chats", "logs", "run", "workspace"):
+            (ash_home / name).mkdir(exist_ok=True)
+        (ash_home / "config.toml").write_text(
+            "\n".join(
+                [
+                    "[models.default]",
+                    "provider='openai'",
+                    "model='gpt-5.2'",
+                    "",
+                    "[openai]",
+                    "api_key='sk-test'",
+                    "",
+                    "[image]",
+                    "enabled=true",
+                    "provider='openai'",
+                    "request_timeout_seconds=0",
+                ]
+            )
+            + "\n"
+        )
+
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = run_doctor_checks()
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert any(
+            finding.check == "config.image.request_timeout_seconds"
+            and finding.level == "warning"
+            for finding in result.findings
+        )
 
 
 class TestStatsCommand:

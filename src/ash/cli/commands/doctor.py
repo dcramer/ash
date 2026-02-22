@@ -22,6 +22,7 @@ from ash.config.paths import (
     get_schedule_file,
     get_sessions_path,
 )
+from ash.images.service import _resolve_image_model
 
 SESSION_VERSION = "2"
 
@@ -349,6 +350,43 @@ def _check_image_config(config: AshConfig) -> list[DoctorFinding]:
                 check="config.image.max_image_bytes",
                 detail=f"invalid value: {image_cfg.max_image_bytes}",
                 repair="Set `[image].max_image_bytes` to a positive integer",
+            )
+        )
+    if image_cfg.request_timeout_seconds <= 0:
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.image.request_timeout_seconds",
+                detail=f"invalid value: {image_cfg.request_timeout_seconds}",
+                repair="Set `[image].request_timeout_seconds` to > 0",
+            )
+        )
+    else:
+        findings.append(
+            DoctorFinding(
+                level="ok",
+                check="config.image.request_timeout_seconds",
+                detail=f"request timeout is valid: {image_cfg.request_timeout_seconds}s",
+            )
+        )
+
+    try:
+        resolved_model = _resolve_image_model(config)
+    except ValueError as e:
+        findings.append(
+            DoctorFinding(
+                level="warning",
+                check="config.image.model_resolution",
+                detail=f"failed to resolve image model: {e}",
+                repair="Fix `[image].model` to a valid OpenAI model or alias",
+            )
+        )
+    else:
+        findings.append(
+            DoctorFinding(
+                level="ok",
+                check="config.image.model_resolution",
+                detail=f"resolved image model: {resolved_model}",
             )
         )
 
