@@ -1,0 +1,51 @@
+schema_version: "2.0"
+name: System End-to-End Smoke
+description: Single cheap E2E case covering remember, scheduling, and recall in one thread
+
+defaults:
+  agent: memory
+  drain_extraction: true
+  session:
+    provider: telegram
+    chat_id: eval-system-e2e
+    chat_type: supergroup
+    chat_title: "System E2E Eval Group"
+    user_id: eval-user-alice
+    username: alice
+    display_name: "Alice"
+
+cases:
+  - id: memory_schedule_recall_smoke
+    description: One conversation that asks to remember tasks, set a reminder, and recall both
+    turns:
+      - prompt: "Please remember my tasks for today: laundry, put away closet stuff, and bathrooms."
+        expected_behavior: |
+          The assistant should acknowledge and remember the task list.
+        criteria:
+          - Acknowledges the tasks naturally
+          - Does not refuse remembering
+
+      - prompt: "Set a daily reminder at 8am UTC to review that task list."
+        expected_behavior: |
+          The assistant should schedule a recurring reminder in UTC.
+        criteria:
+          - Confirms a recurring schedule/reminder was created
+          - Includes timing details in the response
+
+      - prompt: "What do I need to do today, and what reminder is set?"
+        expected_behavior: |
+          The assistant should recall the task context and mention the reminder setup.
+        criteria:
+          - Mentions at least one task from the saved list
+          - Mentions that a reminder exists (with timing or recurrence)
+          - Response is conversational and concise
+
+    assertions:
+      memories:
+        - content_contains: ["laundry"]
+
+    tags:
+      - e2e
+      - smoke
+      - memory
+      - scheduler
