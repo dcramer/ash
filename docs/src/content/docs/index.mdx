@@ -7,262 +7,77 @@ hero:
   actions: []
 ---
 
-<div class="ash-hero">
-  <div class="ash-hero-content">
-    <div class="ash-badge">AUTONOMOUS AI AGENT</div>
-    <h1 class="ash-title">
-      <span class="ash-title-main">ASH</span>
-    </h1>
-    <p class="ash-tagline">Gotta automate 'em all.</p>
-    <p class="ash-description">
-      Self-driving assistant that runs commands, searches the web,
-      remembers everything, and never asks for permission twice.
-    </p>
-    <div class="ash-cta">
-      <a href="getting-started/quick-start/" class="ash-btn ash-btn-primary">
-        Get Started
-        <span class="ash-btn-arrow">→</span>
-      </a>
-      <a href="https://github.com/dcramer/ash" class="ash-btn ash-btn-secondary">
-        GitHub
-      </a>
-    </div>
-  </div>
+<div class="ash-home">
+  <section class="ash-mega" aria-label="Ash brand header">
+    <h1 class="ash-mega-word"><img class="ash-mega-icon" src="/ash/logo.svg" alt="" />ASH</h1>
+    <p class="ash-mega-expansion">autonomous sandbox hustler</p>
+  </section>
 
-  <div class="ash-terminal">
-    <div class="ash-terminal-header">
-      <span class="ash-terminal-dot"></span>
-      <span class="ash-terminal-dot"></span>
-      <span class="ash-terminal-dot"></span>
-      <span class="ash-terminal-title">ash chat</span>
-    </div>
-    <div class="ash-terminal-body">
-      <div class="ash-terminal-line">
-        <span class="ash-prompt">you:</span> remind me when the next bus comes every morning at 7am
-      </div>
-      <div class="ash-terminal-line ash-terminal-response">
-        <span class="ash-prompt ash-prompt-ai">ash:</span> I'll set that up. What's your bus stop?
-      </div>
-      <div class="ash-terminal-line">
-        <span class="ash-prompt">you:</span> 4th & King, the N line
-      </div>
-      <div class="ash-terminal-line ash-terminal-response">
-        <span class="ash-prompt ash-prompt-ai">ash:</span> Done. Created a skill that checks Muni arrivals and scheduled it for 7am daily. You'll get a Telegram message with the next 3 arrivals.
-      </div>
-      <div class="ash-terminal-line ash-terminal-response">
-        <span class="ash-prompt ash-prompt-ai"></span> <span class="ash-dim">✓ Created skill: muni-arrivals</span>
-      </div>
-      <div class="ash-terminal-line ash-terminal-response">
-        <span class="ash-prompt ash-prompt-ai"></span> <span class="ash-dim">✓ Scheduled: daily at 7:00am</span>
+  <section class="ash-home-hero">
+    <div class="ash-home-hero-grid">
+      <div>
+        <h1 class="ash-home-title">
+          drop the ask.
+          <span class="ash-highlight">watch it cook.</span>
+        </h1>
+        <p class="ash-home-subtitle">
+          ash is your personal chaos goblin. you drop a messy ask, it plans,
+          runs tools, remembers your preferences, and comes back with the done version.
+        </p>
+        <div class="ash-home-actions">
+          <div class="ash-home-cta">
+            <a class="ash-home-cta-primary" href="/ash/getting-started/quick-start/">get going in 5 min →</a>
+          </div>
+          <div class="ash-home-jumps">
+            <a href="/ash/cli/overview/">cli docs</a>
+            <a href="/ash/systems/overview/">systems</a>
+            <a href="/ash/configuration/overview/">config</a>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
+  </section>
+
+  <section class="ash-home-flow" aria-label="Ash capability and proof sections">
+    <article class="ash-home-band ash-home-band-acid ash-home-band-slice">
+      <p class="ash-band-tag">01 / saturday speedrun</p>
+      <h2>plan a perfect chaos day</h2>
+      <p class="ash-scenario-line">one prompt -> weather-aware route, food stops, and zero spreadsheet suffering.</p>
+      <div class="ash-chat-demo ash-chat-ops" aria-label="Daily operations scenario">
+        <p class="ash-chat-turn ash-chat-user"><span class="ash-chat-speaker">you</span> build me a no-lame saturday: gym, matcha, thrift, sunset spot, ramen.<span class="ash-chat-time">10:41</span></p>
+        <p class="ash-chat-turn ash-chat-ash"><span class="ash-chat-speaker">ash</span> say less. pulling weather + travel times + open hours rn.<br />i’ll keep it walkable and not tourist-core.<span class="ash-chat-time">10:41</span></p>
+        <p class="ash-chat-tool"><span>tool</span> weather checked, maps routed, 14 spots filtered to 5 bangers</p>
+        <p class="ash-chat-turn ash-chat-ash ash-chat-latest"><span class="ash-chat-speaker">ash</span> locked itinerary:<br />11:00 grind at iron temple (least crowded)<br />12:20 matcha @ mono (outdoor seats + good wifi)<br />1:10 thrift loop (3 stores, 12 min apart)<br />6:02 twin peaks golden hour<br />7:30 maru ramen (waitlist link saved)<span class="ash-chat-time">10:42</span></p>
+        <p class="ash-chat-meta">day plan dropped</p>
+      </div>
+    </article>
+
+    <article class="ash-home-band ash-home-band-paper">
+      <p class="ash-band-tag">02 / memory goes brr</p>
+      <h2>remember the tiny stuff</h2>
+      <p class="ash-scenario-line">favorites, routines, weird preferences. ash keeps the lore so you don’t.</p>
+      <div class="ash-chat-demo ash-chat-memory" aria-label="Memory scenario">
+        <p class="ash-chat-turn ash-chat-user"><span class="ash-chat-speaker">you</span> reminder: mom likes peonies, not roses. and jules is oat milk only.<span class="ash-chat-time">12:03</span></p>
+        <p class="ash-chat-turn ash-chat-ash"><span class="ash-chat-speaker">ash</span> noted.<br />want birthday nudges 3 days early + day-of backup ping?<span class="ash-chat-time">12:03</span></p>
+        <p class="ash-chat-turn ash-chat-user"><span class="ash-chat-speaker">you</span> yes + monthly reminder to reorder my contacts.<span class="ash-chat-time">12:04</span></p>
+        <p class="ash-chat-tool"><span>memory</span> saved people prefs + gift hints + contact lens cadence</p>
+        <p class="ash-chat-turn ash-chat-ash ash-chat-latest"><span class="ash-chat-speaker">ash</span> done. saved profile snippets:<br />- mom: peonies, pastel wrap, no scented candles<br />- jules: oat only, dark chocolate, late-evening plans<br />- you: contacts reorder every 30 days (nudge at 9am)<span class="ash-chat-time">12:04</span></p>
+        <p class="ash-chat-meta">personal lore saved</p>
+      </div>
+    </article>
+
+    <article class="ash-home-band ash-home-band-tools">
+      <p class="ash-band-tag">03 / main character mode</p>
+      <h2>run your life on autopilot</h2>
+      <p class="ash-scenario-line">set routines once, then let ash nudge you with perfect timing.</p>
+      <div class="ash-chat-demo ash-chat-ship" aria-label="Build and ship scenario">
+        <p class="ash-chat-turn ash-chat-user"><span class="ash-chat-speaker">you</span> every weekday: wake me 7:30, gym at 8, deep work at 10, walk at sunset.<span class="ash-chat-time">15:11</span></p>
+        <p class="ash-chat-turn ash-chat-ash"><span class="ash-chat-speaker">ash</span> clean system.<br />want gym reminders skipped if sleep < 6h and rain > 70%?<span class="ash-chat-time">15:11</span></p>
+        <p class="ash-chat-turn ash-chat-user"><span class="ash-chat-speaker">you</span> yep. and on sunday make me a grocery list from my usual meals.<span class="ash-chat-time">15:12</span></p>
+        <p class="ash-chat-tool"><span>tool</span> schedules created + conditional rule saved + weekly grocery task queued</p>
+        <p class="ash-chat-turn ash-chat-ash ash-chat-latest"><span class="ash-chat-speaker">ash</span> autopilot is live:<br />7:30 wake nudge + 8:00 gym cue<br />10:00 focus mode ping + distraction block reminder<br />sunset walk reminder with weather-adjusted time<br />sunday 5pm grocery list generated from your meal history<span class="ash-chat-time">15:12</span></p>
+        <p class="ash-chat-meta">autopilot armed</p>
+      </div>
+    </article>
+  </section>
 </div>
-
-<style>{`
-  /* Hide default Starlight hero */
-  .hero {
-    display: none !important;
-  }
-
-  /* ASH HERO */
-  .ash-hero {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4rem;
-    align-items: center;
-    padding: 4rem 0 6rem;
-    max-width: 1200px;
-    margin: 0 auto;
-  }
-
-  .ash-badge {
-    display: inline-block;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.15em;
-    color: var(--sl-color-accent);
-    border: 1px solid var(--sl-color-accent);
-    padding: 0.4em 0.8em;
-    border-radius: 4px;
-    margin-bottom: 1.5rem;
-  }
-
-  .ash-title {
-    margin: 0 0 1rem !important;
-    line-height: 0.85 !important;
-  }
-
-  .ash-title-main {
-    font-size: clamp(5rem, 15vw, 10rem);
-    font-weight: 800;
-    letter-spacing: -0.06em;
-    background: linear-gradient(180deg, #fff 0%, #888 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    display: block;
-  }
-
-  .ash-tagline {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: var(--sl-color-accent);
-    margin: 0 0 1rem;
-    letter-spacing: -0.02em;
-  }
-
-  .ash-description {
-    font-size: 1.15rem;
-    color: var(--sl-color-gray-2);
-    line-height: 1.6;
-    margin: 0 0 2rem;
-    max-width: 380px;
-  }
-
-  .ash-cta {
-    display: flex;
-    gap: 1rem;
-  }
-
-  .ash-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.8rem 1.5rem;
-    font-size: 1rem;
-    font-weight: 700;
-    text-decoration: none;
-    border-radius: 8px;
-    transition: all 0.15s ease;
-  }
-
-  .ash-btn-primary {
-    background: transparent;
-    color: var(--sl-color-accent);
-    font-weight: 700;
-    border: 2px solid var(--sl-color-accent);
-  }
-
-  .ash-btn-primary:hover {
-    background: var(--sl-color-accent);
-    color: black;
-    transform: translateY(-2px);
-  }
-
-  .ash-btn-arrow {
-    transition: transform 0.15s;
-  }
-
-  .ash-btn-primary:hover .ash-btn-arrow {
-    transform: translateX(4px);
-  }
-
-  .ash-btn-secondary {
-    background: transparent;
-    color: var(--sl-color-gray-1);
-    border: 1px solid var(--sl-color-gray-4);
-  }
-
-  .ash-btn-secondary:hover {
-    border-color: var(--sl-color-gray-2);
-    color: white;
-  }
-
-  /* TERMINAL */
-  .ash-terminal {
-    background: #0c0c0c;
-    border: 1px solid var(--sl-color-gray-5);
-    border-radius: 12px;
-    overflow: hidden;
-    font-family: var(--sl-font-mono);
-    font-size: 0.85rem;
-    box-shadow: 0 24px 48px rgba(0,0,0,0.4);
-  }
-
-  .ash-terminal-header {
-    background: var(--sl-color-gray-6);
-    padding: 0.75rem 1rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    border-bottom: 1px solid var(--sl-color-gray-5);
-  }
-
-  .ash-terminal-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--sl-color-gray-4);
-  }
-
-  .ash-terminal-dot:first-child { background: #ff5f57; }
-  .ash-terminal-dot:nth-child(2) { background: #ffbd2e; }
-  .ash-terminal-dot:nth-child(3) { background: #28c840; }
-
-  .ash-terminal-title {
-    margin-left: auto;
-    color: var(--sl-color-gray-3);
-    font-size: 0.75rem;
-  }
-
-  .ash-terminal-body {
-    padding: 1.25rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .ash-terminal-line {
-    color: var(--sl-color-gray-1);
-    line-height: 1.5;
-  }
-
-  .ash-prompt {
-    color: var(--sl-color-accent);
-    font-weight: 600;
-    margin-right: 0.5rem;
-  }
-
-  .ash-prompt-ai {
-    color: #28c840;
-  }
-
-  .ash-dim {
-    color: var(--sl-color-gray-3);
-  }
-
-  .ash-typing::after {
-    content: '▋';
-    animation: blink 1s infinite;
-    color: var(--sl-color-accent);
-  }
-
-  @keyframes blink {
-    0%, 50% { opacity: 1; }
-    51%, 100% { opacity: 0; }
-  }
-
-  /* MOBILE */
-  @media (max-width: 900px) {
-    .ash-hero {
-      grid-template-columns: 1fr;
-      gap: 3rem;
-      padding: 2rem 0 4rem;
-    }
-
-    .ash-title-main {
-      font-size: 4rem;
-    }
-
-    .ash-features {
-      grid-template-columns: 1fr;
-    }
-
-    .ash-feature-large,
-    .ash-feature-wide {
-      grid-row: auto;
-      grid-column: auto;
-    }
-  }
-`}</style>
