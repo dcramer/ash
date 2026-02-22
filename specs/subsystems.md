@@ -144,6 +144,7 @@ For each subsystem:
 ## Integration Hooks
 
 The runtime harness uses integration hooks to keep core wiring light and deterministic.
+Contributor implementation details live in [specs/integrations.md](integrations.md).
 
 ### Harness responsibilities (MUST)
 

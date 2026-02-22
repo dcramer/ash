@@ -673,10 +673,10 @@ class TelegramMessageHandler:
                     # If top is the main agent, pop it (main agent done)
                     if top.agent_type == "main":
                         main_frame = stack.pop()
-                        self._agent._maybe_spawn_memory_extraction(
-                            "",  # no user message for extraction context
-                            main_frame.context.user_id or "",
-                            main_frame.session,
+                        await self._agent.run_message_postprocess_hooks(
+                            user_message="",  # no user text for this completion path
+                            session=main_frame.session,
+                            effective_user_id=main_frame.context.user_id or "",
                         )
                         self._stack_manager.clear(session_key)
                         self._persist_stack(session_key, sm)

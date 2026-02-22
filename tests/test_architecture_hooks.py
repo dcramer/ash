@@ -179,6 +179,16 @@ def test_scheduling_runtime_instantiation_is_constrained() -> None:
     }
 
 
+def test_memory_postprocess_calls_are_integration_owned() -> None:
+    files = _python_files_under("src/ash")
+
+    call_sites = _find_call_sites(r"\brun_memory_postprocess\(", files)
+    assert call_sites == {
+        Path("src/ash/core/agent.py"),
+        Path("src/ash/integrations/memory.py"),
+    }
+
+
 def test_harness_boundaries_reference_integration_hooks_spec() -> None:
     expected_comment = "specs/subsystems.md (Integration Hooks)"
     boundary_files = [

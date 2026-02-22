@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
     from ash.memory.extractor import MemoryExtractor
+    from ash.memory.postprocess import MemoryPostprocessService
     from ash.providers.base import IncomingMessage
     from ash.store.store import Store
     from ash.store.types import PersonEntry, RetrievedContext
@@ -181,7 +182,17 @@ class Agent:
         self._prompt_context_augmenters = tuple(prompt_context_augmenters or [])
         self._sandbox_env_augmenters = tuple(sandbox_env_augmenters or [])
         self._message_postprocess_hooks = tuple(message_postprocess_hooks or [])
-        self._last_extraction_time: float | None = None
+        from ash.memory.postprocess import MemoryPostprocessService
+
+        self._memory_postprocess: MemoryPostprocessService = MemoryPostprocessService(
+            store=self._memory,
+            people_store=self._people,
+            extractor=self._extractor,
+            extraction_enabled=self._config.extraction_enabled,
+            min_message_length=self._config.extraction_min_message_length,
+            debounce_seconds=self._config.extraction_debounce_seconds,
+            confidence_threshold=self._config.extraction_confidence_threshold,
+        )
 
     def install_integration_hooks(
         self,
@@ -235,7 +246,48 @@ class Agent:
         effective_user_id: str,
     ) -> None:
         """Default memory postprocess behavior for integration hooks."""
-        self._maybe_spawn_memory_extraction(user_message, effective_user_id, session)
+        self._memory_postprocess.maybe_schedule(
+            user_message=user_message,
+            session=session,
+            effective_user_id=effective_user_id,
+        )
+
+    async def run_message_postprocess_hooks(
+        self,
+        user_message: str,
+        session: SessionState,
+        effective_user_id: str,
+    ) -> None:
+        """Public entrypoint for integration-driven post-turn work."""
+        await self._run_message_postprocess_hooks(
+            user_message=user_message,
+            session=session,
+            effective_user_id=effective_user_id,
+        )
+
+    async def _ensure_self_person(
+        self,
+        user_id: str,
+        username: str,
+        display_name: str,
+    ) -> str | None:
+        """Compatibility shim for tests; delegates to memory postprocess service."""
+        if not hasattr(self, "_memory_postprocess"):
+            if not self._people:
+                return None
+            from ash.memory.processing import ensure_self_person
+
+            return await ensure_self_person(
+                self._people,
+                user_id,
+                username,
+                display_name,
+            )
+        return await self._memory_postprocess.ensure_self_person(
+            user_id=user_id,
+            username=username,
+            display_name=display_name,
+        )
 
     @property
     def system_prompt(self) -> str:
@@ -519,200 +571,6 @@ class Agent:
             system_prompt=system_prompt,
             message_budget=message_budget,
         )
-
-    async def _ensure_self_person(
-        self,
-        user_id: str,
-        username: str,
-        display_name: str,
-    ) -> str | None:
-        """Ensure a self-Person exists for the user with username as alias."""
-        if not self._people:
-            return None
-
-        from ash.memory.processing import ensure_self_person
-
-        return await ensure_self_person(self._people, user_id, username, display_name)
-
-    def _should_extract_memories(self, user_message: str) -> bool:
-        if not self._config.extraction_enabled:
-            return False
-
-        if not self._extractor or not self._memory:
-            return False
-
-        if len(user_message) < self._config.extraction_min_message_length:
-            return False
-
-        if self._last_extraction_time is not None:
-            elapsed = time.time() - self._last_extraction_time
-            if elapsed < self._config.extraction_debounce_seconds:
-                return False
-
-        return True
-
-    async def _extract_memories_background(
-        self,
-        session: SessionState,
-        user_id: str,
-        chat_id: str | None = None,
-    ) -> None:
-        from ash.llm.types import Message as LLMMessage
-        from ash.llm.types import Role
-        from ash.memory.extractor import SpeakerInfo
-        from ash.memory.processing import enrich_owner_names, process_extracted_facts
-
-        if not self._extractor or not self._memory:
-            return
-
-        try:
-            self._last_extraction_time = time.time()
-
-            existing_memories: list[str] = []
-            try:
-                recent = await self._memory.list_memories(
-                    owner_user_id=user_id,
-                    chat_id=chat_id,
-                    limit=20,
-                )
-                existing_memories = [m.content for m in recent]
-            except Exception:
-                logger.debug(
-                    "Failed to get existing memories for extraction", exc_info=True
-                )
-
-            all_messages: list[LLMMessage] = [
-                msg
-                for msg in session.messages
-                if msg.role in (Role.USER, Role.ASSISTANT) and msg.get_text().strip()
-            ]
-            llm_messages = all_messages[-4:]  # Last 2 exchanges
-
-            if not llm_messages:
-                return
-
-            # Build speaker info from session context for attribution
-            speaker_username = session.context.username
-            speaker_display_name = session.context.display_name
-
-            # Collect owner names to avoid treating the user's own name
-            # as a third party in extraction
-            owner_names: list[str] = []
-            if speaker_username:
-                owner_names.append(speaker_username)
-            if speaker_display_name and speaker_display_name not in owner_names:
-                owner_names.append(speaker_display_name)
-            speaker_info = SpeakerInfo(
-                user_id=user_id,
-                username=speaker_username,
-                display_name=speaker_display_name,
-            )
-
-            # Ensure self-person exists for proper trust determination.
-            # Create whenever we have at least one identifier.
-            speaker_person_id: str | None = None
-            if speaker_username or speaker_display_name:
-                effective_display = speaker_display_name or speaker_username
-                assert effective_display is not None  # guaranteed by outer if
-                speaker_person_id = await self._ensure_self_person(
-                    user_id=user_id,
-                    username=speaker_username or "",
-                    display_name=effective_display,
-                )
-
-            # Enrich owner_names with person aliases for better owner filtering
-            if speaker_person_id and self._people:
-                await enrich_owner_names(self._people, owner_names, speaker_person_id)
-
-            facts = await self._extractor.extract_from_conversation(
-                messages=llm_messages,
-                existing_memories=existing_memories,
-                owner_names=owner_names if owner_names else None,
-                speaker_info=speaker_info,
-                current_datetime=datetime.now(UTC),
-            )
-
-            logger.info(
-                "facts_extracted",
-                extra={
-                    "count": len(facts),
-                    "fact.speaker": speaker_info.username if speaker_info else None,
-                },
-            )
-            for fact in facts:
-                logger.info(
-                    "fact_extracted",
-                    extra={
-                        "fact.content": fact.content[:80],
-                        "fact.type": fact.memory_type.value,
-                        "fact.confidence": fact.confidence,
-                        "fact.subjects": fact.subjects,
-                        "fact.speaker": fact.speaker,
-                    },
-                )
-
-            # Resolve graph_chat_id for LEARNED_IN edges
-            graph_chat_id: str | None = None
-            if session.provider and session.chat_id and self._memory:
-                chat_entry = self._memory.graph.find_chat_by_provider(
-                    session.provider, session.chat_id
-                )
-                if chat_entry:
-                    graph_chat_id = chat_entry.id
-                logger.debug(
-                    "memory_extraction_chat_lookup: provider=%s chat_id=%s graph_chat_id=%s chat_count=%d",
-                    session.provider,
-                    session.chat_id,
-                    graph_chat_id,
-                    len(self._memory.graph.chats),
-                )
-
-            await process_extracted_facts(
-                facts=facts,
-                store=self._memory,
-                user_id=user_id,
-                chat_id=chat_id,
-                speaker_username=speaker_username,
-                speaker_display_name=speaker_display_name,
-                speaker_person_id=speaker_person_id,
-                owner_names=owner_names,
-                source="background_extraction",
-                confidence_threshold=self._config.extraction_confidence_threshold,
-                graph_chat_id=graph_chat_id,
-                chat_type=session.context.chat_type,
-            )
-
-        except Exception:
-            logger.warning("Background memory extraction failed", exc_info=True)
-
-    def _spawn_memory_extraction(
-        self,
-        session: SessionState,
-        user_id: str,
-        chat_id: str | None = None,
-    ) -> None:
-        import asyncio
-
-        def handle_error(task: asyncio.Task[None]) -> None:
-            if not task.cancelled() and (exc := task.exception()):
-                logger.warning(
-                    "memory_extraction_task_failed", extra={"error.message": str(exc)}
-                )
-
-        task = asyncio.create_task(
-            self._extract_memories_background(session, user_id, chat_id),
-            name="memory_extraction",
-        )
-        task.add_done_callback(handle_error)
-
-    def _maybe_spawn_memory_extraction(
-        self,
-        user_message: str,
-        effective_user_id: str,
-        session: SessionState,
-    ) -> None:
-        if self._should_extract_memories(user_message):
-            self._spawn_memory_extraction(session, effective_user_id, session.chat_id)
 
     def _build_tool_context(
         self,
