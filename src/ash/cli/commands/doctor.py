@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import stat
@@ -335,6 +336,25 @@ def _check_browser_config(config: AshConfig) -> list[DoctorFinding]:
                     level="ok",
                     check="config.browser.kernel.api_key",
                     detail="Kernel API key configured",
+                )
+            )
+
+    if browser_cfg.provider == "sandbox":
+        if importlib.util.find_spec("playwright") is None:
+            findings.append(
+                DoctorFinding(
+                    level="warning",
+                    check="config.browser.sandbox.playwright",
+                    detail="sandbox browser provider requires playwright package",
+                    repair="Run `uv sync --all-groups` and `uv run playwright install chromium`",
+                )
+            )
+        else:
+            findings.append(
+                DoctorFinding(
+                    level="ok",
+                    check="config.browser.sandbox.playwright",
+                    detail="playwright package is available",
                 )
             )
 

@@ -41,6 +41,8 @@ dependencies = [
     "tomlkit>=0.13.0",  # For preserving TOML formatting when writing
     # HTTP Client
     "httpx>=0.27.0",
+    # Browser automation
+    "playwright>=1.54.0",
     # Environment
     "python-dotenv>=1.0.0",
     # Auth
