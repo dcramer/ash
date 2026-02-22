@@ -1,4 +1,7 @@
-"""Shared helpers for integration composition."""
+"""Shared helpers for integration composition.
+
+Spec contract: specs/subsystems.md (Integration Hooks), specs/integrations.md.
+"""
 
 from __future__ import annotations
 

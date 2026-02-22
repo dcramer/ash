@@ -195,6 +195,8 @@ def test_harness_boundaries_reference_integration_hooks_spec() -> None:
         ROOT / "src/ash/core/agent.py",
         ROOT / "src/ash/cli/commands/serve.py",
         ROOT / "src/ash/cli/commands/chat.py",
+        ROOT / "src/ash/integrations/runtime.py",
+        ROOT / "src/ash/integrations/composer.py",
         ROOT / "evals/harness.py",
     ]
     for path in boundary_files:

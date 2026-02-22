@@ -42,6 +42,8 @@ class ExampleIntegration(IntegrationContributor):
 2. Keep hook behavior local to the integration domain.
 3. Post-turn behavior belongs in `on_message_postprocess`, not provider/core call sites.
 4. Register via shared composition (`create_default_integrations` + `compose_integrations`).
+5. Hook failures must be isolated per contributor and logged with hook + contributor metadata.
+6. Contributors that fail in `setup` are excluded from later hook/lifecycle execution.
 
 ## Testing Checklist
 

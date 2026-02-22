@@ -1,7 +1,11 @@
-"""Integration runtime and hooks for harness composition."""
+"""Integration runtime and hooks for harness composition.
+
+Spec contract: specs/subsystems.md (Integration Hooks), specs/integrations.md.
+"""
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +22,7 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 IntegrationMode = Literal["serve", "chat", "eval"]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -93,31 +98,73 @@ class IntegrationRuntime:
         self._contributors = tuple(
             sorted(contributors or [], key=lambda c: (c.priority, c.name))
         )
+        self._active_contributors = self._contributors
 
     @property
     def contributors(self) -> tuple[IntegrationContributor, ...]:
         return self._contributors
 
+    @property
+    def active_contributors(self) -> tuple[IntegrationContributor, ...]:
+        return self._active_contributors
+
+    def _log_hook_failure(
+        self,
+        *,
+        hook_name: str,
+        contributor: IntegrationContributor,
+    ) -> None:
+        logger.warning(
+            "integration_hook_failed",
+            extra={
+                "integration.name": contributor.name,
+                "integration.priority": contributor.priority,
+                "integration.hook": hook_name,
+            },
+            exc_info=True,
+        )
+
     async def setup(self, context: IntegrationContext) -> None:
+        # Spec contract: specs/subsystems.md (Integration Hooks)
+        # Keep integration failures isolated so one contributor doesn't break all.
+        active: list[IntegrationContributor] = []
         for contributor in self._contributors:
-            await contributor.setup(context)
+            try:
+                await contributor.setup(context)
+            except Exception:
+                self._log_hook_failure(hook_name="setup", contributor=contributor)
+                continue
+            active.append(contributor)
+        self._active_contributors = tuple(active)
 
     async def on_startup(self, context: IntegrationContext) -> None:
-        for contributor in self._contributors:
-            await contributor.on_startup(context)
+        for contributor in self._active_contributors:
+            try:
+                await contributor.on_startup(context)
+            except Exception:
+                self._log_hook_failure(hook_name="on_startup", contributor=contributor)
 
     async def on_shutdown(self, context: IntegrationContext) -> None:
-        for contributor in reversed(self._contributors):
-            await contributor.on_shutdown(context)
+        for contributor in reversed(self._active_contributors):
+            try:
+                await contributor.on_shutdown(context)
+            except Exception:
+                self._log_hook_failure(hook_name="on_shutdown", contributor=contributor)
 
     def register_rpc_methods(
         self, server: RPCServer, context: IntegrationContext
     ) -> None:
-        for contributor in self._contributors:
-            contributor.register_rpc_methods(server, context)
+        for contributor in self._active_contributors:
+            try:
+                contributor.register_rpc_methods(server, context)
+            except Exception:
+                self._log_hook_failure(
+                    hook_name="register_rpc_methods",
+                    contributor=contributor,
+                )
 
     def _build_hooks(self, factory: Callable[[IntegrationContributor], T]) -> list[T]:
-        return [factory(contributor) for contributor in self._contributors]
+        return [factory(contributor) for contributor in self._active_contributors]
 
     def prompt_context_augmenters(
         self, context: IntegrationContext
@@ -127,9 +174,16 @@ class IntegrationRuntime:
                 prompt_context: PromptContext,
                 session: SessionState,
             ) -> PromptContext:
-                return contributor.augment_prompt_context(
-                    prompt_context, session, context
-                )
+                try:
+                    return contributor.augment_prompt_context(
+                        prompt_context, session, context
+                    )
+                except Exception:
+                    self._log_hook_failure(
+                        hook_name="augment_prompt_context",
+                        contributor=contributor,
+                    )
+                    return prompt_context
 
             return _hook
 
@@ -144,9 +198,16 @@ class IntegrationRuntime:
                 session: SessionState,
                 effective_user_id: str,
             ) -> dict[str, str]:
-                return contributor.augment_sandbox_env(
-                    env, session, effective_user_id, context
-                )
+                try:
+                    return contributor.augment_sandbox_env(
+                        env, session, effective_user_id, context
+                    )
+                except Exception:
+                    self._log_hook_failure(
+                        hook_name="augment_sandbox_env",
+                        contributor=contributor,
+                    )
+                    return env
 
             return _hook
 
@@ -161,12 +222,18 @@ class IntegrationRuntime:
                 session: SessionState,
                 effective_user_id: str,
             ) -> None:
-                await contributor.on_message_postprocess(
-                    user_message,
-                    session,
-                    effective_user_id,
-                    context,
-                )
+                try:
+                    await contributor.on_message_postprocess(
+                        user_message,
+                        session,
+                        effective_user_id,
+                        context,
+                    )
+                except Exception:
+                    self._log_hook_failure(
+                        hook_name="on_message_postprocess",
+                        contributor=contributor,
+                    )
 
             return _hook
 

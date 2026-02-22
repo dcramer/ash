@@ -76,6 +76,73 @@ class _StubContributor(IntegrationContributor):
         self._events.append(("postprocess", self.name))
 
 
+class _FailingContributor(_StubContributor):
+    def __init__(
+        self,
+        *,
+        name: str,
+        priority: int,
+        events: list[tuple[str, str]],
+        fail_in: str,
+    ) -> None:
+        super().__init__(name=name, priority=priority, events=events)
+        self._fail_in = fail_in
+
+    async def setup(self, context: IntegrationContext) -> None:
+        if self._fail_in == "setup":
+            raise RuntimeError("setup failure")
+        await super().setup(context)
+
+    async def on_startup(self, context: IntegrationContext) -> None:
+        if self._fail_in == "on_startup":
+            raise RuntimeError("startup failure")
+        await super().on_startup(context)
+
+    async def on_shutdown(self, context: IntegrationContext) -> None:
+        if self._fail_in == "on_shutdown":
+            raise RuntimeError("shutdown failure")
+        await super().on_shutdown(context)
+
+    def register_rpc_methods(self, server: Any, context: IntegrationContext) -> None:
+        if self._fail_in == "register_rpc_methods":
+            raise RuntimeError("rpc failure")
+        super().register_rpc_methods(server, context)
+
+    def augment_prompt_context(
+        self,
+        prompt_context: PromptContext,
+        session: SessionState,
+        context: IntegrationContext,
+    ) -> PromptContext:
+        if self._fail_in == "augment_prompt_context":
+            raise RuntimeError("prompt failure")
+        return super().augment_prompt_context(prompt_context, session, context)
+
+    def augment_sandbox_env(
+        self,
+        env: dict[str, str],
+        session: SessionState,
+        effective_user_id: str,
+        context: IntegrationContext,
+    ) -> dict[str, str]:
+        if self._fail_in == "augment_sandbox_env":
+            raise RuntimeError("env failure")
+        return super().augment_sandbox_env(env, session, effective_user_id, context)
+
+    async def on_message_postprocess(
+        self,
+        user_message: str,
+        session: SessionState,
+        effective_user_id: str,
+        context: IntegrationContext,
+    ) -> None:
+        if self._fail_in == "on_message_postprocess":
+            raise RuntimeError("postprocess failure")
+        await super().on_message_postprocess(
+            user_message, session, effective_user_id, context
+        )
+
+
 def _context() -> IntegrationContext:
     config = AshConfig(
         workspace=Path("tmp-workspace"),
@@ -176,6 +243,74 @@ async def test_integration_runtime_builds_postprocess_hooks() -> None:
         ("postprocess", "a"),
         ("postprocess", "b"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_integration_runtime_setup_failure_disables_only_failing_contributor() -> (
+    None
+):
+    events: list[tuple[str, str]] = []
+    runtime = IntegrationRuntime(
+        [
+            _StubContributor(name="ok", priority=10, events=events),
+            _FailingContributor(
+                name="bad",
+                priority=20,
+                events=events,
+                fail_in="setup",
+            ),
+        ]
+    )
+    context = _context()
+
+    await runtime.setup(context)
+    await runtime.on_startup(context)
+    runtime.register_rpc_methods(cast(Any, object()), context)
+    await runtime.on_shutdown(context)
+
+    assert [contributor.name for contributor in runtime.active_contributors] == ["ok"]
+    assert events == [
+        ("setup", "ok"),
+        ("startup", "ok"),
+        ("rpc", "ok"),
+        ("shutdown", "ok"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_integration_runtime_isolates_hook_failures_after_setup() -> None:
+    events: list[tuple[str, str]] = []
+    runtime = IntegrationRuntime(
+        [
+            _FailingContributor(
+                name="bad",
+                priority=10,
+                events=events,
+                fail_in="on_message_postprocess",
+            ),
+            _StubContributor(name="ok", priority=20, events=events),
+        ]
+    )
+    context = _context()
+    session = SessionState(
+        session_id="s-1",
+        provider="telegram",
+        chat_id="c-1",
+        user_id="u-1",
+    )
+
+    await runtime.setup(context)
+    for hook in runtime.prompt_context_augmenters(context):
+        _ = hook(PromptContext(), session)
+    for hook in runtime.sandbox_env_augmenters(context):
+        _ = hook({}, session, "user-123")
+    runtime.register_rpc_methods(cast(Any, object()), context)
+    await runtime.on_startup(context)
+    for hook in runtime.message_postprocess_hooks(context):
+        await hook("remember this", session, "user-123")
+    await runtime.on_shutdown(context)
+
+    assert ("postprocess", "ok") in events
 
 
 @pytest.mark.asyncio
