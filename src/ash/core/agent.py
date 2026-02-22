@@ -227,24 +227,6 @@ class Agent:
             except Exception:
                 logger.warning("message_postprocess_hook_failed", exc_info=True)
 
-    async def _ensure_self_person(
-        self,
-        user_id: str,
-        username: str,
-        display_name: str,
-    ) -> str | None:
-        """Compatibility shim for tests."""
-        if not self._people:
-            return None
-        from ash.memory.processing import ensure_self_person
-
-        return await ensure_self_person(
-            self._people,
-            user_id,
-            username,
-            display_name,
-        )
-
     @property
     def system_prompt(self) -> str:
         """Get the base system prompt (without memory context)."""

@@ -1758,13 +1758,10 @@ class TestNoUsernameFallback:
         self, graph_store: Store
     ):
         """Self-person created with no username uses numeric user_id as alias."""
-        from ash.core.agent import Agent
+        from ash.memory.processing import ensure_self_person
 
-        # Create a minimal agent with graph_store as _people
-        agent = Agent.__new__(Agent)
-        agent._people = graph_store
-
-        await agent._ensure_self_person(
+        await ensure_self_person(
+            graph_store,
             user_id="123456789",
             username="",
             display_name="David Cramer",
@@ -1779,12 +1776,10 @@ class TestNoUsernameFallback:
 
     async def test_no_username_user_id_resolves(self, graph_store: Store):
         """find_person_ids_for_username with numeric ID resolves after no-username create."""
-        from ash.core.agent import Agent
+        from ash.memory.processing import ensure_self_person
 
-        agent = Agent.__new__(Agent)
-        agent._people = graph_store
-
-        await agent._ensure_self_person(
+        await ensure_self_person(
+            graph_store,
             user_id="123456789",
             username="",
             display_name="David Cramer",
@@ -1797,12 +1792,10 @@ class TestNoUsernameFallback:
         self, graph_store: Store
     ):
         """Self-person created with username uses username as alias (not user_id)."""
-        from ash.core.agent import Agent
+        from ash.memory.processing import ensure_self_person
 
-        agent = Agent.__new__(Agent)
-        agent._people = graph_store
-
-        await agent._ensure_self_person(
+        await ensure_self_person(
+            graph_store,
             user_id="123456789",
             username="notzeeg",
             display_name="David Cramer",

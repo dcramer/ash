@@ -188,6 +188,18 @@ def test_memory_postprocess_service_wiring_is_integration_owned() -> None:
     }
 
 
+def test_ensure_self_person_wiring_avoids_core_agent() -> None:
+    files = _python_files_under("src/ash")
+
+    call_sites = _find_call_sites(r"\bensure_self_person\(", files)
+    assert call_sites == {
+        Path("src/ash/memory/processing.py"),
+        Path("src/ash/memory/postprocess.py"),
+        Path("src/ash/providers/telegram/passive.py"),
+        Path("src/ash/rpc/methods/memory.py"),
+    }
+
+
 def test_harness_boundaries_reference_integration_hooks_spec() -> None:
     expected_comment = "specs/subsystems.md (Integration Hooks)"
     boundary_files = [

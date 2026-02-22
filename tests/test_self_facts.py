@@ -1,34 +1,21 @@
 """Tests for self-fact subject attribution.
 
 Tests:
-- _ensure_self_person returning person_id (new, existing, dedup merge, no store)
+- ensure_self_person returning person_id (new, existing, dedup merge, no store)
 - Doctor command backfilling orphaned self-facts
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ash.config import AshConfig
-from ash.config.models import ModelConfig
-from ash.config.workspace import Workspace
-from ash.core.agent import Agent
-from ash.core.prompt import SystemPromptBuilder
 from ash.graph.graph import KnowledgeGraph
 from ash.graph.persistence import GraphPersistence
-from ash.skills.registry import SkillRegistry
+from ash.memory.processing import ensure_self_person
 from ash.store.store import Store
 from ash.store.types import MemoryType
-from ash.tools.executor import ToolExecutor
-from ash.tools.registry import ToolRegistry
-from tests.conftest import MockLLMProvider
-
-DEFAULT_MODEL_CONFIG = {
-    "default": ModelConfig(provider="anthropic", model="claude-test")
-}
 
 
 @pytest.fixture
@@ -63,29 +50,12 @@ async def store(graph_dir, mock_index, mock_embedding_generator) -> Store:
     return s
 
 
-def _make_agent(store: Store, workspace: Workspace) -> Agent:
-    registry = ToolRegistry()
-    return Agent(
-        llm=MockLLMProvider(),
-        tool_executor=ToolExecutor(registry),
-        prompt_builder=SystemPromptBuilder(
-            workspace=workspace,
-            tool_registry=registry,
-            skill_registry=SkillRegistry(),
-            config=AshConfig(workspace=workspace.path, models=DEFAULT_MODEL_CONFIG),
-        ),
-        graph_store=store,
-    )
-
-
 class TestEnsureSelfPersonReturnsId:
-    """Test _ensure_self_person returns person_id."""
+    """Test ensure_self_person returns person_id."""
 
-    async def test_returns_id_for_new_person(self, store: Store, tmp_path: Path):
-        workspace = Workspace(path=tmp_path, soul="test")
-        agent = _make_agent(store, workspace)
-
-        person_id = await agent._ensure_self_person(
+    async def test_returns_id_for_new_person(self, store: Store):
+        person_id = await ensure_self_person(
+            store,
             user_id="user-1",
             username="notzeeg",
             display_name="David Cramer",
@@ -96,10 +66,7 @@ class TestEnsureSelfPersonReturnsId:
         assert person is not None
         assert person.name == "David Cramer"
 
-    async def test_returns_id_for_existing_person(self, store: Store, tmp_path: Path):
-        workspace = Workspace(path=tmp_path, soul="test")
-        agent = _make_agent(store, workspace)
-
+    async def test_returns_id_for_existing_person(self, store: Store):
         # Create person first
         created = await store.create_person(
             created_by="user-1",
@@ -108,7 +75,8 @@ class TestEnsureSelfPersonReturnsId:
             aliases=["notzeeg"],
         )
 
-        person_id = await agent._ensure_self_person(
+        person_id = await ensure_self_person(
+            store,
             user_id="user-1",
             username="notzeeg",
             display_name="David Cramer",
@@ -116,16 +84,12 @@ class TestEnsureSelfPersonReturnsId:
 
         assert person_id == created.id
 
-    async def test_returns_primary_id_after_dedup_merge(
-        self, store: Store, tmp_path: Path
-    ):
+    async def test_returns_primary_id_after_dedup_merge(self, store: Store):
         from ash.graph.edges import get_merged_into
 
-        workspace = Workspace(path=tmp_path, soul="test")
         # Need an LLM for dedup verification
         mock_llm = _make_dedup_llm()
         store.set_llm(mock_llm, "mock-model")
-        agent = _make_agent(store, workspace)
 
         # Create an existing person with same name but no self relationship
         await store.create_person(
@@ -135,8 +99,9 @@ class TestEnsureSelfPersonReturnsId:
             aliases=["david"],
         )
 
-        # _ensure_self_person creates a new person then dedup should merge
-        person_id = await agent._ensure_self_person(
+        # ensure_self_person creates a new person then dedup should merge
+        person_id = await ensure_self_person(
+            store,
             user_id="user-1",
             username="notzeeg",
             display_name="David Cramer",
@@ -147,29 +112,6 @@ class TestEnsureSelfPersonReturnsId:
         person = await store.get_person(person_id)
         assert person is not None
         assert get_merged_into(store.graph, person.id) is None
-
-    async def test_returns_none_without_people_store(self, tmp_path: Path):
-        workspace = Workspace(path=tmp_path, soul="test")
-        registry = ToolRegistry()
-        agent = Agent(
-            llm=MockLLMProvider(),
-            tool_executor=ToolExecutor(registry),
-            prompt_builder=SystemPromptBuilder(
-                workspace=workspace,
-                tool_registry=registry,
-                skill_registry=SkillRegistry(),
-                config=AshConfig(workspace=workspace.path, models=DEFAULT_MODEL_CONFIG),
-            ),
-            graph_store=None,
-        )
-
-        person_id = await agent._ensure_self_person(
-            user_id="user-1",
-            username="notzeeg",
-            display_name="David Cramer",
-        )
-
-        assert person_id is None
 
 
 class TestDoctorSelfFacts:
