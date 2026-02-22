@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from ash.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
-_GROUNDING_DROP_REASONS = {
+_VERIFICATION_DROP_REASONS = {
     "unsupported",
     "ambiguous",
     "meta_system",
@@ -312,43 +312,43 @@ Return ONLY valid JSON, no other text. Example:
 {{"subjects": ["Sarah"], "type": "relationship", "sensitivity": "public", "portable": true, "shared": false, "aliases": {{}}}}"""
 
 
-GROUNDING_PROMPT = """You are a memory grounding system.
+VERIFICATION_PROMPT = """You are a memory verification system.
 
 You are given:
 1) A conversation transcript
 2) Candidate extracted facts
 
 Primary objective:
-- Keep only facts that are grounded in the transcript and worth storing long-term.
+- Keep only facts that are supported by the transcript and worth storing long-term.
 - Prioritize precision and future utility over recall.
 
 For each fact:
-- grounded=true if supported, self-contained, and useful
-- grounded=false if unsupported, ambiguous, stale, low-utility, or policy-disallowed
+- verified=true if supported, self-contained, and useful
+- verified=false if unsupported, ambiguous, stale, low-utility, or policy-disallowed
 - content should be a rewritten self-contained version when needed
-- drop_reason is required when grounded=false
+- drop_reason is required when verified=false
 
 CRITICAL:
 - Keep meaning faithful to the transcript. Do not invent new facts.
 - If a fact says "going in May" but transcript clearly says "going to Tokyo in May",
   rewrite content to include "Tokyo".
-- If a fact cannot be grounded precisely, mark grounded=false.
-- If key slots are missing (subject/action/object/time/location where relevant), mark grounded=false unless transcript supports a precise rewrite.
-- Example: "User is going in May" is NOT grounded unless destination/context can be resolved from transcript.
+- If a fact cannot be verified precisely, mark verified=false.
+- If key slots are missing (subject/action/object/time/location where relevant), mark verified=false unless transcript supports a precise rewrite.
+- Example: "User is going in May" is NOT verifiable unless destination/context can be resolved from transcript.
 - Drop meta/system facts even if true ("refactored bot", "updated prompt", "wiped session history").
 - Drop low-value transient status snapshots unless clearly useful for future planning.
 
 Return ONLY valid JSON as an array:
 [
-  {{"index": 0, "grounded": true, "content": "Rewritten fact"}},
-  {{"index": 1, "grounded": false, "drop_reason": "ambiguous"}}
+  {{"index": 0, "verified": true, "content": "Rewritten fact"}},
+  {{"index": 1, "verified": false, "drop_reason": "ambiguous"}}
 ]
 
 Rules:
 - Process every input index exactly once.
-- grounded must be a JSON boolean (true/false), not a string.
-- If grounded=true and content is omitted, the original content will be kept.
-- Do not output extra keys beyond: index, grounded, content, drop_reason.
+- verified must be a JSON boolean (true/false), not a string.
+- If verified=true and content is omitted, the original content will be kept.
+- Do not output extra keys beyond: index, verified, content, drop_reason.
 - Allowed drop_reason values:
   - "unsupported"
   - "ambiguous"
@@ -378,9 +378,9 @@ class MemoryExtractor:
         model: str | None = None,
         max_tokens: int = 1024,
         confidence_threshold: float = 0.7,
-        grounding_enabled: bool = True,
-        grounding_llm: "LLMProvider | None" = None,
-        grounding_model: str | None = None,
+        verification_enabled: bool = True,
+        verification_llm: "LLMProvider | None" = None,
+        verification_model: str | None = None,
     ):
         """Initialize memory extractor.
 
@@ -389,17 +389,17 @@ class MemoryExtractor:
             model: Model to use (defaults to provider default).
             max_tokens: Maximum tokens for extraction response.
             confidence_threshold: Minimum confidence to include a fact.
-            grounding_enabled: Whether to run second-pass grounding/rewriting.
-            grounding_llm: Optional LLM provider for grounding calls.
-            grounding_model: Optional model name for grounding calls.
+            verification_enabled: Whether to run second-pass verification/rewriting.
+            verification_llm: Optional LLM provider for verification calls.
+            verification_model: Optional model name for verification calls.
         """
         self._llm = llm
         self._model = model
         self._max_tokens = max_tokens
         self._confidence_threshold = confidence_threshold
-        self._grounding_enabled = grounding_enabled
-        self._grounding_llm = grounding_llm or llm
-        self._grounding_model = grounding_model or model
+        self._verification_enabled = verification_enabled
+        self._verification_llm = verification_llm or llm
+        self._verification_model = verification_model or model
 
     async def classify_fact(self, content: str) -> ExtractedFact | None:
         """Classify a pre-formed fact using LLM.
@@ -518,9 +518,9 @@ class MemoryExtractor:
                     "fact.dropped_secret": drop_counts.get("secret", 0),
                 },
             )
-            if not self._grounding_enabled or not facts or len(messages) <= 1:
+            if not self._verification_enabled or not facts or len(messages) <= 1:
                 return facts
-            return await self._ground_facts_with_context(
+            return await self._verify_facts_with_context(
                 facts=facts,
                 conversation_text=conversation_text,
             )
@@ -529,13 +529,13 @@ class MemoryExtractor:
             logger.warning("memory_extraction_failed", extra={"error.message": str(e)})
             return []
 
-    async def _ground_facts_with_context(
+    async def _verify_facts_with_context(
         self,
         *,
         facts: list[ExtractedFact],
         conversation_text: str,
     ) -> list[ExtractedFact]:
-        """Run second-pass LLM grounding/rewrite against broader context."""
+        """Run second-pass LLM verification/rewrite against broader context."""
         fact_lines = []
         for idx, fact in enumerate(facts):
             fact_lines.append(
@@ -550,19 +550,19 @@ class MemoryExtractor:
                 )
             )
 
-        prompt = GROUNDING_PROMPT.format(
+        prompt = VERIFICATION_PROMPT.format(
             conversation=conversation_text,
             facts="\n".join(fact_lines),
         )
 
         try:
-            response = await self._grounding_llm.complete(
+            response = await self._verification_llm.complete(
                 messages=[Message(role=Role.USER, content=prompt)],
-                model=self._grounding_model,
+                model=self._verification_model,
                 max_tokens=512,
                 temperature=0.0,
             )
-            decisions = self._parse_grounding_response(response.message.get_text())
+            decisions = self._parse_verification_response(response.message.get_text())
             if not decisions:
                 return facts
 
@@ -571,31 +571,35 @@ class MemoryExtractor:
             decisions_by_index: dict[int, dict[str, Any]] = {}
             for decision in decisions:
                 idx = decision.get("index")
-                grounded = decision.get("grounded")
+                verified = decision.get("verified")
+                if verified is None:
+                    # Backward-compatible parsing for older output shape.
+                    verified = decision.get("grounded")
                 if not isinstance(idx, int) or idx < 0 or idx >= len(facts):
                     continue
-                if not isinstance(grounded, bool):
+                if not isinstance(verified, bool):
                     continue
+                decision["verified"] = verified
                 decisions_by_index[idx] = decision
 
-            # Fail open when grounding output had no usable decisions.
+            # Fail open when verification output had no usable decisions.
             if not decisions_by_index:
                 return facts
 
-            grounded_facts: list[ExtractedFact] = []
+            verified_facts: list[ExtractedFact] = []
             dropped_count = 0
             rewritten_count = 0
             drop_reason_counts: Counter[str] = Counter()
             for idx, fact in enumerate(facts):
                 decision = decisions_by_index.get(idx)
                 if decision is None:
-                    grounded_facts.append(fact)
+                    verified_facts.append(fact)
                     continue
 
-                if decision["grounded"] is not True:
+                if decision["verified"] is not True:
                     dropped_count += 1
                     reason = decision.get("drop_reason")
-                    if isinstance(reason, str) and reason in _GROUNDING_DROP_REASONS:
+                    if isinstance(reason, str) and reason in _VERIFICATION_DROP_REASONS:
                         drop_reason_counts[reason] += 1
                     else:
                         drop_reason_counts["unknown"] += 1
@@ -606,7 +610,7 @@ class MemoryExtractor:
                     rewritten_content = content.strip()
                     if contains_secret(rewritten_content):
                         logger.debug(
-                            "secret_filtered_from_grounding",
+                            "secret_filtered_from_verification",
                             extra={"content_preview": rewritten_content[:30]},
                         )
                         dropped_count += 1
@@ -615,13 +619,13 @@ class MemoryExtractor:
                     if rewritten_content != fact.content:
                         rewritten_count += 1
                         fact.content = rewritten_content
-                grounded_facts.append(fact)
+                verified_facts.append(fact)
 
             logger.info(
-                "memory_grounding_filter_stats",
+                "memory_verification_stats",
                 extra={
                     "fact.total_candidates": len(facts),
-                    "fact.accepted_count": len(grounded_facts),
+                    "fact.accepted_count": len(verified_facts),
                     "fact.rewritten_count": rewritten_count,
                     "fact.dropped_count": dropped_count,
                     "fact.decision_count": len(decisions_by_index),
@@ -642,13 +646,13 @@ class MemoryExtractor:
                     "fact.dropped_unknown_reason": drop_reason_counts.get("unknown", 0),
                 },
             )
-            return grounded_facts
+            return verified_facts
         except Exception:
-            logger.warning("memory_grounding_failed", exc_info=True)
+            logger.warning("memory_verification_failed", exc_info=True)
             return facts
 
-    def _parse_grounding_response(self, response_text: str) -> list[dict[str, Any]]:
-        """Parse the LLM grounding response."""
+    def _parse_verification_response(self, response_text: str) -> list[dict[str, Any]]:
+        """Parse the LLM verification response."""
         text = response_text.strip()
         match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
         if match:
@@ -657,7 +661,9 @@ class MemoryExtractor:
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
-            logger.debug("Failed to parse grounding response as JSON: %s", text[:200])
+            logger.debug(
+                "Failed to parse verification response as JSON: %s", text[:200]
+            )
             return []
 
         if not isinstance(data, list):

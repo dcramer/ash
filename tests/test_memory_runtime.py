@@ -72,12 +72,12 @@ async def test_initialize_memory_runtime_builds_store_and_extractor(
     monkeypatch.setattr("ash.memory.runtime.create_store", _fake_create_store)
 
     fake_extraction_llm = object()
-    fake_grounding_llm = object()
+    fake_verification_llm = object()
     monkeypatch.setattr(
         AshConfig,
         "create_llm_provider_for_model",
         lambda _self, alias: (
-            fake_grounding_llm if alias == "default" else fake_extraction_llm
+            fake_verification_llm if alias == "default" else fake_extraction_llm
         ),
     )
 
@@ -88,17 +88,17 @@ async def test_initialize_memory_runtime_builds_store_and_extractor(
             llm: object,
             model: str,
             confidence_threshold: float,
-            grounding_enabled: bool,
-            grounding_llm: object,
-            grounding_model: str,
+            verification_enabled: bool,
+            verification_llm: object,
+            verification_model: str,
         ) -> None:
             calls["extractor_args"] = {
                 "llm": llm,
                 "model": model,
                 "confidence_threshold": confidence_threshold,
-                "grounding_enabled": grounding_enabled,
-                "grounding_llm": grounding_llm,
-                "grounding_model": grounding_model,
+                "verification_enabled": verification_enabled,
+                "verification_llm": verification_llm,
+                "verification_model": verification_model,
             }
 
     monkeypatch.setattr("ash.memory.runtime.MemoryExtractor", _FakeExtractor)
@@ -114,8 +114,8 @@ async def test_initialize_memory_runtime_builds_store_and_extractor(
     assert calls["registry_kwargs"]["openai_api_key"] == "embed-key"
     assert calls["store_kwargs"]["graph_dir"] == tmp_path / "graph"
     assert calls["extractor_args"]["llm"] is fake_extraction_llm
-    assert calls["extractor_args"]["grounding_llm"] is fake_grounding_llm
-    assert calls["extractor_args"]["grounding_model"] == "gpt-5-mini"
+    assert calls["extractor_args"]["verification_llm"] is fake_verification_llm
+    assert calls["extractor_args"]["verification_model"] == "gpt-5-mini"
     assert set_llm_calls == [(fake_extraction_llm, "gpt-5-mini-low")]
 
 
@@ -206,12 +206,12 @@ async def test_initialize_memory_runtime_can_skip_extractor_initialization(
 
 
 @pytest.mark.asyncio
-async def test_initialize_memory_runtime_supports_provider_qualified_grounding_model(
+async def test_initialize_memory_runtime_supports_provider_qualified_verification_model(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
-    config.memory.extraction_grounding_model = "openai:gpt-5.2"
+    config.memory.extraction_verification_model = "openai:gpt-5.2"
     fake_store = cast(Any, SimpleNamespace(set_llm=lambda *_args: None))
 
     monkeypatch.setattr(
@@ -234,7 +234,7 @@ async def test_initialize_memory_runtime_supports_provider_qualified_grounding_m
     monkeypatch.setattr("ash.memory.runtime.create_store", _fake_create_store)
 
     fake_extraction_llm = object()
-    fake_grounding_llm = object()
+    fake_verification_llm = object()
     monkeypatch.setattr(
         AshConfig,
         "create_llm_provider_for_model",
@@ -244,7 +244,7 @@ async def test_initialize_memory_runtime_supports_provider_qualified_grounding_m
         AshConfig,
         "create_llm_provider_for_provider",
         lambda _self, provider: (
-            fake_grounding_llm if provider == "openai" else object()
+            fake_verification_llm if provider == "openai" else object()
         ),
     )
 
@@ -264,17 +264,17 @@ async def test_initialize_memory_runtime_supports_provider_qualified_grounding_m
 
     assert runtime.store is fake_store
     assert runtime.extractor is not None
-    assert calls["extractor_args"]["grounding_llm"] is fake_grounding_llm
-    assert calls["extractor_args"]["grounding_model"] == "gpt-5.2"
+    assert calls["extractor_args"]["verification_llm"] is fake_verification_llm
+    assert calls["extractor_args"]["verification_model"] == "gpt-5.2"
 
 
 @pytest.mark.asyncio
-async def test_initialize_memory_runtime_supports_plain_grounding_model_name(
+async def test_initialize_memory_runtime_supports_plain_verification_model_name(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
-    config.memory.extraction_grounding_model = "gpt-5.2"
+    config.memory.extraction_verification_model = "gpt-5.2"
     fake_store = cast(Any, SimpleNamespace(set_llm=lambda *_args: None))
 
     monkeypatch.setattr(
@@ -297,7 +297,7 @@ async def test_initialize_memory_runtime_supports_plain_grounding_model_name(
     monkeypatch.setattr("ash.memory.runtime.create_store", _fake_create_store)
 
     fake_extraction_llm = object()
-    fake_grounding_llm = object()
+    fake_verification_llm = object()
     monkeypatch.setattr(
         AshConfig,
         "create_llm_provider_for_model",
@@ -307,7 +307,7 @@ async def test_initialize_memory_runtime_supports_plain_grounding_model_name(
         AshConfig,
         "create_llm_provider_for_provider",
         lambda _self, provider: (
-            fake_grounding_llm if provider == "openai" else object()
+            fake_verification_llm if provider == "openai" else object()
         ),
     )
 
@@ -327,5 +327,5 @@ async def test_initialize_memory_runtime_supports_plain_grounding_model_name(
 
     assert runtime.store is fake_store
     assert runtime.extractor is not None
-    assert calls["extractor_args"]["grounding_llm"] is fake_grounding_llm
-    assert calls["extractor_args"]["grounding_model"] == "gpt-5.2"
+    assert calls["extractor_args"]["verification_llm"] is fake_verification_llm
+    assert calls["extractor_args"]["verification_model"] == "gpt-5.2"

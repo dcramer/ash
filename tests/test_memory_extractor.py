@@ -642,8 +642,8 @@ class TestClassifyFact:
         assert result.aliases == {"Sukhpreet": ["SK"]}
 
 
-class TestGroundingPass:
-    """Tests for optional second-pass grounding/rewriting."""
+class TestVerificationPass:
+    """Tests for optional second-pass verification/rewriting."""
 
     @pytest.fixture
     def mock_llm(self):
@@ -655,10 +655,10 @@ class TestGroundingPass:
             llm=mock_llm,
             model="test-model",
             confidence_threshold=0.7,
-            grounding_enabled=True,
+            verification_enabled=True,
         )
 
-    async def test_grounding_rewrites_incomplete_fact(self, extractor, mock_llm):
+    async def test_verification_rewrites_incomplete_fact(self, extractor, mock_llm):
         mock_llm.complete = AsyncMock(
             side_effect=[
                 CompletionResponse(
@@ -671,7 +671,7 @@ class TestGroundingPass:
                 CompletionResponse(
                     message=Message(
                         role=Role.ASSISTANT,
-                        content='[{"index":0,"grounded":true,"content":"Randolf is going to Tokyo in May"}]',
+                        content='[{"index":0,"verified":true,"content":"Randolf is going to Tokyo in May"}]',
                     ),
                     usage=Usage(input_tokens=120, output_tokens=25),
                 ),
@@ -688,7 +688,7 @@ class TestGroundingPass:
         assert len(facts) == 1
         assert facts[0].content == "Randolf is going to Tokyo in May"
 
-    async def test_grounding_can_drop_ungrounded_fact(self, extractor, mock_llm):
+    async def test_verification_can_drop_unverified_fact(self, extractor, mock_llm):
         mock_llm.complete = AsyncMock(
             side_effect=[
                 CompletionResponse(
@@ -701,7 +701,7 @@ class TestGroundingPass:
                 CompletionResponse(
                     message=Message(
                         role=Role.ASSISTANT,
-                        content='[{"index":0,"grounded":false}]',
+                        content='[{"index":0,"verified":false}]',
                     ),
                     usage=Usage(input_tokens=100, output_tokens=15),
                 ),
@@ -717,7 +717,7 @@ class TestGroundingPass:
 
         assert facts == []
 
-    async def test_grounding_partial_decisions_keep_undecided_facts(
+    async def test_verification_partial_decisions_keep_undecided_facts(
         self, extractor, mock_llm
     ):
         mock_llm.complete = AsyncMock(
@@ -732,7 +732,7 @@ class TestGroundingPass:
                 CompletionResponse(
                     message=Message(
                         role=Role.ASSISTANT,
-                        content='[{"index":0,"grounded":true,"content":"Randolf is going to Tokyo in May"}]',
+                        content='[{"index":0,"verified":true,"content":"Randolf is going to Tokyo in May"}]',
                     ),
                     usage=Usage(input_tokens=110, output_tokens=20),
                 ),
@@ -750,7 +750,7 @@ class TestGroundingPass:
         assert facts[0].content == "Randolf is going to Tokyo in May"
         assert facts[1].content == "User prefers dark mode"
 
-    async def test_grounding_duplicate_decisions_last_one_wins(
+    async def test_verification_duplicate_decisions_last_one_wins(
         self, extractor, mock_llm
     ):
         mock_llm.complete = AsyncMock(
@@ -765,7 +765,7 @@ class TestGroundingPass:
                 CompletionResponse(
                     message=Message(
                         role=Role.ASSISTANT,
-                        content='[{"index":0,"grounded":false},{"index":0,"grounded":true,"content":"Randolf is going to Tokyo in May"}]',
+                        content='[{"index":0,"verified":false},{"index":0,"verified":true,"content":"Randolf is going to Tokyo in May"}]',
                     ),
                     usage=Usage(input_tokens=90, output_tokens=25),
                 ),
@@ -782,16 +782,16 @@ class TestGroundingPass:
         assert len(facts) == 1
         assert facts[0].content == "Randolf is going to Tokyo in May"
 
-    async def test_grounding_can_use_dedicated_provider_and_model(self):
+    async def test_verification_can_use_dedicated_provider_and_model(self):
         extraction_llm = MagicMock()
-        grounding_llm = MagicMock()
+        verification_llm = MagicMock()
         extractor = MemoryExtractor(
             llm=extraction_llm,
             model="extract-model",
             confidence_threshold=0.7,
-            grounding_enabled=True,
-            grounding_llm=grounding_llm,
-            grounding_model="ground-model",
+            verification_enabled=True,
+            verification_llm=verification_llm,
+            verification_model="verify-model",
         )
 
         extraction_llm.complete = AsyncMock(
@@ -803,11 +803,11 @@ class TestGroundingPass:
                 usage=Usage(input_tokens=100, output_tokens=40),
             )
         )
-        grounding_llm.complete = AsyncMock(
+        verification_llm.complete = AsyncMock(
             return_value=CompletionResponse(
                 message=Message(
                     role=Role.ASSISTANT,
-                    content='[{"index":0,"grounded":true,"content":"Randolf is going to Tokyo in May"}]',
+                    content='[{"index":0,"verified":true,"content":"Randolf is going to Tokyo in May"}]',
                 ),
                 usage=Usage(input_tokens=120, output_tokens=25),
             )
@@ -823,19 +823,19 @@ class TestGroundingPass:
         assert len(facts) == 1
         assert facts[0].content == "Randolf is going to Tokyo in May"
         assert extraction_llm.complete.await_count == 1
-        assert grounding_llm.complete.await_count == 1
+        assert verification_llm.complete.await_count == 1
         assert extraction_llm.complete.call_args.kwargs["model"] == "extract-model"
-        assert grounding_llm.complete.call_args.kwargs["model"] == "ground-model"
+        assert verification_llm.complete.call_args.kwargs["model"] == "verify-model"
 
 
-class TestGroundingPromptContent:
-    """Tests verifying grounding prompt contains key guardrails."""
+class TestVerificationPromptContent:
+    """Tests verifying verification prompt contains key guardrails."""
 
     @pytest.fixture
     def prompt(self):
-        from ash.memory.extractor import GROUNDING_PROMPT
+        from ash.memory.extractor import VERIFICATION_PROMPT
 
-        return GROUNDING_PROMPT.lower()
+        return VERIFICATION_PROMPT.lower()
 
     def test_prompt_requires_decision_for_every_index(self, prompt):
         assert "process every input index exactly once" in prompt
@@ -845,7 +845,7 @@ class TestGroundingPromptContent:
         assert '"user is going in may"' in prompt
 
     def test_prompt_includes_drop_reason_taxonomy(self, prompt):
-        assert "drop_reason is required when grounded=false" in prompt
+        assert "drop_reason is required when verified=false" in prompt
         assert '"meta_system"' in prompt
         assert '"low_utility"' in prompt
 

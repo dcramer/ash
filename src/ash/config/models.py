@@ -191,11 +191,11 @@ class MemoryConfig(BaseModel):
         8  # Number of recent messages to include in extraction context
     )
     extraction_confidence_threshold: float = 0.7  # Minimum confidence to store
-    extraction_grounding_enabled: bool = (
-        True  # Run second-pass LLM grounding/rewriting of extracted facts
+    extraction_verification_enabled: bool = (
+        True  # Run second-pass LLM verification/rewriting of extracted facts
     )
-    extraction_grounding_model: str | None = (
-        None  # Grounding model alias or provider model name (None = use default)
+    extraction_verification_model: str | None = (
+        None  # Verification model alias or provider model name (None = use default)
     )
 
 

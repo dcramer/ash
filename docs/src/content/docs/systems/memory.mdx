@@ -30,8 +30,8 @@ extraction_min_message_length = 20
 extraction_debounce_seconds = 30
 extraction_confidence_threshold = 0.7
 extraction_context_messages = 8
-extraction_grounding_enabled = true
-extraction_grounding_model = null
+extraction_verification_enabled = true
+extraction_verification_model = null
 ```
 
 ### Key Options
@@ -48,13 +48,13 @@ extraction_grounding_model = null
 | `extraction_enabled` | `true` | Background fact extraction |
 | `extraction_model` | `null` | Optional model alias override |
 | `extraction_context_messages` | `8` | Message window used when building extraction context |
-| `extraction_grounding_enabled` | `true` | Run second LLM pass to ground/rewrite extracted facts |
-| `extraction_grounding_model` | `null` | Grounding model selector. `null` uses `[models.default]`; accepts alias (`"mini"`) or provider model (`"openai:gpt-5.2"` / `"gpt-5.2"`). |
+| `extraction_verification_enabled` | `true` | Run second LLM pass to verify/rewrite extracted facts |
+| `extraction_verification_model` | `null` | Verification model selector. `null` uses `[models.default]`; accepts alias (`"mini"`) or provider model (`"openai:gpt-5.2"` / `"gpt-5.2"`). |
 | `extraction_confidence_threshold` | `0.7` | Minimum confidence to store extracted facts |
 
 ### Recommended Setups
 
-Use a cheaper extraction model and a stronger grounding model:
+Use a cheaper extraction model and a stronger verification model:
 
 ```toml
 [models.default]
@@ -67,25 +67,25 @@ model = "gpt-5-mini"
 
 [memory]
 extraction_model = "mini"
-extraction_grounding_enabled = true
-extraction_grounding_model = "default"
+extraction_verification_enabled = true
+extraction_verification_model = "default"
 ```
 
-Use a provider-qualified grounding model directly:
+Use a provider-qualified verification model directly:
 
 ```toml
 [memory]
 extraction_model = "mini"
-extraction_grounding_enabled = true
-extraction_grounding_model = "openai:gpt-5.2"
+extraction_verification_enabled = true
+extraction_verification_model = "openai:gpt-5.2"
 ```
 
 Use a plain model name (resolved against the default model's provider):
 
 ```toml
 [memory]
-extraction_grounding_enabled = true
-extraction_grounding_model = "gpt-5.2"
+extraction_verification_enabled = true
+extraction_verification_model = "gpt-5.2"
 ```
 
 ## Embeddings

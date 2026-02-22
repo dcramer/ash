@@ -37,8 +37,8 @@ cases:
       - memory
       - extraction
 
-  - id: extraction_grounding_contextual_rewrite
-    description: Multi-turn extraction should ground vague follow-up facts using broader context
+  - id: extraction_verification_contextual_rewrite
+    description: Multi-turn extraction should verify vague follow-up facts using broader context
     turns:
       - prompt: "Remember this: Randolf is going to Tokyo in May."
         expected_behavior: |
@@ -49,7 +49,7 @@ cases:
       - prompt: "Also remember he's still going in May."
         expected_behavior: |
           The assistant should still rely on extraction, and resulting memory content
-          should stay grounded to the earlier Tokyo context.
+          should stay verified against the earlier Tokyo context.
         criteria:
           - The assistant acknowledges the remember request naturally
           - The assistant does not claim a failure
@@ -68,7 +68,7 @@ cases:
     tags:
       - memory
       - extraction
-      - grounding
+      - verification
 
   - id: extraction_recall_after_store
     description: A fact stored via explicit remember is recallable in a new session
