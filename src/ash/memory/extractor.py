@@ -7,6 +7,7 @@ running asynchronously after each exchange.
 import json
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -477,8 +478,24 @@ class MemoryExtractor:
                 temperature=0.1,  # Low temperature for consistent extraction
             )
 
+            drop_counts: Counter[str] = Counter()
             # Parse the response
-            facts = self._parse_extraction_response(response.message.get_text())
+            facts = self._parse_extraction_response(
+                response.message.get_text(),
+                drop_counts=drop_counts,
+            )
+            total_candidates = len(facts) + sum(drop_counts.values())
+            logger.info(
+                "memory_extraction_filter_stats",
+                extra={
+                    "fact.total_candidates": total_candidates,
+                    "fact.accepted_count": len(facts),
+                    "fact.dropped_invalid": drop_counts.get("invalid", 0),
+                    "fact.dropped_empty_content": drop_counts.get("empty_content", 0),
+                    "fact.dropped_low_confidence": drop_counts.get("low_confidence", 0),
+                    "fact.dropped_secret": drop_counts.get("secret", 0),
+                },
+            )
             if not self._grounding_enabled or not facts or len(messages) <= 1:
                 return facts
             return await self._ground_facts_with_context(
@@ -544,6 +561,8 @@ class MemoryExtractor:
                 return facts
 
             grounded_facts: list[ExtractedFact] = []
+            dropped_count = 0
+            rewritten_count = 0
             for idx, fact in enumerate(facts):
                 decision = decisions_by_index.get(idx)
                 if decision is None:
@@ -551,20 +570,34 @@ class MemoryExtractor:
                     continue
 
                 if decision["grounded"] is not True:
+                    dropped_count += 1
                     continue
 
                 content = decision.get("content")
                 if isinstance(content, str) and content.strip():
                     rewritten_content = content.strip()
                     if contains_secret(rewritten_content):
-                        logger.warning(
-                            "secret_filtered_from_extraction",
+                        logger.debug(
+                            "secret_filtered_from_grounding",
                             extra={"content_preview": rewritten_content[:30]},
                         )
+                        dropped_count += 1
                         continue
-                    fact.content = rewritten_content
+                    if rewritten_content != fact.content:
+                        rewritten_count += 1
+                        fact.content = rewritten_content
                 grounded_facts.append(fact)
 
+            logger.info(
+                "memory_grounding_filter_stats",
+                extra={
+                    "fact.total_candidates": len(facts),
+                    "fact.accepted_count": len(grounded_facts),
+                    "fact.rewritten_count": rewritten_count,
+                    "fact.dropped_count": dropped_count,
+                    "fact.decision_count": len(decisions_by_index),
+                },
+            )
             return grounded_facts
         except Exception:
             logger.warning("memory_grounding_failed", exc_info=True)
@@ -660,9 +693,15 @@ This ensures memories remain meaningful when recalled later.
 
         return "\n\n".join(lines)
 
-    def _parse_extraction_response(self, response_text: str) -> list[ExtractedFact]:
+    def _parse_extraction_response(
+        self,
+        response_text: str,
+        *,
+        drop_counts: Counter[str] | None = None,
+    ) -> list[ExtractedFact]:
         """Parse the LLM's JSON response into ExtractedFact objects."""
         text = response_text.strip()
+        counters = drop_counts or Counter()
 
         # Strip markdown code fences if present
         match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
@@ -682,24 +721,34 @@ This ensures memories remain meaningful when recalled later.
         facts = []
         for item in data:
             if not isinstance(item, dict):
+                counters["invalid"] += 1
                 continue
-            fact = self._parse_fact_item(item)
+            fact = self._parse_fact_item(item, drop_counts=counters)
             if fact is not None:
                 facts.append(fact)
         return facts
 
-    def _parse_fact_item(self, item: dict[str, Any]) -> ExtractedFact | None:
+    def _parse_fact_item(
+        self,
+        item: dict[str, Any],
+        *,
+        drop_counts: Counter[str] | None = None,
+    ) -> ExtractedFact | None:
         """Parse a single fact dict from the LLM response. Returns None if invalid."""
+        counters = drop_counts or Counter()
         content = item.get("content", "").strip()
         if not content:
+            counters["empty_content"] += 1
             return None
 
         confidence = float(item.get("confidence", 0.0))
         if confidence < self._confidence_threshold:
+            counters["low_confidence"] += 1
             return None
 
         if contains_secret(content):
-            logger.warning(
+            counters["secret"] += 1
+            logger.debug(
                 "secret_filtered_from_extraction",
                 extra={"content_preview": content[:30]},
             )
