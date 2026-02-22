@@ -16,6 +16,18 @@ def _find_call_sites(pattern: str, paths: list[Path]) -> set[Path]:
     return matches
 
 
+def _find_import_sites(pattern: str, paths: list[Path]) -> set[Path]:
+    regex = re.compile(pattern)
+    matches: set[Path] = set()
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if regex.search(line):
+                matches.add(path.relative_to(ROOT))
+                break
+    return matches
+
+
 def _python_files_under(*roots: str) -> list[Path]:
     files: list[Path] = []
     for root in roots:
@@ -62,6 +74,47 @@ def test_register_log_methods_wiring_is_constrained() -> None:
     assert call_sites == {
         Path("src/ash/integrations/runtime_rpc.py"),
         Path("src/ash/rpc/methods/logs.py"),
+    }
+
+
+def test_rpc_method_registrar_imports_are_constrained() -> None:
+    files = _python_files_under("src/ash")
+    files.append(ROOT / "evals/harness.py")
+
+    memory_imports = _find_import_sites(
+        r"from ash\.rpc\.methods\.memory import register_memory_methods",
+        files,
+    )
+    assert memory_imports == {
+        Path("src/ash/integrations/memory.py"),
+        Path("src/ash/rpc/methods/__init__.py"),
+    }
+
+    schedule_imports = _find_import_sites(
+        r"from ash\.rpc\.methods\.schedule import register_schedule_methods",
+        files,
+    )
+    assert schedule_imports == {
+        Path("src/ash/integrations/scheduling.py"),
+        Path("src/ash/rpc/methods/__init__.py"),
+    }
+
+    config_imports = _find_import_sites(
+        r"from ash\.rpc\.methods\.config import register_config_methods",
+        files,
+    )
+    assert config_imports == {
+        Path("src/ash/integrations/runtime_rpc.py"),
+        Path("src/ash/rpc/methods/__init__.py"),
+    }
+
+    log_imports = _find_import_sites(
+        r"from ash\.rpc\.methods\.logs import register_log_methods",
+        files,
+    )
+    assert log_imports == {
+        Path("src/ash/integrations/runtime_rpc.py"),
+        Path("src/ash/rpc/methods/__init__.py"),
     }
 
 
