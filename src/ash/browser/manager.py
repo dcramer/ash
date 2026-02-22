@@ -788,7 +788,19 @@ class BrowserManager:
 
 def create_browser_manager(config: AshConfig) -> BrowserManager:
     """Create a fully-wired browser manager."""
+    # Runtime boundary contract: specs/browser.md
+    # Sandbox provider execution must remain sandbox/container-scoped.
     browser_cfg = config.browser
+    if browser_cfg.enabled and browser_cfg.provider == "sandbox":
+        # Operational guardrail for spec conformance.
+        if not os.environ.get("ASH_RPC_SOCKET"):
+            logger.warning(
+                "browser_sandbox_runtime_unverified",
+                extra={
+                    "browser.provider": "sandbox",
+                    "config.hint": "Run Ash in sandbox/container runtime for sandbox provider conformance",
+                },
+            )
     base_dir = (
         browser_cfg.state_dir.expanduser()
         if browser_cfg.state_dir

@@ -26,7 +26,7 @@ A subsystem is NOT:
 | sessions | Conversation persistence and context | Fact extraction, semantic search |
 | scheduling | Deferred task execution | Task content, routing |
 | images | Inbound image understanding + context extraction | Message transport, LLM orchestration |
-| browser | Session-scoped page actions and artifacts | Message transport, model orchestration |
+| browser | Session-scoped page actions and artifacts (sandbox provider runs in container runtime) | Message transport, model orchestration |
 
 ### Consumers use public API only
 
@@ -130,7 +130,7 @@ Public types live in one place, not scattered across implementation files:
 | people | Complete | [specs/people.md](people.md) |
 | sessions | Needs refactor | - |
 | scheduling | Complete | [specs/schedule.md](schedule.md) |
-| browser | In progress | - |
+| browser | In progress | [specs/browser.md](browser.md) |
 
 ## Verification
 

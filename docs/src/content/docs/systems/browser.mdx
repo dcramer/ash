@@ -16,7 +16,7 @@ Ash exposes a browser subsystem with a session-oriented API.
 
 ## Providers
 
-- `sandbox` (default): local Chromium automation via Playwright.
+- `sandbox` (default): Chromium automation in sandbox/container runtime.
 - `kernel`: remote provider adapter for Kernel-backed execution.
 
 ## Runtime Integration
@@ -43,9 +43,11 @@ api_key = "${KERNEL_API_KEY}"
 
 Use `uv run ash doctor` to validate browser config and missing credentials.
 
-For `sandbox` provider, install runtime prerequisites on the host:
+For `sandbox` provider, ensure runtime prerequisites are present in the sandbox image/runtime:
 
 ```bash
 uv sync --all-groups
 uv run playwright install chromium
 ```
+
+Browser subsystem contract: `specs/browser.md`.
