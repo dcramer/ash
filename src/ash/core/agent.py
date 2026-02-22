@@ -964,12 +964,10 @@ async def create_agent(
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.agents.builtin import register_builtin_agents
     from ash.core.prompt import RuntimeInfo
-    from ash.llm import create_registry
-    from ash.memory.extractor import MemoryExtractor
+    from ash.memory.runtime import initialize_memory_runtime
     from ash.sandbox import SandboxExecutor
     from ash.sandbox.packages import build_setup_command, collect_skill_packages
     from ash.skills import SkillRegistry
-    from ash.store import create_store
     from ash.tools.base import build_sandbox_manager_config
     from ash.tools.builtin import BashTool, WebFetchTool, WebSearchTool
     from ash.tools.builtin.agents import UseAgentTool
@@ -1025,76 +1023,15 @@ async def create_agent(
             WebFetchTool(executor=shared_executor, cache=fetch_cache)
         )
 
-    # Create unified graph store (replaces separate memory_manager + person_manager)
-    graph_store: Store | None = None
-    if not graph_dir:
-        logger.info(
-            "memory_tools_disabled", extra={"config.reason": "no_graph_directory"}
-        )
-    elif not config.embeddings:
-        logger.info(
-            "memory_tools_disabled",
-            extra={"config.reason": "embeddings_not_configured"},
-        )
-    else:
-        try:
-            embeddings_key = config.resolve_embeddings_api_key()
-            if not embeddings_key:
-                logger.info(
-                    "memory_tools_disabled",
-                    extra={
-                        "config.reason": "no_api_key",
-                        "embeddings.provider": config.embeddings.provider,
-                    },
-                )
-                raise ValueError("Embeddings API key required for memory")
-
-            # Create registry with embedding provider and default LLM provider
-            config.get_model("default")
-            openai_key = config._resolve_provider_api_key("openai")
-            anthropic_key = config._resolve_provider_api_key("anthropic")
-            # Ensure the embedding provider's key is available
-            if config.embeddings.provider == "openai" and not openai_key:
-                openai_key = embeddings_key
-            llm_registry = create_registry(
-                anthropic_api_key=anthropic_key.get_secret_value()
-                if anthropic_key
-                else None,
-                openai_api_key=openai_key.get_secret_value() if openai_key else None,
-            )
-            graph_store = await create_store(
-                graph_dir=graph_dir,
-                llm_registry=llm_registry,
-                embedding_model=config.embeddings.model,
-                embedding_provider=config.embeddings.provider,
-                max_entries=config.memory.max_entries,
-            )
-            logger.debug("Store initialized")
-        except ValueError as e:
-            logger.debug(f"Memory disabled: {e}")
-        except Exception:
-            logger.warning("Failed to initialize graph store", exc_info=True)
-
-    memory_extractor: MemoryExtractor | None = None
-    if graph_store and config.memory.extraction_enabled:
-        extraction_model_alias = config.memory.extraction_model or model_alias
-        try:
-            extraction_model_config = config.get_model(extraction_model_alias)
-            extraction_llm = config.create_llm_provider_for_model(
-                extraction_model_alias
-            )
-            memory_extractor = MemoryExtractor(
-                llm=extraction_llm,
-                model=extraction_model_config.model,
-                confidence_threshold=config.memory.extraction_confidence_threshold,
-            )
-            logger.debug(
-                "Memory extractor initialized (model=%s)",
-                extraction_model_config.model,
-            )
-            graph_store.set_llm(extraction_llm, extraction_model_config.model)
-        except Exception:
-            logger.warning("Failed to initialize memory extractor", exc_info=True)
+    # Memory subsystem boundary: delegate store/extractor wiring to memory runtime.
+    memory_runtime = await initialize_memory_runtime(
+        config=config,
+        graph_dir=graph_dir,
+        model_alias=model_alias,
+        logger=logger,
+    )
+    graph_store = memory_runtime.store
+    memory_extractor = memory_runtime.extractor
 
     tool_executor = ToolExecutor(tool_registry)
     logger.info("tools_registered", extra={"count": len(tool_registry)})
