@@ -63,8 +63,15 @@ class SendMessageTool(Tool):
                     "type": "string",
                     "description": "The message to send to the user",
                 },
+                "image_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional local file path to an image to send (for example, "
+                        "a browser screenshot artifact path)."
+                    ),
+                },
             },
-            "required": ["message"],
+            "required": [],
         }
 
     async def execute(
@@ -76,8 +83,9 @@ class SendMessageTool(Tool):
         from ash.providers.base import OutgoingMessage
 
         message = input_data.get("message", "").strip()
-        if not message:
-            return ToolResult.error("Message cannot be empty")
+        image_path = str(input_data.get("image_path") or "").strip() or None
+        if not message and not image_path:
+            return ToolResult.error("Message or image_path is required")
 
         if not context.chat_id:
             return ToolResult.error("No chat context available")
@@ -93,6 +101,7 @@ class SendMessageTool(Tool):
                 OutgoingMessage(
                     chat_id=context.chat_id,
                     text=message,
+                    image_path=image_path,
                     reply_to_message_id=reply_to,
                 )
             )

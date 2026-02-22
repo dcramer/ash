@@ -41,6 +41,11 @@ class BrowserManager:
     def store(self) -> BrowserStore:
         return self._store
 
+    @property
+    def provider_names(self) -> tuple[str, ...]:
+        """Configured browser providers available at runtime."""
+        return tuple(sorted(self._providers.keys()))
+
     def _is_sandbox_runtime(self) -> bool:
         """Return True when running in sandbox/container runtime context."""
         env_value = (

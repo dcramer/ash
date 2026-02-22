@@ -17,7 +17,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, ReactionTypeEmoji
+from aiogram.types import CallbackQuery, FSInputFile, ReactionTypeEmoji
 from aiogram.types import Message as TelegramMessage
 
 from ash.config.models import PassiveListeningConfig
@@ -61,6 +61,7 @@ def _truncate(text: str, max_len: int = LOG_PREVIEW_MAX_LEN) -> str:
 
 
 MAX_SEND_LENGTH = 4000  # Below Telegram's 4096 limit to leave room for formatting
+MAX_CAPTION_LENGTH = 1024
 
 
 def _find_split_point(text: str, max_length: int) -> int:
@@ -705,6 +706,9 @@ class TelegramProvider(Provider):
 
     async def send(self, message: OutgoingMessage) -> str:
         """Send a message via Telegram, splitting long messages into chunks."""
+        if message.image_path:
+            return await self._send_image(message)
+
         chunks = split_message(message.text)
         if len(chunks) == 1:
             return await self._send_single(message)
@@ -714,12 +718,49 @@ class TelegramProvider(Provider):
             chunk_msg = OutgoingMessage(
                 chat_id=message.chat_id,
                 text=chunk,
+                image_path=message.image_path,
                 reply_to_message_id=message.reply_to_message_id if i == 0 else None,
                 parse_mode=message.parse_mode,
                 reply_markup=message.reply_markup if i == len(chunks) - 1 else None,
             )
             last_id = await self._send_single(chunk_msg)
         return last_id
+
+    async def _send_image(self, message: OutgoingMessage) -> str:
+        """Send an image (optionally with caption) via Telegram."""
+        parse_mode = _get_parse_mode(message.parse_mode)
+        reply_to = (
+            int(message.reply_to_message_id) if message.reply_to_message_id else None
+        )
+        image_path = str(message.image_path or "").strip()
+        if not image_path:
+            raise ValueError("image_path is required for image messages")
+
+        # Telegram captions are limited. Send overflow as a follow-up text message.
+        caption = message.text or ""
+        caption_head = caption[:MAX_CAPTION_LENGTH]
+        caption_tail = caption[MAX_CAPTION_LENGTH:]
+
+        sent = await self._bot.send_photo(
+            chat_id=int(message.chat_id),
+            photo=FSInputFile(image_path),
+            caption=caption_head or None,
+            reply_to_message_id=reply_to,
+            parse_mode=parse_mode if caption_head else None,
+            reply_markup=message.reply_markup,
+        )
+
+        if caption_tail:
+            await self._send_single(
+                OutgoingMessage(
+                    chat_id=message.chat_id,
+                    text=caption_tail,
+                    reply_to_message_id=str(sent.message_id),
+                    parse_mode=message.parse_mode,
+                )
+            )
+
+        return str(sent.message_id)
 
     async def _send_single(self, message: OutgoingMessage) -> str:
         """Send a single message via Telegram."""

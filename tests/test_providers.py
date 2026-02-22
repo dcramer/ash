@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ash.providers.base import IncomingMessage
+from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.handlers import TelegramMessageHandler
 from ash.providers.telegram.provider import TelegramProvider
 
@@ -19,6 +19,7 @@ class TestTelegramProvider:
         with patch("ash.providers.telegram.provider.Bot") as mock_bot_class:
             mock_bot = MagicMock()
             mock_bot.send_message = AsyncMock()
+            mock_bot.send_photo = AsyncMock()
             mock_bot.send_chat_action = AsyncMock()
             mock_bot.edit_message_text = AsyncMock()
             mock_bot.delete_message = AsyncMock()
@@ -53,6 +54,22 @@ class TestTelegramProvider:
         with patch("ash.providers.telegram.provider.Bot"):
             provider = TelegramProvider(bot_token="test", allowed_users=[])
             assert provider._is_user_allowed(12345, "anyone") is True
+
+    async def test_send_image_uses_send_photo(self, provider):
+        image_path = "artifacts/screen.png"
+        provider._bot.send_photo.return_value = MagicMock(message_id=321)
+        with patch("ash.providers.telegram.provider.FSInputFile") as fs_input:
+            msg_id = await provider.send(
+                OutgoingMessage(
+                    chat_id="123",
+                    text="Here is the screenshot",
+                    image_path=image_path,
+                )
+            )
+
+        assert msg_id == "321"
+        fs_input.assert_called_once_with(image_path)
+        provider._bot.send_photo.assert_awaited_once()
 
 
 class TestTelegramMessageHandler:

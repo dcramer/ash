@@ -31,6 +31,7 @@ class BrowserTool(Tool):
 
     @property
     def input_schema(self) -> dict[str, Any]:
+        provider_enum = list(self._manager.provider_names)
         return {
             "type": "object",
             "properties": {
@@ -53,7 +54,7 @@ class BrowserTool(Tool):
                 },
                 "provider": {
                     "type": "string",
-                    "enum": ["sandbox", "kernel"],
+                    "enum": provider_enum,
                     "description": "Optional provider override.",
                 },
                 "session_id": {

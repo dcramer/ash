@@ -272,6 +272,7 @@ class SystemPromptBuilder:
                 "- ALWAYS use tools for lookups — never assume or guess. Search first, answer second.",
                 "- Treat direct requests as execution requests. If the user asks you to check/test/do something, run the relevant tool now instead of proposing what you could do.",
                 "- For capability questions (e.g., 'can we do X?'), verify by attempting the task with available tools and report what actually happened.",
+                "- If the user asks for a screenshot/image from the browser, run `browser` with `page.screenshot` and send the image artifact back in chat via `send_message` using `image_path`.",
                 "- For people/profile lookups, prefer resolved real names when available; use handles/usernames as fallback terms.",
                 "- NEVER claim success without verification — check tool output before reporting.",
                 "- If a requested tool check fails, do NOT backfill the answer from memory/prior knowledge. State that it is unverified and stop.",

@@ -202,6 +202,16 @@ async def test_browser_tool_missing_action_returns_error(tmp_path) -> None:
     assert "missing required field: action" in result.content
 
 
+def test_browser_tool_provider_enum_reflects_manager_providers(tmp_path) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    manager = BrowserManager(
+        config=_config(), store=store, providers={"sandbox": _FakeProvider()}
+    )
+    tool = BrowserTool(manager)
+    provider_schema = tool.input_schema["properties"]["provider"]
+    assert provider_schema["enum"] == ["sandbox"]
+
+
 @pytest.mark.asyncio
 async def test_browser_manager_rejects_cross_provider_session_id(tmp_path) -> None:
     store = BrowserStore(tmp_path / "browser")

@@ -856,6 +856,8 @@ class TestSystemPromptBuilder:
         assert "Be brief" in prompt
         assert "Skip filler" in prompt
         assert "prefer resolved real names" in prompt
+        assert "page.screenshot" in prompt
+        assert "image_path" in prompt
 
     def test_build_sender_section_includes_resolved_sender_identity(
         self, prompt_builder

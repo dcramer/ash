@@ -46,6 +46,7 @@ class OutgoingMessage:
 
     chat_id: str
     text: str
+    image_path: str | None = None
     reply_to_message_id: str | None = None
     parse_mode: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
