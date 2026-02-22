@@ -279,6 +279,7 @@ class Agent:
         self,
         context: RetrievedContext | None = None,
         known_people: list[PersonEntry] | None = None,
+        sender_person: PersonEntry | None = None,
         conversation_gap_minutes: float | None = None,
         has_reply_context: bool = False,
         sender_username: str | None = None,
@@ -301,6 +302,7 @@ class Agent:
             runtime=self._refresh_runtime_time(),
             memory=context,
             known_people=known_people,
+            sender_person=sender_person,
             sender=SenderInfo(
                 username=sender_username,
                 display_name=sender_display_name,
@@ -496,6 +498,7 @@ class Agent:
         system_prompt = self._build_system_prompt(
             context=gathered.memory,
             known_people=gathered.known_people,
+            sender_person=gathered.sender_person,
             conversation_gap_minutes=ctx.conversation_gap_minutes,
             has_reply_context=ctx.has_reply_context,
             sender_username=ctx.username,

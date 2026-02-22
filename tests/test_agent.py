@@ -851,6 +851,27 @@ class TestSystemPromptBuilder:
         prompt = prompt_builder.build(mode=PromptMode.FULL)
         assert "Be brief" in prompt
         assert "Skip filler" in prompt
+        assert "prefer resolved real names" in prompt
+
+    def test_build_sender_section_includes_resolved_sender_identity(
+        self, prompt_builder
+    ):
+        from ash.core.prompt import ChatInfo, PromptContext, SenderInfo
+        from ash.store.types import AliasEntry, PersonEntry
+
+        context = PromptContext(
+            sender=SenderInfo(username="notzeeg", display_name="David"),
+            sender_person=PersonEntry(
+                id="person-1",
+                name="David Cramer",
+                aliases=[AliasEntry(value="notzeeg")],
+            ),
+            chat=ChatInfo(chat_type="group", title="Ash"),
+        )
+
+        prompt = prompt_builder.build(context)
+        assert 'From: **@notzeeg** (David) in the group "Ash"' in prompt
+        assert "Resolved sender identity: **David Cramer** (@notzeeg)" in prompt
 
     def test_memory_hearsay_annotation(self, prompt_builder):
         """Hearsay memories should be annotated in the prompt."""

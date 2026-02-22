@@ -108,6 +108,7 @@ class PromptContext:
     - runtime: Model and timezone info
     - memory: Retrieved memories
     - known_people: People the user knows
+    - sender_person: Resolved canonical person for current sender
     - sender: Message sender info (for group chats)
     - chat: Chat context info
     """
@@ -116,6 +117,7 @@ class PromptContext:
     runtime: RuntimeInfo | None = None
     memory: RetrievedContext | None = None
     known_people: list[PersonEntry] | None = None
+    sender_person: PersonEntry | None = None
     sender: SenderInfo | None = None
     chat: ChatInfo | None = None
 
@@ -266,6 +268,7 @@ class SystemPromptBuilder:
                 '- Skip filler: no "Great question!", no "I\'d be happy to help!", no "Let me know if you need anything else"',
                 "- End naturally. Never end with follow-up questions unless you genuinely need clarification.",
                 "- ALWAYS use tools for lookups — never assume or guess. Search first, answer second.",
+                "- For people/profile lookups, prefer resolved real names when available; use handles/usernames as fallback terms.",
                 "- NEVER claim success without verification — check tool output before reporting.",
                 "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
                 "- Report failures with actual error messages. If output is empty, say so.",
@@ -774,10 +777,28 @@ class SystemPromptBuilder:
             "## Current Message",
             "",
             from_line,
-            "",
-            'When this user uses pronouns like "he", "she", "they", '
-            "they are referring to someone else - not themselves.",
         ]
+
+        if context.sender_person is not None:
+            aliases = [
+                f"@{alias.value.lstrip('@')}" for alias in context.sender_person.aliases
+            ]
+            if aliases:
+                lines.append(
+                    f"Resolved sender identity: **{context.sender_person.name}** ({', '.join(aliases[:3])})"
+                )
+            else:
+                lines.append(
+                    f"Resolved sender identity: **{context.sender_person.name}**"
+                )
+
+        lines.extend(
+            [
+                "",
+                'When this user uses pronouns like "he", "she", "they", '
+                "they are referring to someone else - not themselves.",
+            ]
+        )
 
         chat_state_path = context.get_chat_state_path()
         if chat_state_path:

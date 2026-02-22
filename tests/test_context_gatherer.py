@@ -45,6 +45,7 @@ class TestContextGatherer:
         )
         mock_store.list_people = AsyncMock(return_value=[])
         mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
 
         gatherer = ContextGatherer(store=mock_store)
 
@@ -68,6 +69,26 @@ class TestContextGatherer:
         mock_store.find_person_ids_for_username = AsyncMock(
             return_value={"person-1", "person-2"}
         )
+        mock_store.get_person = AsyncMock(
+            side_effect=[
+                PersonEntry(
+                    id="person-1",
+                    version=1,
+                    created_by="user-1",
+                    name="John Doe",
+                    aliases=[],
+                    relationships=[],
+                ),
+                PersonEntry(
+                    id="person-2",
+                    version=1,
+                    created_by="user-1",
+                    name="John D",
+                    aliases=[],
+                    relationships=[],
+                ),
+            ]
+        )
         mock_store.get_context_for_message = AsyncMock(
             return_value=RetrievedContext(memories=[])
         )
@@ -87,6 +108,7 @@ class TestContextGatherer:
         assert call_kwargs["participant_person_ids"] == {
             "johndoe": {"person-1", "person-2"}
         }
+        assert mock_store.get_person.call_count == 2
 
     @pytest.mark.asyncio
     async def test_gather_handles_memory_retrieval_failure(self):
@@ -97,6 +119,7 @@ class TestContextGatherer:
         )
         mock_store.list_people = AsyncMock(return_value=[])
         mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
 
         gatherer = ContextGatherer(store=mock_store)
 
@@ -119,6 +142,7 @@ class TestContextGatherer:
         )
         mock_store.list_people = AsyncMock(side_effect=Exception("Database error"))
         mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
 
         gatherer = ContextGatherer(store=mock_store)
 
@@ -157,6 +181,7 @@ class TestContextGatherer:
         )
         mock_store.list_people = AsyncMock(return_value=[mock_person])
         mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
 
         gatherer = ContextGatherer(store=mock_store)
 
