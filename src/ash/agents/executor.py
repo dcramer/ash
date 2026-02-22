@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from ash.tools import ToolExecutor
 
 logger = logging.getLogger(__name__)
+INPUT_PREVIEW_MAX_LEN = 180
 
 # Keywords that indicate user wants to cancel rather than continue
 CANCEL_KEYWORDS = {"cancel", "abort", "nevermind", "never mind", "stop", "quit"}
@@ -395,7 +396,7 @@ class AgentExecutor:
                 extra={
                     "gen_ai.agent.name": agent_config.name,
                     "mode": "passthrough",
-                    "input.preview": input_message[:100],
+                    "input.preview": input_message[:INPUT_PREVIEW_MAX_LEN],
                 },
             )
             return await agent.execute_passthrough(input_message, context)
@@ -444,7 +445,7 @@ class AgentExecutor:
                 "agent_executing",
                 extra={
                     "gen_ai.agent.name": agent_config.name,
-                    "input.preview": input_message[:100],
+                    "input.preview": input_message[:INPUT_PREVIEW_MAX_LEN],
                 },
             )
             start_iteration = 1

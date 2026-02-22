@@ -38,6 +38,7 @@ logger = logging.getLogger("telegram")
 
 # Minimum interval between message edits (Telegram rate limit)
 EDIT_INTERVAL = 1.0
+LOG_PREVIEW_MAX_LEN = 120
 
 
 def _get_parse_mode(mode: str | None) -> ParseMode:
@@ -52,7 +53,7 @@ def _get_parse_mode(mode: str | None) -> ParseMode:
         return ParseMode.MARKDOWN
 
 
-def _truncate(text: str, max_len: int = 40) -> str:
+def _truncate(text: str, max_len: int = LOG_PREVIEW_MAX_LEN) -> str:
     """Truncate text for logging (first line only, max length)."""
     first_line, *rest = text.split("\n", 1)
     truncated = len(first_line) > max_len or bool(rest)
@@ -384,7 +385,7 @@ class TelegramProvider(Provider):
                 "was_processed": processing_mode is not None,
                 "processing_mode": processing_mode,
                 "skip_reason": skip_reason,
-                "input.preview": _truncate(message.text or message.caption or "", 40),
+                "input.preview": _truncate(message.text or message.caption or ""),
             },
         )
 

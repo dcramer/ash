@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger("telegram.passive")
+LOG_PREVIEW_MAX_LEN = 120
 
 
 def _format_speaker_label(username: str | None, display_name: str | None) -> str:
@@ -62,6 +63,13 @@ def _format_speaker_label(username: str | None, display_name: str | None) -> str
     if display_name:
         return f"{display_name}: "
     return ""
+
+
+def _truncate_preview(text: str, max_len: int = LOG_PREVIEW_MAX_LEN) -> str:
+    """Truncate text for logging previews."""
+    first_line, *rest = text.split("\n", 1)
+    truncated = len(first_line) > max_len or bool(rest)
+    return first_line[:max_len] + "..." if truncated else first_line
 
 
 def check_bot_name_mention(text: str, bot_context: BotContext | None) -> bool:
@@ -369,7 +377,7 @@ class PassiveEngagementDecider:
                 "engagement_decision",
                 extra={
                     "decision": "ENGAGE" if should_engage else "SILENT",
-                    "input.preview": text[:50],
+                    "input.preview": _truncate_preview(text),
                 },
             )
             return should_engage

@@ -268,6 +268,8 @@ class SystemPromptBuilder:
                 '- Skip filler: no "Great question!", no "I\'d be happy to help!", no "Let me know if you need anything else"',
                 "- End naturally. Never end with follow-up questions unless you genuinely need clarification.",
                 "- ALWAYS use tools for lookups — never assume or guess. Search first, answer second.",
+                "- Treat direct requests as execution requests. If the user asks you to check/test/do something, run the relevant tool now instead of proposing what you could do.",
+                "- For capability questions (e.g., 'can we do X?'), verify by attempting the task with available tools and report what actually happened.",
                 "- For people/profile lookups, prefer resolved real names when available; use handles/usernames as fallback terms.",
                 "- NEVER claim success without verification — check tool output before reporting.",
                 "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
