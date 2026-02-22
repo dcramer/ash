@@ -137,7 +137,6 @@ def test_integration_module_import_direction_is_constrained() -> None:
     )
     assert memory_imports == {
         Path("src/ash/integrations/__init__.py"),
-        Path("src/ash/integrations/builtin.py"),
         Path("src/ash/integrations/defaults.py"),
     }
 
@@ -147,7 +146,6 @@ def test_integration_module_import_direction_is_constrained() -> None:
     )
     assert scheduling_imports == {
         Path("src/ash/integrations/__init__.py"),
-        Path("src/ash/integrations/builtin.py"),
         Path("src/ash/integrations/defaults.py"),
     }
 
@@ -157,7 +155,6 @@ def test_integration_module_import_direction_is_constrained() -> None:
     )
     assert runtime_rpc_imports == {
         Path("src/ash/integrations/__init__.py"),
-        Path("src/ash/integrations/builtin.py"),
         Path("src/ash/integrations/defaults.py"),
     }
 
