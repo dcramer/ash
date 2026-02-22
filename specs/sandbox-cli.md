@@ -109,6 +109,7 @@ Total: 3 task(s)
 
 | Command Group | Purpose |
 |---------------|---------|
+| `browser` | Start/list/control browser sessions and page actions |
 | `schedule` | Create, list, cancel, update scheduled tasks |
 | `memory` | Search, list, add, extract, delete memories |
 | `logs` | Query structured server logs |
@@ -117,6 +118,7 @@ Total: 3 task(s)
 
 See individual subsystem specs for command-specific output formats:
 - Schedule: [specs/schedule.md](schedule.md)
+- Browser: [docs/src/content/docs/systems/browser.mdx](../docs/src/content/docs/systems/browser.mdx)
 
 ## Environment Variables
 
