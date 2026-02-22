@@ -200,7 +200,10 @@ class SandboxBrowserProvider:
         try:
             from playwright.async_api import async_playwright
         except Exception as e:
-            raise ValueError("playwright_not_installed") from e
+            raise ValueError(
+                "playwright_not_installed: run `uv sync --all-groups` and "
+                "`uv run playwright install chromium`, then restart ash"
+            ) from e
 
         playwright = await async_playwright().start()
         try:
@@ -208,8 +211,18 @@ class SandboxBrowserProvider:
                 headless=self._headless,
                 channel=self._browser_channel or None,
             )
-        except Exception:
+        except Exception as e:
             await playwright.stop()
+            message = str(e).lower()
+            if (
+                "executable doesn't exist" in message
+                or "browser has been closed" in message
+                or "failed to launch" in message
+            ):
+                raise ValueError(
+                    "chromium_not_installed: run `uv run playwright install chromium`, "
+                    "then restart ash"
+                ) from e
             raise
 
         context = await browser.new_context(

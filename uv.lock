@@ -299,6 +299,7 @@ dependencies = [
     { name = "ash-rpc-protocol" },
     { name = "croniter" },
     { name = "dateparser" },
+    { name = "playwright" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -308,6 +309,7 @@ requires-dist = [
     { name = "ash-rpc-protocol", editable = "packages/ash-rpc-protocol" },
     { name = "croniter", specifier = ">=2.0.0" },
     { name = "dateparser", specifier = ">=1.2.0" },
+    { name = "playwright", specifier = ">=1.54.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]

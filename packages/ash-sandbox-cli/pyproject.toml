@@ -12,6 +12,7 @@ dependencies = [
     "croniter>=2.0.0",
     "dateparser>=1.2.0",
     "pyyaml>=6.0.0",
+    "playwright>=1.54.0",
     "ash-rpc-protocol",
 ]
 

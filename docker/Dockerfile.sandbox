@@ -41,6 +41,9 @@ RUN uv pip install --system --no-cache \
     && rm -rf /tmp/ash-rpc-protocol /tmp/ash-sandbox-cli \
     && which ash-sb && ash-sb --help  # Verify ash-sb is on PATH and works
 
+# Install Playwright browser runtime so default browser behaviors work out-of-box
+RUN playwright install chromium
+
 # Create non-root user for sandbox execution
 RUN useradd -m -s /bin/bash -u 1000 sandbox
 
