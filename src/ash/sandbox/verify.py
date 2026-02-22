@@ -15,7 +15,7 @@ class TestCategory(Enum):
     EDGE_CASES = "edge_cases"
 
 
-class TestResult(Enum):
+class VerificationResult(Enum):
     PASS = "pass"  # noqa: S105
     FAIL = "fail"
     SKIP = "skip"
@@ -38,7 +38,7 @@ class VerificationTest:
 @dataclass
 class TestOutput:
     test: VerificationTest
-    result: TestResult
+    result: VerificationResult
     actual_exit_code: int
     actual_output: str
     message: str
@@ -366,7 +366,7 @@ class SandboxVerifier:
         if test.requires_network and not self._network_enabled:
             return TestOutput(
                 test=test,
-                result=TestResult.SKIP,
+                result=VerificationResult.SKIP,
                 actual_exit_code=-1,
                 actual_output="",
                 message="Skipped: network disabled",
@@ -383,7 +383,7 @@ class SandboxVerifier:
         except Exception as e:
             return TestOutput(
                 test=test,
-                result=TestResult.FAIL,
+                result=VerificationResult.FAIL,
                 actual_exit_code=-1,
                 actual_output=str(e),
                 message=f"Execution error: {e}",
@@ -397,7 +397,7 @@ class SandboxVerifier:
         if failure_message:
             return TestOutput(
                 test=test,
-                result=TestResult.FAIL,
+                result=VerificationResult.FAIL,
                 actual_exit_code=result.exit_code,
                 actual_output=output,
                 message=failure_message,
@@ -405,7 +405,7 @@ class SandboxVerifier:
 
         return TestOutput(
             test=test,
-            result=TestResult.PASS,
+            result=VerificationResult.PASS,
             actual_exit_code=result.exit_code,
             actual_output=output,
             message="OK",

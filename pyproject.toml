@@ -172,6 +172,7 @@ markers = [
     "slow: marks tests as slow",
     "integration: marks tests as integration tests",
     "eval: marks tests as evaluation tests (require real LLM)",
+    "network: marks tests that require external network access",
 ]
 log_cli = true
 log_cli_level = "WARNING"
