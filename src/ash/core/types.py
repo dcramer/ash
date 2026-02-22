@@ -40,6 +40,10 @@ GetSteeringMessagesCallback = Callable[[], Awaitable[list["IncomingMessage"]]]
 # Integration hook callbacks.
 PromptContextAugmenter = Callable[["PromptContext", "SessionState"], "PromptContext"]
 SandboxEnvAugmenter = Callable[[dict[str, str], "SessionState", str], dict[str, str]]
+MessagePostprocessHook = Callable[
+    [str, "SessionState", str],
+    Awaitable[None],
+]
 
 MAX_TOOL_ITERATIONS = 25
 

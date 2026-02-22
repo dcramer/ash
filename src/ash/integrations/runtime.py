@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from ash.config import AshConfig
     from ash.core.prompt import PromptContext
     from ash.core.session import SessionState
-    from ash.core.types import AgentComponents
+    from ash.core.types import AgentComponents, MessagePostprocessHook
     from ash.rpc.server import RPCServer
 
 
@@ -70,6 +70,16 @@ class IntegrationContributor:
     ) -> dict[str, str]:
         """Augment sandbox env for tool execution."""
         return env
+
+    async def on_message_postprocess(
+        self,
+        user_message: str,
+        session: SessionState,
+        effective_user_id: str,
+        context: IntegrationContext,
+    ) -> None:
+        """Run post-turn work after a user message is processed."""
+        return None
 
 
 class IntegrationRuntime:
@@ -136,6 +146,29 @@ class IntegrationRuntime:
             ) -> dict[str, str]:
                 return _contributor.augment_sandbox_env(
                     env, session, effective_user_id, context
+                )
+
+            hooks.append(_hook)
+        return hooks
+
+    def message_postprocess_hooks(
+        self, context: IntegrationContext
+    ) -> list[MessagePostprocessHook]:
+        hooks: list[MessagePostprocessHook] = []
+        for contributor in self._contributors:
+
+            async def _hook(
+                user_message: str,
+                session: SessionState,
+                effective_user_id: str,
+                *,
+                _contributor: IntegrationContributor = contributor,
+            ) -> None:
+                await _contributor.on_message_postprocess(
+                    user_message,
+                    session,
+                    effective_user_id,
+                    context,
                 )
 
             hooks.append(_hook)

@@ -26,6 +26,7 @@ from ash.core.types import (
     AgentResponse,
     CompactionInfo,
     GetSteeringMessagesCallback,
+    MessagePostprocessHook,
     OnToolStartCallback,
     PromptContextAugmenter,
     SandboxEnvAugmenter,
@@ -150,6 +151,7 @@ class Agent:
         mount_prefix: str = "/ash",
         prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
         sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
+        message_postprocess_hooks: list[MessagePostprocessHook] | None = None,
     ):
         """Initialize agent.
 
@@ -164,6 +166,7 @@ class Agent:
             mount_prefix: Sandbox mount prefix for container paths.
             prompt_context_augmenters: Optional hooks for prompt context augmentation.
             sandbox_env_augmenters: Optional hooks for sandbox environment augmentation.
+            message_postprocess_hooks: Optional hooks run after a user turn.
         """
         self._llm = llm
         self._tools = tool_executor
@@ -177,6 +180,7 @@ class Agent:
         self._mount_prefix = mount_prefix
         self._prompt_context_augmenters = tuple(prompt_context_augmenters or [])
         self._sandbox_env_augmenters = tuple(sandbox_env_augmenters or [])
+        self._message_postprocess_hooks = tuple(message_postprocess_hooks or [])
         self._last_extraction_time: float | None = None
 
     def install_integration_hooks(
@@ -184,10 +188,12 @@ class Agent:
         *,
         prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
         sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
+        message_postprocess_hooks: list[MessagePostprocessHook] | None = None,
     ) -> None:
         """Install integration hooks after agent construction."""
         self._prompt_context_augmenters = tuple(prompt_context_augmenters or [])
         self._sandbox_env_augmenters = tuple(sandbox_env_augmenters or [])
+        self._message_postprocess_hooks = tuple(message_postprocess_hooks or [])
 
     def _apply_prompt_context_hooks(
         self,
@@ -209,6 +215,27 @@ class Agent:
         for hook in self._sandbox_env_augmenters:
             current = hook(current, session, effective_user_id)
         return current
+
+    async def _run_message_postprocess_hooks(
+        self,
+        user_message: str,
+        session: SessionState,
+        effective_user_id: str,
+    ) -> None:
+        for hook in self._message_postprocess_hooks:
+            try:
+                await hook(user_message, session, effective_user_id)
+            except Exception:
+                logger.warning("message_postprocess_hook_failed", exc_info=True)
+
+    def run_memory_postprocess(
+        self,
+        user_message: str,
+        session: SessionState,
+        effective_user_id: str,
+    ) -> None:
+        """Default memory postprocess behavior for integration hooks."""
+        self._maybe_spawn_memory_extraction(user_message, effective_user_id, session)
 
     @property
     def system_prompt(self) -> str:
@@ -939,8 +966,10 @@ class Agent:
                 )
 
                 if not pending_tools:
-                    self._maybe_spawn_memory_extraction(
-                        user_message, setup.effective_user_id, session
+                    await self._run_message_postprocess_hooks(
+                        user_message=user_message,
+                        session=session,
+                        effective_user_id=setup.effective_user_id,
                     )
                     return AgentResponse(
                         text=response.message.get_text() or "",
@@ -977,8 +1006,10 @@ class Agent:
                 # Check if any tool returned a checkpoint - stop loop to wait for user input
                 checkpoint = _extract_checkpoint(tool_calls)
                 if checkpoint:
-                    self._maybe_spawn_memory_extraction(
-                        user_message, setup.effective_user_id, session
+                    await self._run_message_postprocess_hooks(
+                        user_message=user_message,
+                        session=session,
+                        effective_user_id=setup.effective_user_id,
                     )
                     return AgentResponse(
                         text=response.message.get_text() or "",
@@ -997,8 +1028,10 @@ class Agent:
                 "max_tool_iterations",
                 extra={"agent.max_iterations": self._config.max_tool_iterations},
             )
-            self._maybe_spawn_memory_extraction(
-                user_message, setup.effective_user_id, session
+            await self._run_message_postprocess_hooks(
+                user_message=user_message,
+                session=session,
+                effective_user_id=setup.effective_user_id,
             )
             return AgentResponse(
                 text="I've reached the maximum number of tool calls. Please try again with a simpler request.",
@@ -1071,8 +1104,10 @@ class Agent:
                     content_blocks.insert(0, TextContent(text=current_text))
 
                 if not content_blocks:
-                    self._maybe_spawn_memory_extraction(
-                        user_message, setup.effective_user_id, session
+                    await self._run_message_postprocess_hooks(
+                        user_message=user_message,
+                        session=session,
+                        effective_user_id=setup.effective_user_id,
                     )
                     return
 
@@ -1080,8 +1115,10 @@ class Agent:
 
                 pending_tools = [b for b in content_blocks if isinstance(b, ToolUse)]
                 if not pending_tools:
-                    self._maybe_spawn_memory_extraction(
-                        user_message, setup.effective_user_id, session
+                    await self._run_message_postprocess_hooks(
+                        user_message=user_message,
+                        session=session,
+                        effective_user_id=setup.effective_user_id,
                     )
                     return
 
@@ -1109,8 +1146,10 @@ class Agent:
                         if msg.text:
                             session.add_user_message(msg.text)
 
-            self._maybe_spawn_memory_extraction(
-                user_message, setup.effective_user_id, session
+            await self._run_message_postprocess_hooks(
+                user_message=user_message,
+                session=session,
+                effective_user_id=setup.effective_user_id,
             )
             yield "\n\n[Max tool iterations reached]"
 
@@ -1122,6 +1161,7 @@ async def create_agent(
     model_alias: str = "default",
     prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
     sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
+    message_postprocess_hooks: list[MessagePostprocessHook] | None = None,
 ) -> AgentComponents:
     # Harness composition boundary.
     # Spec contract: specs/subsystems.md (Integration Hooks).
@@ -1321,6 +1361,7 @@ async def create_agent(
         mount_prefix=config.sandbox.mount_prefix,
         prompt_context_augmenters=prompt_context_augmenters,
         sandbox_env_augmenters=sandbox_env_augmenters,
+        message_postprocess_hooks=message_postprocess_hooks,
         config=AgentConfig(
             model=model_config.model,
             max_tokens=model_config.max_tokens,

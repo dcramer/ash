@@ -64,6 +64,15 @@ class _StubContributor(IntegrationContributor):
         env[f"HOOK_{self.name.upper()}"] = effective_user_id
         return env
 
+    async def on_message_postprocess(
+        self,
+        user_message: str,
+        session: SessionState,
+        effective_user_id: str,
+        context: IntegrationContext,
+    ) -> None:
+        self._events.append(("postprocess", self.name))
+
 
 def _context() -> IntegrationContext:
     config = AshConfig(
@@ -142,6 +151,32 @@ def test_integration_runtime_builds_prompt_and_env_hooks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_integration_runtime_builds_postprocess_hooks() -> None:
+    events: list[tuple[str, str]] = []
+    runtime = IntegrationRuntime(
+        [
+            _StubContributor(name="a", priority=10, events=events),
+            _StubContributor(name="b", priority=20, events=events),
+        ]
+    )
+    context = _context()
+    session = SessionState(
+        session_id="s-1",
+        provider="telegram",
+        chat_id="c-1",
+        user_id="u-1",
+    )
+
+    for hook in runtime.message_postprocess_hooks(context):
+        await hook("remember this", session, "user-123")
+
+    assert events == [
+        ("postprocess", "a"),
+        ("postprocess", "b"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_compose_integrations_runs_setup_and_installs_hooks() -> None:
     events: list[tuple[str, str]] = []
 
@@ -149,15 +184,18 @@ async def test_compose_integrations_runs_setup_and_installs_hooks() -> None:
         def __init__(self) -> None:
             self.prompt_hooks = None
             self.env_hooks = None
+            self.postprocess_hooks = None
 
         def install_integration_hooks(
             self,
             *,
             prompt_context_augmenters=None,
             sandbox_env_augmenters=None,
+            message_postprocess_hooks=None,
         ) -> None:
             self.prompt_hooks = prompt_context_augmenters
             self.env_hooks = sandbox_env_augmenters
+            self.postprocess_hooks = message_postprocess_hooks
 
     config = AshConfig(
         workspace=Path("tmp-workspace"),
@@ -177,8 +215,10 @@ async def test_compose_integrations_runs_setup_and_installs_hooks() -> None:
     assert events == [("setup", "x")]
     assert fake_agent.prompt_hooks is not None
     assert fake_agent.env_hooks is not None
+    assert fake_agent.postprocess_hooks is not None
     assert len(fake_agent.prompt_hooks) == 1
     assert len(fake_agent.env_hooks) == 1
+    assert len(fake_agent.postprocess_hooks) == 1
 
 
 @pytest.mark.asyncio
@@ -191,8 +231,13 @@ async def test_active_integrations_runs_full_lifecycle() -> None:
             *,
             prompt_context_augmenters=None,
             sandbox_env_augmenters=None,
+            message_postprocess_hooks=None,
         ) -> None:
-            _ = (prompt_context_augmenters, sandbox_env_augmenters)
+            _ = (
+                prompt_context_augmenters,
+                sandbox_env_augmenters,
+                message_postprocess_hooks,
+            )
 
     config = AshConfig(
         workspace=Path("tmp-workspace"),
