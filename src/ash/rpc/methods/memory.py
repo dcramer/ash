@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 def register_memory_methods(
     server: "RPCServer",
     memory_manager: "Store",
-    person_manager: "Store | None" = None,
     memory_extractor: "MemoryExtractor | None" = None,
     sessions_path: Path | None = None,
 ) -> None:
@@ -28,17 +27,14 @@ def register_memory_methods(
     Args:
         server: RPC server to register methods on.
         memory_manager: Store instance.
-        person_manager: Store instance (for subject resolution).
         memory_extractor: Optional extractor for fact classification/extraction.
         sessions_path: Path to sessions directory (for memory.extract).
     """
 
     async def _build_username_lookup() -> dict[str, str]:
         """Build username → display name lookup from people records."""
-        if not person_manager:
-            return {}
         try:
-            people = await person_manager.list_people()
+            people = await memory_manager.list_people()
             lookup: dict[str, str] = {}
             for p in people:
                 if p.name:
@@ -62,7 +58,7 @@ def register_memory_methods(
         person_ids: list[str] | None, people_by_id: dict[str, Any] | None = None
     ) -> list[str]:
         """Resolve subject person IDs to display names."""
-        if not person_ids or not person_manager:
+        if not person_ids:
             return []
         names: list[str] = []
         for pid in person_ids:
@@ -70,7 +66,7 @@ def register_memory_methods(
                 names.append(people_by_id[pid].name)
             else:
                 try:
-                    person = await person_manager.get_person(pid)
+                    person = await memory_manager.get_person(pid)
                     if person:
                         names.append(person.name)
                     else:
@@ -91,7 +87,7 @@ def register_memory_methods(
         """
         from ash.memory.processing import enrich_owner_names, ensure_self_person
 
-        if not person_manager or not user_id:
+        if not user_id:
             return None, []
 
         owner_names: list[str] = []
@@ -105,14 +101,14 @@ def register_memory_methods(
             effective_display = source_display_name or source_username
             assert effective_display is not None
             speaker_person_id = await ensure_self_person(
-                person_manager,
+                memory_manager,
                 user_id,
                 source_username or "",
                 effective_display,
             )
 
         if speaker_person_id:
-            await enrich_owner_names(person_manager, owner_names, speaker_person_id)
+            await enrich_owner_names(memory_manager, owner_names, speaker_person_id)
 
         return speaker_person_id, owner_names
 
@@ -700,12 +696,11 @@ def register_memory_methods(
 
         # Build people_by_id for subject resolution
         people_by_id: dict[str, Any] = {}
-        if person_manager:
-            try:
-                people = await person_manager.list_people()
-                people_by_id = {p.id: p for p in people}
-            except Exception:
-                logger.warning("people_list_load_failed", exc_info=True)
+        try:
+            people = await memory_manager.list_people()
+            people_by_id = {p.id: p for p in people}
+        except Exception:
+            logger.warning("people_list_load_failed", exc_info=True)
 
         result = []
         for m in memories:

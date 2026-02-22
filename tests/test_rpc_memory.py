@@ -85,7 +85,6 @@ def rpc_server(memory_manager, mock_extractor, tmp_path):
     register_memory_methods(
         server,  # type: ignore[arg-type]
         memory_manager,
-        person_manager=memory_manager,
         memory_extractor=mock_extractor,
         sessions_path=sessions_path,
     )
@@ -454,7 +453,6 @@ class TestRPCMemoryExtract:
         register_memory_methods(
             server,  # type: ignore[arg-type]
             memory_manager,
-            person_manager=memory_manager,
             memory_extractor=mock_extractor,
             sessions_path=tmp_path / "sessions",
         )
@@ -524,7 +522,6 @@ class TestRPCMemoryExtract:
         register_memory_methods(
             server,  # type: ignore[arg-type]
             memory_manager,
-            person_manager=memory_manager,
             memory_extractor=mock_extractor,
             sessions_path=tmp_path / "sessions",
         )
@@ -595,7 +592,6 @@ class TestRPCMemoryExtract:
         register_memory_methods(
             server,  # type: ignore[arg-type]
             memory_manager,
-            person_manager=memory_manager,
             memory_extractor=mock_extractor,
             sessions_path=tmp_path / "sessions",
         )
@@ -658,7 +654,6 @@ class TestRPCMemoryExtract:
         register_memory_methods(
             server,  # type: ignore[arg-type]
             memory_manager,
-            person_manager=memory_manager,
             memory_extractor=mock_extractor,
             sessions_path=tmp_path / "sessions",
         )
@@ -723,7 +718,6 @@ class TestRPCMemoryExtract:
         register_memory_methods(
             server,  # type: ignore[arg-type]
             memory_manager,
-            person_manager=memory_manager,
             memory_extractor=mock_extractor,
             sessions_path=tmp_path / "sessions",
         )
@@ -782,7 +776,6 @@ class TestRPCMemoryExtract:
         register_memory_methods(
             server,  # type: ignore[arg-type]
             memory_manager,
-            person_manager=memory_manager,
             memory_extractor=mock_extractor,
             sessions_path=tmp_path / "sessions",
         )

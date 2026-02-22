@@ -50,7 +50,6 @@ class MemoryIntegration(IntegrationContributor):
         register_memory_methods(
             server,
             components.memory_manager,
-            components.memory_manager,
             memory_extractor=components.memory_extractor,
             sessions_path=context.sessions_path,
         )
