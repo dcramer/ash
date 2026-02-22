@@ -6,6 +6,7 @@ Spec contract: specs/subsystems.md (Integration Hooks).
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -36,10 +37,30 @@ class ImageIntegration(IntegrationContributor):
                 extra={"skip_reason": "unsupported_provider"},
             )
             return
-        self._service = ImageUnderstandingService(
-            config=context.config,
-            provider=OpenAIImageProvider(),
-        )
+        api_key = context.config.resolve_provider_api_key("openai")
+        resolved_api_key = api_key.get_secret_value() if api_key else None
+        if not resolved_api_key:
+            resolved_api_key = os.environ.get("OPENAI_API_KEY")
+        if not resolved_api_key:
+            logger.warning(
+                "image_preprocess_skipped",
+                extra={"skip_reason": "missing_openai_api_key"},
+            )
+            return
+        try:
+            self._service = ImageUnderstandingService(
+                config=context.config,
+                provider=OpenAIImageProvider(api_key=resolved_api_key),
+            )
+        except ValueError as e:
+            logger.warning(
+                "image_preprocess_skipped",
+                extra={
+                    "skip_reason": "invalid_image_model_config",
+                    "error.message": str(e),
+                },
+            )
+            self._service = None
 
     async def preprocess_incoming_message(
         self,

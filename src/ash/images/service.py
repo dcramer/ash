@@ -17,13 +17,17 @@ def _resolve_image_model(config: AshConfig) -> str:
     if configured:
         if "/" in configured:
             provider, model = configured.split("/", 1)
-            if provider.lower() == "openai" and model.strip():
-                return model.strip()
+            if provider.lower() != "openai":
+                raise ValueError("image_model_provider_must_be_openai")
+            if not model.strip():
+                raise ValueError("image_model_missing_model_name")
+            return model.strip()
         if configured in config.models:
             alias_model = config.get_model(configured)
-            if alias_model.provider == "openai":
-                return alias_model.model
-        return configured
+            if alias_model.provider != "openai":
+                raise ValueError("image_model_alias_must_resolve_to_openai")
+            return alias_model.model
+        return configured  # treat as direct OpenAI model id
 
     default_model = config.default_model
     if default_model.provider == "openai":
@@ -125,6 +129,13 @@ class ImageUnderstandingService:
             return message
         images = self._select_images(message)
         if not images:
+            message.metadata["image.processed"] = False
+            message.metadata["image.skip_reason"] = "no_usable_images"
+            if not message.text.strip() and self._config.image.no_caption_auto_respond:
+                message.text = (
+                    "The user sent image(s), but usable image data was unavailable. "
+                    "Ask one clarifying question about what they want to know."
+                )
             return message
 
         request = ImageAnalyzeRequest(

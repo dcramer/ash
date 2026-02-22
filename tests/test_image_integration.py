@@ -5,9 +5,10 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from pydantic import SecretStr
 
 from ash.config import AshConfig
-from ash.config.models import ModelConfig
+from ash.config.models import ModelConfig, ProviderConfig
 from ash.images.service import ImageUnderstandingService
 from ash.images.types import ImageAnalyzeResult
 from ash.integrations.image import ImageIntegration
@@ -91,9 +92,10 @@ async def test_image_service_handles_no_caption_with_followup_instruction() -> N
 async def test_image_integration_falls_back_on_provider_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         "ash.integrations.image.OpenAIImageProvider",
-        lambda: _FailingImageProvider(),
+        lambda api_key=None: _FailingImageProvider(),
     )
     config = _config()
+    config.openai = ProviderConfig(api_key=SecretStr("sk-test"))
     context = IntegrationContext(
         config=config,
         components=cast(Any, SimpleNamespace()),
@@ -106,3 +108,80 @@ async def test_image_integration_falls_back_on_provider_failure(monkeypatch) -> 
     updated = await integration.preprocess_incoming_message(message, context)
 
     assert "Ask one clarifying question" in updated.text
+
+
+@pytest.mark.asyncio
+async def test_image_service_falls_back_when_no_usable_images() -> None:
+    service = ImageUnderstandingService(config=_config(), provider=_FakeImageProvider())
+    message = IncomingMessage(
+        id="m-1",
+        chat_id="c-1",
+        user_id="u-1",
+        text="",
+        images=[ImageAttachment(file_id="file-1", mime_type="image/png", data=None)],
+    )
+
+    updated = await service.preprocess_message(message)
+
+    assert updated.metadata["image.processed"] is False
+    assert updated.metadata["image.skip_reason"] == "no_usable_images"
+    assert "usable image data was unavailable" in updated.text
+
+
+@pytest.mark.asyncio
+async def test_image_integration_skips_invalid_non_openai_alias_model() -> None:
+    config = AshConfig(
+        workspace=Path("tmp-workspace"),
+        models={
+            "default": ModelConfig(provider="openai", model="gpt-5-mini"),
+            "sonnet": ModelConfig(provider="anthropic", model="claude-sonnet-4"),
+        },
+    )
+    config.image.model = "sonnet"
+    config.openai = ProviderConfig(api_key=SecretStr("sk-test"))
+    context = IntegrationContext(
+        config=config,
+        components=cast(Any, SimpleNamespace()),
+        mode="serve",
+    )
+    integration = ImageIntegration()
+    await integration.setup(context)
+
+    message = _message(text="")
+    updated = await integration.preprocess_incoming_message(message, context)
+    assert updated.text == ""
+
+
+@pytest.mark.asyncio
+async def test_image_integration_passes_resolved_openai_api_key(monkeypatch) -> None:
+    captured: dict[str, str | None] = {"api_key": None}
+
+    class _CapturingProvider:
+        name = "openai"
+
+        def __init__(self, api_key: str | None = None) -> None:
+            captured["api_key"] = api_key
+
+        async def analyze(self, request):  # noqa: ANN001
+            _ = request
+            return ImageAnalyzeResult(
+                summary="ok",
+                salient_text="none",
+                uncertainty="low",
+                provider="openai",
+            )
+
+    monkeypatch.setattr(
+        "ash.integrations.image.OpenAIImageProvider", _CapturingProvider
+    )
+    config = _config()
+    config.openai = ProviderConfig(api_key=SecretStr("sk-test"))
+    context = IntegrationContext(
+        config=config,
+        components=cast(Any, SimpleNamespace()),
+        mode="serve",
+    )
+    integration = ImageIntegration()
+    await integration.setup(context)
+
+    assert captured["api_key"] == "sk-test"

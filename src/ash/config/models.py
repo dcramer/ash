@@ -472,6 +472,12 @@ class AshConfig(BaseModel):
     def resolve_api_key(self, alias: str) -> SecretStr | None:
         return self._resolve_provider_api_key(self.get_model(alias).provider)
 
+    def resolve_provider_api_key(
+        self, provider: Literal["anthropic", "openai", "openai-oauth"]
+    ) -> SecretStr | None:
+        """Resolve API key for a provider from config/env/oauth storage."""
+        return self._resolve_provider_api_key(provider)
+
     def create_llm_provider_for_model(self, alias: str):  # noqa: ANN201
         """Create an LLM provider instance for a model alias.
 
