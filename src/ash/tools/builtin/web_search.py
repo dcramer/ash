@@ -208,7 +208,8 @@ class WebSearchTool(Tool):
         return (
             "Search the web for current information. "
             "Use this to find recent news, documentation, articles, or any "
-            "information that may not be in your training data. "
+            "information that may not be in your training data. Prefer this "
+            "for discovery before `web_fetch`/`browser`. "
             "Returns structured results with titles, URLs, and descriptions."
         )
 

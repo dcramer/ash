@@ -216,6 +216,8 @@ class SystemPromptBuilder:
                     "",
                     *self._TOOL_OPERATIONAL_RULES,
                     "",
+                    *self._WEB_TOOL_ROUTING_RULES,
+                    "",
                     *self._TOOL_NARRATION_RULES,
                 ]
             )
@@ -325,6 +327,16 @@ class SystemPromptBuilder:
         "- On timeout: report it and try a simpler approach. On persistent failure: explain and ask the user.",
     ]
 
+    _WEB_TOOL_ROUTING_RULES: list[str] = [
+        "### Web/Search/Browser Routing",
+        "- Start with the cheapest tool that can answer accurately: `web_search` -> `web_fetch` -> `browser`.",
+        "- Use `web_search` to discover sources, URLs, and what exists.",
+        "- Use `web_fetch` when you already have a URL and need content reading without interaction.",
+        "- Use `browser` for interactive/dynamic/authenticated workflows (click/type/wait/screenshots), or when `web_fetch` cannot access needed content.",
+        "- For capability checks (e.g., 'can we do X?'), attempt the task now with tools instead of answering hypothetically.",
+        "- If a step fails, report the exact error and escalate to the next viable tool. Never claim success without verification.",
+    ]
+
     _TOOL_NARRATION_RULES: list[str] = [
         "- Default: do not narrate routine, low-risk tool calls (just call the tool)",
         "- Narrate only when it helps: multi-step work, complex problems, sensitive actions (e.g., deletions), or when the user explicitly asks",
@@ -346,7 +358,16 @@ class SystemPromptBuilder:
         for tool_def in tool_defs:
             lines.append(f"- **{tool_def.name}**: {tool_def.description}")
 
-        lines.extend(["", "### Usage", "", *self._TOOL_OPERATIONAL_RULES])
+        lines.extend(
+            [
+                "",
+                "### Usage",
+                "",
+                *self._TOOL_OPERATIONAL_RULES,
+                "",
+                *self._WEB_TOOL_ROUTING_RULES,
+            ]
+        )
 
         return "\n".join(lines)
 

@@ -25,7 +25,8 @@ class BrowserTool(Tool):
     def description(self) -> str:
         return (
             "Perform deterministic browser actions using named sessions. "
-            "Supports session lifecycle and page navigation/extraction workflows."
+            "Use for interactive/dynamic/authenticated pages (click/type/wait/screenshot), "
+            "not simple web lookups that `web_search`/`web_fetch` can handle."
         )
 
     @property

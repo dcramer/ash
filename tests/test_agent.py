@@ -787,6 +787,8 @@ class TestSystemPromptBuilder:
         assert "Available Tools" in prompt
         assert "Tool Call Style" in prompt
         assert "Sandbox" in prompt
+        assert "Web/Search/Browser Routing" in prompt
+        assert "`web_search` -> `web_fetch` -> `browser`" in prompt
         assert "test assistant" in prompt.lower()
 
     def test_build_full_mode_narration_not_in_tools_section(self, prompt_builder):
@@ -807,6 +809,8 @@ class TestSystemPromptBuilder:
             PromptContext(runtime=runtime), mode=PromptMode.MINIMAL
         )
         assert "## Tool Usage" in prompt
+        assert "Web/Search/Browser Routing" in prompt
+        assert "attempt the task now with tools" in prompt
         assert "## Sandbox" in prompt
         assert "## Runtime" in prompt
         # Should NOT include full-mode sections

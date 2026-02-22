@@ -355,7 +355,8 @@ class WebFetchTool(Tool):
         return (
             "Fetch and read the content of a web page. "
             "Extracts readable text from HTML pages, converting to markdown format. "
-            "Use this to read full articles, documentation, or other web content."
+            "Use this to read full articles, documentation, or other web content "
+            "when a direct URL is known and page interaction is not required."
         )
 
     @property
