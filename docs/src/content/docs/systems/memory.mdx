@@ -29,6 +29,8 @@ extraction_model = null
 extraction_min_message_length = 20
 extraction_debounce_seconds = 30
 extraction_confidence_threshold = 0.7
+extraction_context_messages = 8
+extraction_grounding_enabled = true
 ```
 
 ### Key Options
@@ -44,6 +46,8 @@ extraction_confidence_threshold = 0.7
 | `max_entries` | `null` | Optional retention cap |
 | `extraction_enabled` | `true` | Background fact extraction |
 | `extraction_model` | `null` | Optional model alias override |
+| `extraction_context_messages` | `8` | Message window used when building extraction context |
+| `extraction_grounding_enabled` | `true` | Run second LLM pass to ground/rewrite extracted facts |
 | `extraction_confidence_threshold` | `0.7` | Minimum confidence to store extracted facts |
 
 ## Embeddings

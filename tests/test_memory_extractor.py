@@ -699,6 +699,71 @@ class TestGroundingPass:
 
         assert facts == []
 
+    async def test_grounding_partial_decisions_keep_undecided_facts(
+        self, extractor, mock_llm
+    ):
+        mock_llm.complete = AsyncMock(
+            side_effect=[
+                CompletionResponse(
+                    message=Message(
+                        role=Role.ASSISTANT,
+                        content='[{"content":"Randolf is going in May","subjects":["Randolf"],"shared":false,"confidence":0.9},{"content":"User prefers dark mode","subjects":[],"shared":false,"confidence":0.9}]',
+                    ),
+                    usage=Usage(input_tokens=140, output_tokens=50),
+                ),
+                CompletionResponse(
+                    message=Message(
+                        role=Role.ASSISTANT,
+                        content='[{"index":0,"grounded":true,"content":"Randolf is going to Tokyo in May"}]',
+                    ),
+                    usage=Usage(input_tokens=110, output_tokens=20),
+                ),
+            ]
+        )
+
+        facts = await extractor.extract_from_conversation(
+            [
+                Message(role=Role.USER, content="Randolf is going to Tokyo in May"),
+                Message(role=Role.USER, content="I prefer dark mode"),
+            ]
+        )
+
+        assert len(facts) == 2
+        assert facts[0].content == "Randolf is going to Tokyo in May"
+        assert facts[1].content == "User prefers dark mode"
+
+    async def test_grounding_duplicate_decisions_last_one_wins(
+        self, extractor, mock_llm
+    ):
+        mock_llm.complete = AsyncMock(
+            side_effect=[
+                CompletionResponse(
+                    message=Message(
+                        role=Role.ASSISTANT,
+                        content='[{"content":"Randolf is going in May","subjects":["Randolf"],"shared":false,"confidence":0.9}]',
+                    ),
+                    usage=Usage(input_tokens=90, output_tokens=35),
+                ),
+                CompletionResponse(
+                    message=Message(
+                        role=Role.ASSISTANT,
+                        content='[{"index":0,"grounded":false},{"index":0,"grounded":true,"content":"Randolf is going to Tokyo in May"}]',
+                    ),
+                    usage=Usage(input_tokens=90, output_tokens=25),
+                ),
+            ]
+        )
+
+        facts = await extractor.extract_from_conversation(
+            [
+                Message(role=Role.USER, content="Randolf is going to Tokyo in May"),
+                Message(role=Role.USER, content="he's still going in May"),
+            ]
+        )
+
+        assert len(facts) == 1
+        assert facts[0].content == "Randolf is going to Tokyo in May"
+
 
 class TestAliasParsing:
     """Tests for alias parsing in extraction."""

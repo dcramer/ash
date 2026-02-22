@@ -307,6 +307,11 @@ Return ONLY valid JSON as an array:
   {{"index": 1, "grounded": false}}
 ]
 
+Rules:
+- Use each fact index at most once.
+- grounded must be a JSON boolean (true/false), not a string.
+- If grounded=true and content is omitted, the original content will be kept.
+
 ## Conversation
 {conversation}
 
@@ -494,25 +499,44 @@ class MemoryExtractor:
             if not decisions:
                 return facts
 
-            grounded_facts: list[ExtractedFact] = []
-            saw_valid_decision = False
+            # Keep only the latest valid decision per index and fail open
+            # for any fact the model did not decide about.
+            decisions_by_index: dict[int, dict[str, Any]] = {}
             for decision in decisions:
                 idx = decision.get("index")
                 grounded = decision.get("grounded")
                 if not isinstance(idx, int) or idx < 0 or idx >= len(facts):
                     continue
-                saw_valid_decision = True
-                if grounded is not True:
+                if not isinstance(grounded, bool):
+                    continue
+                decisions_by_index[idx] = decision
+
+            # Fail open when grounding output had no usable decisions.
+            if not decisions_by_index:
+                return facts
+
+            grounded_facts: list[ExtractedFact] = []
+            for idx, fact in enumerate(facts):
+                decision = decisions_by_index.get(idx)
+                if decision is None:
+                    grounded_facts.append(fact)
+                    continue
+
+                if decision["grounded"] is not True:
                     continue
 
                 content = decision.get("content")
                 if isinstance(content, str) and content.strip():
-                    facts[idx].content = content.strip()
-                grounded_facts.append(facts[idx])
+                    rewritten_content = content.strip()
+                    if contains_secret(rewritten_content):
+                        logger.warning(
+                            "secret_filtered_from_extraction",
+                            extra={"content_preview": rewritten_content[:30]},
+                        )
+                        continue
+                    fact.content = rewritten_content
+                grounded_facts.append(fact)
 
-            # Fail open only when grounding output had no usable decisions.
-            if not saw_valid_decision:
-                return facts
             return grounded_facts
         except Exception:
             logger.warning("memory_grounding_failed", exc_info=True)

@@ -109,7 +109,26 @@ extraction_model = null
 extraction_min_message_length = 20
 extraction_debounce_seconds = 30
 extraction_confidence_threshold = 0.7
+extraction_context_messages = 8
+extraction_grounding_enabled = true
 ```
+
+| Key | Type | Default |
+|-----|------|---------|
+| `max_context_messages` | int | `20` |
+| `context_token_budget` | int | `100000` |
+| `recency_window` | int | `10` |
+| `system_prompt_buffer` | int | `8000` |
+| `compaction_enabled` | bool | `true` |
+| `auto_gc` | bool | `true` |
+| `max_entries` | int \| null | `null` |
+| `extraction_enabled` | bool | `true` |
+| `extraction_model` | string \| null | `null` |
+| `extraction_min_message_length` | int | `20` |
+| `extraction_debounce_seconds` | int | `30` |
+| `extraction_confidence_threshold` | float | `0.7` |
+| `extraction_context_messages` | int | `8` |
+| `extraction_grounding_enabled` | bool | `true` |
 
 ## Conversation (`[conversation]`)
 
