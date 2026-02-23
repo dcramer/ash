@@ -963,17 +963,17 @@ def create_browser_manager(
     if not kernel_key:
         kernel_key = os.environ.get("KERNEL_API_KEY")
 
-    providers: dict[str, BrowserProvider] = {
-        "sandbox": SandboxBrowserProvider(
+    providers: dict[str, BrowserProvider] = {}
+    # Provider exposure is single-source-of-truth from config.browser.provider.
+    if browser_cfg.provider == "sandbox":
+        providers["sandbox"] = SandboxBrowserProvider(
             headless=config.browser.sandbox.headless,
             browser_channel=config.browser.sandbox.browser_channel,
             viewport_width=config.browser.default_viewport_width,
             viewport_height=config.browser.default_viewport_height,
             executor=sandbox_executor,
         )
-    }
-    # Only expose Kernel when credentials exist.
-    if kernel_key:
+    else:
         providers["kernel"] = KernelBrowserProvider(
             api_key=kernel_key,
             base_url=config.browser.kernel.base_url

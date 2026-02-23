@@ -485,7 +485,7 @@ async def test_create_browser_manager_omits_kernel_when_unconfigured(
     assert attempted.error_code == "invalid_provider"
 
 
-def test_create_browser_manager_includes_kernel_when_default_provider_kernel(
+def test_create_browser_manager_uses_kernel_when_configured(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("KERNEL_API_KEY", raising=False)
@@ -500,10 +500,10 @@ def test_create_browser_manager_includes_kernel_when_default_provider_kernel(
     )
     manager = create_browser_manager(cfg)
 
-    assert "kernel" not in manager._providers
+    assert manager.provider_names == ("kernel",)
 
 
-def test_create_browser_manager_includes_kernel_with_api_key(
+def test_create_browser_manager_uses_configured_provider_even_with_kernel_api_key(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("KERNEL_API_KEY", "test-key")
@@ -517,7 +517,7 @@ def test_create_browser_manager_includes_kernel_with_api_key(
         ),
     )
     manager = create_browser_manager(cfg)
-    assert "kernel" in manager._providers
+    assert manager.provider_names == ("sandbox",)
 
 
 @pytest.mark.asyncio

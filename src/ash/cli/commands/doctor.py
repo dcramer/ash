@@ -360,31 +360,37 @@ def _check_browser_config(config: AshConfig) -> list[DoctorFinding]:
                     ),
                 )
             )
+        if in_sandbox:
+            if importlib.util.find_spec("playwright") is None:
+                findings.append(
+                    DoctorFinding(
+                        level="warning",
+                        check="config.browser.sandbox.playwright",
+                        detail="sandbox browser provider requires playwright package",
+                        repair=(
+                            "Install playwright/chromium in the runtime image "
+                            "(e.g. `uv sync --all-groups` + "
+                            "`uv run playwright install chromium` during image build)"
+                        ),
+                    )
+                )
+            else:
+                findings.append(
+                    DoctorFinding(
+                        level="ok",
+                        check="config.browser.sandbox.playwright",
+                        detail="playwright package is available",
+                    )
+                )
+        else:
             findings.append(
                 DoctorFinding(
                     level="ok",
                     check="config.browser.sandbox.playwright",
                     detail=(
                         "host playwright check skipped; verify playwright/chromium "
-                        "are installed in sandbox image"
+                        "are installed in sandbox image runtime"
                     ),
-                )
-            )
-        elif importlib.util.find_spec("playwright") is None:
-            findings.append(
-                DoctorFinding(
-                    level="warning",
-                    check="config.browser.sandbox.playwright",
-                    detail="sandbox browser provider requires playwright package",
-                    repair="Run `uv sync --all-groups` and `uv run playwright install chromium`",
-                )
-            )
-        else:
-            findings.append(
-                DoctorFinding(
-                    level="ok",
-                    check="config.browser.sandbox.playwright",
-                    detail="playwright package is available",
                 )
             )
 

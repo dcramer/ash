@@ -822,7 +822,8 @@ class TestDoctorCommand:
 
         assert any(
             finding.check == "config.browser.sandbox.playwright"
-            and finding.level == "warning"
+            and finding.level == "ok"
+            and "host playwright check skipped" in finding.detail
             for finding in result.findings
         )
 

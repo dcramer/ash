@@ -136,7 +136,7 @@ async def test_browser_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
                     stderr="",
                 )
             if "python -c" in command:
-                return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
+                return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
             return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
 
     browser_manager = create_browser_manager(
