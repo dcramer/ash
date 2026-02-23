@@ -236,7 +236,7 @@ class BrowserConfig(BaseModel):
 
     enabled: bool = True
     provider: Literal["sandbox", "kernel"] = "sandbox"
-    timeout_seconds: float = 30.0
+    timeout_seconds: float = 20.0
     max_session_minutes: int = 20
     artifacts_retention_days: int = 7
     state_dir: Path | None = None

@@ -111,7 +111,7 @@ class TestBrowserConfig:
         config = BrowserConfig()
         assert config.enabled is True
         assert config.provider == "sandbox"
-        assert config.timeout_seconds == 30.0
+        assert config.timeout_seconds == 20.0
 
 
 class TestAshConfig:

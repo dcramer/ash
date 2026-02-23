@@ -93,12 +93,31 @@ class BrowserManager:
         )
 
     def _action_timeout_seconds(self, action: str) -> float:
-        base = float(self._config.browser.timeout_seconds)
+        base = self._clamp_timeout_seconds(float(self._config.browser.timeout_seconds))
         if action == "session.start":
-            return max(30.0, base + 20.0)
+            return min(60.0, max(15.0, base + 10.0))
         if action.startswith("page."):
-            return max(20.0, base + 10.0)
-        return max(15.0, base + 5.0)
+            return min(120.0, max(10.0, base + 5.0))
+        return min(60.0, max(10.0, base + 5.0))
+
+    def _clamp_timeout_seconds(self, value: float) -> float:
+        return max(1.0, min(120.0, value))
+
+    def _normalize_browser_error_message(self, message: str) -> str:
+        runtime_unavailable_markers = (
+            "sandbox_runtime_required",
+            "sandbox_executor_required",
+            "sandbox_browser_launch_failed",
+            "sandbox_browser_runtime_unavailable",
+            "cdp_not_ready",
+        )
+        if any(marker in message for marker in runtime_unavailable_markers):
+            return (
+                f"{message} "
+                "Do NOT retry browser tool; browser runtime is unavailable. "
+                "Check sandbox browser runtime/container health."
+            )
+        return message
 
     async def _await_provider_call(self, action: str, coro):
         timeout_s = self._action_timeout_seconds(action)
@@ -221,6 +240,7 @@ class BrowserManager:
                     provider_name=provider_key,
                 )
             if action == "page.goto":
+                raw_timeout = params.get("timeout_seconds")
                 return await self._page_goto(
                     provider=provider,
                     effective_user_id=effective_user_id,
@@ -228,9 +248,12 @@ class BrowserManager:
                     session_name=session_name,
                     provider_name=provider_key,
                     url=str(params.get("url") or "").strip(),
-                    timeout_seconds=float(
-                        params.get("timeout_seconds")
-                        or self._config.browser.timeout_seconds
+                    timeout_seconds=self._clamp_timeout_seconds(
+                        float(
+                            raw_timeout
+                            if raw_timeout is not None
+                            else self._config.browser.timeout_seconds
+                        )
                     ),
                 )
             if action == "page.extract":
@@ -291,19 +314,20 @@ class BrowserManager:
                 error_message=f"unknown browser action: {action}",
             )
         except Exception as e:
+            message = self._normalize_browser_error_message(str(e))
             logger.warning(
                 "browser_action_failed",
                 extra={
                     "browser.action": action,
                     "browser.provider": provider_key,
-                    "error.message": str(e),
+                    "error.message": message,
                 },
             )
             return BrowserActionResult(
                 ok=False,
                 action=action,
                 error_code="action_failed",
-                error_message=str(e),
+                error_message=message,
             )
 
     async def _session_start(
@@ -711,14 +735,18 @@ class BrowserManager:
                 ),
             )
         else:
+            raw_timeout = params.get("timeout_seconds")
             await self._await_provider_call(
                 action,
                 provider.wait_for(
                     provider_session_id=session.provider_session_id,
                     selector=selector,
-                    timeout_seconds=float(
-                        params.get("timeout_seconds")
-                        or self._config.browser.timeout_seconds
+                    timeout_seconds=self._clamp_timeout_seconds(
+                        float(
+                            raw_timeout
+                            if raw_timeout is not None
+                            else self._config.browser.timeout_seconds
+                        )
                     ),
                 ),
             )

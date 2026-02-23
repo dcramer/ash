@@ -30,6 +30,8 @@ class _FakeProvider:
 
     def __init__(self) -> None:
         self.closed_session_ids: list[str | None] = []
+        self.last_goto_timeout_seconds: float | None = None
+        self.last_wait_timeout_seconds: float | None = None
 
     async def start_session(self, *, session_id: str, profile_name: str | None):
         _ = profile_name
@@ -42,6 +44,7 @@ class _FakeProvider:
         self, *, provider_session_id: str | None, url: str, timeout_seconds: float
     ):
         _ = (provider_session_id, timeout_seconds)
+        self.last_goto_timeout_seconds = timeout_seconds
         return ProviderGotoResult(
             url=url,
             title="Example",
@@ -83,6 +86,7 @@ class _FakeProvider:
         timeout_seconds: float,
     ) -> None:
         _ = (provider_session_id, selector, timeout_seconds)
+        self.last_wait_timeout_seconds = timeout_seconds
 
     async def screenshot(self, *, provider_session_id: str | None):
         _ = provider_session_id
@@ -106,6 +110,12 @@ class _FakeWarmupProvider(_FakeProvider):
 
     async def warmup(self) -> None:
         self.warmup_calls += 1
+
+
+class _FailingRuntimeProvider(_FakeProvider):
+    async def start_session(self, *, session_id: str, profile_name: str | None):
+        _ = (session_id, profile_name)
+        raise ValueError("sandbox_browser_launch_failed: cdp_not_ready")
 
 
 def _config() -> AshConfig:
@@ -205,6 +215,64 @@ async def test_browser_manager_goto_extract_and_screenshot(tmp_path) -> None:
     )
     assert shot.ok is True
     assert shot.artifact_refs
+
+
+@pytest.mark.asyncio
+async def test_browser_manager_clamps_action_timeouts(tmp_path) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    provider = _FakeProvider()
+    manager = BrowserManager(
+        config=_config(), store=store, providers={"sandbox": provider}
+    )
+
+    started = await manager.execute_action(
+        action="session.start",
+        effective_user_id="u1",
+        provider_name="sandbox",
+    )
+    session_id = started.session_id
+    assert session_id
+
+    goto = await manager.execute_action(
+        action="page.goto",
+        effective_user_id="u1",
+        provider_name="sandbox",
+        session_id=session_id,
+        params={"url": "https://example.com", "timeout_seconds": 9999},
+    )
+    assert goto.ok is True
+    assert provider.last_goto_timeout_seconds == 120.0
+
+    waited = await manager.execute_action(
+        action="page.wait_for",
+        effective_user_id="u1",
+        provider_name="sandbox",
+        session_id=session_id,
+        params={"selector": "#ready", "timeout_seconds": 0},
+    )
+    assert waited.ok is True
+    assert provider.last_wait_timeout_seconds == 1.0
+
+
+@pytest.mark.asyncio
+async def test_browser_manager_runtime_failures_include_non_retry_guidance(
+    tmp_path,
+) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    manager = BrowserManager(
+        config=_config(),
+        store=store,
+        providers={"sandbox": _FailingRuntimeProvider()},
+    )
+    started = await manager.execute_action(
+        action="session.start",
+        effective_user_id="u1",
+        provider_name="sandbox",
+    )
+    assert started.ok is False
+    assert started.error_code == "action_failed"
+    assert started.error_message is not None
+    assert "Do NOT retry browser tool" in started.error_message
 
 
 @pytest.mark.asyncio
