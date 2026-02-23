@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -1035,7 +1036,10 @@ async def create_agent(
         sandbox_executor=shared_executor,
     )
     if config.browser.enabled:
-        await browser_manager.warmup_default_provider()
+        asyncio.create_task(
+            browser_manager.warmup_default_provider(),
+            name="browser-warmup-default-provider",
+        )
         tool_registry.register(BrowserTool(browser_manager))
 
     # Register interrupt tool for agent checkpointing
