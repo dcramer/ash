@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -9,11 +10,13 @@ import pytest
 from ash.config import AshConfig
 from ash.config.models import ModelConfig
 from ash.integrations import (
+    BrowserIntegration,
     IntegrationContext,
     RuntimeRPCIntegration,
     SchedulingIntegration,
 )
 from ash.skills import SkillRegistry
+from ash.tools import ToolRegistry
 
 
 def _context() -> IntegrationContext:
@@ -25,6 +28,9 @@ def _context() -> IntegrationContext:
         Any,
         SimpleNamespace(
             skill_registry=SkillRegistry(),
+            tool_registry=ToolRegistry(),
+            sandbox_executor=None,
+            browser_manager=None,
             agent=object(),
         ),
     )
@@ -145,3 +151,30 @@ async def test_scheduling_integration_owns_lifecycle_and_rpc(monkeypatch) -> Non
     await integration.on_shutdown(context)
     assert _FakeWatcher.started is True
     assert _FakeWatcher.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_browser_integration_owns_manager_tool_and_warmup(monkeypatch) -> None:
+    context = _context()
+    integration = BrowserIntegration()
+
+    class _FakeManager:
+        def __init__(self) -> None:
+            self.warmup_calls = 0
+
+        async def warmup_default_provider(self) -> None:
+            self.warmup_calls += 1
+
+    fake_manager = _FakeManager()
+    monkeypatch.setattr(
+        "ash.browser.create_browser_manager",
+        lambda *args, **kwargs: fake_manager,
+    )
+
+    await integration.setup(context)
+    assert context.components.browser_manager is fake_manager
+    assert context.components.tool_registry.has("browser")
+
+    await integration.on_startup(context)
+    await asyncio.sleep(0)
+    assert fake_manager.warmup_calls == 1

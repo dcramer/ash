@@ -195,6 +195,23 @@ def test_memory_postprocess_service_wiring_is_integration_owned() -> None:
     }
 
 
+def test_browser_runtime_wiring_is_integration_owned() -> None:
+    files = _python_files_under("src/ash")
+
+    manager_call_sites = _find_call_sites(r"\bcreate_browser_manager\(", files)
+    assert manager_call_sites == {
+        Path("src/ash/browser/manager.py"),
+        Path("src/ash/cli/commands/browser.py"),
+        Path("src/ash/integrations/browser.py"),
+    }
+
+    warmup_call_sites = _find_call_sites(r"\bwarmup_default_provider\(", files)
+    assert warmup_call_sites == {
+        Path("src/ash/browser/manager.py"),
+        Path("src/ash/integrations/browser.py"),
+    }
+
+
 def test_ensure_self_person_wiring_avoids_core_agent() -> None:
     files = _python_files_under("src/ash")
 
