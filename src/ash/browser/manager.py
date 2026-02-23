@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -91,6 +92,23 @@ class BrowserManager:
             extra={"browser.provider": provider_key},
         )
 
+    def _action_timeout_seconds(self, action: str) -> float:
+        base = float(self._config.browser.timeout_seconds)
+        if action == "session.start":
+            return max(30.0, base + 20.0)
+        if action.startswith("page."):
+            return max(20.0, base + 10.0)
+        return max(15.0, base + 5.0)
+
+    async def _await_provider_call(self, action: str, coro):
+        timeout_s = self._action_timeout_seconds(action)
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout_s)
+        except TimeoutError as e:
+            raise ValueError(
+                f"browser_action_timeout:{action}:{int(timeout_s)}s"
+            ) from e
+
     async def execute_action(
         self,
         *,
@@ -122,6 +140,16 @@ class BrowserManager:
                 action=action,
                 error_code="invalid_provider",
                 error_message=f"unsupported provider: {provider_key}",
+            )
+        if provider_key == "kernel" and action.startswith("page."):
+            return BrowserActionResult(
+                ok=False,
+                action=action,
+                error_code="provider_not_supported",
+                error_message=(
+                    "kernel provider does not currently support page actions; "
+                    "use sandbox provider"
+                ),
             )
         if (
             provider_key == "sandbox"
@@ -285,9 +313,12 @@ class BrowserManager:
     ) -> BrowserActionResult:
         session_id = str(uuid.uuid4())
         resolved_name = (session_name or f"session-{session_id[:8]}").strip()
-        started = await provider.start_session(
-            session_id=session_id,
-            profile_name=profile_name,
+        started = await self._await_provider_call(
+            "session.start",
+            provider.start_session(
+                session_id=session_id,
+                profile_name=profile_name,
+            ),
         )
 
         now = datetime.now(UTC)
@@ -421,7 +452,10 @@ class BrowserManager:
                 error_code="session_not_found",
                 error_message="session not found",
             )
-        await provider.close_session(provider_session_id=session.provider_session_id)
+        await self._await_provider_call(
+            "session.close",
+            provider.close_session(provider_session_id=session.provider_session_id),
+        )
 
         closed = replace(session, status="closed", updated_at=datetime.now(UTC))
         self._store.append_session(closed)
@@ -459,8 +493,9 @@ class BrowserManager:
             )
 
         if session.status == "active":
-            await provider.close_session(
-                provider_session_id=session.provider_session_id
+            await self._await_provider_call(
+                "session.close",
+                provider.close_session(provider_session_id=session.provider_session_id),
             )
 
         archived = replace(
@@ -515,10 +550,13 @@ class BrowserManager:
                 error_message="session not found",
             )
 
-        result: ProviderGotoResult = await provider.goto(
-            provider_session_id=session.provider_session_id,
-            url=url,
-            timeout_seconds=self._config.browser.timeout_seconds,
+        result: ProviderGotoResult = await self._await_provider_call(
+            "page.goto",
+            provider.goto(
+                provider_session_id=session.provider_session_id,
+                url=url,
+                timeout_seconds=self._config.browser.timeout_seconds,
+            ),
         )
 
         artifact_refs: list[str] = []
@@ -587,12 +625,15 @@ class BrowserManager:
             )
 
         html = self._read_last_html(session)
-        extract = await provider.extract(
-            provider_session_id=session.provider_session_id,
-            html=html,
-            mode=mode,
-            selector=selector,
-            max_chars=max(1, max_chars),
+        extract = await self._await_provider_call(
+            "page.extract",
+            provider.extract(
+                provider_session_id=session.provider_session_id,
+                html=html,
+                mode=mode,
+                selector=selector,
+                max_chars=max(1, max_chars),
+            ),
         )
 
         logger.info(
@@ -647,23 +688,33 @@ class BrowserManager:
             )
 
         if action == "page.click":
-            await provider.click(
-                provider_session_id=session.provider_session_id, selector=selector
+            await self._await_provider_call(
+                action,
+                provider.click(
+                    provider_session_id=session.provider_session_id,
+                    selector=selector,
+                ),
             )
         elif action == "page.type":
-            await provider.type(
-                provider_session_id=session.provider_session_id,
-                selector=selector,
-                text=str(params.get("text") or ""),
-                clear_first=bool(params.get("clear_first", True)),
+            await self._await_provider_call(
+                action,
+                provider.type(
+                    provider_session_id=session.provider_session_id,
+                    selector=selector,
+                    text=str(params.get("text") or ""),
+                    clear_first=bool(params.get("clear_first", True)),
+                ),
             )
         else:
-            await provider.wait_for(
-                provider_session_id=session.provider_session_id,
-                selector=selector,
-                timeout_seconds=float(
-                    params.get("timeout_seconds")
-                    or self._config.browser.timeout_seconds
+            await self._await_provider_call(
+                action,
+                provider.wait_for(
+                    provider_session_id=session.provider_session_id,
+                    selector=selector,
+                    timeout_seconds=float(
+                        params.get("timeout_seconds")
+                        or self._config.browser.timeout_seconds
+                    ),
                 ),
             )
 
@@ -706,8 +757,9 @@ class BrowserManager:
                 error_message="session not found",
             )
 
-        shot = await provider.screenshot(
-            provider_session_id=session.provider_session_id
+        shot = await self._await_provider_call(
+            "page.screenshot",
+            provider.screenshot(provider_session_id=session.provider_session_id),
         )
         ext = ".png" if shot.mime_type == "image/png" else ".bin"
         path = self._write_artifact(
@@ -787,8 +839,11 @@ class BrowserManager:
             provider = self._providers.get(session.provider)
             if provider is not None:
                 try:
-                    await provider.close_session(
-                        provider_session_id=session.provider_session_id
+                    await self._await_provider_call(
+                        "session.close",
+                        provider.close_session(
+                            provider_session_id=session.provider_session_id
+                        ),
                     )
                 except Exception as e:
                     logger.warning(
@@ -917,8 +972,8 @@ def create_browser_manager(
             executor=sandbox_executor,
         )
     }
-    # Only expose Kernel when configured explicitly or when credentials exist.
-    if kernel_key or browser_cfg.provider == "kernel":
+    # Only expose Kernel when credentials exist.
+    if kernel_key:
         providers["kernel"] = KernelBrowserProvider(
             api_key=kernel_key,
             base_url=config.browser.kernel.base_url

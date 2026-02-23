@@ -737,7 +737,7 @@ class TestDoctorCommand:
             for finding in result.findings
         )
 
-    def test_doctor_warns_when_sandbox_browser_missing_playwright(
+    def test_doctor_skips_host_playwright_check_when_sandbox_runtime_required(
         self, monkeypatch, tmp_path
     ):
         ash_home = tmp_path / ".ash"
@@ -754,6 +754,55 @@ class TestDoctorCommand:
                     "[browser]",
                     "enabled=true",
                     "provider='sandbox'",
+                ]
+            )
+            + "\n"
+        )
+
+        monkeypatch.setattr(
+            "ash.cli.commands.doctor.importlib.util.find_spec",
+            lambda _name: None,
+        )
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            result = run_doctor_checks()
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert any(
+            finding.check == "config.browser.sandbox.runtime"
+            and finding.level == "warning"
+            for finding in result.findings
+        )
+        assert any(
+            finding.check == "config.browser.sandbox.playwright"
+            and finding.level == "ok"
+            and "host playwright check skipped" in finding.detail
+            for finding in result.findings
+        )
+
+    def test_doctor_warns_when_playwright_missing_and_runtime_not_required(
+        self, monkeypatch, tmp_path
+    ):
+        ash_home = tmp_path / ".ash"
+        ash_home.mkdir(parents=True, exist_ok=True)
+        for name in ("graph", "sessions", "chats", "logs", "run", "workspace"):
+            (ash_home / name).mkdir(exist_ok=True)
+        (ash_home / "config.toml").write_text(
+            "\n".join(
+                [
+                    "[models.default]",
+                    "provider='openai'",
+                    "model='gpt-5.2'",
+                    "",
+                    "[browser]",
+                    "enabled=true",
+                    "provider='sandbox'",
+                    "",
+                    "[browser.sandbox]",
+                    "runtime_required=false",
                 ]
             )
             + "\n"

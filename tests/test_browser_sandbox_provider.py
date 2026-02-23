@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import cast
 
 from ash.browser.providers.sandbox import SandboxBrowserProvider
@@ -143,3 +144,33 @@ def test_parse_json_output_ignores_noise() -> None:
     )
     assert payload["ok"] is True
     assert payload["value"] == 1
+
+
+async def test_sandbox_provider_times_out_hung_executor() -> None:
+    class _HangingExecutor:
+        async def execute(
+            self,
+            command: str,
+            command_timeout: int | None = None,
+            reuse_container: bool = True,
+            environment: dict[str, str] | None = None,
+            **kwargs,
+        ) -> ExecutionResult:
+            _ = (command, command_timeout, reuse_container, environment, kwargs)
+            await asyncio.sleep(60)
+            return ExecutionResult(exit_code=0, stdout="", stderr="")
+
+    provider = SandboxBrowserProvider(
+        executor=cast(SandboxExecutor, _HangingExecutor())
+    )
+    try:
+        await provider._execute_sandbox_command(
+            "echo hi",
+            phase="test",
+            timeout_seconds=1,
+            reuse_container=True,
+        )
+    except ValueError as e:
+        assert "sandbox_browser_action_timeout:test" in str(e)
+    else:
+        raise AssertionError("expected timeout error")

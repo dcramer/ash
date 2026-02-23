@@ -10,6 +10,10 @@ import contextlib
 from typing import Any
 
 from ash.core.prompt import PromptContext
+from ash.core.prompt_keys import (
+    CORE_PRINCIPLES_RULES_KEY,
+    TOOL_ROUTING_RULES_KEY,
+)
 from ash.core.session import SessionState
 from ash.integrations.runtime import IntegrationContext, IntegrationContributor
 
@@ -85,17 +89,17 @@ class BrowserIntegration(IntegrationContributor):
         # Browser-specific instruction text is contributed via structured prompt hooks.
         self._append_instruction(
             prompt_context.extra_context,
-            "tool_routing_rules",
+            TOOL_ROUTING_RULES_KEY,
             "Use `browser` for interactive/dynamic/authenticated workflows (click/type/wait/screenshots), or when `web_fetch` cannot access needed content.",
         )
         self._append_instruction(
             prompt_context.extra_context,
-            "core_principles_rules",
+            CORE_PRINCIPLES_RULES_KEY,
             "If the user asks for a screenshot/image from browser context, run `browser` with `page.screenshot` and send the image artifact in chat via `send_message` using `image_path`.",
         )
         self._append_instruction(
             prompt_context.extra_context,
-            "core_principles_rules",
+            CORE_PRINCIPLES_RULES_KEY,
             "When browser use is requested, never describe results without an actual browser tool outcome.",
         )
         return prompt_context

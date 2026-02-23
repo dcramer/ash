@@ -63,6 +63,10 @@ class UseAgentTool(Tool):
         self._pending_checkpoints: dict[str, CheckpointState] = {}
         self._checkpoint_lock = asyncio.Lock()
 
+    def set_shared_prompt(self, prompt: str | None) -> None:
+        """Update shared prompt context used for subagent execution."""
+        self._subagent_context = prompt
+
     @property
     def name(self) -> str:
         return "use_agent"

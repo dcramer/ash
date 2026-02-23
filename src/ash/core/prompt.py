@@ -8,6 +8,12 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from ash.core.prompt_keys import (
+    CORE_PRINCIPLES_RULES_KEY,
+    RESERVED_PROMPT_EXTENSION_KEYS,
+    TOOL_ROUTING_RULES_KEY,
+)
+
 
 class PromptMode(str, Enum):
     FULL = "full"  # Main agent — all sections
@@ -213,7 +219,7 @@ class SystemPromptBuilder:
             routing_rules = [
                 *self._WEB_TOOL_ROUTING_RULES,
                 *self._extra_instruction_lines(
-                    context.extra_context, "tool_routing_rules"
+                    context.extra_context, TOOL_ROUTING_RULES_KEY
                 ),
             ]
             tool_guidance = "\n".join(
@@ -288,7 +294,7 @@ class SystemPromptBuilder:
         ]
         lines.extend(
             self._extra_instruction_lines(
-                context.extra_context, "core_principles_rules"
+                context.extra_context, CORE_PRINCIPLES_RULES_KEY
             )
         )
         return "\n".join(lines)
@@ -378,7 +384,7 @@ class SystemPromptBuilder:
             ]
         )
         lines.extend(
-            self._extra_instruction_lines(context.extra_context, "tool_routing_rules")
+            self._extra_instruction_lines(context.extra_context, TOOL_ROUTING_RULES_KEY)
         )
 
         return "\n".join(lines)
@@ -427,8 +433,11 @@ class SystemPromptBuilder:
         return "\n".join(lines)
 
     def _build_extra_context_section(self, extra_context: dict[str, Any]) -> str:
-        reserved = {"core_principles_rules", "tool_routing_rules"}
-        payload_data = {k: v for k, v in extra_context.items() if k not in reserved}
+        payload_data = {
+            k: v
+            for k, v in extra_context.items()
+            if k not in RESERVED_PROMPT_EXTENSION_KEYS
+        }
         if not payload_data:
             return ""
 

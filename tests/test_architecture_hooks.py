@@ -221,8 +221,8 @@ def test_browser_prompt_guidance_is_integration_owned() -> None:
     integration_text = (ROOT / "src/ash/integrations/browser.py").read_text(
         encoding="utf-8"
     )
-    assert "tool_routing_rules" in integration_text
-    assert "core_principles_rules" in integration_text
+    assert "TOOL_ROUTING_RULES_KEY" in integration_text
+    assert "CORE_PRINCIPLES_RULES_KEY" in integration_text
 
 
 def test_ensure_self_person_wiring_avoids_core_agent() -> None:

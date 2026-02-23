@@ -255,7 +255,7 @@ async def test_browser_manager_rejects_cross_provider_session_id(tmp_path) -> No
         params={"url": "https://example.com"},
     )
     assert mismatch.ok is False
-    assert mismatch.error_code == "session_not_found"
+    assert mismatch.error_code == "provider_not_supported"
 
 
 @pytest.mark.asyncio
@@ -283,7 +283,7 @@ async def test_browser_manager_no_cross_provider_fallback_without_session_ref(
         params={"url": "https://example.com"},
     )
     assert mismatch.ok is False
-    assert mismatch.error_code == "session_not_found"
+    assert mismatch.error_code == "provider_not_supported"
 
 
 @pytest.mark.asyncio
@@ -500,4 +500,35 @@ def test_create_browser_manager_includes_kernel_when_default_provider_kernel(
     )
     manager = create_browser_manager(cfg)
 
+    assert "kernel" not in manager._providers
+
+
+def test_create_browser_manager_includes_kernel_with_api_key(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KERNEL_API_KEY", "test-key")
+    cfg = AshConfig(
+        workspace=tmp_path / "workspace",
+        models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
+        browser=BrowserConfig(
+            provider="sandbox",
+            sandbox=BrowserSandboxConfig(runtime_required=False),
+            state_dir=tmp_path / "browser-state",
+        ),
+    )
+    manager = create_browser_manager(cfg)
     assert "kernel" in manager._providers
+
+
+@pytest.mark.asyncio
+async def test_browser_manager_kernel_page_actions_fail_fast(tmp_path) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    manager = BrowserManager(config=_config(), store=store, providers={})
+    result = await manager.execute_action(
+        action="page.goto",
+        effective_user_id="u1",
+        provider_name="kernel",
+        params={"url": "https://example.com"},
+    )
+    assert result.ok is False
+    assert result.error_code == "invalid_provider"

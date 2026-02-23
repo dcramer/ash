@@ -22,7 +22,7 @@ from ash.browser.providers.base import (
     ProviderScreenshotResult,
     ProviderStartResult,
 )
-from ash.sandbox.executor import SandboxExecutor
+from ash.sandbox.executor import ExecutionResult, SandboxExecutor
 
 logger = logging.getLogger("browser")
 
@@ -331,12 +331,12 @@ asyncio.run(main())
         args: list[str],
         deadline_seconds: int,
     ) -> dict[str, Any]:
-        executor = self._require_executor()
         arg_text = " ".join(shlex.quote(arg) for arg in args)
         command = f"python -c {shlex.quote(code)} {arg_text}".strip()
-        result = await executor.execute(
+        result = await self._execute_sandbox_command(
             command,
-            timeout=deadline_seconds,
+            phase="python_action",
+            timeout_seconds=deadline_seconds,
             reuse_container=True,
             environment={"NODE_OPTIONS": "--no-warnings"},
         )
@@ -408,16 +408,24 @@ asyncio.run(main())
             return await self._launch_runtime()
 
     async def _launch_runtime(self) -> _RemoteSandboxRuntime:
-        executor = self._require_executor()
         base_dir = "/home/sandbox/.cache/ash-browser/runtime"
         last_error = "sandbox_browser_launch_failed: unknown startup failure"
+        launch_deadline = (
+            asyncio.get_running_loop().time() + self._MAX_LAUNCH_TOTAL_SECONDS
+        )
         logger.info(
             "browser_sandbox_runtime_starting",
             extra={
                 "browser.provider": "sandbox",
             },
         )
-        for _ in range(8):
+        for attempt in range(1, self._MAX_LAUNCH_ATTEMPTS + 1):
+            if asyncio.get_running_loop().time() >= launch_deadline:
+                last_error = (
+                    "sandbox_browser_launch_failed: startup_deadline_exceeded:"
+                    f"{int(self._MAX_LAUNCH_TOTAL_SECONDS)}s"
+                )
+                break
             port = self._pick_port()
             launch_cmd = (
                 f"mkdir -p {shlex.quote(base_dir)} && "
@@ -432,9 +440,10 @@ asyncio.run(main())
                 "about:blank "
                 f"> {shlex.quote(base_dir)}/chromium.log 2>&1 & echo $!"
             )
-            result = await executor.execute(
-                f"bash -lc {shlex.quote(launch_cmd)}",
-                timeout=20,
+            result = await self._execute_sandbox_command(
+                command=f"bash -lc {shlex.quote(launch_cmd)}",
+                phase=f"runtime_launch_attempt_{attempt}",
+                timeout_seconds=20,
                 reuse_container=True,
             )
             if not result.success:
@@ -500,16 +509,16 @@ asyncio.run(main())
         return ws_ok
 
     async def _kill_runtime(self, runtime: _RemoteSandboxRuntime) -> None:
-        executor = self._require_executor()
-        _ = await executor.execute(
-            f"bash -lc {shlex.quote(f'kill {runtime.pid} >/dev/null 2>&1 || true')}",
-            timeout=5,
+        _ = await self._execute_sandbox_command(
+            command=f"bash -lc {shlex.quote(f'kill {runtime.pid} >/dev/null 2>&1 || true')}",
+            phase="runtime_kill",
+            timeout_seconds=5,
             reuse_container=True,
         )
 
     async def _wait_for_cdp_ready(self, *, runtime: _RemoteSandboxRuntime) -> None:
         http_ok, http_probe = await self._probe_http_ready(
-            runtime.port, timeout_seconds=45.0
+            runtime.port, timeout_seconds=self._HTTP_READY_TIMEOUT_SECONDS
         )
         if not http_ok:
             raise ValueError(
@@ -520,7 +529,7 @@ asyncio.run(main())
                 )
             )
         ws_ok, ws_probe = await self._probe_cdp_handshake(
-            runtime.port, timeout_seconds=15.0
+            runtime.port, timeout_seconds=self._WS_READY_TIMEOUT_SECONDS
         )
         if ws_ok:
             return
@@ -535,7 +544,6 @@ asyncio.run(main())
     async def _probe_http_ready(
         self, port: int, *, timeout_seconds: float
     ) -> tuple[bool, str]:
-        executor = self._require_executor()
         probe_script = """
 import sys, time, urllib.request
 port = sys.argv[1]
@@ -551,9 +559,10 @@ while time.time() < deadline:
         time.sleep(0.2)
 raise SystemExit(1)
 """
-        probe = await executor.execute(
-            f"python -c {shlex.quote(probe_script)} {port} {timeout_seconds}",
-            timeout=max(5, int(timeout_seconds) + 5),
+        probe = await self._execute_sandbox_command(
+            command=f"python -c {shlex.quote(probe_script)} {port} {timeout_seconds}",
+            phase="http_probe",
+            timeout_seconds=max(5, int(timeout_seconds) + 5),
             reuse_container=True,
         )
         details = (probe.stderr or probe.stdout or "").strip()
@@ -562,7 +571,6 @@ raise SystemExit(1)
     async def _probe_cdp_handshake(
         self, port: int, *, timeout_seconds: float
     ) -> tuple[bool, str]:
-        executor = self._require_executor()
         probe_script = """
 import asyncio, sys
 from playwright.async_api import async_playwright
@@ -581,9 +589,10 @@ async def main():
         await pw.stop()
 asyncio.run(main())
 """
-        probe = await executor.execute(
-            f"python -c {shlex.quote(probe_script)} {port} {timeout_seconds}",
-            timeout=max(5, int(timeout_seconds) + 5),
+        probe = await self._execute_sandbox_command(
+            command=f"python -c {shlex.quote(probe_script)} {port} {timeout_seconds}",
+            phase="cdp_probe",
+            timeout_seconds=max(5, int(timeout_seconds) + 5),
             reuse_container=True,
             environment={"NODE_OPTIONS": "--no-warnings"},
         )
@@ -597,16 +606,17 @@ asyncio.run(main())
         phase: str,
         probe_details: str,
     ) -> str:
-        executor = self._require_executor()
-        proc_alive = await executor.execute(
-            f"bash -lc {shlex.quote(f'kill -0 {runtime.pid} >/dev/null 2>&1 && echo alive || echo dead')}",
-            timeout=5,
+        proc_alive = await self._execute_sandbox_command(
+            command=f"bash -lc {shlex.quote(f'kill -0 {runtime.pid} >/dev/null 2>&1 && echo alive || echo dead')}",
+            phase="runtime_alive_probe",
+            timeout_seconds=5,
             reuse_container=True,
         )
         log_tail_cmd = f"bash -lc {shlex.quote(f'tail -n 40 {shlex.quote(runtime.base_dir)}/chromium.log 2>/dev/null || true')}"
-        log_tail = await executor.execute(
-            log_tail_cmd,
-            timeout=10,
+        log_tail = await self._execute_sandbox_command(
+            command=log_tail_cmd,
+            phase="runtime_log_tail",
+            timeout_seconds=10,
             reuse_container=True,
         )
         details = (log_tail.stdout or log_tail.stderr or "").strip()
@@ -619,3 +629,36 @@ asyncio.run(main())
         if probe_details:
             return f"{prefix}; process={alive_text or 'unknown'}; probe={probe_details}"
         return f"{prefix}; process={alive_text or 'unknown'}; probe=unavailable"
+
+    async def _execute_sandbox_command(
+        self,
+        command: str,
+        *,
+        phase: str,
+        timeout_seconds: int,
+        reuse_container: bool,
+        environment: dict[str, str] | None = None,
+    ) -> ExecutionResult:
+        executor = self._require_executor()
+        # Guard against hangs in container/image startup paths that can occur
+        # before sandbox command-level timeouts are applied.
+        outer_timeout = max(5, timeout_seconds + 10)
+        try:
+            return await asyncio.wait_for(
+                executor.execute(
+                    command,
+                    timeout=timeout_seconds,
+                    reuse_container=reuse_container,
+                    environment=environment,
+                ),
+                timeout=outer_timeout,
+            )
+        except TimeoutError as e:
+            raise ValueError(
+                f"sandbox_browser_action_timeout:{phase}:{outer_timeout}s"
+            ) from e
+
+    _MAX_LAUNCH_ATTEMPTS = 3
+    _MAX_LAUNCH_TOTAL_SECONDS = 45.0
+    _HTTP_READY_TIMEOUT_SECONDS = 12.0
+    _WS_READY_TIMEOUT_SECONDS = 8.0

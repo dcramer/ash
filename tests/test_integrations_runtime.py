@@ -9,6 +9,7 @@ import pytest
 from ash.config import AshConfig
 from ash.config.models import ModelConfig
 from ash.core.prompt import PromptContext
+from ash.core.prompt_keys import TOOL_ROUTING_RULES_KEY
 from ash.core.session import SessionState
 from ash.integrations import (
     IntegrationContext,
@@ -560,3 +561,88 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
         ("memory_postprocess_init", "ok"),
         ("memory_postprocess", "user-123"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_compose_integrations_refreshes_subagent_shared_prompt() -> None:
+    class _FakeAgent:
+        def install_integration_hooks(
+            self,
+            *,
+            prompt_context_augmenters=None,
+            sandbox_env_augmenters=None,
+            incoming_message_preprocessors=None,
+            message_postprocess_hooks=None,
+        ) -> None:
+            _ = (
+                prompt_context_augmenters,
+                sandbox_env_augmenters,
+                incoming_message_preprocessors,
+                message_postprocess_hooks,
+            )
+
+    class _FakeUseTool:
+        def __init__(self) -> None:
+            self.prompt: str | None = None
+
+        def set_shared_prompt(self, prompt: str | None) -> None:
+            self.prompt = prompt
+
+    class _FakeToolRegistry:
+        def __init__(self) -> None:
+            self._tools = {
+                "use_agent": _FakeUseTool(),
+                "use_skill": _FakeUseTool(),
+            }
+
+        def has(self, name: str) -> bool:
+            return name in self._tools
+
+        def get(self, name: str):
+            return self._tools[name]
+
+    class _FakePromptBuilder:
+        def build(self, context: PromptContext, mode) -> str:
+            _ = mode
+            rules = context.extra_context.get(TOOL_ROUTING_RULES_KEY) or []
+            return "\n".join(["## Tool Usage", *rules])
+
+    class _RoutingContributor(IntegrationContributor):
+        name = "routing"
+        priority = 10
+
+        def augment_prompt_context(
+            self,
+            prompt_context: PromptContext,
+            session: SessionState,
+            context: IntegrationContext,
+        ) -> PromptContext:
+            _ = (session, context)
+            prompt_context.extra_context[TOOL_ROUTING_RULES_KEY] = [
+                "- integration route line"
+            ]
+            return prompt_context
+
+    config = AshConfig(
+        workspace=Path("tmp-workspace"),
+        models={"default": ModelConfig(provider="openai", model="gpt-5-mini")},
+    )
+    tool_registry = _FakeToolRegistry()
+    components = cast(
+        Any,
+        SimpleNamespace(
+            agent=_FakeAgent(),
+            tool_registry=tool_registry,
+            prompt_builder=_FakePromptBuilder(),
+        ),
+    )
+
+    await compose_integrations(
+        config=config,
+        components=components,
+        mode="eval",
+        contributors=[_RoutingContributor()],
+    )
+
+    assert "integration route line" in (tool_registry.get("use_agent").prompt or "")
+    assert "integration route line" in (tool_registry.get("use_skill").prompt or "")

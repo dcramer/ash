@@ -176,6 +176,10 @@ class UseSkillTool(Tool):
         self._voice = voice
         self._subagent_context = subagent_context
 
+    def set_shared_prompt(self, prompt: str | None) -> None:
+        """Update shared prompt context used for skill execution."""
+        self._subagent_context = prompt
+
     @property
     def name(self) -> str:
         return "use_skill"
