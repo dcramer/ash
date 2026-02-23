@@ -360,7 +360,7 @@ async def test_browser_manager_requires_sandbox_runtime_when_enabled(
 
 
 @pytest.mark.asyncio
-async def test_browser_tool_bypasses_runtime_gate_for_agent_calls(
+async def test_browser_tool_respects_runtime_gate_for_agent_calls(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = BrowserStore(tmp_path / "browser")
@@ -376,7 +376,8 @@ async def test_browser_tool_bypasses_runtime_gate_for_agent_calls(
         {"action": "session.start", "provider": "sandbox"},
         ToolContext(user_id="u1"),
     )
-    assert result.is_error is False
+    assert result.is_error is True
+    assert "sandbox_runtime_required" in result.content
 
 
 @pytest.mark.asyncio

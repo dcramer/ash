@@ -110,8 +110,6 @@ class BrowserTool(Tool):
         action = str(input_data.get("action") or "").strip()
         if not action:
             return ToolResult.error("missing required field: action")
-        params = dict(input_data)
-        params["_request_origin"] = "agent_tool"
 
         result = await self._manager.execute_action(
             action=action,
@@ -132,7 +130,7 @@ class BrowserTool(Tool):
                 if input_data.get("profile_name")
                 else None
             ),
-            params=params,
+            params=dict(input_data),
         )
         payload = format_browser_result(result)
         if result.ok:
