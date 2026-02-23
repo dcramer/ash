@@ -53,6 +53,7 @@ class SandboxBrowserProvider:
         self._sessions: set[str] = set()
         self._runtime: _RemoteSandboxRuntime | None = None
         self._runtime_lock = asyncio.Lock()
+        self._runtime_base_dir: str | None = None
         self.runs_in_sandbox_executor = executor is not None
 
     async def start_session(
@@ -408,7 +409,7 @@ asyncio.run(main())
             return await self._launch_runtime()
 
     async def _launch_runtime(self) -> _RemoteSandboxRuntime:
-        base_dir = "/home/sandbox/.cache/ash-browser/runtime"
+        base_dir = await self._resolve_runtime_base_dir()
         last_error = "sandbox_browser_launch_failed: unknown startup failure"
         launch_deadline = (
             asyncio.get_running_loop().time() + self._MAX_LAUNCH_TOTAL_SECONDS
@@ -481,6 +482,32 @@ asyncio.run(main())
             )
             return runtime
         raise ValueError(last_error)
+
+    async def _resolve_runtime_base_dir(self) -> str:
+        """Pick a writable runtime directory for Chromium profile/log data."""
+        if self._runtime_base_dir:
+            return self._runtime_base_dir
+        candidates = (
+            "/home/sandbox/.cache/ash-browser/runtime",
+            "/tmp/ash-browser/runtime",  # noqa: S108 - sandbox-local ephemeral runtime
+            "/workspace/.ash-browser/runtime",
+        )
+        for base_dir in candidates:
+            probe = await self._execute_sandbox_command(
+                command=(
+                    "bash -lc "
+                    + shlex.quote(
+                        f"mkdir -p {shlex.quote(base_dir)} && test -w {shlex.quote(base_dir)}"
+                    )
+                ),
+                phase="runtime_dir_probe",
+                timeout_seconds=8,
+                reuse_container=True,
+            )
+            if probe.success:
+                self._runtime_base_dir = base_dir
+                return base_dir
+        raise ValueError("sandbox_browser_launch_failed: no_writable_runtime_dir")
 
     async def _shutdown_runtime_if_idle(self) -> None:
         """Stop warm runtime when no sessions remain to avoid orphan processes."""

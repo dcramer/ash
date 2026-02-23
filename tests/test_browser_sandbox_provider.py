@@ -174,3 +174,45 @@ async def test_sandbox_provider_times_out_hung_executor() -> None:
         assert "sandbox_browser_action_timeout:test" in str(e)
     else:
         raise AssertionError("expected timeout error")
+
+
+async def test_sandbox_provider_falls_back_to_tmp_runtime_dir() -> None:
+    class _DirProbeExecutor:
+        def __init__(self) -> None:
+            self.commands: list[str] = []
+
+        async def execute(
+            self,
+            command: str,
+            command_timeout: int | None = None,
+            reuse_container: bool = True,
+            environment: dict[str, str] | None = None,
+            **kwargs,
+        ) -> ExecutionResult:
+            _ = (command_timeout, reuse_container, environment, kwargs)
+            self.commands.append(command)
+            if (
+                "test -w" in command
+                and "/home/sandbox/.cache/ash-browser/runtime" in command
+            ):
+                return ExecutionResult(
+                    exit_code=1, stdout="", stderr="permission denied"
+                )
+            if "test -w" in command and "/tmp/ash-browser/runtime" in command:  # noqa: S108
+                return ExecutionResult(exit_code=0, stdout="", stderr="")
+            if "nohup chromium" in command:
+                return ExecutionResult(exit_code=0, stdout="12345\n", stderr="")
+            if "/json/version" in command:
+                return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
+            if "python -c" in command:
+                return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
+            return ExecutionResult(exit_code=0, stdout="", stderr="")
+
+    executor = _DirProbeExecutor()
+    provider = SandboxBrowserProvider(executor=cast(SandboxExecutor, executor))
+    started = await provider.start_session(session_id="s1", profile_name=None)
+    assert started.provider_session_id == "s1"
+    assert any(
+        "--user-data-dir=/tmp/ash-browser/runtime/profile" in c
+        for c in executor.commands
+    )
