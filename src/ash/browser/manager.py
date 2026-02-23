@@ -10,7 +10,7 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ash.browser.providers.base import BrowserProvider, ProviderGotoResult
 from ash.browser.providers.kernel import KernelBrowserProvider
@@ -19,6 +19,9 @@ from ash.browser.store import BrowserStore
 from ash.browser.types import BrowserActionResult, BrowserProfile, BrowserSession
 from ash.config import AshConfig
 from ash.config.paths import get_browser_path
+
+if TYPE_CHECKING:
+    from ash.sandbox.executor import SandboxExecutor
 
 logger = logging.getLogger("browser")
 
@@ -93,6 +96,7 @@ class BrowserManager:
             provider_key == "sandbox"
             and self._config.browser.sandbox.runtime_required
             and not self._is_sandbox_runtime()
+            and not bool(getattr(provider, "runs_in_sandbox_executor", False))
         ):
             message = (
                 "sandbox_runtime_required: browser provider 'sandbox' must run "
@@ -825,7 +829,11 @@ class BrowserManager:
             return None
 
 
-def create_browser_manager(config: AshConfig) -> BrowserManager:
+def create_browser_manager(
+    config: AshConfig,
+    *,
+    sandbox_executor: SandboxExecutor | None = None,
+) -> BrowserManager:
     """Create a fully-wired browser manager."""
     # Runtime boundary contract: specs/browser.md
     # Sandbox provider execution must remain sandbox/container-scoped.
@@ -849,6 +857,7 @@ def create_browser_manager(config: AshConfig) -> BrowserManager:
             browser_channel=config.browser.sandbox.browser_channel,
             viewport_width=config.browser.default_viewport_width,
             viewport_height=config.browser.default_viewport_height,
+            executor=sandbox_executor,
         )
     }
     # Only expose Kernel when configured explicitly or when credentials exist.

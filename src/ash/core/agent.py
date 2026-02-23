@@ -1030,7 +1030,10 @@ async def create_agent(
     tool_registry.register(ReadFileTool(executor=shared_executor))
     tool_registry.register(WriteFileTool(executor=shared_executor))
 
-    browser_manager = create_browser_manager(config)
+    browser_manager = create_browser_manager(
+        config,
+        sandbox_executor=shared_executor,
+    )
     if config.browser.enabled:
         tool_registry.register(BrowserTool(browser_manager))
 

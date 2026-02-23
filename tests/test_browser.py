@@ -90,6 +90,11 @@ class _FakeKernelProvider(_FakeProvider):
     name = "kernel"
 
 
+class _FakeSandboxExecutorProvider(_FakeProvider):
+    name = "sandbox"
+    runs_in_sandbox_executor = True
+
+
 def _config() -> AshConfig:
     return AshConfig(
         workspace=Path("tmp-workspace"),
@@ -378,6 +383,26 @@ async def test_browser_tool_respects_runtime_gate_for_agent_calls(
     )
     assert result.is_error is True
     assert "sandbox_runtime_required" in result.content
+
+
+@pytest.mark.asyncio
+async def test_browser_manager_allows_executor_offload_when_host_runtime(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    manager = BrowserManager(
+        config=_strict_config(),
+        store=store,
+        providers={"sandbox": _FakeSandboxExecutorProvider()},
+    )
+    monkeypatch.setattr(manager, "_is_sandbox_runtime", lambda: False)
+
+    started = await manager.execute_action(
+        action="session.start",
+        effective_user_id="u1",
+        provider_name="sandbox",
+    )
+    assert started.ok is True
 
 
 @pytest.mark.asyncio
