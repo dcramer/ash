@@ -67,6 +67,8 @@ class SandboxBrowserProvider:
             f"mkdir -p {shlex.quote(base_dir)} && "
             "nohup chromium "
             "--headless=new "
+            "--no-sandbox "
+            "--disable-dev-shm-usage "
             "--disable-gpu "
             "--remote-debugging-address=127.0.0.1 "
             f"--remote-debugging-port={port} "
@@ -89,7 +91,9 @@ class SandboxBrowserProvider:
             raise ValueError(
                 f"sandbox_browser_launch_failed: invalid chromium pid '{pid_text}'"
             )
-        self._sessions[session_id] = _RemoteSandboxSession(port=port, pid=int(pid_text))
+        pid = int(pid_text)
+        await self._wait_for_cdp_ready(port=port, pid=pid, base_dir=base_dir)
+        self._sessions[session_id] = _RemoteSandboxSession(port=port, pid=pid)
         return ProviderStartResult(
             provider_session_id=session_id,
             metadata={"engine": "playwright", "browser": "chromium"},
@@ -355,9 +359,19 @@ asyncio.run(main())
             command,
             timeout=deadline_seconds,
             reuse_container=True,
+            environment={"NODE_OPTIONS": "--no-warnings"},
         )
         if not result.success:
-            message = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            stderr = result.stderr.strip()
+            if stderr:
+                cleaned_lines = [
+                    line
+                    for line in stderr.splitlines()
+                    if not line.startswith("(node:")
+                    and not line.startswith("(Use `node --trace-deprecation")
+                ]
+                stderr = "\n".join(cleaned_lines).strip()
+            message = stderr or result.stdout.strip() or "unknown error"
             raise ValueError(f"sandbox_browser_action_failed: {message}")
         output = (result.stdout or "").strip()
         if not output:
@@ -366,3 +380,46 @@ asyncio.run(main())
             return json.loads(output)
         except Exception as e:
             raise ValueError(f"sandbox_browser_parse_failed: {output[:200]}") from e
+
+    async def _wait_for_cdp_ready(self, *, port: int, pid: int, base_dir: str) -> None:
+        """Wait until Chromium CDP endpoint is reachable."""
+        executor = self._require_executor()
+        probe_script = """
+import sys, time, urllib.request
+port = sys.argv[1]
+deadline = time.time() + 12.0
+url = f"http://127.0.0.1:{port}/json/version"
+while time.time() < deadline:
+    try:
+        with urllib.request.urlopen(url, timeout=1.0) as resp:
+            if resp.status == 200:
+                print("ok")
+                raise SystemExit(0)
+    except Exception:
+        time.sleep(0.2)
+raise SystemExit(1)
+"""
+        probe = await executor.execute(
+            f"python -c {shlex.quote(probe_script)} {port}",
+            timeout=15,
+            reuse_container=True,
+        )
+        if probe.success:
+            return
+        log_tail_cmd = f"bash -lc {shlex.quote(f'tail -n 40 {shlex.quote(base_dir)}/chromium.log 2>/dev/null || true')}"
+        log_tail = await executor.execute(
+            log_tail_cmd,
+            timeout=10,
+            reuse_container=True,
+        )
+        _ = await executor.execute(
+            f"bash -lc {shlex.quote(f'kill {pid} >/dev/null 2>&1 || true')}",
+            timeout=5,
+            reuse_container=True,
+        )
+        details = (log_tail.stdout or log_tail.stderr or "").strip()
+        if details:
+            raise ValueError(
+                f"sandbox_browser_launch_failed: cdp_not_ready; chromium log: {details}"
+            )
+        raise ValueError("sandbox_browser_launch_failed: cdp_not_ready")
