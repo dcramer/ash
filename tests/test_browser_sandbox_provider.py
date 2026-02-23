@@ -105,6 +105,7 @@ async def test_sandbox_provider_uses_executor_for_full_flow() -> None:
     await provider.close_session(provider_session_id="s1")
     assert any("nohup chromium" in cmd for cmd in executor.commands)
     assert any("/json/version" in cmd for cmd in executor.commands)
+    assert any("kill 12345" in cmd for cmd in executor.commands)
 
 
 async def test_sandbox_provider_requires_executor() -> None:

@@ -1035,6 +1035,7 @@ async def create_agent(
         sandbox_executor=shared_executor,
     )
     if config.browser.enabled:
+        await browser_manager.warmup_default_provider()
         tool_registry.register(BrowserTool(browser_manager))
 
     # Register interrupt tool for agent checkpointing

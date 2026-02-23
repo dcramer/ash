@@ -95,6 +95,16 @@ class _FakeSandboxExecutorProvider(_FakeProvider):
     runs_in_sandbox_executor = True
 
 
+class _FakeWarmupProvider(_FakeProvider):
+    name = "sandbox"
+
+    def __init__(self) -> None:
+        self.warmup_calls = 0
+
+    async def warmup(self) -> None:
+        self.warmup_calls += 1
+
+
 def _config() -> AshConfig:
     return AshConfig(
         workspace=Path("tmp-workspace"),
@@ -403,6 +413,17 @@ async def test_browser_manager_allows_executor_offload_when_host_runtime(
         provider_name="sandbox",
     )
     assert started.ok is True
+
+
+@pytest.mark.asyncio
+async def test_browser_manager_warmup_default_provider(tmp_path) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    provider = _FakeWarmupProvider()
+    manager = BrowserManager(
+        config=_config(), store=store, providers={"sandbox": provider}
+    )
+    await manager.warmup_default_provider()
+    assert provider.warmup_calls == 1
 
 
 @pytest.mark.asyncio

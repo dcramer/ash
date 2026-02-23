@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import secrets
 import shlex
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ from ash.browser.providers.base import (
     ProviderStartResult,
 )
 from ash.sandbox.executor import SandboxExecutor
+
+logger = logging.getLogger("browser")
 
 
 @dataclass(slots=True)
@@ -75,7 +78,12 @@ class SandboxBrowserProvider:
         if not provider_session_id:
             return None
         self._sessions.discard(provider_session_id)
+        await self._shutdown_runtime_if_idle()
         return None
+
+    async def warmup(self) -> None:
+        """Boot and verify warm browser runtime ahead of first user action."""
+        await self._ensure_runtime()
 
     async def goto(
         self,
@@ -378,6 +386,14 @@ asyncio.run(main())
             if self._runtime and await self._is_runtime_healthy(self._runtime):
                 return self._runtime
             if self._runtime is not None:
+                logger.warning(
+                    "browser_sandbox_runtime_unhealthy",
+                    extra={
+                        "browser.provider": "sandbox",
+                        "browser.runtime_port": self._runtime.port,
+                        "browser.runtime_pid": self._runtime.pid,
+                    },
+                )
                 await self._kill_runtime(self._runtime)
                 self._runtime = None
             return await self._launch_runtime()
@@ -386,6 +402,12 @@ asyncio.run(main())
         executor = self._require_executor()
         base_dir = "/home/sandbox/.cache/ash-browser/runtime"
         last_error = "sandbox_browser_launch_failed: unknown startup failure"
+        logger.info(
+            "browser_sandbox_runtime_starting",
+            extra={
+                "browser.provider": "sandbox",
+            },
+        )
         for _ in range(8):
             port = self._pick_port()
             launch_cmd = (
@@ -431,8 +453,35 @@ asyncio.run(main())
                 await self._kill_runtime(runtime)
                 continue
             self._runtime = runtime
+            logger.info(
+                "browser_sandbox_runtime_ready",
+                extra={
+                    "browser.provider": "sandbox",
+                    "browser.runtime_port": runtime.port,
+                    "browser.runtime_pid": runtime.pid,
+                },
+            )
             return runtime
         raise ValueError(last_error)
+
+    async def _shutdown_runtime_if_idle(self) -> None:
+        """Stop warm runtime when no sessions remain to avoid orphan processes."""
+        if self._sessions:
+            return
+        async with self._runtime_lock:
+            if self._sessions or self._runtime is None:
+                return
+            runtime = self._runtime
+            self._runtime = None
+            await self._kill_runtime(runtime)
+            logger.info(
+                "browser_sandbox_runtime_stopped",
+                extra={
+                    "browser.provider": "sandbox",
+                    "browser.runtime_port": runtime.port,
+                    "browser.runtime_pid": runtime.pid,
+                },
+            )
 
     async def _is_runtime_healthy(self, runtime: _RemoteSandboxRuntime) -> bool:
         http_ok, _ = await self._probe_http_ready(runtime.port, timeout_seconds=2.0)

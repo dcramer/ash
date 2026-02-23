@@ -60,6 +60,37 @@ class BrowserManager:
             return True
         return Path("/.dockerenv").exists()
 
+    async def warmup_default_provider(self) -> None:
+        """Best-effort warmup for configured default provider."""
+        if not self._config.browser.enabled:
+            return
+        provider_key = self._config.browser.provider.strip().lower()
+        provider = self._providers.get(provider_key)
+        if provider is None:
+            return
+        warmup = getattr(provider, "warmup", None)
+        if not callable(warmup):
+            return
+        logger.info(
+            "browser_runtime_starting",
+            extra={"browser.provider": provider_key},
+        )
+        try:
+            await warmup()
+        except Exception as e:
+            logger.warning(
+                "browser_runtime_start_failed",
+                extra={
+                    "browser.provider": provider_key,
+                    "error.message": str(e),
+                },
+            )
+            return
+        logger.info(
+            "browser_runtime_ready",
+            extra={"browser.provider": provider_key},
+        )
+
     async def execute_action(
         self,
         *,
