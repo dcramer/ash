@@ -387,7 +387,7 @@ asyncio.run(main())
         probe_script = """
 import sys, time, urllib.request
 port = sys.argv[1]
-deadline = time.time() + 12.0
+deadline = time.time() + 30.0
 url = f"http://127.0.0.1:{port}/json/version"
 while time.time() < deadline:
     try:
@@ -401,11 +401,16 @@ raise SystemExit(1)
 """
         probe = await executor.execute(
             f"python -c {shlex.quote(probe_script)} {port}",
-            timeout=15,
+            timeout=35,
             reuse_container=True,
         )
         if probe.success:
             return
+        proc_alive = await executor.execute(
+            f"bash -lc {shlex.quote(f'kill -0 {pid} >/dev/null 2>&1 && echo alive || echo dead')}",
+            timeout=5,
+            reuse_container=True,
+        )
         log_tail_cmd = f"bash -lc {shlex.quote(f'tail -n 40 {shlex.quote(base_dir)}/chromium.log 2>/dev/null || true')}"
         log_tail = await executor.execute(
             log_tail_cmd,
@@ -418,8 +423,18 @@ raise SystemExit(1)
             reuse_container=True,
         )
         details = (log_tail.stdout or log_tail.stderr or "").strip()
+        probe_details = (probe.stderr or probe.stdout or "").strip()
+        alive_text = (proc_alive.stdout or "").strip()
         if details:
             raise ValueError(
                 f"sandbox_browser_launch_failed: cdp_not_ready; chromium log: {details}"
             )
-        raise ValueError("sandbox_browser_launch_failed: cdp_not_ready")
+        if probe_details:
+            raise ValueError(
+                "sandbox_browser_launch_failed: cdp_not_ready; "
+                f"probe={probe_details}; process={alive_text or 'unknown'}"
+            )
+        raise ValueError(
+            "sandbox_browser_launch_failed: cdp_not_ready; "
+            f"process={alive_text or 'unknown'}"
+        )
