@@ -48,6 +48,7 @@ class SandboxBrowserProvider:
         viewport_width: int = 1280,
         viewport_height: int = 720,
         executor: SandboxExecutor | None = None,
+        runtime_restart_attempts: int = 1,
     ) -> None:
         _ = (headless, browser_channel, viewport_width, viewport_height)
         self._executor = executor
@@ -56,6 +57,7 @@ class SandboxBrowserProvider:
         self._runtime_lock = asyncio.Lock()
         self._runtime_base_dir: str | None = None
         self.runs_in_sandbox_executor = executor is not None
+        self._runtime_restart_attempts = max(0, int(runtime_restart_attempts))
 
     async def start_session(
         self,
@@ -406,6 +408,9 @@ asyncio.run(main())
                 },
             )
         runtime = await self._ensure_runtime()
+        if await self._is_runtime_healthy(runtime):
+            return runtime.port
+        runtime = await self._recover_runtime(reason="action_runtime_unhealthy")
         return runtime.port
 
     async def _run_json(
@@ -569,6 +574,57 @@ asyncio.run(main())
                 await self._kill_runtime(self._runtime)
                 self._runtime = None
             return await self._launch_runtime()
+
+    async def _recover_runtime(self, *, reason: str) -> _RemoteSandboxRuntime:
+        """Bounded runtime recovery when runtime becomes unhealthy mid-session."""
+        logger.warning(
+            "browser_runtime_unhealthy",
+            extra={
+                "browser.provider": "sandbox",
+                "browser.reason": reason,
+            },
+        )
+        async with self._runtime_lock:
+            # Another coroutine may have already recovered the runtime.
+            if self._runtime and await self._is_runtime_healthy(self._runtime):
+                return self._runtime
+
+            if self._runtime is not None:
+                await self._kill_runtime(self._runtime)
+                self._runtime = None
+
+            attempts = max(1, self._runtime_restart_attempts)
+            last_error = "sandbox_browser_runtime_unavailable: restart_failed"
+            for attempt in range(1, attempts + 1):
+                logger.warning(
+                    "browser_runtime_restarting",
+                    extra={
+                        "browser.provider": "sandbox",
+                        "browser.reason": reason,
+                        "browser.restart_attempt": attempt,
+                        "browser.restart_max_attempts": attempts,
+                    },
+                )
+                try:
+                    runtime = await self._launch_runtime()
+                except ValueError as e:
+                    last_error = str(e)
+                    continue
+                if await self._is_runtime_healthy(runtime):
+                    return runtime
+                last_error = (
+                    "sandbox_browser_runtime_unavailable: post_restart_unhealthy"
+                )
+
+        logger.warning(
+            "browser_runtime_restart_failed",
+            extra={
+                "browser.provider": "sandbox",
+                "browser.reason": reason,
+                "error.message": last_error,
+            },
+        )
+        raise ValueError(last_error)
 
     async def _launch_runtime(self) -> _RemoteSandboxRuntime:
         base_dir = await self._resolve_runtime_base_dir()

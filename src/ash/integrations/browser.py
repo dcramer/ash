@@ -53,6 +53,8 @@ class BrowserIntegration(IntegrationContributor):
         manager = getattr(context.components, "browser_manager", None)
         if manager is None:
             return
+        if not context.config.browser.sandbox.runtime_warmup_on_start:
+            return
         if self._warmup_task is not None and not self._warmup_task.done():
             return
         # Spec contract: specs/subsystems.md (Integration Hooks)

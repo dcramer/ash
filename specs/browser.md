@@ -1,5 +1,8 @@
 # Browser Subsystem
 
+Implementation plan for adopting the service-style runtime model:
+- [specs/browser-runtime-v2.md](browser-runtime-v2.md)
+
 ## Scope
 
 Browser provides session-scoped page automation and artifacts for agent/tool workflows.
@@ -18,6 +21,14 @@ It does not own:
 
 - `sandbox`: Browser automation MUST execute inside the sandbox/container runtime.
 - `kernel`: Remote provider adapter.
+
+### Sandbox Runtime Controls
+
+`[browser.sandbox]` supports:
+
+- `runtime_required` (bool): require sandbox/container runtime.
+- `runtime_warmup_on_start` (bool): warm browser runtime during integration startup.
+- `runtime_restart_attempts` (int): bounded restart attempts when runtime becomes unhealthy.
 
 ## Hard Requirements
 

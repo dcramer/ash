@@ -977,6 +977,7 @@ def create_browser_manager(
             viewport_width=config.browser.default_viewport_width,
             viewport_height=config.browser.default_viewport_height,
             executor=sandbox_executor,
+            runtime_restart_attempts=config.browser.sandbox.runtime_restart_attempts,
         )
     else:
         providers["kernel"] = KernelBrowserProvider(
