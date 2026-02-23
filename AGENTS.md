@@ -40,6 +40,8 @@ Use `/dex-plan` to create tasks from planning docs (specs, roadmaps).
 - Do not add direct feature wiring branches in runtime entrypoints when an integration hook exists.
 - Keep prompt augmentation structured; prompt text rendering must stay centralized.
 - Add/update architecture guard tests when touching harness boundaries.
+- Subsystem behavior must be integration-owned: tool registration, prompt/context additions, sandbox env wiring, startup/shutdown lifecycle, and RPC exposure belong in integration hooks (not core agent wiring). See `specs/subsystems.md` (Integration Hooks), `specs/integrations.md`, and subsystem specs (e.g., `specs/browser.md`).
+- When adding/changing subsystem behavior, update the relevant spec first (or in the same change) and leave a spec-reference comment in boundary files.
 
 ## Skills
 

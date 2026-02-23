@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from typing import Any
 
+from ash.core.prompt import PromptContext
+from ash.core.session import SessionState
 from ash.integrations.runtime import IntegrationContext, IntegrationContributor
 
 
@@ -65,6 +68,38 @@ class BrowserIntegration(IntegrationContributor):
                 await self._warmup_task
         self._warmup_task = None
 
+    def augment_prompt_context(
+        self,
+        prompt_context: PromptContext,
+        session: SessionState,
+        context: IntegrationContext,
+    ) -> PromptContext:
+        _ = session
+        if not context.config.browser.enabled:
+            return prompt_context
+        manager = getattr(context.components, "browser_manager", None)
+        if manager is None:
+            return prompt_context
+
+        # Spec contract: specs/subsystems.md (Integration Hooks)
+        # Browser-specific instruction text is contributed via structured prompt hooks.
+        self._append_instruction(
+            prompt_context.extra_context,
+            "tool_routing_rules",
+            "Use `browser` for interactive/dynamic/authenticated workflows (click/type/wait/screenshots), or when `web_fetch` cannot access needed content.",
+        )
+        self._append_instruction(
+            prompt_context.extra_context,
+            "core_principles_rules",
+            "If the user asks for a screenshot/image from browser context, run `browser` with `page.screenshot` and send the image artifact in chat via `send_message` using `image_path`.",
+        )
+        self._append_instruction(
+            prompt_context.extra_context,
+            "core_principles_rules",
+            "When browser use is requested, never describe results without an actual browser tool outcome.",
+        )
+        return prompt_context
+
     def register_rpc_methods(self, server, context: IntegrationContext) -> None:
         from ash.rpc.methods.browser import register_browser_methods
 
@@ -72,3 +107,18 @@ class BrowserIntegration(IntegrationContributor):
         if manager is None:
             return
         register_browser_methods(server, manager)
+
+    @staticmethod
+    def _append_instruction(
+        extra_context: dict[str, Any],
+        key: str,
+        line: str,
+    ) -> None:
+        value = extra_context.get(key)
+        if isinstance(value, list):
+            rules = value
+        else:
+            rules = []
+            extra_context[key] = rules
+        if line not in rules:
+            rules.append(line)

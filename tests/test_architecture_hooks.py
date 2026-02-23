@@ -212,6 +212,19 @@ def test_browser_runtime_wiring_is_integration_owned() -> None:
     }
 
 
+def test_browser_prompt_guidance_is_integration_owned() -> None:
+    prompt_text = (ROOT / "src/ash/core/prompt.py").read_text(encoding="utf-8")
+    assert "Web/Search/Browser Routing" not in prompt_text
+    assert "screenshot/image from the browser" not in prompt_text
+    assert "`web_search` -> `web_fetch` -> `browser`" not in prompt_text
+
+    integration_text = (ROOT / "src/ash/integrations/browser.py").read_text(
+        encoding="utf-8"
+    )
+    assert "tool_routing_rules" in integration_text
+    assert "core_principles_rules" in integration_text
+
+
 def test_ensure_self_person_wiring_avoids_core_agent() -> None:
     files = _python_files_under("src/ash")
 

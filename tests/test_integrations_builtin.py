@@ -9,6 +9,8 @@ import pytest
 
 from ash.config import AshConfig
 from ash.config.models import ModelConfig
+from ash.core.prompt import PromptContext
+from ash.core.session import SessionState
 from ash.integrations import (
     BrowserIntegration,
     IntegrationContext,
@@ -178,3 +180,42 @@ async def test_browser_integration_owns_manager_tool_and_warmup(monkeypatch) -> 
     await integration.on_startup(context)
     await asyncio.sleep(0)
     assert fake_manager.warmup_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_browser_integration_injects_prompt_guidance_via_hook(
+    monkeypatch,
+) -> None:
+    context = _context()
+    integration = BrowserIntegration()
+
+    class _FakeManager:
+        async def warmup_default_provider(self) -> None:
+            return None
+
+    fake_manager = _FakeManager()
+    monkeypatch.setattr(
+        "ash.browser.create_browser_manager",
+        lambda *args, **kwargs: fake_manager,
+    )
+
+    # Drive setup so manager exists on context components.
+    await integration.setup(context)
+
+    session = SessionState(
+        session_id="s-1",
+        provider="telegram",
+        chat_id="c-1",
+        user_id="u-1",
+    )
+    prompt_context = integration.augment_prompt_context(
+        PromptContext(),
+        session,
+        context,
+    )
+    routing = prompt_context.extra_context.get("tool_routing_rules")
+    principles = prompt_context.extra_context.get("core_principles_rules")
+    assert isinstance(routing, list)
+    assert isinstance(principles, list)
+    assert any("Use `browser` for interactive" in line for line in routing)
+    assert any("page.screenshot" in line for line in principles)

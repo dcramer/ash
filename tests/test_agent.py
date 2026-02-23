@@ -787,8 +787,8 @@ class TestSystemPromptBuilder:
         assert "Available Tools" in prompt
         assert "Tool Call Style" in prompt
         assert "Sandbox" in prompt
-        assert "Web/Search/Browser Routing" in prompt
-        assert "`web_search` -> `web_fetch` -> `browser`" in prompt
+        assert "Web/Search Routing" in prompt
+        assert "`web_search` -> `web_fetch`" in prompt
         assert "test assistant" in prompt.lower()
 
     def test_build_full_mode_narration_not_in_tools_section(self, prompt_builder):
@@ -809,7 +809,7 @@ class TestSystemPromptBuilder:
             PromptContext(runtime=runtime), mode=PromptMode.MINIMAL
         )
         assert "## Tool Usage" in prompt
-        assert "Web/Search/Browser Routing" in prompt
+        assert "Web/Search Routing" in prompt
         assert "attempt the task now with tools" in prompt
         assert "## Sandbox" in prompt
         assert "## Runtime" in prompt
@@ -856,8 +856,8 @@ class TestSystemPromptBuilder:
         assert "Be brief" in prompt
         assert "Skip filler" in prompt
         assert "prefer resolved real names" in prompt
-        assert "page.screenshot" in prompt
-        assert "image_path" in prompt
+        assert "page.screenshot" not in prompt
+        assert "image_path" not in prompt
 
     def test_build_sender_section_includes_resolved_sender_identity(
         self, prompt_builder

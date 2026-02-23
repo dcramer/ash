@@ -210,13 +210,19 @@ class SystemPromptBuilder:
             return "".join(parts)
 
         if mode == PromptMode.MINIMAL:
+            routing_rules = [
+                *self._WEB_TOOL_ROUTING_RULES,
+                *self._extra_instruction_lines(
+                    context.extra_context, "tool_routing_rules"
+                ),
+            ]
             tool_guidance = "\n".join(
                 [
                     "## Tool Usage",
                     "",
                     *self._TOOL_OPERATIONAL_RULES,
                     "",
-                    *self._WEB_TOOL_ROUTING_RULES,
+                    *routing_rules,
                     "",
                     *self._TOOL_NARRATION_RULES,
                 ]
@@ -231,10 +237,10 @@ class SystemPromptBuilder:
 
         # PromptMode.FULL
         sections = [
-            self._build_core_principles_section(),
+            self._build_core_principles_section(context),
             self._build_silent_replies_section(context),
             self._build_safety_section(),
-            self._build_tools_section(),
+            self._build_tools_section(context),
             self._build_tool_call_style_section(),
             self._build_skills_section(),
             self._build_agents_section(),
@@ -259,30 +265,33 @@ class SystemPromptBuilder:
 
         return "".join(parts)
 
-    def _build_core_principles_section(self) -> str:
-        return "\n".join(
-            [
-                "## Core Principles",
-                "",
-                "You are a knowledgeable, resourceful assistant. Act like a smart friend with powerful tools.",
-                "",
-                "- Be brief. Answer the question, then stop.",
-                '- Skip filler: no "Great question!", no "I\'d be happy to help!", no "Let me know if you need anything else"',
-                "- End naturally. Never end with follow-up questions unless you genuinely need clarification.",
-                "- ALWAYS use tools for lookups — never assume or guess. Search first, answer second.",
-                "- Treat direct requests as execution requests. If the user asks you to check/test/do something, run the relevant tool now instead of proposing what you could do.",
-                "- For capability questions (e.g., 'can we do X?'), verify by attempting the task with available tools and report what actually happened.",
-                "- If the user asks for a screenshot/image from the browser, run `browser` with `page.screenshot` and send the image artifact back in chat via `send_message` using `image_path`.",
-                "- For people/profile lookups, prefer resolved real names when available; use handles/usernames as fallback terms.",
-                "- NEVER claim success without verification — check tool output before reporting.",
-                "- If a requested tool check fails, do NOT backfill the answer from memory/prior knowledge. State that it is unverified and stop.",
-                "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
-                "- Report failures with actual error messages. If output is empty, say so.",
-                "- When a tool returns unexpected, empty, or confusing results, DO NOT guess or make excuses. Investigate: re-read the output, try alternative approaches, or use the debug-self skill to trace what went wrong.",
-                "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice",
-                "- For deep research, delegate to the `research` skill.",
-            ]
+    def _build_core_principles_section(self, context: PromptContext) -> str:
+        lines = [
+            "## Core Principles",
+            "",
+            "You are a knowledgeable, resourceful assistant. Act like a smart friend with powerful tools.",
+            "",
+            "- Be brief. Answer the question, then stop.",
+            '- Skip filler: no "Great question!", no "I\'d be happy to help!", no "Let me know if you need anything else"',
+            "- End naturally. Never end with follow-up questions unless you genuinely need clarification.",
+            "- ALWAYS use tools for lookups — never assume or guess. Search first, answer second.",
+            "- Treat direct requests as execution requests. If the user asks you to check/test/do something, run the relevant tool now instead of proposing what you could do.",
+            "- For capability questions (e.g., 'can we do X?'), verify by attempting the task with available tools and report what actually happened.",
+            "- For people/profile lookups, prefer resolved real names when available; use handles/usernames as fallback terms.",
+            "- NEVER claim success without verification — check tool output before reporting.",
+            "- If a requested tool check fails, do NOT backfill the answer from memory/prior knowledge. State that it is unverified and stop.",
+            "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
+            "- Report failures with actual error messages. If output is empty, say so.",
+            "- When a tool returns unexpected, empty, or confusing results, DO NOT guess or make excuses. Investigate: re-read the output, try alternative approaches, or use the debug-self skill to trace what went wrong.",
+            "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice",
+            "- For deep research, delegate to the `research` skill.",
+        ]
+        lines.extend(
+            self._extra_instruction_lines(
+                context.extra_context, "core_principles_rules"
+            )
         )
+        return "\n".join(lines)
 
     def _build_silent_replies_section(self, context: PromptContext) -> str:
         if not context.allow_no_reply:
@@ -329,11 +338,10 @@ class SystemPromptBuilder:
     ]
 
     _WEB_TOOL_ROUTING_RULES: list[str] = [
-        "### Web/Search/Browser Routing",
-        "- Start with the cheapest tool that can answer accurately: `web_search` -> `web_fetch` -> `browser`.",
+        "### Web/Search Routing",
+        "- Start with the cheapest tool that can answer accurately: `web_search` -> `web_fetch`.",
         "- Use `web_search` to discover sources, URLs, and what exists.",
         "- Use `web_fetch` when you already have a URL and need content reading without interaction.",
-        "- Use `browser` for interactive/dynamic/authenticated workflows (click/type/wait/screenshots), or when `web_fetch` cannot access needed content.",
         "- For capability checks (e.g., 'can we do X?'), attempt the task now with tools instead of answering hypothetically.",
         "- If a step fails, report the exact error and escalate to the next viable tool. Never claim success without verification.",
     ]
@@ -344,7 +352,7 @@ class SystemPromptBuilder:
         "- Keep narration brief and value-dense; avoid repeating obvious steps",
     ]
 
-    def _build_tools_section(self) -> str:
+    def _build_tools_section(self, context: PromptContext) -> str:
         tool_defs = self._tools.get_definitions()
         if not tool_defs:
             return ""
@@ -368,6 +376,9 @@ class SystemPromptBuilder:
                 "",
                 *self._WEB_TOOL_ROUTING_RULES,
             ]
+        )
+        lines.extend(
+            self._extra_instruction_lines(context.extra_context, "tool_routing_rules")
         )
 
         return "\n".join(lines)
@@ -416,10 +427,12 @@ class SystemPromptBuilder:
         return "\n".join(lines)
 
     def _build_extra_context_section(self, extra_context: dict[str, Any]) -> str:
-        if not extra_context:
+        reserved = {"core_principles_rules", "tool_routing_rules"}
+        payload_data = {k: v for k, v in extra_context.items() if k not in reserved}
+        if not payload_data:
             return ""
 
-        payload = json.dumps(extra_context, indent=2, sort_keys=True)
+        payload = json.dumps(payload_data, indent=2, sort_keys=True)
         return "\n".join(
             [
                 "## Integration Context",
@@ -430,6 +443,26 @@ class SystemPromptBuilder:
                 "```",
             ]
         )
+
+    @staticmethod
+    def _extra_instruction_lines(
+        extra_context: dict[str, Any],
+        key: str,
+    ) -> list[str]:
+        value = extra_context.get(key)
+        if not isinstance(value, list):
+            return []
+        lines: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            text = item.strip()
+            if not text:
+                continue
+            if not text.startswith("-"):
+                text = f"- {text}"
+            lines.append(text)
+        return lines
 
     def _build_agents_section(self) -> str:
         if not self._agents:
