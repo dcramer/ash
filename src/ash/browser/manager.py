@@ -228,6 +228,10 @@ class BrowserManager:
                     session_name=session_name,
                     provider_name=provider_key,
                     url=str(params.get("url") or "").strip(),
+                    timeout_seconds=float(
+                        params.get("timeout_seconds")
+                        or self._config.browser.timeout_seconds
+                    ),
                 )
             if action == "page.extract":
                 return await self._page_extract(
@@ -528,6 +532,7 @@ class BrowserManager:
         session_name: str | None,
         provider_name: str,
         url: str,
+        timeout_seconds: float,
     ) -> BrowserActionResult:
         if not url:
             return BrowserActionResult(
@@ -555,7 +560,7 @@ class BrowserManager:
             provider.goto(
                 provider_session_id=session.provider_session_id,
                 url=url,
-                timeout_seconds=self._config.browser.timeout_seconds,
+                timeout_seconds=max(1.0, timeout_seconds),
             ),
         )
 

@@ -137,7 +137,20 @@ async def main():
         page = await session_page(browser, session_id, True)
         if page is None:
             raise RuntimeError("session_page_missing")
-        await page.goto(url, wait_until="domcontentloaded", timeout=int(max(1.0, timeout_s) * 1000))
+        try:
+            await page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=int(max(1.0, timeout_s) * 1000),
+            )
+        except Exception:
+            # Some sites never reach DOMContentLoaded in constrained/headless envs.
+            # Fallback to commit so we can still capture URL/title/content best-effort.
+            await page.goto(
+                url,
+                wait_until="commit",
+                timeout=int(max(1.0, min(timeout_s, 12.0)) * 1000),
+            )
         title = await page.title()
         html = await page.content()
         print(json.dumps({"url": page.url, "title": title, "html": html}, ensure_ascii=True))
