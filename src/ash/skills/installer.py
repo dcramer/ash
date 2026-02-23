@@ -550,7 +550,15 @@ class SkillInstaller:
 
         for source in sources:
             try:
-                installed = self.install_source(source)
+                # Always refresh path sources so changed SKILL.md trees are picked up.
+                if source.path:
+                    installed = self.install_path_source(source.path, force=True)
+                else:
+                    installed = self.install_source(source)
+                if source.repo:
+                    updated = self.update(repo=source.repo)
+                    if updated is not None:
+                        installed = updated
                 results.append(installed)
             except SkillInstallerError as e:
                 logger.error(

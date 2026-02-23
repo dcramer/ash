@@ -3,11 +3,14 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from ash.config import AshConfig
 
 
 def register(app: typer.Typer) -> None:
@@ -139,6 +142,10 @@ async def _run_server(
     if not provider_runtime.senders:
         logger.debug("schedule watcher disabled (no providers)")
 
+    skill_auto_sync_task: asyncio.Task[None] | None = None
+    if ash_config.skill_auto_sync and ash_config.skill_sources:
+        skill_auto_sync_task = _start_skill_auto_sync_task(ash_config)
+
     # Compose integration contributors for runtime wiring.
     default_integrations = create_default_integrations(
         mode="serve",
@@ -213,13 +220,46 @@ async def _run_server(
                 telegram_provider,
                 components.sandbox_executor,
                 pid_path,
+                skill_auto_sync_task,
             )
+
+
+def _start_skill_auto_sync_task(ash_config: "AshConfig") -> asyncio.Task[None]:
+    """Start periodic background sync of configured skill sources."""
+    from ash.skills.installer import SkillInstaller
+
+    interval_minutes = max(1, int(ash_config.skill_update_interval_minutes))
+    logger.info(
+        "skill_sources_auto_sync_started",
+        extra={"interval.minutes": interval_minutes},
+    )
+
+    async def _loop() -> None:
+        installer = SkillInstaller()
+        while True:
+            try:
+                synced = await asyncio.to_thread(
+                    installer.sync_all, ash_config.skill_sources
+                )
+                logger.info(
+                    "skill_sources_auto_sync_complete",
+                    extra={"count": len(synced)},
+                )
+            except Exception as e:
+                logger.warning(
+                    "skill_sources_auto_sync_failed",
+                    extra={"error.message": str(e)},
+                )
+            await asyncio.sleep(interval_minutes * 60)
+
+    return asyncio.create_task(_loop(), name="skill-auto-sync")
 
 
 async def _cleanup_server(
     telegram_provider,
     sandbox_executor,
     pid_path: Path,
+    skill_auto_sync_task: asyncio.Task[None] | None = None,
 ) -> None:
     """Clean up server resources."""
     from ash.service.pid import remove_pid_file
@@ -249,6 +289,13 @@ async def _cleanup_server(
                     "cleanup_error",
                     extra={"cleanup.method": method, "error.message": str(e)},
                 )
+
+    if skill_auto_sync_task:
+        skill_auto_sync_task.cancel()
+        try:
+            await skill_auto_sync_task
+        except asyncio.CancelledError:
+            pass
 
     remove_pid_file(pid_path)
     remove_runtime_state()

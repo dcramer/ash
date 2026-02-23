@@ -89,10 +89,12 @@ class BrowserManager:
                 error_code="invalid_provider",
                 error_message=f"unsupported provider: {provider_key}",
             )
+        request_origin = str(params.get("_request_origin") or "").strip().lower()
         if (
             provider_key == "sandbox"
             and self._config.browser.sandbox.runtime_required
             and not self._is_sandbox_runtime()
+            and request_origin != "agent_tool"
         ):
             message = (
                 "sandbox_runtime_required: browser provider 'sandbox' must run "

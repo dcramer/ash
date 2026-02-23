@@ -520,3 +520,33 @@ class TestAshConfigTimezoneDefault:
                 timezone="Invalid/Timezone",
             )
         assert "Invalid timezone" in str(exc_info.value)
+
+
+class TestSkillAutoSyncConfig:
+    def test_parses_skill_auto_sync_minutes(self):
+        from ash.config.models import AshConfig
+
+        config = AshConfig.model_validate(
+            {
+                "models": {"default": {"provider": "openai", "model": "test"}},
+                "skills": {
+                    "auto_sync": True,
+                    "update_interval_minutes": 5,
+                    "sources": [{"repo": "owner/repo"}],
+                },
+            }
+        )
+        assert config.skill_auto_sync is True
+        assert config.skill_update_interval_minutes == 5
+        assert len(config.skill_sources) == 1
+
+    def test_legacy_hours_interval_converts_to_minutes(self):
+        from ash.config.models import AshConfig
+
+        config = AshConfig.model_validate(
+            {
+                "models": {"default": {"provider": "openai", "model": "test"}},
+                "skills": {"auto_sync": True, "update_interval": 2},
+            }
+        )
+        assert config.skill_update_interval_minutes == 120

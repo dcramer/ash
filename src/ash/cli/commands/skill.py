@@ -317,7 +317,7 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Sync all skill sources from config.
 
-        Installs any sources in [[skills.sources]] that aren't installed yet.
+        Installs missing sources and refreshes existing ones.
 
         Examples:
             ash skill sync
@@ -336,7 +336,14 @@ def register(app: typer.Typer) -> None:
 
         for source in config.skill_sources:
             try:
-                result = installer.install_source(source)
+                if source.path:
+                    result = installer.install_path_source(source.path, force=True)
+                else:
+                    result = installer.install_source(source)
+                    if source.repo:
+                        updated = installer.update(repo=source.repo)
+                        if updated is not None:
+                            result = updated
                 results.append(result)
                 info(
                     f"Synced {source.repo or source.path}: "

@@ -232,6 +232,58 @@ Instructions here.
 
         assert result.path == str(skill_dir)
 
+    def test_sync_all_updates_existing_repos(self, installer):
+        """sync_all should install and then update repo sources."""
+        source = SkillSource(repo="owner/repo")
+        installed = InstalledSource(
+            repo="owner/repo",
+            install_path="installed/owner__repo",
+        )
+        updated = InstalledSource(
+            repo="owner/repo",
+            install_path="installed/owner__repo",
+            commit_sha="abc123",
+        )
+
+        with (
+            patch.object(
+                installer, "install_source", return_value=installed
+            ) as mock_install,
+            patch.object(installer, "update", return_value=updated) as mock_update,
+        ):
+            results = installer.sync_all([source])
+
+        mock_install.assert_called_once_with(source)
+        mock_update.assert_called_once_with(repo="owner/repo")
+        assert len(results) == 1
+        assert results[0].commit_sha == "abc123"
+
+    def test_sync_all_refreshes_path_sources(self, installer):
+        """sync_all should force-refresh local path sources."""
+        source = SkillSource(path="~/skills")
+        refreshed = InstalledSource(
+            path="~/skills",
+            install_path="installed/local/skills",
+            skills=["a", "b"],
+        )
+
+        with (
+            patch.object(
+                installer,
+                "install_path_source",
+                return_value=refreshed,
+            ) as mock_install_path,
+            patch.object(installer, "install_source") as mock_install_source,
+            patch.object(installer, "update") as mock_update,
+        ):
+            results = installer.sync_all([source])
+
+        mock_install_path.assert_called_once_with("~/skills", force=True)
+        mock_install_source.assert_not_called()
+        mock_update.assert_not_called()
+        assert len(results) == 1
+        assert results[0].skills == ["a", "b"]
+
 
 class TestConfigWriter:
     """Tests for ConfigWriter."""

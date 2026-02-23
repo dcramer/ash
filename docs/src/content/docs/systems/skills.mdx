@@ -107,14 +107,16 @@ Details about how to accomplish the task...
 
 ```toml
 [skills]
-auto_sync = true       # Sync sources on startup (optional)
-update_interval = 24   # Hours between auto-updates (optional)
+auto_sync = true                 # Sync sources on startup (optional)
+update_interval_minutes = 5      # Minutes between auto-updates (optional)
 ```
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `auto_sync` | bool | `false` | Automatically sync sources on startup |
-| `update_interval` | int | `24` | Hours between automatic updates |
+| `update_interval_minutes` | int | `5` | Minutes between automatic updates |
+
+`update_interval` (hours) is still accepted for backward compatibility.
 
 ### External Sources
 

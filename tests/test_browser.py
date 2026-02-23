@@ -360,6 +360,26 @@ async def test_browser_manager_requires_sandbox_runtime_when_enabled(
 
 
 @pytest.mark.asyncio
+async def test_browser_tool_bypasses_runtime_gate_for_agent_calls(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    manager = BrowserManager(
+        config=_strict_config(),
+        store=store,
+        providers={"sandbox": _FakeProvider()},
+    )
+    monkeypatch.setattr(manager, "_is_sandbox_runtime", lambda: False)
+    tool = BrowserTool(manager)
+
+    result = await tool.execute(
+        {"action": "session.start", "provider": "sandbox"},
+        ToolContext(user_id="u1"),
+    )
+    assert result.is_error is False
+
+
+@pytest.mark.asyncio
 async def test_create_browser_manager_omits_kernel_when_unconfigured(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

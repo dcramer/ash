@@ -401,7 +401,7 @@ class AshConfig(BaseModel):
     skill_sources: list[SkillSource] = Field(default_factory=list)
     # Auto-sync configuration from [skills] section
     skill_auto_sync: bool = False
-    skill_update_interval: int = 24  # Hours between auto-updates
+    skill_update_interval_minutes: int = Field(default=5, ge=1)
 
     @model_validator(mode="before")
     @classmethod
@@ -411,7 +411,7 @@ class AshConfig(BaseModel):
         TOML structure:
             [skills]
             auto_sync = true
-            update_interval = 24
+            update_interval_minutes = 5
 
             [[skills.sources]]
             repo = "owner/repo"
@@ -421,7 +421,7 @@ class AshConfig(BaseModel):
 
         Becomes:
             skill_auto_sync = True
-            skill_update_interval = 24
+            skill_update_interval_minutes = 5
             skill_sources = [SkillSource(repo="owner/repo")]
             skills = {"research": SkillConfig(...)}
         """
@@ -438,11 +438,18 @@ class AshConfig(BaseModel):
         # Extract sources array and global settings
         sources = skills_data.pop("sources", [])
         auto_sync = skills_data.pop("auto_sync", False)
-        update_interval = skills_data.pop("update_interval", 24)
+        update_interval_minutes = skills_data.pop("update_interval_minutes", None)
+        # Backward-compat: legacy `update_interval` was in hours.
+        update_interval_hours = skills_data.pop("update_interval", None)
+        if update_interval_minutes is None:
+            if update_interval_hours is not None:
+                update_interval_minutes = int(update_interval_hours) * 60
+            else:
+                update_interval_minutes = 5
 
         data["skill_sources"] = sources
         data["skill_auto_sync"] = auto_sync
-        data["skill_update_interval"] = update_interval
+        data["skill_update_interval_minutes"] = update_interval_minutes
         # Remaining entries are per-skill configs
         data["skills"] = skills_data
         return data
