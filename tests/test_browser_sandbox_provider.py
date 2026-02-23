@@ -9,7 +9,7 @@ from ash.sandbox.executor import ExecutionResult, SandboxExecutor
 class _FakeExecutor:
     def __init__(self) -> None:
         self.commands: list[str] = []
-        self._python_calls = 0
+        self._extract_calls = 0
 
     async def execute(
         self,
@@ -27,25 +27,28 @@ class _FakeExecutor:
         if "/json/version" in command:
             return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
         if "python -c" in command:
-            self._python_calls += 1
-        if self._python_calls == 1:
-            return ExecutionResult(
-                exit_code=0,
-                stdout='{"url":"https://example.com","title":"Example","html":"<html></html>"}\n',
-                stderr="",
-            )
-        if self._python_calls == 2:
-            return ExecutionResult(exit_code=0, stdout='{"text":"Hello"}\n', stderr="")
-        if self._python_calls == 3:
-            return ExecutionResult(
-                exit_code=0, stdout='{"title":"Example"}\n', stderr=""
-            )
-        if self._python_calls == 7:
-            return ExecutionResult(
-                exit_code=0,
-                stdout='{"image_b64":"aGVsbG8="}\n',
-                stderr="",
-            )
+            if "page.goto(" in command:
+                return ExecutionResult(
+                    exit_code=0,
+                    stdout='{"url":"https://example.com","title":"Example","html":"<html></html>"}\n',
+                    stderr="",
+                )
+            if "mode, selector, max_chars" in command:
+                self._extract_calls += 1
+                if self._extract_calls == 1:
+                    return ExecutionResult(
+                        exit_code=0, stdout='{"text":"Hello"}\n', stderr=""
+                    )
+                return ExecutionResult(
+                    exit_code=0, stdout='{"title":"Example"}\n', stderr=""
+                )
+            if "page.screenshot" in command:
+                return ExecutionResult(
+                    exit_code=0,
+                    stdout='{"image_b64":"aGVsbG8="}\n',
+                    stderr="",
+                )
+            return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
         return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
 
 

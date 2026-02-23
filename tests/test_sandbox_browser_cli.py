@@ -6,6 +6,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -21,6 +22,7 @@ from ash.config.models import (
 )
 from ash.integrations import BrowserIntegration, IntegrationContext, IntegrationRuntime
 from ash.integrations.rpc import active_rpc_server
+from ash.sandbox.executor import ExecutionResult, SandboxExecutor
 
 
 def _runner(env: dict[str, str]) -> CliRunner:
@@ -110,7 +112,37 @@ async def test_browser_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
             sandbox=BrowserSandboxConfig(runtime_required=False),
         ),
     )
-    browser_manager = create_browser_manager(config)
+
+    class _RPCFakeExecutor:
+        async def execute(
+            self,
+            command: str,
+            command_timeout: int | None = None,
+            reuse_container: bool = True,
+            environment: dict[str, str] | None = None,
+            **kwargs: object,
+        ) -> ExecutionResult:
+            if "timeout" in kwargs and isinstance(kwargs["timeout"], (int, type(None))):
+                command_timeout = kwargs["timeout"]
+            _ = (command_timeout, reuse_container, environment)
+            if "nohup chromium" in command:
+                return ExecutionResult(exit_code=0, stdout="23456\n", stderr="")
+            if "/json/version" in command:
+                return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
+            if "document.body" in command:
+                return ExecutionResult(
+                    exit_code=0,
+                    stdout='{"text":""}\n',
+                    stderr="",
+                )
+            if "python -c" in command:
+                return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
+            return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
+
+    browser_manager = create_browser_manager(
+        config,
+        sandbox_executor=cast(SandboxExecutor, _RPCFakeExecutor()),
+    )
     components = SimpleNamespace(browser_manager=browser_manager)
     context = IntegrationContext(
         config=config,

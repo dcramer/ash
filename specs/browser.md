@@ -28,6 +28,11 @@ It does not own:
 5. Retention settings MUST be enforced at runtime:
    - `browser.max_session_minutes`
    - `browser.artifacts_retention_days`
+6. `sandbox` provider SHOULD keep a warm Chromium runtime per sandbox container and attach sessions to it.
+7. `sandbox` provider startup MUST gate on CDP readiness in two phases:
+   - HTTP endpoint readiness (`/json/version` with `webSocketDebuggerUrl`)
+   - CDP websocket handshake readiness
+8. CDP startup failures MUST include actionable diagnostics (phase + process/log details).
 
 ## Integration Contract
 
