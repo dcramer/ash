@@ -28,6 +28,18 @@ class _FakeExecutor:
         if "/json/version" in command:
             return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
         if "python -c" in command:
+            if "/json/list" in command:
+                return ExecutionResult(
+                    exit_code=0,
+                    stdout='{"exists": true}\n',
+                    stderr="",
+                )
+            if "target_id_missing" in command:
+                return ExecutionResult(
+                    exit_code=0,
+                    stdout='{"target_id":"target-s1"}\n',
+                    stderr="",
+                )
             if "page.goto(" in command:
                 return ExecutionResult(
                     exit_code=0,
@@ -205,6 +217,14 @@ async def test_sandbox_provider_falls_back_to_tmp_runtime_dir() -> None:
             if "/json/version" in command:
                 return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
             if "python -c" in command:
+                if "/json/list" in command:
+                    return ExecutionResult(
+                        exit_code=0, stdout='{"exists": true}\n', stderr=""
+                    )
+                if "target_id_missing" in command:
+                    return ExecutionResult(
+                        exit_code=0, stdout='{"target_id":"target-s1"}\n', stderr=""
+                    )
                 return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
             return ExecutionResult(exit_code=0, stdout="", stderr="")
 

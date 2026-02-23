@@ -53,6 +53,7 @@ class SandboxBrowserProvider:
         _ = (headless, browser_channel, viewport_width, viewport_height)
         self._executor = executor
         self._sessions: set[str] = set()
+        self._session_targets: dict[str, str] = {}
         self._runtime: _RemoteSandboxRuntime | None = None
         self._runtime_lock = asyncio.Lock()
         self._runtime_base_dir: str | None = None
@@ -67,16 +68,32 @@ class SandboxBrowserProvider:
     ) -> ProviderStartResult:
         _ = profile_name
         if session_id in self._sessions:
+            target_id = await self._resolve_target_id(
+                session_id=session_id,
+                create_if_missing=True,
+            )
             return ProviderStartResult(
                 provider_session_id=session_id,
-                metadata={"engine": "playwright", "browser": "chromium"},
+                metadata={
+                    "engine": "playwright",
+                    "browser": "chromium",
+                    "target_id": target_id,
+                },
             )
         runtime = await self._ensure_runtime()
-        await self._ensure_session_page(session_id=session_id, port=runtime.port)
+        target_id = await self._resolve_target_id(
+            session_id=session_id,
+            create_if_missing=True,
+            runtime_port=runtime.port,
+        )
         self._sessions.add(session_id)
         return ProviderStartResult(
             provider_session_id=session_id,
-            metadata={"engine": "playwright", "browser": "chromium"},
+            metadata={
+                "engine": "playwright",
+                "browser": "chromium",
+                "target_id": target_id,
+            },
         )
 
     async def close_session(self, *, provider_session_id: str | None) -> None:
@@ -84,11 +101,17 @@ class SandboxBrowserProvider:
             return None
         try:
             port = await self._resolve_session_port(provider_session_id)
-            await self._close_session_page(session_id=provider_session_id, port=port)
+            target_id = await self._resolve_target_id(
+                session_id=provider_session_id,
+                create_if_missing=False,
+                runtime_port=port,
+            )
+            await self._close_target_page(target_id=target_id, port=port)
         except ValueError:
             # Best-effort close: session/runtime may already be gone.
             pass
         self._sessions.discard(provider_session_id)
+        self._session_targets.pop(provider_session_id, None)
         await self._shutdown_runtime_if_idle()
         return None
 
@@ -106,39 +129,40 @@ class SandboxBrowserProvider:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"}:
             raise ValueError("invalid_url_scheme")
+        if not provider_session_id:
+            raise ValueError("session_not_found")
         port = await self._resolve_session_port(provider_session_id)
+        target_id = await self._resolve_target_id(
+            session_id=provider_session_id,
+            create_if_missing=True,
+            runtime_port=port,
+        )
         payload = await self._run_json(
             code="""
 import asyncio, json, sys
 from playwright.async_api import async_playwright
-port, session_id, url, timeout_s = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
+port, target_id, url, timeout_s = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
 
-async def session_page(browser, session_id, create_if_missing):
+async def page_by_target(browser, target_id):
     for context in browser.contexts:
         for page in context.pages:
             try:
-                name = await page.evaluate("() => window.name || ''")
+                cdp = await context.new_cdp_session(page)
+                info = await cdp.send("Target.getTargetInfo")
+                page_target = info.get("targetInfo", {}).get("targetId", "")
             except Exception:
-                name = ""
-            if name == session_id:
+                page_target = ""
+            if page_target == target_id:
                 return page
-    if not create_if_missing:
-        return None
-    context = browser.contexts[0] if browser.contexts else await browser.new_context()
-    page = context.pages[0] if context.pages else await context.new_page()
-    try:
-        await page.evaluate("(sid) => { window.name = sid; }", session_id)
-    except Exception:
-        pass
-    return page
+    return None
 
 async def main():
     pw = await async_playwright().start()
     browser = await pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
     try:
-        page = await session_page(browser, session_id, True)
+        page = await page_by_target(browser, target_id)
         if page is None:
-            raise RuntimeError("session_page_missing")
+            raise RuntimeError("session_target_missing")
         try:
             await page.goto(
                 url,
@@ -161,7 +185,7 @@ async def main():
         await pw.stop()
 asyncio.run(main())
 """,
-            args=[str(port), str(provider_session_id), url, str(timeout_seconds)],
+            args=[str(port), target_id, url, str(timeout_seconds)],
             deadline_seconds=max(30, int(timeout_seconds) + 5),
         )
         return ProviderGotoResult(
@@ -180,24 +204,33 @@ asyncio.run(main())
         max_chars: int,
     ) -> ProviderExtractResult:
         _ = html
+        if not provider_session_id:
+            raise ValueError("session_not_found")
         port = await self._resolve_session_port(provider_session_id)
+        target_id = await self._resolve_target_id(
+            session_id=provider_session_id,
+            create_if_missing=False,
+            runtime_port=port,
+        )
         if mode not in {"text", "title"}:
             raise ValueError("unsupported_extract_mode")
         payload = await self._run_json(
             code="""
 import asyncio, json, sys
 from playwright.async_api import async_playwright
-port, session_id, mode, selector, max_chars = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5])
+port, target_id, mode, selector, max_chars = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5])
 selector = None if selector == "__NONE__" else selector
 
-async def session_page(browser, session_id):
+async def page_by_target(browser, target_id):
     for context in browser.contexts:
         for page in context.pages:
             try:
-                name = await page.evaluate("() => window.name || ''")
+                cdp = await context.new_cdp_session(page)
+                info = await cdp.send("Target.getTargetInfo")
+                page_target = info.get("targetInfo", {}).get("targetId", "")
             except Exception:
-                name = ""
-            if name == session_id:
+                page_target = ""
+            if page_target == target_id:
                 return page
     return None
 
@@ -205,9 +238,9 @@ async def main():
     pw = await async_playwright().start()
     browser = await pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
     try:
-        page = await session_page(browser, session_id)
+        page = await page_by_target(browser, target_id)
         if page is None:
-            raise RuntimeError("session_page_missing")
+            raise RuntimeError("session_target_missing")
         if mode == "title":
             title = await page.title()
             print(json.dumps({"title": (title or "")[:max_chars]}, ensure_ascii=True))
@@ -224,7 +257,7 @@ asyncio.run(main())
 """,
             args=[
                 str(port),
-                str(provider_session_id),
+                target_id,
                 mode,
                 selector or "__NONE__",
                 str(max(1, max_chars)),
@@ -280,21 +313,30 @@ asyncio.run(main())
         *,
         provider_session_id: str | None,
     ) -> ProviderScreenshotResult:
+        if not provider_session_id:
+            raise ValueError("session_not_found")
         port = await self._resolve_session_port(provider_session_id)
+        target_id = await self._resolve_target_id(
+            session_id=provider_session_id,
+            create_if_missing=False,
+            runtime_port=port,
+        )
         payload = await self._run_json(
             code="""
 import asyncio, base64, json, sys
 from playwright.async_api import async_playwright
-port, session_id = sys.argv[1], sys.argv[2]
+port, target_id = sys.argv[1], sys.argv[2]
 
-async def session_page(browser, session_id):
+async def page_by_target(browser, target_id):
     for context in browser.contexts:
         for page in context.pages:
             try:
-                name = await page.evaluate("() => window.name || ''")
+                cdp = await context.new_cdp_session(page)
+                info = await cdp.send("Target.getTargetInfo")
+                page_target = info.get("targetInfo", {}).get("targetId", "")
             except Exception:
-                name = ""
-            if name == session_id:
+                page_target = ""
+            if page_target == target_id:
                 return page
     return None
 
@@ -302,9 +344,9 @@ async def main():
     pw = await async_playwright().start()
     browser = await pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
     try:
-        page = await session_page(browser, session_id)
+        page = await page_by_target(browser, target_id)
         if page is None:
-            raise RuntimeError("session_page_missing")
+            raise RuntimeError("session_target_missing")
         image = await page.screenshot(type="png", full_page=True)
         print(json.dumps({"image_b64": base64.b64encode(image).decode("ascii")}, ensure_ascii=True))
     finally:
@@ -312,7 +354,7 @@ async def main():
         await pw.stop()
 asyncio.run(main())
 """,
-            args=[str(port), str(provider_session_id)],
+            args=[str(port), target_id],
             deadline_seconds=30,
         )
         image_b64 = str(payload.get("image_b64") or "")
@@ -333,21 +375,30 @@ asyncio.run(main())
         clear_first: bool = True,
         timeout_seconds: float = 30.0,
     ) -> None:
+        if not provider_session_id:
+            raise ValueError("session_not_found")
         port = await self._resolve_session_port(provider_session_id)
+        target_id = await self._resolve_target_id(
+            session_id=provider_session_id,
+            create_if_missing=False,
+            runtime_port=port,
+        )
         _ = await self._run_json(
             code="""
 import asyncio, sys
 from playwright.async_api import async_playwright
-port, session_id, action, selector, text, clear_first, timeout_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6] == "1", float(sys.argv[7])
+port, target_id, action, selector, text, clear_first, timeout_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6] == "1", float(sys.argv[7])
 
-async def session_page(browser, session_id):
+async def page_by_target(browser, target_id):
     for context in browser.contexts:
         for page in context.pages:
             try:
-                name = await page.evaluate("() => window.name || ''")
+                cdp = await context.new_cdp_session(page)
+                info = await cdp.send("Target.getTargetInfo")
+                page_target = info.get("targetInfo", {}).get("targetId", "")
             except Exception:
-                name = ""
-            if name == session_id:
+                page_target = ""
+            if page_target == target_id:
                 return page
     return None
 
@@ -355,9 +406,9 @@ async def main():
     pw = await async_playwright().start()
     browser = await pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
     try:
-        page = await session_page(browser, session_id)
+        page = await page_by_target(browser, target_id)
         if page is None:
-            raise RuntimeError("session_page_missing")
+            raise RuntimeError("session_target_missing")
         if action == "click":
             await page.locator(selector).first.click(timeout=10000)
         elif action == "type":
@@ -375,7 +426,7 @@ asyncio.run(main())
 """,
             args=[
                 str(port),
-                str(provider_session_id),
+                target_id,
                 action,
                 selector,
                 text,
@@ -412,6 +463,32 @@ asyncio.run(main())
             return runtime.port
         runtime = await self._recover_runtime(reason="action_runtime_unhealthy")
         return runtime.port
+
+    async def _resolve_target_id(
+        self,
+        *,
+        session_id: str,
+        create_if_missing: bool,
+        runtime_port: int | None = None,
+    ) -> str:
+        # Architecture/spec reference: specs/browser-runtime-v2.md (Phase 2)
+        port = runtime_port or await self._resolve_session_port(session_id)
+        target_id = self._session_targets.get(session_id)
+        if target_id and await self._target_exists(port=port, target_id=target_id):
+            return target_id
+        discovered = await self._find_target_id_for_session(
+            session_id=session_id, port=port
+        )
+        if discovered:
+            self._session_targets[session_id] = discovered
+            return discovered
+        if not create_if_missing:
+            raise ValueError("session_target_not_found")
+        created = await self._create_target_for_session(
+            session_id=session_id, port=port
+        )
+        self._session_targets[session_id] = created
+        return created
 
     async def _run_json(
         self,
@@ -481,10 +558,12 @@ asyncio.run(main())
                 return line
         return lines[-1] if lines else text
 
-    async def _ensure_session_page(self, *, session_id: str, port: int) -> None:
-        _ = await self._run_json(
+    async def _find_target_id_for_session(
+        self, *, session_id: str, port: int
+    ) -> str | None:
+        payload = await self._run_json(
             code="""
-import asyncio, sys
+import asyncio, json, sys
 from playwright.async_api import async_playwright
 port, session_id = sys.argv[1], sys.argv[2]
 async def main():
@@ -497,13 +576,14 @@ async def main():
                     name = await page.evaluate("() => window.name || ''")
                 except Exception:
                     name = ""
-                if name == session_id:
-                    print("{}")
+                if name != session_id:
+                    continue
+                cdp = await context.new_cdp_session(page)
+                info = await cdp.send("Target.getTargetInfo")
+                target_id = info.get("targetInfo", {}).get("targetId", "")
+                if target_id:
+                    print(json.dumps({"target_id": target_id}, ensure_ascii=True))
                     return
-        context = browser.contexts[0] if browser.contexts else await browser.new_context()
-        page = await context.new_page()
-        await page.goto("about:blank", wait_until="domcontentloaded", timeout=5000)
-        await page.evaluate("(sid) => { window.name = sid; }", session_id)
         print("{}")
     finally:
         await browser.close()
@@ -513,32 +593,29 @@ asyncio.run(main())
             args=[str(port), session_id],
             deadline_seconds=20,
         )
+        target_id = str(payload.get("target_id") or "").strip()
+        return target_id or None
 
-    async def _close_session_page(self, *, session_id: str, port: int) -> None:
-        _ = await self._run_json(
+    async def _create_target_for_session(self, *, session_id: str, port: int) -> str:
+        payload = await self._run_json(
             code="""
-import asyncio, sys
+import asyncio, json, sys
 from playwright.async_api import async_playwright
 port, session_id = sys.argv[1], sys.argv[2]
 async def main():
     pw = await async_playwright().start()
     browser = await pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
     try:
-        closed = 0
-        for context in browser.contexts:
-            for page in list(context.pages):
-                try:
-                    name = await page.evaluate("() => window.name || ''")
-                except Exception:
-                    name = ""
-                if name != session_id:
-                    continue
-                try:
-                    await page.close()
-                    closed += 1
-                except Exception:
-                    continue
-        print("{}")
+        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        page = await context.new_page()
+        await page.goto("about:blank", wait_until="domcontentloaded", timeout=5000)
+        await page.evaluate("(sid) => { window.name = sid; }", session_id)
+        cdp = await context.new_cdp_session(page)
+        info = await cdp.send("Target.getTargetInfo")
+        target_id = info.get("targetInfo", {}).get("targetId", "")
+        if not target_id:
+            raise RuntimeError("target_id_missing")
+        print(json.dumps({"target_id": target_id}, ensure_ascii=True))
     finally:
         await browser.close()
         await pw.stop()
@@ -547,6 +624,62 @@ asyncio.run(main())
             args=[str(port), session_id],
             deadline_seconds=20,
         )
+        target_id = str(payload.get("target_id") or "").strip()
+        if not target_id:
+            raise ValueError("session_target_create_failed")
+        return target_id
+
+    async def _close_target_page(self, *, target_id: str, port: int) -> None:
+        _ = await self._run_json(
+            code="""
+import asyncio, sys
+from playwright.async_api import async_playwright
+port, target_id = sys.argv[1], sys.argv[2]
+async def main():
+    pw = await async_playwright().start()
+    browser = await pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+    try:
+        for context in browser.contexts:
+            for page in list(context.pages):
+                try:
+                    cdp = await context.new_cdp_session(page)
+                    info = await cdp.send("Target.getTargetInfo")
+                    page_target = info.get("targetInfo", {}).get("targetId", "")
+                except Exception:
+                    page_target = ""
+                if page_target != target_id:
+                    continue
+                try:
+                    await page.close()
+                except Exception:
+                    continue
+        print("{}")
+    finally:
+        await browser.close()
+        await pw.stop()
+asyncio.run(main())
+""",
+            args=[str(port), target_id],
+            deadline_seconds=20,
+        )
+
+    async def _target_exists(self, *, port: int, target_id: str) -> bool:
+        payload = await self._run_json(
+            code="""
+import json, sys, urllib.request
+port, target_id = sys.argv[1], sys.argv[2]
+with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=2.0) as resp:
+    data = json.loads(resp.read().decode("utf-8", errors="replace"))
+exists = any(
+    isinstance(item, dict) and str(item.get("id") or "") == target_id
+    for item in (data if isinstance(data, list) else [])
+)
+print(json.dumps({"exists": exists}, ensure_ascii=True))
+""",
+            args=[str(port), target_id],
+            deadline_seconds=10,
+        )
+        return bool(payload.get("exists"))
 
     def _pick_port(self) -> int:
         used_ports: set[int] = set()

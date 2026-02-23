@@ -129,6 +129,16 @@ async def test_browser_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
                 return ExecutionResult(exit_code=0, stdout="23456\n", stderr="")
             if "/json/version" in command:
                 return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
+            if "/json/list" in command:
+                return ExecutionResult(
+                    exit_code=0, stdout='{"exists": true}\n', stderr=""
+                )
+            if "target_id_missing" in command:
+                return ExecutionResult(
+                    exit_code=0,
+                    stdout='{"target_id":"target-ops"}\n',
+                    stderr="",
+                )
             if "document.body" in command:
                 return ExecutionResult(
                     exit_code=0,
