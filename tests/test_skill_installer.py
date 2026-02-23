@@ -12,6 +12,7 @@ from ash.skills.installer import (
     InstalledSource,
     SkillInstaller,
     SkillInstallerError,
+    SourceSyncState,
 )
 
 
@@ -283,6 +284,70 @@ Instructions here.
         mock_update.assert_not_called()
         assert len(results) == 1
         assert results[0].skills == ["a", "b"]
+
+    def test_sync_all_report_records_success_state(self, installer):
+        """sync_all_report should persist success health metadata."""
+        source = SkillSource(repo="owner/repo")
+        installed = InstalledSource(
+            repo="owner/repo",
+            install_path="installed/owner__repo",
+            commit_sha="oldsha",
+        )
+        updated = InstalledSource(
+            repo="owner/repo",
+            install_path="installed/owner__repo",
+            commit_sha="newsha",
+        )
+        installer._sources = {"repo:owner/repo": installed}
+
+        with (
+            patch.object(installer, "install_source", return_value=installed),
+            patch.object(installer, "update", return_value=updated),
+        ):
+            report = installer.sync_all_report([source])
+
+        assert len(report.synced) == 1
+        assert len(report.failed) == 0
+        state = installer.list_sync_state()["repo:owner/repo"]
+        assert state.last_status == "ok"
+        assert state.last_action == "updated"
+        assert state.previous_commit_sha == "oldsha"
+        assert state.current_commit_sha == "newsha"
+        assert state.commit_changed is True
+
+    def test_sync_all_report_records_failure_state(self, installer):
+        """sync_all_report should persist failure health metadata."""
+        source = SkillSource(path="~/skills")
+        with patch.object(
+            installer,
+            "install_path_source",
+            side_effect=SkillInstallerError("boom"),
+        ):
+            report = installer.sync_all_report([source])
+
+        assert len(report.synced) == 0
+        assert len(report.failed) == 1
+        state = installer.list_sync_state()["path:~/skills"]
+        assert state.last_status == "error"
+        assert state.last_action == "sync_failed"
+        assert state.last_error == "boom"
+
+    def test_remove_sync_state_on_uninstall(self, installer):
+        """Uninstall should delete sync state entry for removed source."""
+        fake_install_path = installer.install_path / "local" / "skills"
+        installer._sync_state = {
+            "path:~/skills": SourceSyncState(last_status="ok", last_action="installed")
+        }
+        installer._sources = {
+            "path:~/skills": InstalledSource(
+                path="~/skills",
+                install_path=str(fake_install_path),
+            )
+        }
+
+        result = installer.uninstall(path="~/skills")
+        assert result is True
+        assert "path:~/skills" not in installer.list_sync_state()
 
 
 class TestConfigWriter:

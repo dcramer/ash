@@ -61,6 +61,20 @@ def _source_key(repo: str | None, path: str | None) -> str:
     return f"repo:{repo}" if repo else f"path:{path}"
 
 
+def _format_sync_timestamp(value: str | None) -> str:
+    """Format ISO timestamps for compact table display."""
+    if not value:
+        return "-"
+    return value.replace("+00:00", "Z")
+
+
+def _short_error(value: str, limit: int = 44) -> str:
+    """Trim long sync errors for table rendering."""
+    if len(value) <= limit:
+        return value
+    return f"{value[: limit - 3]}..."
+
+
 def register(app: typer.Typer) -> None:
     """Register the skill command group."""
     skill_app = typer.Typer(name="skill", help="Manage skills", no_args_is_help=True)
@@ -322,7 +336,7 @@ def register(app: typer.Typer) -> None:
         Examples:
             ash skill sync
         """
-        from ash.skills.installer import SkillInstaller, SkillInstallerError
+        from ash.skills.installer import SkillInstaller
 
         config = get_config(config_path)
 
@@ -331,33 +345,23 @@ def register(app: typer.Typer) -> None:
             return
 
         installer = SkillInstaller()
-        results = []
-        errors = []
+        report = installer.sync_all_report(config.skill_sources)
 
-        for source in config.skill_sources:
-            try:
-                if source.path:
-                    result = installer.install_path_source(source.path, force=True)
-                else:
-                    result = installer.install_source(source)
-                    if source.repo:
-                        updated = installer.update(repo=source.repo)
-                        if updated is not None:
-                            result = updated
-                results.append(result)
-                info(
-                    f"Synced {source.repo or source.path}: "
-                    f"{len(result.skills)} skill(s)"
-                )
-            except SkillInstallerError as e:
-                errors.append((source, e))
-                error(f"Failed to sync {source.repo or source.path}: {e}")
+        for synced in report.synced:
+            info(f"Synced {synced.repo or synced.path}: {len(synced.skills)} skill(s)")
+        for failed_source, failed_error in report.failed:
+            error(
+                f"Failed to sync {failed_source.repo or failed_source.path}: "
+                f"{failed_error}"
+            )
 
-        if results:
-            total_skills = sum(len(r.skills) for r in results)
-            success(f"Synced {len(results)} source(s), {total_skills} skill(s) total")
+        if report.synced:
+            total_skills = sum(len(r.skills) for r in report.synced)
+            success(
+                f"Synced {len(report.synced)} source(s), {total_skills} skill(s) total"
+            )
 
-        if errors:
+        if report.failed:
             raise typer.Exit(1)
 
     @skill_app.command("update")
@@ -445,6 +449,7 @@ def register(app: typer.Typer) -> None:
         config = get_config(config_path)
         installer = SkillInstaller()
         installed = {s.source_key: s for s in installer.list_installed()}
+        sync_state = installer.list_sync_state()
 
         if not config.skill_sources and not installed:
             warning("No skill sources configured or installed")
@@ -457,6 +462,8 @@ def register(app: typer.Typer) -> None:
                 ("Source", "white"),
                 ("Ref", "yellow"),
                 ("Status", "green"),
+                ("Last Sync", "dim"),
+                ("Health", "yellow"),
                 ("Skills", "dim"),
             ],
         )
@@ -475,12 +482,22 @@ def register(app: typer.Typer) -> None:
             else:
                 status = "not installed"
                 skills = "-"
+            state = sync_state.get(key)
+            last_sync = _format_sync_timestamp(state.last_attempt_at if state else None)
+            if not state or state.last_status == "unknown":
+                health = "-"
+            elif state.last_status == "ok":
+                health = f"[green]{state.last_action or 'ok'}[/green]"
+            else:
+                health = f"[red]{_short_error(state.last_error or 'sync failed')}[/red]"
 
             table.add_row(
                 source_type,
                 source.repo or source.path or "",
                 source.ref or "-",
                 status,
+                last_sync,
+                health,
                 skills,
             )
 
@@ -489,11 +506,21 @@ def register(app: typer.Typer) -> None:
             if key in config_keys:
                 continue
             source_type = "repo" if source.repo else "path"
+            state = sync_state.get(key)
+            last_sync = _format_sync_timestamp(state.last_attempt_at if state else None)
+            if not state or state.last_status == "unknown":
+                health = "-"
+            elif state.last_status == "ok":
+                health = f"[green]{state.last_action or 'ok'}[/green]"
+            else:
+                health = f"[red]{_short_error(state.last_error or 'sync failed')}[/red]"
             table.add_row(
                 source_type,
                 source.repo or source.path or "",
                 source.ref or "-",
                 "[yellow]orphaned[/yellow]",
+                last_sync,
+                health,
                 _format_skills_list(source.skills) or "-",
             )
 

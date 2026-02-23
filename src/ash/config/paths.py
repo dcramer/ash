@@ -147,6 +147,7 @@ def get_installed_skills_path() -> Path:
     Structure:
         ~/.ash/skills.installed/
         ├── .sources.json          # Metadata about installed sources
+        ├── .sync_state.json       # Per-source sync health/recency state
         ├── github/owner__repo/    # Cloned repos (double underscore separator)
         └── local/skill-name -> ~  # Symlinks to local paths
     """

@@ -10,6 +10,7 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from ash.config.models import SkillSource
 from ash.config.paths import get_installed_skills_path
@@ -17,6 +18,7 @@ from ash.config.paths import get_installed_skills_path
 logger = logging.getLogger(__name__)
 
 SOURCES_METADATA_FILE = ".sources.json"
+SYNC_STATE_FILE = ".sync_state.json"
 GITHUB_DIR = "github"
 LOCAL_DIR = "local"
 
@@ -80,12 +82,78 @@ class InstalledSource:
         )
 
 
+@dataclass
+class SourceSyncState:
+    """Per-source sync health and recency."""
+
+    last_attempt_at: str = ""
+    last_success_at: str = ""
+    last_status: str = "unknown"  # unknown|ok|error
+    last_action: str = (
+        ""  # installed|updated|checked_no_change|refreshed_path|sync_failed
+    )
+    last_error: str | None = None
+    previous_commit_sha: str | None = None
+    current_commit_sha: str | None = None
+    commit_changed: bool | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "last_attempt_at": self.last_attempt_at,
+            "last_success_at": self.last_success_at,
+            "last_status": self.last_status,
+            "last_action": self.last_action,
+            "last_error": self.last_error,
+            "previous_commit_sha": self.previous_commit_sha,
+            "current_commit_sha": self.current_commit_sha,
+            "commit_changed": self.commit_changed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SourceSyncState":
+        return cls(
+            last_attempt_at=str(data.get("last_attempt_at") or ""),
+            last_success_at=str(data.get("last_success_at") or ""),
+            last_status=str(data.get("last_status") or "unknown"),
+            last_action=str(data.get("last_action") or ""),
+            last_error=(
+                str(data["last_error"])
+                if isinstance(data.get("last_error"), str)
+                else None
+            ),
+            previous_commit_sha=(
+                str(data["previous_commit_sha"])
+                if isinstance(data.get("previous_commit_sha"), str)
+                else None
+            ),
+            current_commit_sha=(
+                str(data["current_commit_sha"])
+                if isinstance(data.get("current_commit_sha"), str)
+                else None
+            ),
+            commit_changed=(
+                bool(data["commit_changed"])
+                if isinstance(data.get("commit_changed"), bool)
+                else None
+            ),
+        )
+
+
+@dataclass
+class SyncReport:
+    """Outcome summary for a sync pass."""
+
+    synced: list[InstalledSource] = field(default_factory=list)
+    failed: list[tuple[SkillSource, str]] = field(default_factory=list)
+
+
 class SkillInstaller:
     """Installer for external skill sources."""
 
     def __init__(self, install_path: Path | None = None):
         self.install_path = install_path or get_installed_skills_path()
         self._sources: dict[str, InstalledSource] | None = None
+        self._sync_state: dict[str, SourceSyncState] | None = None
 
     def _check_git(self) -> None:
         """Ensure git is available on host."""
@@ -103,6 +171,10 @@ class SkillInstaller:
     def _metadata_path(self) -> Path:
         """Get path to sources metadata file."""
         return self.install_path / SOURCES_METADATA_FILE
+
+    def _sync_state_path(self) -> Path:
+        """Get path to per-source sync health state file."""
+        return self.install_path / SYNC_STATE_FILE
 
     def _load_metadata(self) -> dict[str, InstalledSource]:
         """Load installed sources metadata."""
@@ -141,6 +213,88 @@ class SkillInstaller:
             "sources": {key: source.to_dict() for key, source in self._sources.items()},
         }
         metadata_path.write_text(json.dumps(data, indent=2))
+
+    def _load_sync_state(self) -> dict[str, SourceSyncState]:
+        """Load per-source sync health state."""
+        if self._sync_state is not None:
+            return self._sync_state
+
+        state_path = self._sync_state_path()
+        if not state_path.exists():
+            self._sync_state = {}
+            return self._sync_state
+
+        try:
+            data = json.loads(state_path.read_text())
+            self._sync_state = {
+                key: SourceSyncState.from_dict(value)
+                for key, value in data.get("sources", {}).items()
+                if isinstance(value, dict)
+            }
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning("sync_state_load_failed", extra={"error.message": str(e)})
+            self._sync_state = {}
+
+        return self._sync_state
+
+    def _save_sync_state(self) -> None:
+        """Persist per-source sync health state."""
+        if self._sync_state is None:
+            return
+        self.install_path.mkdir(parents=True, exist_ok=True)
+        state_path = self._sync_state_path()
+        payload = {
+            "version": 1,
+            "sources": {
+                key: value.to_dict() for key, value in self._sync_state.items()
+            },
+        }
+        state_path.write_text(json.dumps(payload, indent=2))
+
+    def _source_key(self, *, repo: str | None = None, path: str | None = None) -> str:
+        if repo:
+            return f"repo:{repo}"
+        return f"path:{path}"
+
+    def _record_sync_state(
+        self,
+        *,
+        source_key: str,
+        ok: bool,
+        action: str,
+        error: str | None = None,
+        previous_commit_sha: str | None = None,
+        current_commit_sha: str | None = None,
+    ) -> None:
+        states = self._load_sync_state()
+        state = states.get(source_key, SourceSyncState())
+        now = datetime.now(UTC).isoformat()
+        state.last_attempt_at = now
+        state.last_status = "ok" if ok else "error"
+        state.last_action = action
+        if ok:
+            state.last_success_at = now
+            state.last_error = None
+        else:
+            state.last_error = error or "unknown sync failure"
+        state.previous_commit_sha = previous_commit_sha
+        state.current_commit_sha = current_commit_sha
+        if previous_commit_sha and current_commit_sha:
+            state.commit_changed = previous_commit_sha != current_commit_sha
+        else:
+            state.commit_changed = None
+        states[source_key] = state
+        self._save_sync_state()
+
+    def _remove_sync_state(self, source_key: str) -> None:
+        states = self._load_sync_state()
+        if source_key in states:
+            del states[source_key]
+            self._save_sync_state()
+
+    def list_sync_state(self) -> dict[str, SourceSyncState]:
+        """List per-source sync health state."""
+        return dict(self._load_sync_state())
 
     def _repo_to_path(self, repo: str) -> Path:
         """Convert repo name to installation path.
@@ -412,10 +566,7 @@ class SkillInstaller:
 
         sources = self._load_metadata()
 
-        if repo:
-            source_key = f"repo:{repo}"
-        else:
-            source_key = f"path:{path}"
+        source_key = self._source_key(repo=repo, path=path)
 
         if source_key not in sources:
             logger.debug(f"Source not found: {source_key}")
@@ -439,6 +590,7 @@ class SkillInstaller:
         # Remove from metadata
         del sources[source_key]
         self._save_metadata()
+        self._remove_sync_state(source_key)
 
         logger.info(
             "skill_source_uninstalled", extra={"skill.source": repo or str(path)}
@@ -535,6 +687,63 @@ class SkillInstaller:
 
         return updated
 
+    def sync_all_report(self, sources: list[SkillSource]) -> SyncReport:
+        """Sync all sources and return a success/failure report."""
+        report = SyncReport()
+        installed = self._load_metadata()
+
+        for source in sources:
+            source_key = self._source_key(repo=source.repo, path=source.path)
+            existing_source = installed.get(source_key)
+            previous_commit_sha = (
+                existing_source.commit_sha if source.repo and existing_source else None
+            )
+            try:
+                if source.path:
+                    synced = self.install_path_source(source.path, force=True)
+                    action = "refreshed_path"
+                else:
+                    synced = self.install_source(source)
+                    action = "installed"
+                    if source.repo:
+                        updated = self.update(repo=source.repo)
+                        if updated is not None:
+                            synced = updated
+                            action = "updated"
+                if (
+                    source.repo
+                    and previous_commit_sha
+                    and synced.commit_sha
+                    and previous_commit_sha == synced.commit_sha
+                ):
+                    action = "checked_no_change"
+                self._record_sync_state(
+                    source_key=source_key,
+                    ok=True,
+                    action=action,
+                    previous_commit_sha=previous_commit_sha,
+                    current_commit_sha=synced.commit_sha if source.repo else None,
+                )
+                report.synced.append(synced)
+            except SkillInstallerError as e:
+                self._record_sync_state(
+                    source_key=source_key,
+                    ok=False,
+                    action="sync_failed",
+                    error=str(e),
+                    previous_commit_sha=previous_commit_sha,
+                )
+                logger.error(
+                    "skill_install_failed",
+                    extra={
+                        "skill.source": source.repo or str(source.path),
+                        "error.message": str(e),
+                    },
+                )
+                report.failed.append((source, str(e)))
+
+        return report
+
     def sync_all(self, sources: list[SkillSource]) -> list[InstalledSource]:
         """Sync all sources from config.
 
@@ -546,30 +755,7 @@ class SkillInstaller:
         Returns:
             List of installed/updated sources
         """
-        results = []
-
-        for source in sources:
-            try:
-                # Always refresh path sources so changed SKILL.md trees are picked up.
-                if source.path:
-                    installed = self.install_path_source(source.path, force=True)
-                else:
-                    installed = self.install_source(source)
-                if source.repo:
-                    updated = self.update(repo=source.repo)
-                    if updated is not None:
-                        installed = updated
-                results.append(installed)
-            except SkillInstallerError as e:
-                logger.error(
-                    "skill_install_failed",
-                    extra={
-                        "skill.source": source.repo or str(source.path),
-                        "error.message": str(e),
-                    },
-                )
-
-        return results
+        return self.sync_all_report(sources).synced
 
     def list_installed(self) -> list[InstalledSource]:
         """List all installed sources.

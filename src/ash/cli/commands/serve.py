@@ -236,21 +236,47 @@ def _start_skill_auto_sync_task(ash_config: "AshConfig") -> asyncio.Task[None]:
 
     async def _loop() -> None:
         installer = SkillInstaller()
+        failure_streak = 0
         while True:
             try:
-                synced = await asyncio.to_thread(
-                    installer.sync_all, ash_config.skill_sources
+                report = await asyncio.to_thread(
+                    installer.sync_all_report, ash_config.skill_sources
                 )
+                failure_count = len(report.failed)
+                synced_count = len(report.synced)
+                if failure_count:
+                    failure_streak += 1
+                else:
+                    failure_streak = 0
                 logger.info(
                     "skill_sources_auto_sync_complete",
-                    extra={"count": len(synced)},
+                    extra={
+                        "count": synced_count,
+                        "failed_count": failure_count,
+                    },
                 )
+                if report.failed:
+                    logger.warning(
+                        "skill_sources_auto_sync_partial_failure",
+                        extra={
+                            "failed_count": failure_count,
+                            "failed_sources": [
+                                s.repo or str(s.path) for s, _ in report.failed
+                            ],
+                        },
+                    )
             except Exception as e:
+                failure_streak += 1
                 logger.warning(
                     "skill_sources_auto_sync_failed",
                     extra={"error.message": str(e)},
                 )
-            await asyncio.sleep(interval_minutes * 60)
+            base_sleep = interval_minutes * 60
+            if failure_streak <= 0:
+                sleep_seconds = base_sleep
+            else:
+                sleep_seconds = min(base_sleep * (2 ** min(failure_streak, 4)), 3600)
+            await asyncio.sleep(sleep_seconds)
 
     return asyncio.create_task(_loop(), name="skill-auto-sync")
 
