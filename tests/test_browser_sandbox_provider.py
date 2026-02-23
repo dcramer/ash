@@ -112,3 +112,12 @@ async def test_sandbox_provider_requires_executor() -> None:
         assert "sandbox_executor_required" in str(e)
     else:
         raise AssertionError("expected sandbox_executor_required")
+
+
+def test_parse_json_output_ignores_noise() -> None:
+    provider = SandboxBrowserProvider(executor=None)
+    payload = provider._parse_json_output(
+        '(node:1) warning\nnot json\n{"ok": true, "value": 1}'
+    )
+    assert payload["ok"] is True
+    assert payload["value"] == 1

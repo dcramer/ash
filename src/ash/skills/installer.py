@@ -601,6 +601,7 @@ class SkillInstaller:
         self,
         *,
         repo: str | None = None,
+        strict: bool = False,
     ) -> InstalledSource | None:
         """Update an installed repo to latest.
 
@@ -618,6 +619,8 @@ class SkillInstaller:
             source_key = f"repo:{repo}"
             if source_key not in sources:
                 logger.warning("skill_source_not_found", extra={"skill.source": repo})
+                if strict:
+                    raise SkillInstallerError(f"Repo not installed: {repo}")
                 return None
             sources_to_update = [sources[source_key]]
         else:
@@ -627,10 +630,13 @@ class SkillInstaller:
         for source in sources_to_update:
             install_path = Path(source.install_path)
             if not install_path.exists():
+                message = f"Install path missing: {install_path}"
                 logger.warning(
                     "skill_source_install_path_missing",
                     extra={"file.path": str(install_path)},
                 )
+                if strict:
+                    raise SkillInstallerError(message)
                 continue
 
             logger.info("skill_source_updating", extra={"skill.source": source.repo})
@@ -641,6 +647,7 @@ class SkillInstaller:
                 fetch_cmd, cwd=install_path, capture_output=True, text=True
             )
             if result.returncode != 0:
+                message = f"Failed to fetch {source.repo}: {result.stderr.strip() or 'unknown error'}"
                 logger.warning(
                     "skill_source_fetch_failed",
                     extra={
@@ -648,6 +655,8 @@ class SkillInstaller:
                         "error.message": result.stderr.strip(),
                     },
                 )
+                if strict:
+                    raise SkillInstallerError(message)
                 continue
 
             # Determine the ref to reset to
@@ -662,6 +671,10 @@ class SkillInstaller:
                 reset_cmd, cwd=install_path, capture_output=True, text=True
             )
             if result.returncode != 0:
+                message = (
+                    f"Failed to reset {source.repo} to {reset_ref}: "
+                    f"{result.stderr.strip() or 'unknown error'}"
+                )
                 logger.warning(
                     "skill_source_reset_failed",
                     extra={
@@ -669,6 +682,8 @@ class SkillInstaller:
                         "error.message": result.stderr.strip(),
                     },
                 )
+                if strict:
+                    raise SkillInstallerError(message)
                 continue
 
             # Update metadata
@@ -706,10 +721,13 @@ class SkillInstaller:
                     synced = self.install_source(source)
                     action = "installed"
                     if source.repo:
-                        updated = self.update(repo=source.repo)
-                        if updated is not None:
-                            synced = updated
-                            action = "updated"
+                        updated = self.update(repo=source.repo, strict=True)
+                        if updated is None:
+                            raise SkillInstallerError(
+                                f"Failed to update repo: {source.repo}"
+                            )
+                        synced = updated
+                        action = "updated"
                 if (
                     source.repo
                     and previous_commit_sha

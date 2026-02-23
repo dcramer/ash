@@ -255,7 +255,7 @@ Instructions here.
             results = installer.sync_all([source])
 
         mock_install.assert_called_once_with(source)
-        mock_update.assert_called_once_with(repo="owner/repo")
+        mock_update.assert_called_once_with(repo="owner/repo", strict=True)
         assert len(results) == 1
         assert results[0].commit_sha == "abc123"
 
@@ -331,6 +331,31 @@ Instructions here.
         assert state.last_status == "error"
         assert state.last_action == "sync_failed"
         assert state.last_error == "boom"
+
+    def test_sync_all_report_marks_repo_update_failure(self, installer):
+        """Repo update failures should be recorded as failed sync state."""
+        source = SkillSource(repo="owner/repo")
+        installed = InstalledSource(
+            repo="owner/repo",
+            install_path="installed/owner__repo",
+        )
+
+        with (
+            patch.object(installer, "install_source", return_value=installed),
+            patch.object(
+                installer,
+                "update",
+                side_effect=SkillInstallerError("fetch failed"),
+            ),
+        ):
+            report = installer.sync_all_report([source])
+
+        assert len(report.synced) == 0
+        assert len(report.failed) == 1
+        state = installer.list_sync_state()["repo:owner/repo"]
+        assert state.last_status == "error"
+        assert state.last_action == "sync_failed"
+        assert state.last_error == "fetch failed"
 
     def test_remove_sync_state_on_uninstall(self, installer):
         """Uninstall should delete sync state entry for removed source."""
