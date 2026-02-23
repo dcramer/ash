@@ -28,12 +28,15 @@ from ash.tools.builtin.browser import BrowserTool
 class _FakeProvider:
     name = "sandbox"
 
+    def __init__(self) -> None:
+        self.closed_session_ids: list[str | None] = []
+
     async def start_session(self, *, session_id: str, profile_name: str | None):
         _ = profile_name
         return ProviderStartResult(provider_session_id=f"p-{session_id[:8]}")
 
     async def close_session(self, *, provider_session_id: str | None) -> None:
-        _ = provider_session_id
+        self.closed_session_ids.append(provider_session_id)
 
     async def goto(
         self, *, provider_session_id: str | None, url: str, timeout_seconds: float
@@ -288,10 +291,11 @@ async def test_browser_manager_expires_stale_active_sessions(tmp_path) -> None:
     store = BrowserStore(tmp_path / "browser")
     cfg = _config()
     cfg.browser.max_session_minutes = 10
+    provider = _FakeProvider()
     manager = BrowserManager(
         config=cfg,
         store=store,
-        providers={"sandbox": _FakeProvider()},
+        providers={"sandbox": provider},
     )
 
     stale_time = datetime.now(UTC) - timedelta(minutes=30)
@@ -301,6 +305,7 @@ async def test_browser_manager_expires_stale_active_sessions(tmp_path) -> None:
         effective_user_id="u1",
         provider="sandbox",
         status="active",
+        provider_session_id="p-stale",
         updated_at=stale_time,
         created_at=stale_time,
     )
@@ -317,6 +322,7 @@ async def test_browser_manager_expires_stale_active_sessions(tmp_path) -> None:
     assert refreshed is not None
     assert refreshed.status == "closed"
     assert refreshed.last_error == "session_expired"
+    assert provider.closed_session_ids == ["p-stale"]
 
 
 @pytest.mark.asyncio
@@ -413,6 +419,34 @@ async def test_browser_manager_allows_executor_offload_when_host_runtime(
         provider_name="sandbox",
     )
     assert started.ok is True
+
+
+@pytest.mark.asyncio
+async def test_browser_manager_archive_closes_active_provider_session(tmp_path) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    provider = _FakeProvider()
+    manager = BrowserManager(
+        config=_config(), store=store, providers={"sandbox": provider}
+    )
+
+    started = await manager.execute_action(
+        action="session.start",
+        effective_user_id="u1",
+        session_name="work",
+        provider_name="sandbox",
+    )
+    assert started.ok is True
+    assert started.session_id is not None
+
+    archived = await manager.execute_action(
+        action="session.archive",
+        effective_user_id="u1",
+        provider_name="sandbox",
+        session_id=started.session_id,
+    )
+    assert archived.ok is True
+    assert len(provider.closed_session_ids) == 1
+    assert provider.closed_session_ids[0] is not None
 
 
 @pytest.mark.asyncio

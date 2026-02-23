@@ -311,7 +311,16 @@ asyncio.run(main())
         if not provider_session_id:
             raise ValueError("session_not_found")
         if provider_session_id not in self._sessions:
-            raise ValueError("session_not_found")
+            # Session state is persisted by manager and provider state is process-local.
+            # Rehydrate lazily so active sessions continue across service restarts.
+            self._sessions.add(provider_session_id)
+            logger.info(
+                "browser_sandbox_session_rehydrated",
+                extra={
+                    "browser.provider": "sandbox",
+                    "browser.session_id": provider_session_id,
+                },
+            )
         runtime = await self._ensure_runtime()
         return runtime.port
 

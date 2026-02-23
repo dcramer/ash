@@ -108,6 +108,24 @@ async def test_sandbox_provider_uses_executor_for_full_flow() -> None:
     assert any("kill 12345" in cmd for cmd in executor.commands)
 
 
+async def test_sandbox_provider_rehydrates_session_after_restart_like_state() -> None:
+    executor = _FakeExecutor()
+    provider = SandboxBrowserProvider(executor=cast(SandboxExecutor, executor))
+
+    started = await provider.start_session(session_id="s1", profile_name=None)
+    assert started.provider_session_id == "s1"
+    provider._sessions.clear()
+
+    extract_text = await provider.extract(
+        provider_session_id="s1",
+        html=None,
+        mode="text",
+        selector=None,
+        max_chars=100,
+    )
+    assert extract_text.data["text"] == "Hello"
+
+
 async def test_sandbox_provider_requires_executor() -> None:
     provider = SandboxBrowserProvider(executor=None)
     try:

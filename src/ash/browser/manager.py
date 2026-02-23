@@ -112,7 +112,7 @@ class BrowserManager:
                 error_message="browser integration is disabled",
             )
 
-        self._apply_retention_policies(effective_user_id=effective_user_id)
+        await self._apply_retention_policies(effective_user_id=effective_user_id)
 
         provider_key = (provider_name or self._config.browser.provider).strip().lower()
         provider = self._providers.get(provider_key)
@@ -185,7 +185,8 @@ class BrowserManager:
                     provider_name=provider_key,
                 )
             if action == "session.archive":
-                return self._session_archive(
+                return await self._session_archive(
+                    provider=provider,
                     effective_user_id=effective_user_id,
                     session_id=session_id,
                     session_name=session_name,
@@ -433,9 +434,10 @@ class BrowserManager:
             data={"status": "closed"},
         )
 
-    def _session_archive(
+    async def _session_archive(
         self,
         *,
+        provider: BrowserProvider,
         effective_user_id: str,
         session_id: str | None,
         session_name: str | None,
@@ -456,7 +458,16 @@ class BrowserManager:
                 error_message="session not found",
             )
 
-        archived = replace(session, status="archived", updated_at=datetime.now(UTC))
+        if session.status == "active":
+            await provider.close_session(
+                provider_session_id=session.provider_session_id
+            )
+
+        archived = replace(
+            session,
+            status="archived",
+            updated_at=datetime.now(UTC),
+        )
         self._store.append_session(archived)
         logger.info(
             "browser_session_archived",
@@ -753,12 +764,12 @@ class BrowserManager:
         provider_sessions = [s for s in sessions if s.provider == provider_name]
         return provider_sessions[0] if provider_sessions else None
 
-    def _apply_retention_policies(self, *, effective_user_id: str) -> None:
+    async def _apply_retention_policies(self, *, effective_user_id: str) -> None:
         """Apply browser session/artifact retention best-effort."""
-        self._expire_stale_sessions(effective_user_id=effective_user_id)
+        await self._expire_stale_sessions(effective_user_id=effective_user_id)
         self._prune_artifacts()
 
-    def _expire_stale_sessions(self, *, effective_user_id: str) -> None:
+    async def _expire_stale_sessions(self, *, effective_user_id: str) -> None:
         max_age_minutes = self._config.browser.max_session_minutes
         if max_age_minutes <= 0:
             return
@@ -773,6 +784,21 @@ class BrowserManager:
                 continue
             if session.updated_at >= cutoff:
                 continue
+            provider = self._providers.get(session.provider)
+            if provider is not None:
+                try:
+                    await provider.close_session(
+                        provider_session_id=session.provider_session_id
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "browser_session_close_failed",
+                        extra={
+                            "browser.session_id": session.id,
+                            "browser.provider": session.provider,
+                            "error.message": str(e),
+                        },
+                    )
             expired = replace(
                 session,
                 status="closed",
