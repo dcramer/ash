@@ -1143,7 +1143,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-chat-demo {
   position: relative;
   border: 0;
-  background: #111111;
+  background: transparent;
   padding: 4.9rem 3rem 2rem;
   display: grid;
   gap: 0.42rem;
@@ -1497,7 +1497,7 @@ body:has(.ash-home) .ash-home-band .ash-chat-turn.ash-chat-user :is(span, .ash-c
 
 body:has(.ash-home) .ash-chat-demo {
   border: 0;
-  background: #111111;
+  background: transparent;
   box-shadow: none;
 }
 
