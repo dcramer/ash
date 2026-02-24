@@ -4,13 +4,13 @@
 
 Files: src/ash/sessions/manager.py, src/ash/sessions/types.py, src/ash/sessions/reader.py, src/ash/sessions/writer.py, src/ash/chats/history.py
 
-## One-Session-Per-Thread Model
+## Per-User Thread Sessions
 
-Ash uses a **one session per thread** model for group chats:
+Ash uses **per-user sessions scoped to thread** for group chats:
 
 - Standalone `@mention` messages create a new thread (thread_id = message external_id)
 - Replies follow the parent thread via `ThreadIndex`
-- Session key for groups: `telegram_{chat_id}_{thread_id}` (all users in the thread share it)
+- Session key for groups: `telegram_{chat_id}_{user_id}_{thread_id}` (users in the same thread do not share session state)
 - DMs use a single session: `telegram_{chat_id}_{user_id}` (no thread_id)
 
 ## File Structure
@@ -269,7 +269,8 @@ class SessionManager:
 |--------|-----|
 | provider=cli | `cli` |
 | provider=telegram, chat_id=123 | `telegram_123` |
-| provider=telegram, chat_id=123, thread_id=456 | `telegram_123_456` |
+| provider=telegram, chat_id=123, user_id=999 | `telegram_123_999` |
+| provider=telegram, chat_id=123, user_id=999, thread_id=456 | `telegram_123_999_456` |
 | provider=api, user_id=abc | `api_abc` |
 
 Special characters in IDs are sanitized to underscores, max 64 chars per component.
