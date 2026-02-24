@@ -7,337 +7,209 @@ sidebar:
 
 import { Aside, FileTree } from '@astrojs/starlight/components';
 
-Skills are reusable instruction files that extend the agent's capabilities. Unlike tools (which execute code), skills are instruction sets that the agent reads and follows.
+Skills are reusable instruction files that teach Ash how to run a workflow. A skill is instructions, context, and optional helper files. It is not a compiled plugin.
 
-## Overview
+## Skills In 30 Seconds
 
-When a skill is invoked:
+Use a skill when you want Ash to repeat a workflow reliably:
 
-1. The agent reads the skill's instructions (markdown content)
-2. The agent follows the instructions using available tools
-3. No code execution happens - the agent just follows the steps
+- Multi-step tasks with specific order.
+- Domain-specific behavior (for example, your team’s deploy playbook).
+- Guardrails around which tools are allowed.
 
-This makes skills powerful for complex workflows that combine multiple tools.
+When a skill is used:
 
-## Skill Sources
+1. Ash reads `SKILL.md`.
+2. Ash follows those instructions with available tools.
+3. Ash returns results as part of the normal conversation.
 
-Skills are loaded from multiple sources in order of precedence (later sources override earlier):
+## Where Skills Should Live
 
-| Priority | Source | Location | Description |
-|----------|--------|----------|-------------|
-| 1 (lowest) | Bundled | Built-in | Skills bundled with Ash |
-| 2 | Installed | `~/.ash/skills.installed/` | External repos and local paths |
-| 3 | User | `~/.ash/skills/` | User-created skills |
-| 4 (highest) | Workspace | `workspace/skills/` | Project-specific skills |
+Use **workspace skills** as the default for anything project-specific.
 
-This allows workspace skills to override installed skills, and installed skills to override bundled ones.
+Canonical location:
 
-## Skill Formats
+```text
+~/.ash/workspace/skills/<skill-name>/SKILL.md
+```
 
-Skills can be defined in two formats:
+Inside the sandbox runtime, that same directory appears at:
 
-### Directory Format (Preferred)
+```text
+/workspace/skills/<skill-name>/SKILL.md
+```
+
+Other skill types:
+
+1. Built-in skills: shipped with Ash.
+2. Installed skills: added from external repos or local sources.
+
+Precedence when names collide: workspace > installed > built-in.
+
+## Create Your First Skill
+
+```bash
+# 1) Scaffold a new skill folder in workspace
+ash skill init my-skill --resources scripts,references
+
+# 2) Edit the generated instructions
+$EDITOR ~/.ash/workspace/skills/my-skill/SKILL.md
+
+# 3) Validate format and frontmatter
+ash skill validate ~/.ash/workspace/skills/my-skill/SKILL.md
+
+# 4) Confirm it's discoverable
+ash skill list --source
+```
+
+Generated directory shape:
 
 <FileTree>
 - my-skill/
-  - SKILL.md Required: skill definition
+  - SKILL.md Required: main instructions
   - scripts/ Optional: helper scripts
-  - references/ Optional: reference docs
-  - assets/ Optional: other files
+  - references/ Optional: longer docs for context
+  - assets/ Optional: extra files
 </FileTree>
 
-The skill name comes from the directory name.
+## SKILL.md Template
 
-### Flat File Format
-
-```
-~/.ash/workspace/skills/my-skill.md
-```
-
-The skill name comes from the filename.
-
-## Skill Definition
-
-Skills use markdown files with YAML frontmatter:
+Use this as your starting point:
 
 ```markdown
 ---
-description: What the skill does (required)
-authors:
-  - Your Name
-rationale: Why this skill was created
-env:
-  - API_KEY
-packages:
-  - curl
-  - jq
-tools:
+# Required. One-line summary shown when Ash considers this skill.
+description: Triages GitHub issues for a repo
+
+# Optional. Override displayed name (default: folder name).
+name: github-triage
+
+# Optional. Restrict tools this skill can call (empty = all available).
+allowed_tools:
   - bash
-  - web_search
-model: haiku  # Optional model override
+  - web_fetch
+
+# Optional. Environment variable names read from config [skills.github-triage].
+env:
+  - GITHUB_TOKEN
+
+# Optional. Model alias override for this skill only.
+model: haiku
+
+# Optional. Iteration limit for this skill (default: 10).
 max_iterations: 10
 ---
 
 ## Instructions
 
-Step-by-step instructions the agent will follow...
+When asked to triage issues:
 
-## Implementation
-
-Details about how to accomplish the task...
-```
-
-### Frontmatter Fields
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `description` | string | Yes | One-line description shown to the agent |
-| `name` | string | No | Override skill name (default: directory/file name) |
-| `authors` | list | No | Who created/maintains this skill |
-| `rationale` | string | No | Why this skill was created |
-| `env` | list | No | Environment variables to inject from config |
-| `packages` | list | No | System packages required (apt) |
-| `tools` | list | No | Tools the skill can use (empty = all) |
-| `model` | string | No | Model alias override for this skill |
-| `max_iterations` | int | No | Iteration limit (default: 10) |
-
-## Configuration
-
-### Global Settings
-
-```toml
-[skills]
-auto_sync = true                 # Sync sources on startup (optional)
-update_interval_minutes = 5      # Minutes between auto-updates (optional)
-```
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `auto_sync` | bool | `false` | Automatically sync sources on startup |
-| `update_interval_minutes` | int | `5` | Minutes between automatic updates |
-
-`update_interval` (hours) is still accepted for backward compatibility.
-
-### External Sources
-
-Add skill sources using `[[skills.sources]]` array entries:
-
-```toml
-# GitHub repo
-[[skills.sources]]
-repo = "anthropic/skills"
-
-# Pinned to version
-[[skills.sources]]
-repo = "company/internal-skills"
-ref = "v2.0.0"
-
-# Local path (symlinked)
-[[skills.sources]]
-path = "~/my-local-skills"
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `repo` | string | GitHub repo in `owner/repo` format |
-| `path` | string | Local filesystem path |
-| `ref` | string | Git ref (branch, tag, commit) - repos only |
-
-<Aside type="note">
-  Each source must have either `repo` or `path`, not both.
-</Aside>
-
-### Per-Skill Configuration
-
-Configure individual skills with `[skills.name]` sections:
-
-```toml
-[skills.research]
-enabled = true
-PERPLEXITY_API_KEY = "pplx-..."
-
-[skills.code-review]
-model = "haiku"
-MAX_FILES = "10"
-
-[skills.deprecated-tool]
-enabled = false
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `enabled` | bool | Enable/disable the skill (default: `true`) |
-| `model` | string | Model alias override for this skill |
-| `*` | string | Any other field becomes an environment variable |
-
-Environment variables are auto-uppercased: `ha_token` becomes `HA_TOKEN`.
-
-## CLI Commands
-
-### Managing Sources
-
-```bash
-# Add from GitHub
-ash skill add anthropic/skills
-
-# Pin to version
-ash skill add anthropic/skills@v1.0.0
-
-# Add from local path
-ash skill add ~/my-local-skills
-
-# List configured sources
-ash skill sources
-
-# Sync all from config
-ash skill sync
-
-# Update repos to latest
-ash skill update
-
-# Remove a source
-ash skill remove anthropic/skills
-```
-
-### Creating Skills
-
-```bash
-# Create a new skill directory
-ash skill init my-skill
-
-# Create with description
-ash skill init my-skill -d "Do something useful"
-
-# Create with resource directories
-ash skill init my-skill --resources scripts,references
-```
-
-### Validating Skills
-
-```bash
-# Validate a skill file
-ash skill validate ~/.ash/workspace/skills/my-skill
-
-# List all available skills
-ash skill list
-
-# Show skill sources
-ash skill list --source
-```
-
-## Directory Structure
-
-After installation, skills are stored in:
-
-```
-~/.ash/
-├── config.toml                # Configuration with [[skills.sources]]
-├── skills/                    # User skills (manually created)
-│   └── my-skill/
-│       └── SKILL.md
-├── skills.installed/          # External skills (managed by CLI)
-│   ├── .sources.json          # Installation metadata
-│   ├── .sync_state.json       # Last sync health/error per source
-│   ├── github/
-│   │   └── anthropic__skills/ # Cloned repos
-│   └── local/
-│       └── ash-skills -> ~/   # Symlinks
-└── workspace/
-    └── skills/                # Project-specific skills
-```
-
-## Skill Registry
-
-Location: `src/ash/skills/registry.py`
-
-Skills are discovered from all sources:
-
-```python
-registry = SkillRegistry()
-registry.discover(workspace_path)
-
-skill = registry.get("my-skill")
-available_skills = registry.list_available()
-```
-
-The registry tracks source type for each skill:
-
-```python
-skill.source_type  # SkillSourceType.WORKSPACE, INSTALLED, USER, BUNDLED
-skill.source_repo  # "owner/repo" if installed from GitHub
-skill.source_ref   # Git ref if pinned
-```
-
-## Example Skill
-
-```markdown
----
-description: Search and summarize GitHub issues
-env:
-  - GITHUB_TOKEN
-tools:
-  - bash
-  - web_fetch
----
-
-## Instructions
-
-When asked to find GitHub issues:
-
-1. Use bash to call the GitHub API:
-   \`\`\`bash
-   curl -s "https://api.github.com/repos/$owner/$repo/issues" \
-     -H "Authorization: Bearer $GITHUB_TOKEN"
-   \`\`\`
-
-2. Parse the JSON response to extract:
-   - Issue number
-   - Title
-   - State (open/closed)
-   - Labels
-
-3. Format as a markdown table
+1. Fetch issues from GitHub API.
+2. Summarize priority, owner, and next action.
+3. Return a concise markdown report.
 
 ## Notes
 
-- Respect rate limits (5000 requests/hour with auth)
-- Filter by state using `?state=open` or `?state=closed`
+- Prefer open issues unless asked otherwise.
+- Flag blocked items explicitly.
 ```
+
+## Install And Manage External Skills
+
+Use this when you want shared/community skill packs:
+
+```bash
+# Add a source from GitHub
+ash skill add anthropic/skills
+
+# Add a pinned version
+ash skill add anthropic/skills@v1.0.0
+
+# Add from a local path
+ash skill add ~/my-local-skills
+
+# See configured sources
+ash skill sources
+
+# Sync latest from configured sources
+ash skill sync
+
+# Update installed repos to latest refs
+ash skill update
+
+# Remove a configured source
+ash skill remove anthropic/skills
+```
+
+## Configure Skills
+
+Global skill behavior in `config.toml`:
+
+```toml
+[skills]
+auto_sync = true             # Optional bool. Default: false.
+update_interval_minutes = 5  # Optional int. Default: 5.
+```
+
+External source declarations:
+
+```toml
+[[skills.sources]]
+repo = "anthropic/skills"      # owner/repo source
+
+[[skills.sources]]
+repo = "company/internal-skills"
+ref = "v2.0.0"                 # optional branch/tag/commit pin
+
+[[skills.sources]]
+path = "~/my-local-skills"     # local source path
+# Set exactly one of: repo or path.
+```
+
+Per-skill overrides:
+
+```toml
+[skills.github-triage]
+enabled = true                  # Optional bool. Default: true.
+model = "haiku"                 # Optional model override.
+GITHUB_TOKEN = "ghp_..."        # Unknown keys become env vars.
+MAX_RESULTS = "25"              # Also exposed as env var.
+```
+
+<Aside type="note">
+  Per-skill env keys are passed to the skill and uppercased automatically (for example, `gh_token` becomes `GH_TOKEN`).
+</Aside>
 
 ## Troubleshooting
 
-### Skill not loading
-
-Check if the skill is enabled:
+### Skill does not appear
 
 ```bash
+# Confirm Ash can discover it
 ash skill list --source
+
+# Validate the file directly
+ash skill validate ~/.ash/workspace/skills/my-skill/SKILL.md
 ```
 
-Verify per-skill config:
+### Skill is present but inactive
 
 ```toml
 [skills.my-skill]
-enabled = true  # Make sure this isn't false
+enabled = true
 ```
 
-### Source not syncing
-
-Manually sync:
-
-```bash
-ash skill sync
-```
-
-Check source status:
+### External source is stale or missing updates
 
 ```bash
 ash skill sources
+ash skill sync
+ash skill update
 ```
 
-### Git not found
+### Repo source fails with git errors
 
-Install git for repo sources:
+Install git for your platform and retry:
 
 ```bash
 # Ubuntu/Debian
@@ -347,14 +219,27 @@ apt install git
 brew install git
 ```
 
-## Compatibility
+## Reference (Advanced)
 
-The skill format is compatible with:
+Storage layout under `~/.ash/`:
 
-- [Agent Skills spec](https://agentskills.io) - Standard skill format
-- Vercel/Anthropic skill repos - Works with community skill repos
-- skild.sh packages - Structure-compatible
+```text
+~/.ash/
+├── config.toml
+├── skills/                    # User skills
+├── skills.installed/          # External skill sources
+│   ├── .sources.json
+│   ├── .sync_state.json
+│   ├── github/
+│   └── local/
+└── workspace/
+    └── skills/                # Project/workspace skills
+```
 
-<Aside type="tip">
-  Skills are instruction-based, not script-based. Write clear steps the agent can follow using its available tools.
-</Aside>
+Internally, discovery is handled by `src/ash/skills/registry.py` and source metadata tracks built-in, installed, user, and workspace origins.
+
+Compatibility:
+
+- [Agent Skills spec](https://agentskills.io)
+- Vercel/Anthropic-style skill repos
+- skild.sh-compatible directory structures
