@@ -308,6 +308,56 @@ async def test_capabilities_integration_registers_capability_rpc_methods(
 
 
 @pytest.mark.asyncio
+async def test_capabilities_integration_passes_providers_to_manager_factory(
+    monkeypatch,
+) -> None:
+    context = _context()
+    provider = object()
+    context.components.capability_providers = [provider]
+    captured: dict[str, Any] = {}
+
+    class _FakeManager:
+        async def register_provider(self, _provider: Any) -> None:
+            captured.setdefault("late_registers", []).append(_provider)
+
+    async def _create_manager(*, providers=None):
+        captured["providers"] = providers
+        return _FakeManager()
+
+    monkeypatch.setattr("ash.capabilities.create_capability_manager", _create_manager)
+
+    integration = CapabilitiesIntegration()
+    await integration.setup(context)
+
+    assert captured["providers"] == [provider]
+    assert getattr(context.components, "capability_manager", None) is not None
+    assert captured.get("late_registers") is None
+
+
+@pytest.mark.asyncio
+async def test_capabilities_integration_registers_providers_on_existing_manager() -> (
+    None
+):
+    context = _context()
+    provider = object()
+    context.components.capability_providers = [provider]
+
+    class _FakeManager:
+        def __init__(self) -> None:
+            self.providers: list[Any] = []
+
+        async def register_provider(self, registered_provider: Any) -> None:
+            self.providers.append(registered_provider)
+
+    manager = _FakeManager()
+    context.components.capability_manager = manager
+
+    integration = CapabilitiesIntegration()
+    await integration.setup(context)
+    assert manager.providers == [provider]
+
+
+@pytest.mark.asyncio
 async def test_capabilities_integration_owns_prompt_routing_guidance() -> None:
     context = _context()
     integration = CapabilitiesIntegration()

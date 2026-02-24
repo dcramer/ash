@@ -51,7 +51,13 @@ def register_capability_methods(
                 operation=operation,
                 input_data=input_data,
                 user_id=user_id,
+                chat_id=_optional_text(params, "chat_id"),
                 chat_type=chat_type,
+                provider=_optional_text(params, "provider"),
+                thread_id=_optional_text(params, "thread_id"),
+                session_key=_optional_text(params, "session_key"),
+                source_username=_optional_text(params, "source_username"),
+                source_display_name=_optional_text(params, "source_display_name"),
                 idempotency_key=_optional_text(params, "idempotency_key"),
             )
         except CapabilityError as e:
@@ -71,7 +77,13 @@ def register_capability_methods(
             return await manager.auth_begin(
                 capability_id=capability_id,
                 user_id=user_id,
+                chat_id=_optional_text(params, "chat_id"),
                 chat_type=chat_type,
+                provider=_optional_text(params, "provider"),
+                thread_id=_optional_text(params, "thread_id"),
+                session_key=_optional_text(params, "session_key"),
+                source_username=_optional_text(params, "source_username"),
+                source_display_name=_optional_text(params, "source_display_name"),
                 account_hint=account_hint,
             )
         except CapabilityError as e:
@@ -86,6 +98,13 @@ def register_capability_methods(
             result = await manager.auth_complete(
                 flow_id=flow_id,
                 user_id=user_id,
+                chat_id=_optional_text(params, "chat_id"),
+                chat_type=_optional_text(params, "chat_type"),
+                provider=_optional_text(params, "provider"),
+                thread_id=_optional_text(params, "thread_id"),
+                session_key=_optional_text(params, "session_key"),
+                source_username=_optional_text(params, "source_username"),
+                source_display_name=_optional_text(params, "source_display_name"),
                 callback_url=callback_url,
                 code=code,
             )

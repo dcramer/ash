@@ -42,6 +42,7 @@ class CapabilityAuthFlow:
     user_id: str
     account_hint: str | None
     expires_at: datetime
+    flow_state: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -52,6 +53,8 @@ class CapabilityAccount:
     user_id: str
     account_ref: str
     created_at: datetime
+    credential_material: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

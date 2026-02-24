@@ -19,6 +19,12 @@ from ash.capabilities.manager import (
     CapabilityManager,
     create_capability_manager,
 )
+from ash.capabilities.providers import (
+    CapabilityAuthBeginResult,
+    CapabilityAuthCompleteResult,
+    CapabilityCallContext,
+    CapabilityProvider,
+)
 from ash.capabilities.types import (
     CapabilityAccount,
     CapabilityAuthFlow,
@@ -30,6 +36,10 @@ from ash.capabilities.types import (
 __all__ = [
     "CapabilityError",
     "CapabilityManager",
+    "CapabilityProvider",
+    "CapabilityCallContext",
+    "CapabilityAuthBeginResult",
+    "CapabilityAuthCompleteResult",
     "CapabilityAccount",
     "CapabilityAuthFlow",
     "CapabilityDefinition",

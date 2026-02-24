@@ -22,9 +22,14 @@ class CapabilitiesIntegration(IntegrationContributor):
 
         components = context.components
         manager = getattr(components, "capability_manager", None)
+        providers = list(getattr(components, "capability_providers", None) or [])
         if manager is None:
-            manager = await create_capability_manager()
+            manager = await create_capability_manager(providers=providers)
             components.capability_manager = manager
+            return
+
+        for provider in providers:
+            await manager.register_provider(provider)
 
     def register_rpc_methods(self, server, context: IntegrationContext) -> None:
         from ash.rpc.methods.capability import register_capability_methods

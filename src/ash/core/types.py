@@ -127,6 +127,7 @@ class AgentComponents:
     memory_extractor: MemoryExtractor | None = None
     browser_manager: Any | None = None
     capability_manager: Any | None = None
+    capability_providers: list[Any] | None = None
     sandbox_executor: SandboxExecutor | None = None
     agent_registry: AgentRegistry | None = None
     agent_executor: AgentExecutor | None = None

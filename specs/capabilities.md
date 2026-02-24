@@ -6,7 +6,7 @@ Files: `src/ash/capabilities/`, `src/ash/rpc/methods/capability.py`, `src/ash/in
 
 ## Status
 
-Contract drafted. Implementation pending.
+Core manager/RPC/CLI implementation is in place; provider backends are incremental.
 
 ## Intent
 
@@ -117,6 +117,40 @@ class CapabilityOperation:
     output_schema: dict[str, Any] = field(default_factory=dict)  # JSON Schema
 ```
 
+### Provider Contract
+
+Provider integrations register a namespace-owned capability surface and execute
+auth/invoke behavior inside host-managed boundaries.
+
+```python
+@dataclass
+class CapabilityCallContext:
+    user_id: str
+    chat_id: str | None
+    chat_type: str | None
+    provider: str | None
+    thread_id: str | None
+    session_key: str | None
+    source_username: str | None
+    source_display_name: str | None
+
+
+class CapabilityProvider(Protocol):
+    @property
+    def namespace(self) -> str: ...
+    async def definitions(self) -> list[CapabilityDefinition]: ...
+    async def auth_begin(...) -> CapabilityAuthBeginResult: ...
+    async def auth_complete(...) -> CapabilityAuthCompleteResult: ...
+    async def invoke(...) -> dict[str, Any]: ...
+```
+
+Rules:
+
+- Provider namespace must match capability ID prefix (`namespace.*`).
+- Provider responses are user-facing payloads and must be credential-safe.
+- Host rejects provider outputs containing credential-like keys (`access_token`,
+  `refresh_token`, `id_token`, `client_secret`, cookie/auth headers).
+
 ### RPC Methods
 
 #### `capability.list`
@@ -162,6 +196,9 @@ Request params:
   "context_token": "<signed-token>"
 }
 ```
+
+All identity/routing fields are derived from verified token claims; caller-provided
+values are ignored.
 
 Response:
 
@@ -277,6 +314,7 @@ See `specs/browser.md` for runtime bridge invariants.
 ## Verification
 
 - Unit tests for capability manager auth/policy enforcement.
+- Unit tests for provider namespace ownership/delegation/output hardening.
 - RPC tests proving caller identity fields are token-derived only.
 - Sandbox CLI tests for `ash-sb capability` command contracts.
 - Integration tests for multi-user isolation (same skill, different users).
