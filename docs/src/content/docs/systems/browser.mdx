@@ -1,35 +1,21 @@
 ---
 title: Browser
-description: Browser integration for session-based page actions
+description: Configure browser automation for page interaction tasks
 sidebar:
   order: 6
 ---
 
-Ash exposes a browser subsystem with a session-oriented API.
+Ash includes a browser subsystem for session-based page actions such as navigation, extraction, clicks, typing, and screenshots.
 
-## What It Does
+## Browser In 30 Seconds
 
-- Starts and tracks browser sessions per user.
-- Supports deterministic actions: `page.goto`, `page.extract`, `page.click`, `page.type`, `page.wait_for`, `page.screenshot`.
-- Stores session metadata and artifacts under `~/.ash/browser/`.
-- Exposes control surfaces through the `browser` tool, RPC methods, and `ash browser` CLI.
+- Browser actions run through the `browser` tool
+- Sessions and artifacts are tracked per runtime state
+- Provider choices:
+  - `sandbox` (default): local/container browser automation
+  - `kernel`: remote Kernel-backed execution
 
-## Providers
-
-- `sandbox` (default): Chromium automation in sandbox/container runtime.
-- `kernel`: remote provider adapter for Kernel-backed execution.
-
-## Runtime Integration
-
-Browser is installed through integration composition, not direct ad-hoc wiring in runtime entrypoints.
-
-- Integration: `src/ash/integrations/browser.py`
-- RPC methods: `src/ash/rpc/methods/browser.py`
-- Tool: `src/ash/tools/builtin/browser.py`
-
-This follows the harness contract in `specs/subsystems.md` and `specs/integrations.md`.
-
-## Configuration
+## Quick Start
 
 ```toml
 [browser]
@@ -37,17 +23,96 @@ enabled = true
 provider = "sandbox"
 timeout_seconds = 30.0
 
-[browser.kernel]
-api_key = "${KERNEL_API_KEY}"
+[browser.sandbox]
+headless = true
+runtime_required = true
 ```
 
-Use `uv run ash doctor` to validate browser config and missing credentials.
+Run diagnostics:
 
-For `sandbox` provider, ensure runtime prerequisites are present in the sandbox image/runtime:
+```bash
+uv run ash doctor
+```
+
+If using sandbox provider prerequisites locally:
 
 ```bash
 uv sync --all-groups
 uv run playwright install chromium
 ```
 
-Browser subsystem contract: `specs/browser.md`.
+## Choose A Provider
+
+Sandbox provider (default):
+
+```toml
+[browser]
+provider = "sandbox"
+```
+
+Kernel provider:
+
+```toml
+[browser]
+provider = "kernel"
+
+[browser.kernel]
+api_key = "${KERNEL_API_KEY}"
+base_url = "https://api.kernel.sh"
+project_id = "your-project-id"
+```
+
+Use sandbox unless you specifically need remote execution.
+
+## Operational Notes
+
+Browser integration is wired through subsystem hooks, not ad-hoc runtime branching.
+
+Key integration surfaces:
+
+- `src/ash/integrations/browser.py`
+- `src/ash/rpc/methods/browser.py`
+- `src/ash/tools/builtin/browser.py`
+
+## Troubleshooting
+
+### Browser tool is unavailable
+
+```bash
+uv run ash doctor
+```
+
+Check:
+
+- `[browser].enabled = true`
+- provider-specific credentials (for `kernel`)
+
+### Browser actions time out
+
+Increase timeout:
+
+```toml
+[browser]
+timeout_seconds = 45.0
+```
+
+### Sandbox browser fails to start
+
+```bash
+uv run ash doctor
+uv run ash sandbox status
+```
+
+If needed, reinstall browser runtime deps:
+
+```bash
+uv run playwright install chromium
+```
+
+## Reference (Advanced)
+
+Subsystem contract and integration boundaries:
+
+- `specs/browser.md`
+- `specs/subsystems.md`
+- `specs/integrations.md`
