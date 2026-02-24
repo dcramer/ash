@@ -1,64 +1,89 @@
 ---
 title: Systems Overview
-description: High-level system architecture
+description: Pick the right subsystem doc for your task
 sidebar:
   order: 1
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-Ash is a Python-based personal assistant with modular subsystems.
+Ash is built from modular systems. Use this page to jump straight to the subsystem you need.
 
-## System Components
+## Systems In 30 Seconds
+
+- **LLM Providers** choose models and credentials
+- **Tools** execute actions (shell, web, files, browser, delegation)
+- **Skills** define reusable workflows in `SKILL.md`
+- **Agents** run delegated autonomous loops
+- **Memory** keeps context and extracted facts
+- **Sandbox** isolates command execution
+- **Providers** deliver messages (for example Telegram)
+- **Vision** analyzes inbound images
+- **Browser** performs session-based page automation
+
+## Start By Goal
+
+If you want to:
+
+- Configure model aliases and API keys -> [LLM Providers](/systems/llm/)
+- Understand or extend tool behavior -> [Tools](/systems/tools/)
+- Create reusable workflows -> [Skills](/systems/skills/)
+- Configure delegated agent execution -> [Agents](/systems/agents/)
+- Tune context and extraction quality -> [Memory](/systems/memory/)
+- Harden runtime security -> [Sandbox](/systems/sandbox/)
+- Configure Telegram delivery/runtime -> [Providers](/systems/providers/)
+- Enable image understanding -> [Vision](/systems/vision/)
+- Run browser automation -> [Browser](/systems/browser/)
+
+## Subsystem Cards
 
 <CardGrid>
-  <Card title="Agent Core" icon="puzzle">
-    Orchestrates conversations, context assembly, and tool usage.
-  </Card>
   <Card title="LLM Providers" icon="rocket">
-    Unified interface for `openai`, `openai-oauth`, and `anthropic` models.
+    Configure model aliases, provider credentials, and reasoning settings.
   </Card>
-  <Card title="Tools + Sandbox" icon="shield">
-    Tool execution with Docker sandbox isolation and runtime controls.
-  </Card>
-  <Card title="Memory" icon="document">
-    Context retention, extraction, and optional semantic retrieval.
-  </Card>
-  <Card title="Providers" icon="telegram">
-    Interfaces like CLI and Telegram.
-  </Card>
-  <Card title="Vision" icon="picture">
-    Inbound image understanding and prompt context injection.
-  </Card>
-  <Card title="Browser" icon="window">
-    Session-scoped browser actions via sandbox or Kernel providers.
+  <Card title="Tools" icon="wrench">
+    Understand built-in tools, configuration, and custom tool extension points.
   </Card>
   <Card title="Skills" icon="setting">
-    Local and external skill discovery/execution.
+    Build reusable subagent workflows backed by `SKILL.md` and workspace paths.
+  </Card>
+  <Card title="Agents" icon="puzzle">
+    Configure delegated execution, including nested parent/child agent stacks.
+  </Card>
+  <Card title="Memory" icon="document">
+    Tune retention, extraction, and semantic retrieval behavior.
+  </Card>
+  <Card title="Sandbox" icon="shield">
+    Control runtime isolation, mounts, network mode, and resource limits.
+  </Card>
+  <Card title="Providers" icon="telegram">
+    Configure transport channels such as Telegram and runtime access controls.
+  </Card>
+  <Card title="Vision" icon="picture">
+    Enable inbound image analysis and text-context injection.
+  </Card>
+  <Card title="Browser" icon="window">
+    Configure browser provider/runtime for session-based page actions.
   </Card>
 </CardGrid>
 
-## Tech Stack
+## Troubleshooting
 
-| Component | Technology |
-|-----------|------------|
-| Language | Python 3.12+ |
-| CLI | Typer |
-| Server | FastAPI + Uvicorn |
-| Telegram | aiogram 3.x |
-| Config/validation | Pydantic |
-| Container runtime | docker-py |
+If subsystem behavior is unclear or seems broken:
 
-## Systems Documentation
+```bash
+uv run ash doctor
+uv run ash config validate
+```
 
-| Section | Description |
-|---------|-------------|
-| [LLM](/systems/llm/) | Model/provider configuration |
-| [Tools](/systems/tools/) | Tool execution patterns |
-| [Skills](/systems/skills/) | Skill sources and runtime behavior |
-| [Agents](/systems/agents/) | Agent architecture |
-| [Memory](/systems/memory/) | Context and memory pipeline |
-| [Vision](/systems/vision/) | Image preprocessing and context injection |
-| [Browser](/systems/browser/) | Session-scoped browser actions and providers |
-| [Sandbox](/systems/sandbox/) | Container isolation and mounts |
-| [Providers](/systems/providers/) | Transport/provider integrations |
+Then check the specific subsystem page linked above for targeted diagnostics.
+
+## Reference (Advanced)
+
+Core stack snapshot:
+
+- Language/runtime: Python 3.12+
+- CLI: Typer
+- Server: FastAPI + Uvicorn
+- Validation/modeling: Pydantic
+- Container runtime integration: Docker (`docker-py`)
