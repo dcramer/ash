@@ -369,7 +369,8 @@ class PeopleDedupMixin:
             response = await self._llm.complete(
                 messages=[Message(role=Role.USER, content=prompt)],
                 model=self._llm_model,
-                max_tokens=10,
+                # OpenAI Responses API enforces max_output_tokens >= 16.
+                max_tokens=16,
                 temperature=0.0,
             )
             return response.message.get_text().strip().upper() == "YES"
