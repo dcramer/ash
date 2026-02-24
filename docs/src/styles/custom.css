@@ -117,6 +117,8 @@ header.header :is(
   background: #ffffff !important;
   color: #11130f !important;
   border: 2px solid #11130f !important;
+  border-right-width: 4px !important;
+  border-bottom-width: 4px !important;
   border-radius: 0 !important;
   box-shadow: 3px 3px 0 rgba(20, 20, 15, 0.18);
   font-weight: 600;
@@ -205,9 +207,9 @@ a:not([class]):hover {
 .sl-link-button[data-variant='primary'] {
   background: var(--ash-lime) !important;
   color: #0f1b05 !important;
-  border: 1px solid var(--ash-ink) !important;
-  border-right-width: 3px !important;
-  border-bottom-width: 3px !important;
+  border: 2px solid var(--ash-ink) !important;
+  border-right-width: 4px !important;
+  border-bottom-width: 4px !important;
   box-shadow: 3px 3px 0 rgba(27, 31, 16, 0.22);
 }
 
@@ -218,9 +220,9 @@ a:not([class]):hover {
 .sl-link-button[data-variant='secondary'] {
   background: #fff9ef !important;
   color: #211f16 !important;
-  border: 1px solid var(--ash-ink) !important;
-  border-right-width: 3px !important;
-  border-bottom-width: 3px !important;
+  border: 2px solid var(--ash-ink) !important;
+  border-right-width: 4px !important;
+  border-bottom-width: 4px !important;
   box-shadow: 3px 3px 0 rgba(27, 31, 16, 0.18);
 }
 
@@ -272,9 +274,9 @@ starlight-toc a[aria-current='true'] {
 
 .card {
   background: #f9fafc !important;
-  border: 1px solid var(--ash-ink) !important;
-  border-right-width: 3px !important;
-  border-bottom-width: 3px !important;
+  border: 2px solid var(--ash-ink) !important;
+  border-right-width: 4px !important;
+  border-bottom-width: 4px !important;
   border-radius: 0 !important;
   box-shadow: 4px 4px 0 rgba(24, 27, 33, 0.14);
 }
@@ -290,7 +292,7 @@ starlight-toc a[aria-current='true'] {
 }
 
 table {
-  border: 1px solid #11130f;
+  border: 2px solid #11130f;
   border-right-width: 4px;
   border-bottom-width: 4px;
   border-radius: 0 !important;
@@ -370,7 +372,7 @@ td {
 
 /* CLI option list (help-style) */
 .ash-help-list {
-  border: 1px solid #11130f;
+  border: 2px solid #11130f;
   border-right-width: 4px;
   border-bottom-width: 4px;
   background: #ffffff;
@@ -400,9 +402,10 @@ td {
   padding: 0.02rem 0;
   color: #0f140b;
   font-family: var(--sl-font-mono);
-  font-weight: 700;
-  background: transparent;
-  border: 0;
+  font-weight: 800;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
   white-space: nowrap;
   overflow-x: auto;
 }
@@ -433,7 +436,7 @@ starlight-aside[type='note'],
 starlight-aside[data-type='note'],
 .starlight-aside--note {
   background: #ffffff !important;
-  border: 1px solid #11130f !important;
+  border: 2px solid #11130f !important;
   border-right-width: 3px !important;
   border-bottom-width: 3px !important;
   border-left-width: 8px !important;
@@ -481,7 +484,7 @@ starlight-aside[data-type='note'] :is(.icon, [slot='icon'], svg),
 
 pre {
   background: #ffffff !important;
-  border: 1px solid #11130f !important;
+  border: 2px solid #11130f !important;
   border-right-width: 4px !important;
   border-bottom-width: 4px !important;
   box-shadow: 4px 4px 0 rgba(20, 20, 15, 0.14) !important;
@@ -496,10 +499,16 @@ pre code {
 
 .expressive-code .frame {
   border-radius: 0 !important;
-  border: 1px solid #11130f !important;
+  border: 2px solid #11130f !important;
   border-right-width: 4px !important;
   border-bottom-width: 4px !important;
   box-shadow: 4px 4px 0 rgba(20, 20, 15, 0.14) !important;
+}
+
+/* Use frame border for shape; avoid nested pre borders causing header/body mismatch */
+.expressive-code .frame pre {
+  border: 0 !important;
+  box-shadow: none !important;
 }
 
 .expressive-code .frame.has-title pre {
@@ -510,7 +519,7 @@ pre code {
 .expressive-code .header,
 .expressive-code .frame .header {
   background: #afff24 !important;
-  border-bottom: 1px solid #11130f !important;
+  border-bottom: 2px solid #11130f !important;
   color: #11130f !important;
 }
 
@@ -599,9 +608,9 @@ body .expressive-code .ec-line :is(
 }
 
 .pagination-links a {
-  border: 1px solid var(--ash-ink);
-  border-right-width: 3px;
-  border-bottom-width: 3px;
+  border: 2px solid var(--ash-ink);
+  border-right-width: 4px;
+  border-bottom-width: 4px;
   border-radius: 0 !important;
   background: #ffffff;
   box-shadow: 3px 3px 0 rgba(20, 20, 15, 0.12);
