@@ -776,7 +776,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   border: 0;
   background: transparent;
   color: #f4f4f4;
-  padding: clamp(0.9rem, 2.8vw, 1.7rem);
+  padding: 0.75rem 0;
   box-shadow: none;
 }
 
