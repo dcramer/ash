@@ -1311,29 +1311,28 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-chat-tool {
   margin: 0.06rem auto;
-  border: 1.5px dashed #565656;
-  background: #f4f4f4;
-  color: #434343;
-  padding: 0.34rem 0.5rem;
+  border: 0;
+  background: transparent;
+  color: #9b9b9b;
+  padding: 0;
   font-family: 'IBM Plex Mono', var(--sl-font-mono);
   font-size: 0.82rem;
   line-height: 1.35;
   width: fit-content;
   max-width: calc(100% - 1rem);
-  text-align: center;
-  border-style: solid;
+  text-align: left;
   font-size: 0.78rem;
   letter-spacing: 0.02em;
 }
 
 .ash-chat-tool span {
-  display: inline-block;
+  display: inline;
   margin-right: 0.3rem;
-  color: #2a2a2a;
+  color: #9b9b9b;
   font-weight: 700;
-  background: #b0ff1f;
-  border: 1.5px solid #565656;
-  padding: 0.05rem 0.24rem;
+  background: transparent;
+  border: 0;
+  padding: 0;
 }
 
 .ash-chat-meta {
@@ -1509,15 +1508,15 @@ body:has(.ash-home) .ash-chat-ash {
 }
 
 body:has(.ash-home) :is(.ash-chat-tool, .ash-chat-meta) {
-  border-color: var(--ash-dark-border);
-  background: #1c1c1c;
-  color: #e5e5e5;
+  border-color: transparent;
+  background: transparent;
+  color: #9b9b9b;
 }
 
 body:has(.ash-home) .ash-chat-tool span {
-  color: #1b1b1b;
-  border-color: #7ea91a;
-  background: #b0ff1f;
+  color: #9b9b9b;
+  border-color: transparent;
+  background: transparent;
 }
 
 @media (max-width: 64rem) {
