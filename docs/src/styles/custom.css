@@ -674,7 +674,7 @@ body .expressive-code .ec-line :is(
 }
 
 .pagination-links a {
-  border: 1px solid var(--ash-ink);
+  border: 1px solid var(--ash-dark-border);
   border-right-width: 1px;
   border-bottom-width: 1px;
   border-radius: 0 !important;
