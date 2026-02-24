@@ -110,3 +110,4 @@ Specs MUST be updated when:
 | [rpc](specs/rpc.md) | Unix domain socket RPC for sandbox-to-host communication |
 | [sessions](specs/sessions.md) | JSONL-based session persistence for conversation history |
 | [workspace](specs/workspace.md) | Agent personality via SOUL.md with inheritance |
+| [docs-pages](specs/docs-pages.md) | User-focused documentation page structure and verification rules |
