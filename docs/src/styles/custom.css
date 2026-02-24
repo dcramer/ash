@@ -599,13 +599,15 @@ pre code {
 }
 
 .expressive-code .header .copy {
-  border-color: #2d3442 !important;
-  color: #d8e3f5 !important;
-  background: #121826 !important;
+  border: 1px solid #4c586e !important;
+  color: #f3f7ff !important;
+  background: #1a2332 !important;
 }
 
 .expressive-code .header .copy:hover {
-  background: #182132 !important;
+  border-color: #b0ff1f !important;
+  color: #0e1407 !important;
+  background: #d1ff69 !important;
 }
 
 /* High-contrast, monochrome-first code palette */
@@ -622,8 +624,8 @@ body .expressive-code {
   --ec-frm-trmTtbBrdBtmCol: #2d3442 !important;
   --ec-frm-trmTtbDotsFg: #5e6a7f !important;
   --ec-frm-trmTtbDotsOpa: 1 !important;
-  --ec-frm-inlBtnFg: #1c232f !important;
-  --ec-frm-inlBtnBrd: #11130f !important;
+  --ec-frm-inlBtnFg: #f3f7ff !important;
+  --ec-frm-inlBtnBrd: #4c586e !important;
 }
 
 .expressive-code .header :is([class*='dot'], [class*='Dot']) {

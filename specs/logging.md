@@ -77,7 +77,7 @@ logger.info(f"Agent {name} completed in {n} iterations")
 logger.error(f"Tool not found: {name}")
 ```
 
-Per-event data goes in `extra={}`. Ambient context (chat_id, session_id, agent_name, model, provider, user_id) is injected automatically via `log_context()`.
+Per-event data goes in `extra={}`. Ambient context (chat_id, session_id, agent_name, model, provider, user_id, thread_id, chat_type, source_username) is injected automatically via `log_context()`.
 
 ### Attribute Naming (OTel-aligned)
 
@@ -171,6 +171,9 @@ Use dot-namespaced, snake_case attribute names. Prefer OTel semantic conventions
 | `model` | `AgentExecutor._execute_inner` | Resolved model name |
 | `provider` | `Agent.process_message`, `AgentExecutor.execute` | LLM provider (anthropic, openai) |
 | `user_id` | `Agent.process_message`, `AgentExecutor.execute` | User identifier |
+| `thread_id` | provider handlers, tool context | Provider thread/topic identifier |
+| `chat_type` | provider/session metadata | private/group/supergroup context |
+| `source_username` | provider/session metadata | Source user handle for attribution |
 
 Context nests — a subagent's `log_context` overrides the parent's for its scope, restoring parent values on exit.
 
@@ -192,6 +195,9 @@ Each line in `~/.ash/logs/YYYY-MM-DD.jsonl`:
 | `model` | string | Context | No |
 | `provider` | string | Context | No |
 | `user_id` | string | Context | No |
+| `thread_id` | string | Context | No |
+| `chat_type` | string | Context | No |
+| `source_username` | string | Context | No |
 | *(extra)* | any | `extra={}` | No |
 
 Priority: `extra` fields override context fields of the same name.

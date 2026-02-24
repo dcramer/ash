@@ -507,7 +507,12 @@ class MemoryExtractor:
                 drop_counts=drop_counts,
             )
             total_candidates = len(facts) + sum(drop_counts.values())
-            logger.info(
+            stats_level = (
+                logger.debug
+                if total_candidates == 0 and len(facts) == 0
+                else logger.info
+            )
+            stats_level(
                 "memory_extraction_filter_stats",
                 extra={
                     "fact.total_candidates": total_candidates,

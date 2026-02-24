@@ -1,6 +1,6 @@
 import json
 
-from ash.cli.commands.logs import _format_extras, query_logs
+from ash.cli.commands.logs import _format_context_marker, _format_extras, query_logs
 
 
 def test_format_extras_keeps_more_error_message_detail() -> None:
@@ -49,6 +49,7 @@ def test_format_extras_hides_empty_and_context_noise_fields() -> None:
             "context": "",
             "context ": "",
             "session_id": "s-1",
+            "agent_name": "main",
             "foo": "",
             "bar": None,
             "ok": "value",
@@ -56,9 +57,64 @@ def test_format_extras_hides_empty_and_context_noise_fields() -> None:
     )
     assert "context=" not in extras
     assert "session_id=" not in extras
+    assert "agent_name=" not in extras
     assert "foo=" not in extras
     assert "bar=" not in extras
     assert "ok=value" in extras
+
+
+def test_format_context_marker_compact_display() -> None:
+    marker = _format_context_marker(
+        {
+            "chat_id": "-542863895",
+            "session_id": "telegram_-542863895_1662",
+            "thread_id": "1662",
+            "agent_name": "main",
+            "provider": "telegram",
+            "user_id": "1234567890",
+            "chat_type": "group",
+            "source_username": "dcramer",
+        }
+    )
+
+    assert marker.startswith("[")
+    assert "-5428638" in marker
+    assert "s:telegram" in marker
+    assert "t:1662" in marker
+    assert "@main" in marker
+    assert "p:telegram" in marker
+    assert "u:12345678" in marker
+    assert "ct:group" in marker
+    assert "src:dcramer" in marker
+
+
+def test_format_extras_summarizes_id_lists() -> None:
+    extras = _format_extras(
+        {
+            "message": "event",
+            "component": "core",
+            "memory.ids": ["abc123456", "def234567", "ghi345678", "jkl456789"],
+        }
+    )
+    assert "memory.ids=4 ids[abc12345, def23456, ghi34567, ...]" in extras
+
+
+def test_format_extras_summarizes_tool_arguments_without_newlines() -> None:
+    extras = _format_extras(
+        {
+            "message": "tool_executed",
+            "component": "tools",
+            "gen_ai.tool.call.arguments": {
+                "command": "ash-sb memory search 'watch'\n--this-chat",
+                "timeout": 60,
+                "foo": "bar",
+            },
+        }
+    )
+    assert "gen_ai.tool.call.arguments={" in extras
+    assert "command=ash-sb memory search 'watch' --this-chat" in extras
+    assert "+1 more" in extras
+    assert "\n" not in extras
 
 
 def test_query_logs_returns_latest_entries_with_newest_last(tmp_path) -> None:

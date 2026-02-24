@@ -239,7 +239,14 @@ class CheckpointHandler:
         chat_id = routing.get("chat_id", "")
         session_key = routing.get("session_key", "")
 
-        with log_context(chat_id=chat_id, session_id=session_key):
+        with log_context(
+            chat_id=chat_id,
+            session_id=session_key,
+            provider=self._provider.name,
+            user_id=user_id,
+            thread_id=routing.get("thread_id"),
+            source_username=callback_query.from_user.username,
+        ):
             await self._handle_callback_query_inner(
                 callback_query=callback_query,
                 routing=routing,

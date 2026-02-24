@@ -164,7 +164,7 @@ class MemoryPostprocessService:
                 current_datetime=datetime.now(UTC),
             )
 
-            logger.info(
+            (logger.debug if len(facts) == 0 else logger.info)(
                 "facts_extracted",
                 extra={
                     "count": len(facts),

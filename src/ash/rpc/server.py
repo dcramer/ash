@@ -14,10 +14,21 @@ from ash_rpc_protocol import (
     read_message,
 )
 
+from ash.logging import log_context
+
 logger = logging.getLogger(__name__)
 
 # Type for RPC method handlers
 RPCHandler = Callable[[dict[str, Any]], Awaitable[Any]]
+
+
+def _string_param(params: dict[str, Any], key: str) -> str | None:
+    """Extract a non-empty string param for log context."""
+    value = params.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 class RPCServer:
@@ -142,7 +153,17 @@ class RPCServer:
 
             # Execute handler
             try:
-                result = await handler(request.params)
+                params = request.params or {}
+                with log_context(
+                    chat_id=_string_param(params, "chat_id"),
+                    session_id=_string_param(params, "session_key"),
+                    provider=_string_param(params, "provider"),
+                    user_id=_string_param(params, "user_id"),
+                    thread_id=_string_param(params, "thread_id"),
+                    chat_type=_string_param(params, "chat_type"),
+                    source_username=_string_param(params, "source_username"),
+                ):
+                    result = await handler(params)
                 return RPCResponse.success(request_id, result)
             except TypeError as e:
                 return RPCResponse.error_response(

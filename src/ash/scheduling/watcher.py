@@ -87,7 +87,7 @@ class ScheduleWatcher:
             try:
                 self._poll_count += 1
                 if self._poll_count % heartbeat_interval == 0:
-                    logger.info(
+                    logger.debug(
                         "schedule_watcher_heartbeat",
                         extra={
                             "poll.count": self._poll_count,

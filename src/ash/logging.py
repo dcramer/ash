@@ -47,6 +47,15 @@ _log_provider: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _log_user_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "log_user_id", default=None
 )
+_log_thread_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_thread_id", default=None
+)
+_log_chat_type: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_chat_type", default=None
+)
+_log_source_username: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "log_source_username", default=None
+)
 
 # All context vars in (field_name, var) order for iteration
 _CONTEXT_VARS: list[tuple[str, contextvars.ContextVar[str | None]]] = [
@@ -56,6 +65,9 @@ _CONTEXT_VARS: list[tuple[str, contextvars.ContextVar[str | None]]] = [
     ("model", _log_model),
     ("provider", _log_provider),
     ("user_id", _log_user_id),
+    ("thread_id", _log_thread_id),
+    ("chat_type", _log_chat_type),
+    ("source_username", _log_source_username),
 ]
 
 
@@ -77,6 +89,9 @@ def log_context(
     model: str | None = None,
     provider: str | None = None,
     user_id: str | None = None,
+    thread_id: str | None = None,
+    chat_type: str | None = None,
+    source_username: str | None = None,
 ) -> Iterator[None]:
     """Context manager for setting log context in current async task."""
     tokens: list[
@@ -89,6 +104,9 @@ def log_context(
         (_log_model, model),
         (_log_provider, provider),
         (_log_user_id, user_id),
+        (_log_thread_id, thread_id),
+        (_log_chat_type, chat_type),
+        (_log_source_username, source_username),
     ]:
         if val is not None:
             tokens.append((var, var.set(val)))
@@ -465,6 +483,26 @@ class ComponentFormatter(logging.Formatter):
         agent_name = _log_agent_name.get()
         if agent_name:
             ctx_parts.append(f"@{agent_name}")
+
+        thread_id = _log_thread_id.get()
+        if thread_id:
+            ctx_parts.append(f"t:{thread_id[:8]}")
+
+        chat_type = _log_chat_type.get()
+        if chat_type:
+            ctx_parts.append(f"ct:{chat_type}")
+
+        provider = _log_provider.get()
+        if provider:
+            ctx_parts.append(f"p:{provider}")
+
+        user_id = _log_user_id.get()
+        if user_id:
+            ctx_parts.append(f"u:{user_id[:8]}")
+
+        source_username = _log_source_username.get()
+        if source_username:
+            ctx_parts.append(f"src:{source_username[:24]}")
 
         record.context = f"[{' '.join(ctx_parts)}] " if ctx_parts else ""
 

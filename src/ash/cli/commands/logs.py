@@ -40,6 +40,10 @@ HIDDEN_FIELDS: set[str] = {
     "session_id",
     "user_id",
     "provider",
+    "thread_id",
+    "chat_type",
+    "source_username",
+    "agent_name",
     "exception",
     "message",
     "duration_ms",
@@ -393,6 +397,63 @@ def _format_duration(ms: float) -> str:
     return f"{int(ms)}ms"
 
 
+def _summarize_ids(value: Any) -> str | None:
+    """Summarize verbose ID lists in console output."""
+    if not isinstance(value, list):
+        return None
+    if not value:
+        return "0 ids"
+    preview = ", ".join(_short_value(str(v)) for v in value[:3])
+    suffix = ", ..." if len(value) > 3 else ""
+    return f"{len(value)} ids[{preview}{suffix}]"
+
+
+def _summarize_tool_arguments(value: Any) -> str | None:
+    """Summarize tool argument payloads for compact one-line rendering."""
+    if not isinstance(value, dict):
+        return None
+
+    keys = ["command", "query", "url", "timeout", "count", "search_type", "this_chat"]
+    parts: list[str] = []
+    used: set[str] = set()
+    for key in keys:
+        if key not in value:
+            continue
+        used.add(key)
+        raw = value[key]
+        if isinstance(raw, str):
+            compact = " ".join(raw.split())
+            if len(compact) > 80:
+                compact = compact[:77] + "..."
+            parts.append(f"{key}={compact}")
+        else:
+            parts.append(f"{key}={raw}")
+
+    extra_keys = [k for k in value if k not in used]
+    if extra_keys:
+        parts.append(f"+{len(extra_keys)} more")
+
+    return "{" + ", ".join(parts) + "}"
+
+
+def _stringify_extra_value(key: str, value: Any) -> str:
+    """Render extra field values without multiline/noisy blobs."""
+    if key.endswith(".ids"):
+        summarized = _summarize_ids(value)
+        if summarized is not None:
+            return summarized
+    if key == "gen_ai.tool.call.arguments":
+        summarized = _summarize_tool_arguments(value)
+        if summarized is not None:
+            return summarized
+    if isinstance(value, dict | list):
+        try:
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        except TypeError:
+            return str(value)
+    return str(value)
+
+
 def _format_extras(entry: dict[str, Any]) -> str:
     """Render extra fields as concise key=value tags."""
     parts: list[str] = []
@@ -416,7 +477,7 @@ def _format_extras(entry: dict[str, Any]) -> str:
         # Apply alias
         display_key = FIELD_ALIASES.get(normalized_key, normalized_key)
 
-        val_str = str(value)
+        val_str = _stringify_extra_value(normalized_key, value)
         max_len = _get_extra_max_len(normalized_key)
         if len(val_str) > max_len:
             val_str = val_str[: max_len - 3] + "..."
@@ -424,6 +485,52 @@ def _format_extras(entry: dict[str, Any]) -> str:
         parts.append(f"{display_key}={val_str}")
 
     return " ".join(parts)
+
+
+def _short_value(value: str, max_len: int = 8) -> str:
+    """Shorten marker values for compact context display."""
+    return value if len(value) <= max_len else value[:max_len]
+
+
+def _format_context_marker(entry: dict[str, Any]) -> str:
+    """Build compact context marker from common log context fields."""
+    parts: list[str] = []
+
+    chat_id = entry.get("chat_id")
+    if isinstance(chat_id, str) and chat_id:
+        parts.append(_short_value(chat_id))
+
+    session_id = entry.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        parts.append(f"s:{_short_value(session_id)}")
+
+    thread_id = entry.get("thread_id")
+    if isinstance(thread_id, str) and thread_id:
+        parts.append(f"t:{_short_value(thread_id)}")
+
+    agent_name = entry.get("agent_name")
+    if isinstance(agent_name, str) and agent_name:
+        parts.append(f"@{_short_value(agent_name, max_len=16)}")
+
+    provider = entry.get("provider")
+    if isinstance(provider, str) and provider:
+        parts.append(f"p:{provider}")
+
+    user_id = entry.get("user_id")
+    if isinstance(user_id, str) and user_id:
+        parts.append(f"u:{_short_value(user_id)}")
+
+    chat_type = entry.get("chat_type")
+    if isinstance(chat_type, str) and chat_type:
+        parts.append(f"ct:{chat_type}")
+
+    source_username = entry.get("source_username")
+    if isinstance(source_username, str) and source_username:
+        parts.append(f"src:{_short_value(source_username, max_len=20)}")
+
+    if not parts:
+        return ""
+    return f"[{' '.join(parts)}]"
 
 
 def _display_entries(
@@ -460,6 +567,8 @@ def _display_entries(
         symbol, style = LEVEL_SYMBOLS.get(level, ("?", ""))
         comp = entry.get("component", "")
         message = entry.get("message", "")
+        context_marker = _format_context_marker(entry)
+        context_str = f" [dim]{context_marker}[/dim]" if context_marker else ""
 
         extras = _format_extras(entry)
         extras_str = f"  [dim]{extras}[/dim]" if extras else ""
@@ -467,7 +576,7 @@ def _display_entries(
         console.print(
             f"[dim]{time_str}[/dim]  [{style}]{symbol}[/{style}]"
             f"  [blue]{comp:<12}[/blue]"
-            f" {message}{extras_str}"
+            f"{context_str} {message}{extras_str}"
         )
 
         # Show exception indented with dim border

@@ -318,29 +318,44 @@ class TestLogContext:
     def test_log_context_with_new_fields(self):
         from ash.logging import (
             _log_agent_name,
+            _log_chat_type,
             _log_model,
             _log_provider,
+            _log_source_username,
+            _log_thread_id,
             _log_user_id,
             log_context,
         )
 
         assert _log_agent_name.get() is None
+        assert _log_thread_id.get() is None
+        assert _log_chat_type.get() is None
+        assert _log_source_username.get() is None
         assert _log_model.get() is None
         assert _log_provider.get() is None
         assert _log_user_id.get() is None
 
         with log_context(
             agent_name="test-agent",
+            thread_id="thread-9",
+            chat_type="group",
+            source_username="dcramer",
             model="claude-3",
             provider="anthropic",
             user_id="u123",
         ):
             assert _log_agent_name.get() == "test-agent"
+            assert _log_thread_id.get() == "thread-9"
+            assert _log_chat_type.get() == "group"
+            assert _log_source_username.get() == "dcramer"
             assert _log_model.get() == "claude-3"
             assert _log_provider.get() == "anthropic"
             assert _log_user_id.get() == "u123"
 
         assert _log_agent_name.get() is None
+        assert _log_thread_id.get() is None
+        assert _log_chat_type.get() is None
+        assert _log_source_username.get() is None
         assert _log_model.get() is None
         assert _log_provider.get() is None
         assert _log_user_id.get() is None
@@ -511,6 +526,36 @@ class TestComponentFormatter:
             result = formatter.format(record)
             assert "@debug-self" in result
 
+    def test_context_with_extended_markers(self):
+        import logging
+
+        from ash.logging import ComponentFormatter, log_context
+
+        formatter = ComponentFormatter("%(context)s%(component)s: %(message)s")
+        record = logging.LogRecord(
+            name="ash.tools",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+
+        with log_context(
+            thread_id="thread-123",
+            chat_type="group",
+            provider="telegram",
+            user_id="user-123456",
+            source_username="dcramer",
+        ):
+            result = formatter.format(record)
+            assert "t:thread-1" in result
+            assert "ct:group" in result
+            assert "p:telegram" in result
+            assert "u:user-123" in result
+            assert "src:dcramer" in result
+
     def test_extra_field_truncation_is_field_aware(self):
         import logging
 
@@ -563,6 +608,9 @@ class TestGetContextFields:
             model="claude-3",
             provider="anthropic",
             user_id="u1",
+            thread_id="t1",
+            chat_type="private",
+            source_username="alice",
         ):
             fields = _get_context_fields()
             assert fields == {
@@ -572,6 +620,9 @@ class TestGetContextFields:
                 "model": "claude-3",
                 "provider": "anthropic",
                 "user_id": "u1",
+                "thread_id": "t1",
+                "chat_type": "private",
+                "source_username": "alice",
             }
 
 

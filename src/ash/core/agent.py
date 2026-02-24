@@ -753,8 +753,12 @@ class Agent:
         with log_context(
             chat_id=session.chat_id,
             session_id=session.session_id,
+            agent_name="main",
             provider=session.provider,
             user_id=setup.effective_user_id,
+            thread_id=session.context.thread_id,
+            chat_type=session.context.chat_type,
+            source_username=session.context.username,
         ):
             while iterations < self._config.max_tool_iterations:
                 iterations += 1
@@ -884,8 +888,12 @@ class Agent:
         with log_context(
             chat_id=session.chat_id,
             session_id=session.session_id,
+            agent_name="main",
             provider=session.provider,
             user_id=setup.effective_user_id,
+            thread_id=session.context.thread_id,
+            chat_type=session.context.chat_type,
+            source_username=session.context.username,
         ):
             while iterations < self._config.max_tool_iterations:
                 iterations += 1

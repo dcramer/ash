@@ -336,6 +336,13 @@ class AgentExecutor:
             agent_name=agent.config.name,
             provider=context.provider,
             user_id=context.user_id,
+            thread_id=context.thread_id,
+            chat_type=str(context.metadata.get("chat_type"))
+            if context.metadata.get("chat_type")
+            else None,
+            source_username=str(context.metadata.get("username"))
+            if context.metadata.get("username")
+            else None,
         ):
             try:
                 return await asyncio.wait_for(
@@ -770,6 +777,13 @@ class AgentExecutor:
             session_id=frame.context.session_id,
             provider=frame.context.provider,
             user_id=frame.context.user_id,
+            thread_id=frame.context.thread_id,
+            chat_type=str(frame.context.metadata.get("chat_type"))
+            if frame.context.metadata.get("chat_type")
+            else None,
+            source_username=str(frame.context.metadata.get("username"))
+            if frame.context.metadata.get("username")
+            else None,
         ):
             if user_message is not None:
                 session.add_user_message(user_message)

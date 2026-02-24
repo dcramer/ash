@@ -190,7 +190,12 @@ class TelegramMessageHandler:
 
         # Set chat_id context immediately so all logs have it
         # (session_id is added later in _process_single_message when known)
-        with log_context(chat_id=message.chat_id):
+        with log_context(
+            chat_id=message.chat_id,
+            provider=self._provider.name,
+            user_id=message.user_id,
+            source_username=message.username,
+        ):
             await self._handle_message_inner(message)
 
     async def _handle_message_inner(self, message: IncomingMessage) -> None:
@@ -295,7 +300,15 @@ class TelegramMessageHandler:
             self._provider.name, message.chat_id, message.user_id, thread_id
         )
 
-        with log_context(chat_id=message.chat_id, session_id=session_key):
+        with log_context(
+            chat_id=message.chat_id,
+            session_id=session_key,
+            provider=self._provider.name,
+            user_id=message.user_id,
+            thread_id=thread_id,
+            chat_type=message.metadata.get("chat_type"),
+            source_username=message.username,
+        ):
             await self._process_single_message_inner(message, ctx)
 
     async def _process_single_message_inner(
