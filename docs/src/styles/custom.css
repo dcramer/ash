@@ -96,7 +96,7 @@ header.header {
   border-bottom: 2px solid #b0ff1f;
   border-right: 0 !important;
   border-inline-end: 0 !important;
-  box-shadow: 0 3px 0 rgba(176, 255, 31, 0.2);
+  box-shadow: none;
   backdrop-filter: none;
 }
 
@@ -161,7 +161,7 @@ header.header site-search > button[data-open-modal] {
   color: #edf2fb !important;
   border: 0 !important;
   border-radius: 0 !important;
-  box-shadow: none !important;
+  box-shadow: none;
   font-family: 'Sora', var(--sl-font) !important;
   font-weight: 700 !important;
   min-height: 2.6rem;
@@ -190,7 +190,7 @@ header.header :is(
   color: #edf2fb !important;
   border: 0 !important;
   border-radius: 0 !important;
-  box-shadow: none !important;
+  box-shadow: none;
   font-weight: 600;
 }
 
@@ -280,7 +280,7 @@ a:not([class]):hover {
   border: 2px solid var(--ash-ink) !important;
   border-right-width: 6px !important;
   border-bottom-width: 6px !important;
-  box-shadow: 6px 6px 0 rgba(27, 31, 16, 0.2);
+  box-shadow: none;
 }
 
 .sl-link-button[data-variant='primary']:hover {
@@ -293,7 +293,7 @@ a:not([class]):hover {
   border: 2px solid var(--ash-dark-border) !important;
   border-right-width: 6px !important;
   border-bottom-width: 6px !important;
-  box-shadow: 6px 6px 0 rgba(27, 31, 16, 0.16);
+  box-shadow: none;
 }
 
 nav.sidebar {
@@ -319,7 +319,7 @@ nav.sidebar a[aria-current='page'],
 nav.sidebar a[aria-current='page']:hover {
   background: #b0ff1f !important;
   color: #11130f !important;
-  box-shadow: none !important;
+  box-shadow: none;
   font-weight: 600;
 }
 
@@ -348,7 +348,7 @@ starlight-toc a[aria-current='true'] {
   border-right-width: 6px !important;
   border-bottom-width: 6px !important;
   border-radius: 0 !important;
-  box-shadow: 6px 6px 0 var(--ash-dark-shadow);
+  box-shadow: none;
 }
 
 .card .title {
@@ -371,7 +371,7 @@ table {
   border-collapse: collapse;
   table-layout: auto;
   background: #05070c;
-  box-shadow: 6px 6px 0 var(--ash-dark-shadow);
+  box-shadow: none;
 }
 
 .sl-markdown-content table {
@@ -448,7 +448,7 @@ td {
   background: #05070c !important;
   padding: 0.35rem 0.52rem;
   margin: 0;
-  box-shadow: 6px 6px 0 var(--ash-dark-shadow);
+  box-shadow: none;
 }
 
 .ash-help-row {
@@ -470,7 +470,7 @@ td {
   font-weight: 800;
   background: transparent !important;
   border: 0 !important;
-  box-shadow: none !important;
+  box-shadow: none;
   white-space: nowrap;
   overflow-x: auto;
 }
@@ -506,7 +506,7 @@ starlight-aside[data-type='note'],
   border-bottom-width: 3px !important;
   border-left-width: 8px !important;
   border-left-color: #b0ff1f !important;
-  box-shadow: 3px 3px 0 var(--ash-dark-shadow) !important;
+  box-shadow: none;
 }
 
 starlight-aside[type='note'] .title,
@@ -552,7 +552,7 @@ pre {
   border: 2px solid var(--ash-dark-border) !important;
   border-right-width: 6px !important;
   border-bottom-width: 6px !important;
-  box-shadow: 6px 6px 0 var(--ash-dark-shadow) !important;
+  box-shadow: none;
   font-family: var(--sl-font-mono);
   border-radius: 0 !important;
 }
@@ -567,14 +567,14 @@ pre code {
   border: 2px solid var(--ash-dark-border) !important;
   border-right-width: 6px !important;
   border-bottom-width: 6px !important;
-  box-shadow: 6px 6px 0 var(--ash-dark-shadow) !important;
+  box-shadow: none;
   background: #05070c !important;
 }
 
 /* Use frame border for shape; avoid nested pre borders causing header/body mismatch */
 .expressive-code .frame pre {
   border: 0 !important;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .expressive-code .frame.has-title pre {
@@ -594,7 +594,7 @@ pre code {
   color: #11130f !important;
   background: inherit !important;
   border: 0 !important;
-  box-shadow: none !important;
+  box-shadow: none;
   font-weight: 800 !important;
 }
 
@@ -680,7 +680,7 @@ body .expressive-code .ec-line :is(
   border-radius: 0 !important;
   background: #0d131d;
   color: #eaf1ff !important;
-  box-shadow: 6px 6px 0 var(--ash-dark-shadow);
+  box-shadow: none;
 }
 
 .pagination-links a:hover {
@@ -756,7 +756,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   background: #b8ff1f;
   color: #0f100a;
   padding: clamp(0.9rem, 2.8vw, 1.7rem);
-  box-shadow: 7px 7px 0 rgba(15, 16, 10, 0.28);
+  box-shadow: none;
 }
 
 .ash-mega-word {
@@ -809,7 +809,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   letter-spacing: 0.04em;
   text-transform: lowercase;
   color: #161509;
-  box-shadow: 4px 4px 0 rgba(20, 20, 15, 0.22);
+  box-shadow: none;
 }
 
 .ash-home-brand-name {
@@ -832,7 +832,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   border: 3px solid var(--ash-ink);
   border-radius: 0 !important;
   background: #fff4da;
-  box-shadow: 7px 7px 0 rgba(20, 20, 15, 0.18);
+  box-shadow: none;
 }
 
 .ash-home-hero-grid {
@@ -911,7 +911,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-home-cta-primary {
   color: #0b1903;
   background: var(--ash-lime);
-  box-shadow: 3px 3px 0 #273d07;
+  box-shadow: none;
 }
 
 .ash-home-cta-primary:hover {
@@ -1130,7 +1130,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   padding: 2.05rem 0.72rem 0.72rem;
   display: grid;
   gap: 0.42rem;
-  box-shadow: 0 0 0 1px rgba(176, 255, 31, 0.22) inset;
+  box-shadow: none;
   transform: none;
   width: 100%;
   max-width: none;
@@ -1176,7 +1176,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   font-size: 0.82rem;
   line-height: 1.35;
   max-width: 80%;
-  box-shadow: 0 1px 0 rgba(14, 18, 8, 0.08);
+  box-shadow: none;
   position: relative;
   border-radius: 0 !important;
   white-space: normal;
@@ -1219,7 +1219,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   width: 1.08rem;
   height: 1.08rem;
   border: 1.5px solid #15180c;
-  box-shadow: 0 1px 0 rgba(10, 14, 7, 0.25);
+  box-shadow: none;
 }
 
 .ash-chat-user::after {
@@ -1405,7 +1405,7 @@ body:has(.ash-home) .ash-mega {
   border-color: var(--ash-dark-border);
   background: #101821;
   color: #eaf2ff;
-  box-shadow: 7px 7px 0 var(--ash-dark-shadow);
+  box-shadow: none;
 }
 
 body:has(.ash-home) :is(.ash-mega-word, .ash-mega-expansion) {
@@ -1419,7 +1419,7 @@ body:has(.ash-home) :is(.ash-mega-icon, .ash-home-brand-mark) {
 body:has(.ash-home) .ash-home-brand-mark {
   background: #172132;
   color: #d9ff6f;
-  box-shadow: 4px 4px 0 var(--ash-dark-shadow);
+  box-shadow: none;
 }
 
 body:has(.ash-home) .ash-home-brand-sub {
@@ -1429,7 +1429,7 @@ body:has(.ash-home) .ash-home-brand-sub {
 body:has(.ash-home) .ash-home-hero {
   border-color: var(--ash-dark-border);
   background: #0d131d;
-  box-shadow: 7px 7px 0 var(--ash-dark-shadow);
+  box-shadow: none;
 }
 
 body:has(.ash-home) :is(.ash-home-title, .ash-home-subtitle) {
@@ -1480,7 +1480,7 @@ body:has(.ash-home) .ash-chat-demo {
       rgba(22, 31, 47, 0.07) 8px,
       rgba(22, 31, 47, 0.07) 16px
     );
-  box-shadow: 0 0 0 1px rgba(170, 180, 198, 0.2) inset;
+  box-shadow: none;
 }
 
 body:has(.ash-home) .ash-chat-ash {
