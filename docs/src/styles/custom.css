@@ -1209,7 +1209,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-chat-user {
   margin-left: 0;
   background: linear-gradient(180deg, #b0ff1f, #b0ff1f);
-  color: #1b1b1b;
+  color: #000000;
   border-color: #565656;
   text-align: right;
   justify-self: end;
@@ -1263,7 +1263,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-chat-user .ash-chat-speaker {
-  color: #565656;
+  color: #000000;
 }
 
 .ash-chat-ash {
@@ -1290,7 +1290,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-chat-user .ash-chat-time {
-  color: #565656;
+  color: #000000;
 }
 
 .ash-chat-user .ash-chat-time::after {
