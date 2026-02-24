@@ -16,12 +16,14 @@ Use a skill when you want Ash to repeat a workflow reliably:
 - Multi-step tasks with specific order.
 - Domain-specific behavior (for example, your team’s deploy playbook).
 - Guardrails around which tools are allowed.
+- Subagent execution with isolated iterations and context.
 
 When a skill is used:
 
 1. Ash reads `SKILL.md`.
-2. Ash follows those instructions with available tools.
-3. Ash returns results as part of the normal conversation.
+2. Ash launches a skill subagent from that definition.
+3. The skill subagent runs its own tool-and-LLM loop.
+4. Ash returns results as part of the normal conversation.
 
 ## Where Skills Should Live
 

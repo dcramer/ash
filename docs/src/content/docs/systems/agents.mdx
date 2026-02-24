@@ -78,6 +78,20 @@ Delegation lifecycle:
   Subagent runs are isolated from the main loop but still inherit routing/session context needed for safe tool execution.
 </Aside>
 
+## Nested Agent Execution
+
+Ash supports nested delegation (agent -> child agent/skill -> deeper child) using a managed execution stack.
+
+How nested execution behaves:
+
+1. Parent frame starts and calls a delegation tool (`use_agent` or `use_skill`).
+2. Child frame is pushed with its own session, model, and tool scope.
+3. Child runs until complete, interrupted, or max-iteration/error exit.
+4. Child result is returned to the parent frame.
+5. Parent resumes from the waiting tool call and continues execution.
+
+This lets complex workflows compose multiple specialized workers without losing parent task context.
+
 ## Troubleshooting
 
 ### Agent does not trigger
