@@ -37,6 +37,8 @@ def session_key(
     parts = [_sanitize(provider)]
     if chat_id:
         parts.append(_sanitize(chat_id))
+        if user_id:
+            parts.append(_sanitize(user_id))
         if thread_id:
             parts.append(_sanitize(thread_id))
     elif user_id:

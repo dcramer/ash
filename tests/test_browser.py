@@ -343,6 +343,45 @@ async def test_browser_manager_rejects_cross_provider_session_id(tmp_path) -> No
 
 
 @pytest.mark.asyncio
+async def test_browser_manager_rejects_cross_user_session_reuse(tmp_path) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    manager = BrowserManager(
+        config=_config(),
+        store=store,
+        providers={"sandbox": _FakeProvider()},
+    )
+
+    started = await manager.execute_action(
+        action="session.start",
+        effective_user_id="u1",
+        provider_name="sandbox",
+        session_name="work",
+    )
+    assert started.ok is True
+    assert started.session_id is not None
+
+    by_id = await manager.execute_action(
+        action="page.goto",
+        effective_user_id="u2",
+        provider_name="sandbox",
+        session_id=started.session_id,
+        params={"url": "https://example.com"},
+    )
+    assert by_id.ok is False
+    assert by_id.error_code == "session_not_found"
+
+    by_name = await manager.execute_action(
+        action="page.goto",
+        effective_user_id="u2",
+        provider_name="sandbox",
+        session_name="work",
+        params={"url": "https://example.com"},
+    )
+    assert by_name.ok is False
+    assert by_name.error_code == "session_not_found"
+
+
+@pytest.mark.asyncio
 async def test_browser_manager_no_cross_provider_fallback_without_session_ref(
     tmp_path,
 ) -> None:

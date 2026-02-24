@@ -31,14 +31,15 @@ class TestSessionKey:
     def test_provider_with_user_id(self):
         assert session_key("api", user_id="user123") == "api_user123"
 
-    def test_chat_id_takes_precedence_over_user_id(self):
-        """Chat-level sessions override user-level."""
-        assert session_key("api", chat_id="chat1", user_id="user1") == "api_chat1"
+    def test_chat_id_and_user_id_scope_group_sessions(self):
+        """Chat sessions include sender identity to avoid cross-user bleed."""
+        assert session_key("api", chat_id="chat1", user_id="user1") == "api_chat1_user1"
 
     def test_thread_id_creates_subsession(self):
         """Thread ID creates sub-session within a chat."""
         assert (
-            session_key("telegram", chat_id="123", thread_id="42") == "telegram_123_42"
+            session_key("telegram", chat_id="123", user_id="u1", thread_id="42")
+            == "telegram_123_u1_42"
         )
 
     def test_sanitizes_special_characters(self):
