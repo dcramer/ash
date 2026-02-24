@@ -93,7 +93,7 @@ body::before {
 
 header.header {
   background: #10110d !important;
-  border-bottom: 2px solid #b0ff1f;
+  border-bottom: 1px solid #b0ff1f;
   border-right: 0 !important;
   border-inline-end: 0 !important;
   box-shadow: none;
@@ -277,9 +277,9 @@ a:not([class]):hover {
 .sl-link-button[data-variant='primary'] {
   background: var(--ash-lime) !important;
   color: #0f1b05 !important;
-  border: 2px solid var(--ash-ink) !important;
-  border-right-width: 6px !important;
-  border-bottom-width: 6px !important;
+  border: 1px solid var(--ash-ink) !important;
+  border-right-width: 3px !important;
+  border-bottom-width: 3px !important;
   box-shadow: none;
 }
 
@@ -290,14 +290,14 @@ a:not([class]):hover {
 .sl-link-button[data-variant='secondary'] {
   background: #111824 !important;
   color: #ecf2ff !important;
-  border: 2px solid var(--ash-dark-border) !important;
-  border-right-width: 6px !important;
-  border-bottom-width: 6px !important;
+  border: 1px solid var(--ash-dark-border) !important;
+  border-right-width: 3px !important;
+  border-bottom-width: 3px !important;
   box-shadow: none;
 }
 
 nav.sidebar {
-  border-inline-end: 2px solid var(--ash-ink);
+  border-inline-end: 1px solid var(--ash-ink);
   background: var(--sl-color-bg-sidebar);
 }
 
@@ -344,9 +344,9 @@ starlight-toc a[aria-current='true'] {
 
 .card {
   background: #0d131d !important;
-  border: 2px solid var(--ash-dark-border) !important;
-  border-right-width: 6px !important;
-  border-bottom-width: 6px !important;
+  border: 1px solid var(--ash-dark-border) !important;
+  border-right-width: 3px !important;
+  border-bottom-width: 3px !important;
   border-radius: 0 !important;
   box-shadow: none;
 }
@@ -362,9 +362,9 @@ starlight-toc a[aria-current='true'] {
 }
 
 table {
-  border: 2px solid var(--ash-dark-border);
-  border-right-width: 6px;
-  border-bottom-width: 6px;
+  border: 1px solid var(--ash-dark-border);
+  border-right-width: 3px;
+  border-bottom-width: 3px;
   border-radius: 0 !important;
   overflow: hidden;
   width: 100%;
@@ -403,7 +403,7 @@ th {
   text-align: left;
   padding: 0.78rem 0.92rem !important;
   vertical-align: top;
-  border-bottom: 2px solid var(--ash-dark-border) !important;
+  border-bottom: 1px solid var(--ash-dark-border) !important;
 }
 
 td,
@@ -442,9 +442,9 @@ td {
 
 /* CLI option list (help-style) */
 .ash-help-list {
-  border: 2px solid var(--ash-dark-border);
-  border-right-width: 6px;
-  border-bottom-width: 6px;
+  border: 1px solid var(--ash-dark-border);
+  border-right-width: 3px;
+  border-bottom-width: 3px;
   background: #05070c !important;
   padding: 0.35rem 0.52rem;
   margin: 0;
@@ -490,8 +490,8 @@ td {
 }
 
 starlight-aside {
-  border-width: 2px;
-  border-left-width: 7px;
+  border-width: 1px;
+  border-left-width: 3px;
   border-radius: 0 !important;
   background: #0d131d !important;
 }
@@ -501,10 +501,10 @@ starlight-aside[type='note'],
 starlight-aside[data-type='note'],
 .starlight-aside--note {
   background: #0d131d !important;
-  border: 2px solid var(--ash-dark-border) !important;
+  border: 1px solid var(--ash-dark-border) !important;
   border-right-width: 3px !important;
   border-bottom-width: 3px !important;
-  border-left-width: 8px !important;
+  border-left-width: 3px !important;
   border-left-color: #b0ff1f !important;
   box-shadow: none;
 }
@@ -549,9 +549,9 @@ starlight-aside[data-type='note'] :is(.icon, [slot='icon'], svg),
 
 pre {
   background: #05070c !important;
-  border: 2px solid var(--ash-dark-border) !important;
-  border-right-width: 6px !important;
-  border-bottom-width: 6px !important;
+  border: 1px solid var(--ash-dark-border) !important;
+  border-right-width: 3px !important;
+  border-bottom-width: 3px !important;
   box-shadow: none;
   font-family: var(--sl-font-mono);
   border-radius: 0 !important;
@@ -564,9 +564,9 @@ pre code {
 
 .expressive-code .frame {
   border-radius: 0 !important;
-  border: 2px solid var(--ash-dark-border) !important;
-  border-right-width: 6px !important;
-  border-bottom-width: 6px !important;
+  border: 1px solid var(--ash-dark-border) !important;
+  border-right-width: 3px !important;
+  border-bottom-width: 3px !important;
   box-shadow: none;
   background: #05070c !important;
 }
@@ -585,7 +585,7 @@ pre code {
 .expressive-code .header,
 .expressive-code .frame .header {
   background: #0a0d14 !important;
-  border-bottom: 2px solid #2d3442 !important;
+  border-bottom: 1px solid #2d3442 !important;
   color: #eaf0fb !important;
 }
 
@@ -674,9 +674,9 @@ body .expressive-code .ec-line :is(
 }
 
 .pagination-links a {
-  border: 2px solid var(--ash-ink);
-  border-right-width: 6px;
-  border-bottom-width: 6px;
+  border: 1px solid var(--ash-ink);
+  border-right-width: 3px;
+  border-bottom-width: 3px;
   border-radius: 0 !important;
   background: #0d131d;
   color: #eaf1ff !important;
@@ -774,7 +774,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-mega-icon {
   width: clamp(3.2rem, 9vw, 5.8rem);
   height: clamp(3.2rem, 9vw, 5.8rem);
-  border: 2px solid #0f100a;
+  border: 1px solid #0f100a;
   flex: 0 0 auto;
 }
 
@@ -801,7 +801,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   justify-content: center;
   min-width: clamp(74px, 10vw, 98px);
   height: clamp(74px, 10vw, 98px);
-  border: 2px solid var(--ash-ink);
+  border: 1px solid var(--ash-ink);
   background: #dfff66;
   font-family: 'Bebas Neue', var(--sl-font);
   font-size: clamp(2rem, 4.8vw, 3.1rem);
@@ -847,7 +847,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   display: inline-flex;
   padding: 0.38rem 0.8rem;
   border-radius: 0 !important;
-  border: 2px solid var(--ash-ink);
+  border: 1px solid var(--ash-ink);
   background: #faffdd;
   color: #1d2b0e;
   font-family: 'Bebas Neue', var(--sl-font);
@@ -905,7 +905,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   border-radius: 0 !important;
   padding: 0.66rem 1rem;
   font-weight: 700;
-  border: 2px solid var(--ash-ink);
+  border: 1px solid var(--ash-ink);
 }
 
 .ash-home-cta-primary {
@@ -940,7 +940,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-home-search-btn {
   display: inline-flex;
   align-items: center;
-  border: 2px solid var(--ash-ink);
+  border: 1px solid var(--ash-ink);
   padding: 0.36rem 0.6rem;
   background: #fff9eb;
   color: #1b1a12;
@@ -1386,7 +1386,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-link-pill {
-  border: 2px solid var(--ash-ink);
+  border: 1px solid var(--ash-ink);
   border-radius: 0 !important;
   padding: 0.34rem 0.68rem;
   text-decoration: none;
