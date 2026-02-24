@@ -623,18 +623,18 @@ class TestSkillAutoSyncConfig:
             {
                 "API_KEY": "secret",
                 "allow_chat_ids": ["dm-1"],
+                "capability_provider": {"command": ["gogcli", "bridge"]},
             }
         )
         assert cfg.get_env_vars() == {"API_KEY": "secret"}
 
-    def test_bundle_gog_enable_applies_skill_and_provider_defaults(self):
+    def test_skill_gog_enabled_applies_provider_defaults(self):
         config = AshConfig.model_validate(
             {
                 "models": {"default": {"provider": "openai", "model": "test"}},
-                "bundles": {"gog": {"enabled": True}},
+                "skills": {"gog": {"enabled": True}},
             }
         )
-        assert config.bundles.gog.enabled is True
         assert config.skills["gog"].enabled is True
         provider = config.capabilities.providers["gog"]
         assert provider.enabled is True
@@ -642,26 +642,35 @@ class TestSkillAutoSyncConfig:
         assert provider.command == ["gogcli", "bridge"]
         assert provider.timeout_seconds == 30.0
 
-    def test_bundle_gog_enable_does_not_override_explicit_config(self):
+    def test_skill_gog_provider_settings_override_provider_config(self):
         config = AshConfig.model_validate(
             {
                 "models": {"default": {"provider": "openai", "model": "test"}},
-                "bundles": {"gog": {"enabled": True}},
-                "skills": {"gog": {"enabled": False}},
+                "skills": {
+                    "gog": {
+                        "enabled": True,
+                        "capability_provider": {
+                            "enabled": True,
+                            "namespace": "gog",
+                            "command": ["custom-gogcli", "bridge"],
+                            "timeout_seconds": 45.0,
+                        },
+                    }
+                },
                 "capabilities": {
                     "providers": {
                         "gog": {
                             "enabled": False,
-                            "namespace": "gog",
-                            "command": ["custom-gogcli", "bridge"],
-                            "timeout_seconds": 45.0,
+                            "namespace": "old-gog",
+                            "command": ["old-gogcli", "bridge"],
+                            "timeout_seconds": 10.0,
                         }
                     }
                 },
             }
         )
-        assert config.skills["gog"].enabled is False
         provider = config.capabilities.providers["gog"]
-        assert provider.enabled is False
+        assert provider.enabled is True
+        assert provider.namespace == "gog"
         assert provider.command == ["custom-gogcli", "bridge"]
         assert provider.timeout_seconds == 45.0

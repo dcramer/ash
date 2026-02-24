@@ -387,6 +387,7 @@ class SkillConfig(BaseModel):
     model: str | None = None
     enabled: bool = True
     allow_chat_ids: list[str] | None = None
+    capability_provider: CapabilityProviderConfig | None = None
 
     @field_validator("allow_chat_ids", mode="before")
     @classmethod
@@ -413,7 +414,8 @@ class SkillConfig(BaseModel):
         return {
             k.upper(): str(v)
             for k, v in self.model_dump().items()
-            if k.lower() not in {"model", "enabled", "allow_chat_ids"}
+            if k.lower()
+            not in {"model", "enabled", "allow_chat_ids", "capability_provider"}
         }
 
 
@@ -468,18 +470,6 @@ class SkillSource(BaseModel):
         if self.ref and not self.repo:
             raise ValueError("'ref' only applies to repo sources")
         return self
-
-
-class BundleConfig(BaseModel):
-    """Configuration for a bundled optional integration package."""
-
-    enabled: bool = False
-
-
-class BundlesConfig(BaseModel):
-    """Top-level bundle toggles from [bundles.*]."""
-
-    gog: BundleConfig = Field(default_factory=BundleConfig)
 
 
 class ConfigError(Exception):
@@ -542,8 +532,6 @@ class AshConfig(BaseModel):
     skills: dict[str, SkillConfig] = Field(default_factory=dict)
     # Skill defaults from [skills.defaults]
     skill_defaults: SkillDefaultsConfig = Field(default_factory=SkillDefaultsConfig)
-    # Bundle presets from [bundles.*]
-    bundles: BundlesConfig = Field(default_factory=BundlesConfig)
 
     # External skill sources: [[skills.sources]] array
     skill_sources: list[SkillSource] = Field(default_factory=list)
@@ -607,7 +595,7 @@ class AshConfig(BaseModel):
             # Remaining entries are per-skill configs
             data["skills"] = skills_data
 
-        _apply_bundle_presets(data)
+        _apply_gog_skill_provider_preset(data)
         return data
 
     @model_validator(mode="after")
@@ -752,28 +740,16 @@ class AshConfig(BaseModel):
         }
 
 
-def _apply_bundle_presets(data: dict[str, Any]) -> None:
-    """Apply opinionated bundle presets without overriding explicit config."""
-    bundles = data.get("bundles")
-    if not isinstance(bundles, dict):
-        return
-    gog = bundles.get("gog")
-    if not isinstance(gog, dict):
-        return
-    enabled = gog.get("enabled")
-    if enabled is not True:
-        return
-
-    # Enable bundled gog skill by default.
+def _apply_gog_skill_provider_preset(data: dict[str, Any]) -> None:
+    """Apply default provider wiring when bundled gog skill is enabled."""
     skills = data.get("skills")
     if not isinstance(skills, dict):
-        skills = {}
-    skill_gog = skills.get("gog")
-    if not isinstance(skill_gog, dict):
-        skill_gog = {}
-    skill_gog.setdefault("enabled", True)
-    skills["gog"] = skill_gog
-    data["skills"] = skills
+        return
+    gog_skill = skills.get("gog")
+    if not isinstance(gog_skill, dict):
+        return
+    if gog_skill.get("enabled") is not True:
+        return
 
     # Wire default external provider bridge command by default.
     capabilities = data.get("capabilities")
@@ -785,6 +761,13 @@ def _apply_bundle_presets(data: dict[str, Any]) -> None:
     provider_gog = providers.get("gog")
     if not isinstance(provider_gog, dict):
         provider_gog = {}
+
+    provider_from_skill = gog_skill.get("capability_provider")
+    if isinstance(provider_from_skill, dict):
+        for field in ("enabled", "namespace", "command", "timeout_seconds"):
+            if field in provider_from_skill:
+                provider_gog[field] = provider_from_skill[field]
+
     provider_gog.setdefault("enabled", True)
     provider_gog.setdefault("namespace", "gog")
     provider_gog.setdefault("command", ["gogcli", "bridge"])

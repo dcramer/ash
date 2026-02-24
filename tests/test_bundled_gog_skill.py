@@ -41,5 +41,5 @@ def test_gog_skill_uses_capability_contract_text() -> None:
     text = _load_gog_skill_text()
 
     assert "ash-sb capability" in text
-    assert "[capabilities.providers.gog]" in text
+    assert "[skills.gog.capability_provider]" in text
     assert "Never read or request raw OAuth access tokens" in text

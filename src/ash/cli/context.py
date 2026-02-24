@@ -117,23 +117,19 @@ model = "codex"  # Use coding model for skill creation
 # =============================================================================
 # Optional: External Capability Provider (skill-owned)
 # =============================================================================
-# One-switch preset for bundled gog package:
+# Configure bundled gog skill + provider wiring in one place:
 #
-# [bundles.gog]
+# [skills.gog]
 # enabled = true
 #
-# This auto-enables:
-# - [skills.gog] enabled = true
-# - [capabilities.providers.gog] with command ["gogcli", "bridge"]
-#
-# Registers an external capability bridge command (for example from a skill
-# package/repo) that implements the capability provider contract.
-
-# [capabilities.providers.gog]
+# [skills.gog.capability_provider]
 # enabled = true
 # namespace = "gog"
 # command = ["gogcli", "bridge"]
 # timeout_seconds = 30
+#
+# Registers an external capability bridge command (for example from a skill
+# package/repo) that implements the capability provider contract.
 
 # =============================================================================
 # Optional: Semantic Search

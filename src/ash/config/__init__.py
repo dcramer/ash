@@ -4,8 +4,6 @@ from ash.config.loader import get_default_config, load_config
 from ash.config.models import (
     AshConfig,
     BraveSearchConfig,
-    BundleConfig,
-    BundlesConfig,
     CapabilitiesConfig,
     CapabilityProviderConfig,
     ConfigError,
@@ -29,8 +27,6 @@ from ash.config.workspace import Workspace, WorkspaceLoader
 
 __all__ = [
     "AshConfig",
-    "BundleConfig",
-    "BundlesConfig",
     "BraveSearchConfig",
     "CapabilitiesConfig",
     "CapabilityProviderConfig",

@@ -40,10 +40,10 @@ ash-sb capability list
 If `gog.email`/`gog.calendar` are unavailable, report that host config must define:
 
 ```toml
-[bundles.gog]
+[skills.gog]
 enabled = true
 
-[capabilities.providers.gog]
+[skills.gog.capability_provider]
 enabled = true
 namespace = "gog"
 command = ["gogcli", "bridge"]

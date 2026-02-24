@@ -227,7 +227,10 @@ allowed_tools:
 Provider runtime wiring is host-owned configuration, not skill metadata:
 
 ```toml
-[capabilities.providers.gog]
+[skills.gog]
+enabled = true
+
+[skills.gog.capability_provider]
 enabled = true
 namespace = "gog"
 command = ["gogcli", "bridge"]
@@ -240,24 +243,18 @@ Ash includes an opt-in bundled `gog` skill for dogfooding this contract.
 
 Enable it in `config.toml`:
 
-```toml
-[bundles.gog]
-enabled = true
-```
-
-This preset enables both the bundled `gog` skill and default
-`gogcli bridge` provider wiring. You can still override either section directly:
-
-```toml
 [skills.gog]
 enabled = true
 
-[capabilities.providers.gog]
+[skills.gog.capability_provider]
 enabled = true
 namespace = "gog"
 command = ["gogcli", "bridge"]
 timeout_seconds = 30
 ```
+
+When `skills.gog.enabled = true`, Ash auto-wires default
+`capabilities.providers.gog` settings unless overridden explicitly.
 
 ## Troubleshooting
 

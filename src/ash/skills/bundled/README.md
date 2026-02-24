@@ -26,7 +26,10 @@ For sensitive integrations (email/calendar/etc.):
 - Host config provides provider runtime wiring in `config.toml`:
 
 ```toml
-[capabilities.providers.gog]
+[skills.gog]
+enabled = true
+
+[skills.gog.capability_provider]
 enabled = true
 namespace = "gog"
 command = ["gogcli", "bridge"]
@@ -44,10 +47,10 @@ Skill metadata must not define provider/container command wiring.
 
 This can live in a single third-party repo/package as long as Ash wiring stays split:
 
-- preset toggle: `[bundles.gog] enabled = true`
-- optional explicit overrides:
-  - skill enablement: `[skills.gog] enabled = true`
-  - provider wiring: `[capabilities.providers.gog] ...`
+- skill enablement + provider defaults: `[skills.gog] enabled = true`
+- optional provider overrides:
+  - `[skills.gog.capability_provider] ...`
+  - or host-level `[capabilities.providers.gog] ...`
 
 ## Layout
 
