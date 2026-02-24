@@ -15,6 +15,20 @@ resolved_path = ".agents/skills/brand-guidelines"
 commit = "9ed23e218631ca6b0b6692adad2c947439754811"
 integrity = "sha256-OI4bxji4am79cV/3TNDVUfsnt6L2HBysG7epE4HFkVI="
 
+[skills.dex]
+source = "dcramer/dex"
+resolved_url = "https://github.com/dcramer/dex.git"
+resolved_path = "plugins/dex/skills/dex"
+commit = "939f6cbb3b13b202929560a98e7f7df6e7a11abe"
+integrity = "sha256-hHFBi95s42ugCGCcej1Z8zFhEr9Udxn69QqjixarjDg="
+
+[skills.dex-plan]
+source = "dcramer/dex"
+resolved_url = "https://github.com/dcramer/dex.git"
+resolved_path = "plugins/dex/skills/dex-plan"
+commit = "939f6cbb3b13b202929560a98e7f7df6e7a11abe"
+integrity = "sha256-+Unk7sv/MXdsbSpkVHa3Lt0bI0YQ0fQCG0LmJGJ5EiM="
+
 [skills.skill-creator]
 source = "getsentry/skills"
 resolved_url = "https://github.com/getsentry/skills.git"
