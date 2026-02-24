@@ -605,8 +605,10 @@ pre code {
 .expressive-code .header,
 .expressive-code .frame .header {
   background: #0e0e0e !important;
-  border-bottom: 1px solid #494949 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--ash-dark-border) !important;
   color: #f2f2f2 !important;
+  box-shadow: none !important;
 }
 
 .expressive-code .header .title,
@@ -641,7 +643,7 @@ body .expressive-code {
   --ec-frm-trmTtbBg: #0e0e0e !important;
   --ec-frm-trmBg: #080808 !important;
   --ec-frm-trmTtbFg: #f2f2f2 !important;
-  --ec-frm-trmTtbBrdBtmCol: transparent !important;
+  --ec-frm-trmTtbBrdBtmCol: var(--ash-dark-border) !important;
   --ec-frm-trmTtbDotsFg: #6d6d6d !important;
   --ec-frm-trmTtbDotsOpa: 1 !important;
   --ec-frm-inlBtnFg: #f8f8f8 !important;
@@ -651,6 +653,9 @@ body .expressive-code {
 .expressive-code .header :is([class*='dot'], [class*='Dot']) {
   background: transparent !important;
   border: 1px solid #6d6d6d !important;
+  box-shadow: none !important;
+  color: transparent !important;
+  opacity: 1 !important;
 }
 
 body .expressive-code .ec-line :where(span[style^='--']:not([class])) {
