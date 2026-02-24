@@ -1,137 +1,59 @@
 ---
 title: LLM Providers
-description: LLM abstraction layer and model configuration
+description: Configure model aliases and provider credentials
 sidebar:
   order: 8
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-The LLM module provides a unified interface for multiple LLM backends including OpenAI GPT models and Anthropic Claude models.
+Ash uses named model aliases under `[models.*]`. You pick a default alias, then optionally route specific workflows to cheaper or stronger models.
 
-## Overview
+## LLM Providers In 30 Seconds
 
-Ash uses named model configurations that can be referenced throughout the system. This allows you to:
-- Define multiple models with different capabilities
-- Use cost-effective models for simple tasks
-- Switch to more powerful models for complex reasoning
+- Configure one required alias: `[models.default]`
+- Point each alias at a provider model (`openai` or `anthropic`)
+- Set provider API keys in config or environment variables
+- Use alias names in CLI (`--model`) and skill overrides
 
-## Configuration
+## Quick Start
 
-### Recommended Setup
-
-Use GPT-5.2 as the default, Mini for lightweight tasks, and Codex for coding:
+Use this as a practical baseline:
 
 ```toml
+# Required default model
 [models.default]
 provider = "openai"
 model = "gpt-5.2"
-temperature = 0.7
 max_tokens = 4096
 
+# Fast/cheap option for lightweight tasks
 [models.mini]
 provider = "openai"
 model = "gpt-5-mini"
 max_tokens = 4096
 
+# Coding-focused option
 [models.codex]
 provider = "openai"
 model = "gpt-5.2-codex"
 max_tokens = 8192
 
-# Override model for specific skills
-[skills.debug]
-model = "codex"
-
-[skills.code-review]
-model = "codex"
-
-[skills.research]
-model = "default"
+# Provider credentials (or use env vars)
+[openai]
+api_key = "sk-..."
 ```
 
-<Aside type="tip">
-  This setup saves money by using GPT-5 Mini for simple tasks while using Codex for skills that need coding capabilities.
-</Aside>
+Test alias selection:
 
-### Model Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `provider` | string | required | `"openai"` or `"anthropic"` |
-| `model` | string | required | Model identifier |
-| `temperature` | float | `null` | Sampling temperature (0.0-1.0) |
-| `max_tokens` | int | `4096` | Maximum response tokens |
-| `thinking` | string | `null` | Extended thinking budget (see below) |
-| `reasoning` | string | `null` | OpenAI reasoning effort (see below) |
-
-<Aside type="tip">
-  Set `temperature` to `null` (or omit it) for reasoning models that don't support temperature control.
-</Aside>
-
-### Reasoning Effort
-
-For OpenAI reasoning models, set the `reasoning` option to control how much effort the model spends thinking before responding:
-
-| Value | Description |
-|-------|-------------|
-| `"low"` | Minimal reasoning effort |
-| `"medium"` | Moderate reasoning effort |
-| `"high"` | Maximum reasoning effort |
-
-Example:
-
-```toml
-[models.pro]
-provider = "openai"
-model = "gpt-5.2-pro"
-reasoning = "high"
+```bash
+uv run ash chat --model mini "Summarize this changelog"
+uv run ash chat --model codex "Refactor this Python function"
 ```
 
-<Aside type="note">
-  Reasoning effort is only supported by OpenAI reasoning models. When not set, the model uses its default behavior.
-</Aside>
+## Configure Providers And API Keys
 
-### Extended Thinking
-
-For Claude models that support extended thinking, set the `thinking` option to control how much reasoning the model can do:
-
-| Value | Description |
-|-------|-------------|
-| `"off"` | Disable extended thinking |
-| `"minimal"` | Very brief thinking |
-| `"low"` | Limited thinking budget |
-| `"medium"` | Moderate thinking budget |
-| `"high"` | Maximum thinking budget |
-
-Example:
-
-```toml
-[models.reasoning]
-provider = "anthropic"
-model = "claude-opus-4-6"
-thinking = "medium"
-```
-
-<Aside type="note">
-  Extended thinking is only supported by certain Anthropic Claude models. Check model documentation for compatibility.
-</Aside>
-
-### Default Model Requirement
-
-A model named `default` is required:
-
-```toml
-[models.default]
-provider = "openai"
-model = "gpt-5.2"
-```
-
-This model is used when no `--model` flag is specified.
-
-## Provider API Keys
-
-Set API keys at the provider level:
+Provider credentials can come from config:
 
 ```toml
 [openai]
@@ -141,205 +63,119 @@ api_key = "sk-..."
 api_key = "sk-ant-..."
 ```
 
-Or use environment variables:
+Or environment variables:
 
 ```bash
 export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### API Key Resolution
+Resolution order:
 
-Keys are resolved in this order:
+1. Config (`[openai].api_key`, `[anthropic].api_key`)
+2. Environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`)
 
-1. Provider config (`[openai].api_key`)
-2. Environment variable (`OPENAI_API_KEY`)
+## Model Alias Options
 
-## Supported Models
+Each alias block supports:
 
-### OpenAI
+```toml
+[models.default]
+provider = "openai"      # Required: "openai" or "anthropic"
+model = "gpt-5.2"        # Required: provider model id
+temperature = 0.7         # Optional: omit/null for reasoning-first models
+max_tokens = 4096         # Optional: default is 4096
+reasoning = "high"       # Optional: OpenAI reasoning effort (low|medium|high)
+thinking = "medium"      # Optional: Anthropic thinking budget
+```
 
-- `gpt-5.2` (recommended for default - flagship model)
-- `gpt-5-mini` (fast, cost-effective)
-- `gpt-5.2-codex` (optimized for coding)
+<Aside type="note">
+  `reasoning` applies to OpenAI reasoning models. `thinking` applies to Claude models that support extended thinking.
+</Aside>
 
-### Anthropic
+## Tune Reasoning Only When Needed
 
-- `claude-haiku-4-5` (fast, cost-effective)
-- `claude-sonnet-4-6` (balanced)
-- `claude-opus-4-6` (reasoning tasks)
+For OpenAI reasoning effort:
 
-## Per-Skill Model Override
+```toml
+[models.pro]
+provider = "openai"
+model = "gpt-5.2-pro"
+reasoning = "high"  # low | medium | high
+```
 
-Override the model used by specific skills:
+For Claude extended thinking:
+
+```toml
+[models.reasoning]
+provider = "anthropic"
+model = "claude-opus-4-6"
+thinking = "medium"  # off | minimal | low | medium | high
+```
+
+Start with defaults. Increase reasoning/thinking only for tasks that need deeper analysis.
+
+## Per-Skill Model Overrides
+
+Skills can target model aliases directly:
 
 ```toml
 [skills.debug]
-model = "codex"  # Use codex for debugging
+model = "codex"        # Use coding-focused alias
 
-[skills.code-review]
-model = "codex"  # Use codex for code review
+[skills.research]
+model = "default"      # Use standard alias
 ```
 
-Model resolution order:
+Skill model resolution order:
 
-1. `[skills.<name>] model` in config
-2. `model` in skill definition (SKILL.md)
-3. `"default"` fallback
+1. `[skills.<name>].model` in config
+2. `model` in `SKILL.md`
+3. `default` alias
 
-## Using Models
+## Troubleshooting
 
-### CLI
-
-Use models by alias:
+### Unknown model alias
 
 ```bash
-uv run ash chat --model codex "Complex coding question"
-uv run ash chat --model mini "Quick summary"
+# Check aliases and spelling
+uv run ash config show
+
+# Retry with a known alias
+uv run ash chat --model default "hello"
 ```
 
-### Multiple Models
+### Provider auth failures
 
-Define multiple named models:
+```bash
+# Validate config shape and required fields
+uv run ash config validate
+
+# Diagnose environment and integration issues
+uv run ash doctor
+```
+
+Common fix: ensure the provider key is present in config or exported env var.
+
+### Responses are cut off
+
+Increase `max_tokens` for the alias used by that workflow.
 
 ```toml
 [models.default]
 provider = "openai"
 model = "gpt-5.2"
-
-[models.mini]
-provider = "openai"
-model = "gpt-5-mini"
-
-[models.codex]
-provider = "openai"
-model = "gpt-5.2-codex"
+max_tokens = 8192
 ```
 
-## Provider Interface
+## Reference (Advanced)
 
-Location: `src/ash/llm/base.py`
+Key implementation files:
 
-```python
-from abc import ABC, abstractmethod
-from typing import AsyncIterator
+- `src/ash/llm/base.py` - provider interface
+- `src/ash/llm/openai.py` - OpenAI implementation
+- `src/ash/llm/anthropic.py` - Anthropic implementation
+- `src/ash/llm/registry.py` - provider registration and lookup
+- `src/ash/llm/types.py` - message/tool-call data types
 
-class LLMProvider(ABC):
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Provider name (e.g., 'anthropic', 'openai')."""
-
-    @abstractmethod
-    async def complete(
-        self,
-        messages: list[Message],
-        *,
-        model: str | None = None,
-        tools: list[ToolDefinition] | None = None,
-        system: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float | None = None,
-    ) -> Message:
-        """Generate a complete response."""
-
-    @abstractmethod
-    async def stream(
-        self,
-        messages: list[Message],
-        *,
-        model: str | None = None,
-        tools: list[ToolDefinition] | None = None,
-        system: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float | None = None,
-    ) -> AsyncIterator[StreamChunk]:
-        """Generate a streaming response."""
-
-    @abstractmethod
-    async def embed(
-        self,
-        texts: list[str],
-        *,
-        model: str | None = None,
-    ) -> list[list[float]]:
-        """Generate embeddings for texts."""
-```
-
-## Implementations
-
-### OpenAI Provider
-
-Location: `src/ash/llm/openai.py`
-
-Uses the official `openai` SDK with the Responses API:
-
-```python
-from openai import AsyncOpenAI
-
-class OpenAIProvider(LLMProvider):
-    def __init__(self, api_key: str):
-        self.client = AsyncOpenAI(api_key=api_key)
-```
-
-### Anthropic Provider
-
-Location: `src/ash/llm/anthropic.py`
-
-Uses the official `anthropic` SDK:
-
-```python
-from anthropic import AsyncAnthropic
-
-class AnthropicProvider(LLMProvider):
-    def __init__(self, api_key: str):
-        self.client = AsyncAnthropic(api_key=api_key)
-```
-
-## Message Types
-
-Location: `src/ash/llm/types.py`
-
-```python
-class Message:
-    role: Literal["user", "assistant"]
-    content: str | list[ContentBlock]
-    tool_calls: list[ToolCall] | None
-
-class ToolCall:
-    id: str
-    name: str
-    input: dict
-
-class StreamChunk:
-    type: Literal["text", "tool_use"]
-    content: str | None
-    tool_call: ToolCall | None
-```
-
-## Provider Registry
-
-Location: `src/ash/llm/registry.py`
-
-Providers are registered and resolved by name:
-
-```python
-registry = LLMRegistry()
-registry.register("openai", OpenAIProvider)
-registry.register("anthropic", AnthropicProvider)
-
-provider = registry.get("openai", api_key="...")
-```
-
-## Tool Definitions
-
-Tools are defined for the LLM:
-
-```python
-class ToolDefinition:
-    name: str
-    description: str
-    input_schema: dict  # JSON Schema
-```
-
-The LLM receives tool definitions and can request tool calls in its response.
+Tool definitions are passed to the model from the tool registry. Providers return assistant messages and tool-call requests in normalized Ash types.
