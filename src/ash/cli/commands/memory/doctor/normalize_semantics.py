@@ -113,6 +113,12 @@ async def memory_doctor_normalize_semantics(store: Store, force: bool) -> None:
 
     console.print(table)
     console.print(
+        "[dim]Assertion: updated=assertion metadata changes, unchanged=metadata kept[/dim]"
+    )
+    console.print(
+        "[dim]Edge Sync: about subjects, stated_by speaker edge, about+stated_by both[/dim]"
+    )
+    console.print(
         f"\nWill update {len(memories_to_update)} memories"
         f" ({violation_count} with assertion invariant warnings)"
     )
@@ -145,7 +151,7 @@ def _format_edge_sync(about_drift: bool, stated_by_drift: bool) -> str:
 
 
 def _format_change_type(assertion_changed: bool) -> str:
-    return "rewrite" if assertion_changed else "keep"
+    return "updated" if assertion_changed else "unchanged"
 
 
 async def _get_or_compile_assertion(

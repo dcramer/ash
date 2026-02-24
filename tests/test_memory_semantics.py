@@ -96,8 +96,8 @@ class TestNormalizeSemanticsPreviewFormatting:
         )
 
     def test_format_change_type(self):
-        assert _format_change_type(assertion_changed=True) == "rewrite"
-        assert _format_change_type(assertion_changed=False) == "keep"
+        assert _format_change_type(assertion_changed=True) == "updated"
+        assert _format_change_type(assertion_changed=False) == "unchanged"
 
     async def test_process_extracted_facts_writes_self_assertion(
         self, graph_store: Store
