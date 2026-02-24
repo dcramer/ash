@@ -295,6 +295,7 @@ async def _run_memory_action(
             memory_doctor_embed_missing,
             memory_doctor_fix_names,
             memory_doctor_normalize_semantics,
+            memory_doctor_provenance_audit,
             memory_doctor_prune_missing_provenance,
             memory_doctor_quality,
             memory_doctor_reclassify,
@@ -335,7 +336,9 @@ async def _run_memory_action(
             await memory_doctor_embed_missing(store, force=force)
         elif subcommand == "normalize-semantics":
             await memory_doctor_normalize_semantics(store, force=force)
-        elif subcommand in ("prune-missing-provenance", "provenance"):
+        elif subcommand == "provenance":
+            await memory_doctor_provenance_audit(store)
+        elif subcommand == "prune-missing-provenance":
             await memory_doctor_prune_missing_provenance(store, force=force)
         elif subcommand == "self-facts":
             await memory_doctor_self_facts(store, force=force)

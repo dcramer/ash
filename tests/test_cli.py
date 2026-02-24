@@ -195,6 +195,41 @@ class TestMemoryCommand:
         assert result.exit_code == 0
         assert calls == [False]
 
+    def test_memory_doctor_provenance_is_non_mutating_audit(
+        self, cli_runner, config_file, monkeypatch
+    ):
+        calls: list[str] = []
+
+        class DummyStore:
+            pass
+
+        async def _fake_get_store(_config):
+            return DummyStore()
+
+        async def _fake_audit(*_args, **_kwargs):
+            calls.append("audit")
+
+        async def _fake_prune(*_args, **_kwargs):
+            calls.append("prune")
+
+        monkeypatch.setattr(
+            "ash.cli.commands.memory._helpers.get_store", _fake_get_store
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_provenance_audit",
+            _fake_audit,
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.memory.doctor.memory_doctor_prune_missing_provenance",
+            _fake_prune,
+        )
+
+        result = cli_runner.invoke(
+            app, ["memory", "doctor", "provenance", "--config", str(config_file)]
+        )
+        assert result.exit_code == 0
+        assert calls == ["audit"]
+
     def test_memory_doctor_all_runs_force_mode(
         self, cli_runner, config_file, monkeypatch
     ):

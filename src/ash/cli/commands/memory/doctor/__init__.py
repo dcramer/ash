@@ -12,6 +12,7 @@ from ash.cli.commands.memory.doctor.normalize_semantics import (
     memory_doctor_normalize_semantics,
 )
 from ash.cli.commands.memory.doctor.prune_missing_provenance import (
+    memory_doctor_provenance_audit,
     memory_doctor_prune_missing_provenance,
 )
 from ash.cli.commands.memory.doctor.quality import memory_doctor_quality
@@ -26,6 +27,7 @@ __all__ = [
     "memory_doctor_embed_missing",
     "memory_doctor_fix_names",
     "memory_doctor_normalize_semantics",
+    "memory_doctor_provenance_audit",
     "memory_doctor_prune_missing_provenance",
     "memory_doctor_quality",
     "memory_doctor_reclassify",
