@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 import shlex
 from datetime import datetime
 from typing import Any
@@ -19,6 +20,8 @@ from ash.capabilities.providers.base import (
     CapabilityProvider,
 )
 from ash.capabilities.types import CapabilityDefinition, CapabilityOperation
+
+_BRIDGE_PROTOCOL_VERSION = 1
 
 
 class SubprocessCapabilityProvider(CapabilityProvider):
@@ -142,30 +145,16 @@ class SubprocessCapabilityProvider(CapabilityProvider):
         )
 
     async def _call_bridge(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        request_id = f"cap_bridge_{secrets.token_hex(8)}"
         payload = {
-            "version": 1,
+            "version": _BRIDGE_PROTOCOL_VERSION,
+            "id": request_id,
             "namespace": self.namespace,
             "method": method,
             "params": params,
         }
         raw_response = await self._execute_command(payload)
-        if not isinstance(raw_response, dict):
-            raise _capability_error(
-                "capability_invalid_output",
-                "bridge response must be an object",
-            )
-        error_payload = raw_response.get("error")
-        if isinstance(error_payload, dict):
-            code = str(error_payload.get("code") or "capability_backend_unavailable")
-            message = str(error_payload.get("message") or "bridge operation failed")
-            raise _capability_error(code, message)
-        result = raw_response.get("result", raw_response)
-        if not isinstance(result, dict):
-            raise _capability_error(
-                "capability_invalid_output",
-                "bridge result must be an object",
-            )
-        return result
+        return _parse_bridge_response(raw_response, request_id=request_id)
 
     async def _execute_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         proc = await asyncio.create_subprocess_exec(
@@ -212,6 +201,67 @@ class SubprocessCapabilityProvider(CapabilityProvider):
                 "bridge command returned non-object JSON",
             )
         return parsed
+
+
+def _parse_bridge_response(
+    raw_response: Any,
+    *,
+    request_id: str,
+) -> dict[str, Any]:
+    if not isinstance(raw_response, dict):
+        raise _capability_error(
+            "capability_invalid_output",
+            "bridge response must be an object",
+        )
+
+    version = raw_response.get("version")
+    if version != _BRIDGE_PROTOCOL_VERSION:
+        raise _capability_error(
+            "capability_invalid_output",
+            "bridge response version mismatch",
+        )
+
+    response_id = str(raw_response.get("id") or "").strip()
+    if not response_id or response_id != request_id:
+        raise _capability_error(
+            "capability_invalid_output",
+            "bridge response id mismatch",
+        )
+
+    has_result = "result" in raw_response
+    has_error = "error" in raw_response
+    if has_result == has_error:
+        raise _capability_error(
+            "capability_invalid_output",
+            "bridge response must contain exactly one of result or error",
+        )
+
+    if has_error:
+        error_payload = raw_response.get("error")
+        if not isinstance(error_payload, dict):
+            raise _capability_error(
+                "capability_invalid_output",
+                "bridge error payload must be an object",
+            )
+        code = _required_text(
+            value=error_payload.get("code"),
+            code="capability_invalid_output",
+            message="bridge error.code is required",
+        )
+        message = _required_text(
+            value=error_payload.get("message"),
+            code="capability_invalid_output",
+            message="bridge error.message is required",
+        )
+        raise _capability_error(code, message)
+
+    result = raw_response.get("result")
+    if not isinstance(result, dict):
+        raise _capability_error(
+            "capability_invalid_output",
+            "bridge result must be an object",
+        )
+    return result
 
 
 def _normalize_command(command: list[str] | str) -> list[str]:

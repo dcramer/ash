@@ -28,7 +28,10 @@ def _context() -> CapabilityCallContext:
 async def test_subprocess_provider_parses_definitions(monkeypatch) -> None:
     async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         assert payload["method"] == "definitions"
+        assert payload["version"] == 1
         return {
+            "version": 1,
+            "id": payload["id"],
             "result": {
                 "definitions": [
                     {
@@ -44,7 +47,7 @@ async def test_subprocess_provider_parses_definitions(monkeypatch) -> None:
                         ],
                     }
                 ]
-            }
+            },
         }
 
     monkeypatch.setattr(
@@ -66,20 +69,28 @@ async def test_subprocess_provider_auth_and_invoke(monkeypatch) -> None:
         method = payload["method"]
         if method == "auth_begin":
             return {
+                "version": 1,
+                "id": payload["id"],
                 "result": {
                     "auth_url": "https://example.test/auth",
                     "flow_state": {"nonce": "n1"},
-                }
+                },
             }
         if method == "auth_complete":
             return {
+                "version": 1,
+                "id": payload["id"],
                 "result": {
                     "account_ref": "work",
                     "credential_material": {"credential_key": "cred_123"},
-                }
+                },
             }
         if method == "invoke":
-            return {"result": {"output": {"status": "ok", "messages": []}}}
+            return {
+                "version": 1,
+                "id": payload["id"],
+                "result": {"output": {"status": "ok", "messages": []}},
+            }
         raise AssertionError(f"unexpected method: {method}")
 
     monkeypatch.setattr(
@@ -121,12 +132,14 @@ async def test_subprocess_provider_auth_and_invoke(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_subprocess_provider_surfaces_bridge_errors(monkeypatch) -> None:
     async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
-        _ = payload
+        assert payload["version"] == 1
         return {
+            "version": 1,
+            "id": payload["id"],
             "error": {
                 "code": "capability_backend_unavailable",
                 "message": "bridge offline",
-            }
+            },
         }
 
     monkeypatch.setattr(
@@ -139,3 +152,138 @@ async def test_subprocess_provider_surfaces_bridge_errors(monkeypatch) -> None:
     with pytest.raises(CapabilityError) as exc_info:
         await provider.definitions()
     assert exc_info.value.code == "capability_backend_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_subprocess_provider_rejects_response_version_mismatch(
+    monkeypatch,
+) -> None:
+    async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "version": 999,
+            "id": payload["id"],
+            "result": {"definitions": []},
+        }
+
+    monkeypatch.setattr(
+        SubprocessCapabilityProvider,
+        "_execute_command",
+        _fake_execute,
+    )
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await provider.definitions()
+    assert exc_info.value.code == "capability_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_subprocess_provider_rejects_response_id_mismatch(monkeypatch) -> None:
+    async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "id": "wrong-id",
+            "result": {"definitions": []},
+        }
+
+    monkeypatch.setattr(
+        SubprocessCapabilityProvider,
+        "_execute_command",
+        _fake_execute,
+    )
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await provider.definitions()
+    assert exc_info.value.code == "capability_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_subprocess_provider_rejects_result_error_ambiguity(monkeypatch) -> None:
+    async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "id": payload["id"],
+            "result": {"definitions": []},
+            "error": {
+                "code": "capability_backend_unavailable",
+                "message": "bridge offline",
+            },
+        }
+
+    monkeypatch.setattr(
+        SubprocessCapabilityProvider,
+        "_execute_command",
+        _fake_execute,
+    )
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await provider.definitions()
+    assert exc_info.value.code == "capability_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_subprocess_provider_rejects_bridge_error_missing_code(
+    monkeypatch,
+) -> None:
+    async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "id": payload["id"],
+            "error": {
+                "message": "bridge offline",
+            },
+        }
+
+    monkeypatch.setattr(
+        SubprocessCapabilityProvider,
+        "_execute_command",
+        _fake_execute,
+    )
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await provider.definitions()
+    assert exc_info.value.code == "capability_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_subprocess_provider_rejects_result_error_absence(monkeypatch) -> None:
+    async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "id": payload["id"],
+        }
+
+    monkeypatch.setattr(
+        SubprocessCapabilityProvider,
+        "_execute_command",
+        _fake_execute,
+    )
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await provider.definitions()
+    assert exc_info.value.code == "capability_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_subprocess_provider_rejects_result_non_object(monkeypatch) -> None:
+    async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "id": payload["id"],
+            "result": [],
+        }
+
+    monkeypatch.setattr(
+        SubprocessCapabilityProvider,
+        "_execute_command",
+        _fake_execute,
+    )
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await provider.definitions()
+    assert exc_info.value.code == "capability_invalid_output"

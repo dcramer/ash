@@ -123,6 +123,54 @@ timeout_seconds = 30
 The host invokes the bridge with JSON over stdin/stdout for `definitions`,
 `auth_begin`, `auth_complete`, and `invoke`.
 
+#### Bridge Envelope (`bridge-v1`)
+
+Every request/response uses a strict envelope:
+
+Request:
+
+```json
+{
+  "version": 1,
+  "id": "cap_bridge_abc123",
+  "namespace": "gog",
+  "method": "invoke",
+  "params": {}
+}
+```
+
+Response (success):
+
+```json
+{
+  "version": 1,
+  "id": "cap_bridge_abc123",
+  "result": {}
+}
+```
+
+Response (error):
+
+```json
+{
+  "version": 1,
+  "id": "cap_bridge_abc123",
+  "error": {
+    "code": "capability_backend_unavailable",
+    "message": "bridge offline"
+  }
+}
+```
+
+Validation rules:
+
+- `version` MUST be `1`.
+- `id` MUST match request `id`.
+- Response MUST contain exactly one of `result` or `error`.
+- `result` MUST be a JSON object.
+- `error` MUST be an object with non-empty `code` and `message`.
+- Envelope violations fail closed with `capability_invalid_output`.
+
 ### Capability Definition
 
 ```python
