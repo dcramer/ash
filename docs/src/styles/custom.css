@@ -620,6 +620,20 @@ pre code {
   border-bottom: 0 !important;
 }
 
+.expressive-code .frame.is-terminal .header::before,
+.expressive-code figcaption.header::before {
+  background: none !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  width: auto !important;
+  height: auto !important;
+  color: #6d6d6d !important;
+  content: '○ ○ ○' !important;
+  font-size: 0.62rem !important;
+  letter-spacing: 0.16rem !important;
+  line-height: 1 !important;
+}
+
 .expressive-code .header .title,
 .expressive-code .header .filename {
   color: #f2f2f2 !important;
