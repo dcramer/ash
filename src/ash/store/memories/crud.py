@@ -507,9 +507,13 @@ class MemoryCrudMixin:
 
         count = 0
         edges_changed = False
+        vector_index_changed = False
         for entry in entries:
             if entry.id in self._graph.memories:
                 from ash.graph.edges import ABOUT, STATED_BY, create_stated_by_edge
+
+                existing = self._graph.memories[entry.id]
+                content_changed = existing.content != entry.content
 
                 existing_about = self._graph.get_outgoing(entry.id, edge_type=ABOUT)
                 existing_subjects = [e.target_id for e in existing_about]
@@ -544,6 +548,42 @@ class MemoryCrudMixin:
                 entry.metadata = normalized_metadata
                 self._graph.memories[entry.id] = entry
                 count += 1
+
+                if content_changed:
+                    # Keep vector index synchronized with rewritten content.
+                    try:
+                        self._index.remove(entry.id)
+                    except Exception:
+                        logger.warning(
+                            "memory_index_remove_failed",
+                            extra={"memory.id": entry.id},
+                            exc_info=True,
+                        )
+
+                    entry.embedding = ""
+                    try:
+                        embedding_floats = await self._embeddings.embed(entry.content)
+                    except Exception:
+                        logger.warning(
+                            "embedding_generation_failed_on_update",
+                            extra={"memory.id": entry.id},
+                            exc_info=True,
+                        )
+                        embedding_floats = None
+
+                    if embedding_floats:
+                        try:
+                            self._index.add(entry.id, embedding_floats)
+                            entry.embedding = MemoryEntry.encode_embedding(
+                                embedding_floats
+                            )
+                        except Exception:
+                            logger.warning(
+                                "memory_index_add_failed_on_update",
+                                extra={"memory.id": entry.id},
+                                exc_info=True,
+                            )
+                    vector_index_changed = True
 
                 # Always sync ABOUT edges to normalized subject attribution.
                 existing_pids = {e.target_id for e in existing_about}
@@ -581,6 +621,8 @@ class MemoryCrudMixin:
             if edges_changed:
                 self._persistence.mark_dirty("edges")
             await self._persistence.flush(self._graph)
+            if vector_index_changed:
+                await self._save_vector_index()
 
         return count
 

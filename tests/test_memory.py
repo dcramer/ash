@@ -172,6 +172,47 @@ class TestStoreSupersession:
         mem = graph_store.graph.memories[old_memory.id]
         assert mem.superseded_at is None
 
+    async def test_batch_update_reindexes_when_content_changes(
+        self,
+        graph_store: Store,
+        mock_index: MagicMock,
+        mock_embedding_generator: MagicMock,
+    ) -> None:
+        memory = await graph_store.add_memory(content="Old value", owner_user_id="u1")
+        mock_index.reset_mock()
+        mock_embedding_generator.embed.reset_mock()
+
+        updated = memory.model_copy(deep=True)
+        updated.content = "New value"
+
+        await graph_store.batch_update_memories([updated])
+
+        mock_embedding_generator.embed.assert_awaited_once_with("New value")
+        mock_index.remove.assert_called_once_with(memory.id)
+        mock_index.add.assert_called_once()
+        assert graph_store.graph.memories[memory.id].content == "New value"
+
+    async def test_batch_update_skips_reindex_when_content_unchanged(
+        self,
+        graph_store: Store,
+        mock_index: MagicMock,
+        mock_embedding_generator: MagicMock,
+    ) -> None:
+        memory = await graph_store.add_memory(
+            content="Stable value", owner_user_id="u1"
+        )
+        mock_index.reset_mock()
+        mock_embedding_generator.embed.reset_mock()
+
+        updated = memory.model_copy(deep=True)
+        updated.source_display_name = "Alice"
+
+        await graph_store.batch_update_memories([updated])
+
+        mock_embedding_generator.embed.assert_not_called()
+        mock_index.remove.assert_not_called()
+        mock_index.add.assert_not_called()
+
 
 class TestGarbageCollection:
     """Tests for memory garbage collection."""

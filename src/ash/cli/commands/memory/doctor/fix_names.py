@@ -89,15 +89,16 @@ async def memory_doctor_fix_names(store: Store, force: bool) -> None:
 
     to_update: list[MemoryEntry] = []
     for memory, person in fixes:
-        memory.source_display_name = person.name
+        updated = memory.model_copy(deep=True)
+        updated.source_display_name = person.name
         # If person has a non-numeric alias, prefer it as the username
         non_numeric_alias = next(
             (alias.value for alias in person.aliases if not alias.value.isdigit()),
             None,
         )
         if non_numeric_alias:
-            memory.source_username = non_numeric_alias
-        to_update.append(memory)
+            updated.source_username = non_numeric_alias
+        to_update.append(updated)
     if to_update:
         await store.batch_update_memories(to_update)
 

@@ -150,8 +150,9 @@ async def memory_doctor_reclassify(
     for full_id, _old_type, new_type_str in changes:
         mem = mem_by_id.get(full_id)
         if mem:
-            mem.memory_type = MemoryType(new_type_str)
-            to_update.append(mem)
+            updated = mem.model_copy(deep=True)
+            updated.memory_type = MemoryType(new_type_str)
+            to_update.append(updated)
     if to_update:
         await store.batch_update_memories(to_update)
 

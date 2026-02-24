@@ -60,8 +60,11 @@ async def memory_doctor_attribution(store: Store, force: bool) -> None:
     if not confirm_or_cancel("Fix attribution for these memories?", force):
         return
 
+    updates = []
     for memory in to_fix:
-        memory.source_username = memory.owner_user_id
-    await store.batch_update_memories(to_fix)
+        updated = memory.model_copy(deep=True)
+        updated.source_username = memory.owner_user_id
+        updates.append(updated)
+    await store.batch_update_memories(updates)
 
     success(f"Fixed attribution for {len(to_fix)} memories")
