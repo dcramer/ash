@@ -1165,12 +1165,12 @@ body:has(.ash-home) .content-panel:first-of-type {
   left: 0;
   right: 0;
   top: 0;
-  height: 1.9rem;
+  height: 2.15rem;
   display: flex;
   align-items: center;
   padding: 0 0.7rem;
   font-family: 'Bebas Neue', var(--sl-font);
-  font-size: 1.05rem;
+  font-size: 1.28rem;
   letter-spacing: 0.04em;
   text-transform: none;
   color: #1b1b1b;
@@ -1216,7 +1216,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-chat-user {
   margin-left: 0;
-  margin-right: 2.9rem;
+  margin-right: 3.25rem;
   padding-right: 0.55rem;
   background: linear-gradient(180deg, #b0ff1f, #b0ff1f);
   color: #000000;
@@ -1234,7 +1234,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-chat-ash::before {
   content: '';
   position: absolute;
-  top: 0.28rem;
+  bottom: 0;
   width: 2rem;
   height: 2rem;
   border: 1.5px solid #2a2a2a;
@@ -1243,7 +1243,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-chat-user::before {
-  right: -2.5rem;
+  right: -2.9rem;
   background:
     radial-gradient(circle at 50% 34%, #2a2a2a 0 0.16rem, transparent 0.17rem),
     radial-gradient(ellipse at 50% 78%, #2a2a2a 0 0.3rem, transparent 0.31rem),
@@ -1251,7 +1251,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-chat-ash::before {
-  left: -2.5rem;
+  left: -2.9rem;
   background: url('/ash/logo.svg') center / cover no-repeat;
 }
 
@@ -1260,7 +1260,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-chat-ash {
-  margin-left: 2.9rem;
+  margin-left: 3.25rem;
   margin-right: 0;
   padding-left: 0.55rem;
   background: #1c1c1c;
