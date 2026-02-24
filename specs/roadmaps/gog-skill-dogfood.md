@@ -72,3 +72,14 @@ allow_chat_ids = ["<dm-chat-id>"]  # optional global guardrail
   under a single `gog` auth handle.
 - Whether to introduce first-class integration namespaces beyond capability IDs for
   future multi-provider auth orchestration.
+
+## Core Changes Needed?
+
+For the packaging model (single third-party package containing both skill files and
+provider runtime), no additional core architecture changes are required.
+
+Optional future improvements:
+
+- Add installer UX to scaffold both `[skills.gog]` and
+  `[capabilities.providers.gog]` config together.
+- Add provider health diagnostics in `ash doctor` for capability bridges.

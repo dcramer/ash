@@ -35,6 +35,7 @@ skills consume those capabilities through stable public surfaces.
 ### MUST
 
 - Load workspace skills from `workspace/skills/`
+- Load bundled skills from packaged source directories using the same parser and validation rules as other skill sources
 - Support directory format: `skills/<name>/SKILL.md` (preferred)
 - Support flat markdown: `skills/<name>.md` (convenience)
 - Each skill defines: name, description, instructions
@@ -43,6 +44,7 @@ skills consume those capabilities through stable public surfaces.
 - Inject env vars from config into skill execution
 - Support capability-mediated calls for sensitive external systems (contract in `specs/capabilities.md`)
 - Keep skill execution on public host interfaces; no direct integration hook registration path for skills
+- Treat bundled skills as regular skill surfaces (no privileged wiring semantics)
 - Support `allowed_tools` to restrict subagent's tools
 - Support `model` override per skill
 - Support `max_iterations` limit per skill

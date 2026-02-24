@@ -48,6 +48,18 @@ Other skill types:
 
 Precedence when names collide: workspace > installed > built-in.
 
+Built-in skills are packaged source skills (not a separate plugin model). They use
+the same `SKILL.md` contract and runtime behavior as installed/workspace skills.
+In this repo, they live at:
+
+```text
+src/ash/skills/bundled/
+```
+
+See:
+
+- `src/ash/skills/bundled/README.md`
+
 ## Create Your First Skill
 
 ```bash
