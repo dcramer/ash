@@ -7,6 +7,7 @@ import pytest
 import typer
 
 from ash.cli.commands.chat import (
+    _new_cli_session_state,
     _resolve_model_alias,
     _validate_model_alias,
     _validate_model_credentials,
@@ -93,3 +94,13 @@ def test_validate_model_credentials_passes_when_api_key_present(
     cfg = _config("openai")
 
     _validate_model_credentials(cfg, "default")
+
+
+def test_new_cli_session_state_sets_private_chat_context() -> None:
+    session = _new_cli_session_state("sess-test")
+
+    assert session.provider == "cli"
+    assert session.chat_id == "local"
+    assert session.user_id == "local-user"
+    assert session.context.chat_type == "private"
+    assert session.context.chat_title == "Ash CLI"

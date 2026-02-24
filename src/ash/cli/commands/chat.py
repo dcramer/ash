@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Annotated
 if TYPE_CHECKING:
     from ash.agents.types import StackFrame
     from ash.config import AshConfig
+    from ash.core.session import SessionState
 
 import typer
 
@@ -53,6 +54,21 @@ def _validate_model_credentials(ash_config: AshConfig, alias: str) -> None:
             f"No API key for provider '{provider}'. Set {env_var} or api_key in config"
         )
         raise typer.Exit(1) from None
+
+
+def _new_cli_session_state(session_id: str) -> SessionState:
+    """Create CLI session state with private-chat semantics for policy checks."""
+    from ash.core.session import SessionState
+
+    session = SessionState(
+        session_id=session_id,
+        provider="cli",
+        chat_id="local",
+        user_id="local-user",
+    )
+    session.context.chat_type = "private"
+    session.context.chat_title = "Ash CLI"
+    return session
 
 
 def register(app: typer.Typer) -> None:
@@ -134,7 +150,6 @@ async def _run_chat(
 
     # Configure logging - suppress to WARNING for chat TUI
     configure_logging(level="WARNING")
-    from ash.core.session import SessionState
     from ash.integrations import (
         active_integrations,
         active_rpc_server,
@@ -217,12 +232,8 @@ async def _run_chat(
                 messages, message_ids = await session_manager.load_messages_for_llm()
 
                 # Create in-memory session state
-                session = SessionState(
-                    session_id=session_header.id,
-                    provider="cli",
-                    chat_id="local",
-                    user_id="local-user",
-                )
+                # CLI chat is local and should behave like a private/DM context.
+                session = _new_cli_session_state(session_header.id)
 
                 # Populate session with previous messages
                 for msg in messages:
