@@ -34,6 +34,7 @@ KNOWN_FRONTMATTER_FIELDS = {
     "rationale",
     "sensitive",
     "access",
+    "capabilities",
     "allowed_tools",
     "triggers",
     "env",
@@ -45,6 +46,8 @@ KNOWN_FRONTMATTER_FIELDS = {
     "license",
     "metadata",
 }
+
+_NAMESPACED_CAPABILITY_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$")
 
 
 def _coerce_str_list(name: str, value: Any) -> list[str]:
@@ -111,6 +114,18 @@ def _coerce_bool(name: str, value: Any, *, default: bool = False) -> bool:
 def _coerce_chat_types(name: str, value: Any) -> list[str]:
     items = _coerce_str_list(name, value)
     return [item.lower() for item in items if item]
+
+
+def _coerce_capability_ids(name: str, value: Any) -> list[str]:
+    items = _coerce_str_list(name, value)
+    invalid = [item for item in items if not _NAMESPACED_CAPABILITY_ID.match(item)]
+    if invalid:
+        joined = ", ".join(sorted(invalid))
+        raise ValueError(
+            f"Field '{name}' must contain namespaced capability ids "
+            f"(namespace.name): {joined}"
+        )
+    return items
 
 
 def _coerce_access_chat_types(value: Any) -> list[str]:
@@ -300,6 +315,9 @@ class SkillRegistry:
             opt_in=_coerce_bool("opt_in", data.get("opt_in"), default=False),
             sensitive=_coerce_bool("sensitive", data.get("sensitive"), default=False),
             allowed_chat_types=_coerce_access_chat_types(data.get("access")),
+            capabilities=_coerce_capability_ids(
+                "capabilities", data.get("capabilities")
+            ),
             source_type=source_type,
             source_repo=source_repo,
             source_ref=source_ref,

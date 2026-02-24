@@ -175,10 +175,15 @@ class UseSkillTool(Tool):
         self._config = config
         self._voice = voice
         self._subagent_context = subagent_context
+        self._capability_manager: Any | None = None
 
     def set_shared_prompt(self, prompt: str | None) -> None:
         """Update shared prompt context used for skill execution."""
         self._subagent_context = prompt
+
+    def set_capability_manager(self, manager: Any | None) -> None:
+        """Attach host capability manager for skill capability preflight checks."""
+        self._capability_manager = manager
 
     @property
     def name(self) -> str:
@@ -304,6 +309,55 @@ class UseSkillTool(Tool):
 
         return None
 
+    async def _validate_required_capabilities(
+        self,
+        skill: SkillDefinition,
+        context: ToolContext | None,
+    ) -> str | None:
+        """Return an error if skill-declared capabilities are unavailable."""
+        required = sorted({item.strip() for item in skill.capabilities if item.strip()})
+        if not required:
+            return None
+
+        if context is None or not context.user_id:
+            return (
+                f"Skill '{skill.name}' requires verified user context for "
+                "capability access."
+            )
+
+        manager = self._capability_manager
+        if manager is None:
+            return (
+                f"Skill '{skill.name}' requires capabilities but capability manager "
+                "is not available."
+            )
+
+        chat_type_raw = context.metadata.get("chat_type")
+        chat_type = str(chat_type_raw).strip() if chat_type_raw else None
+        try:
+            visible = await manager.list_capabilities(
+                user_id=context.user_id,
+                chat_type=chat_type,
+                include_unavailable=False,
+            )
+        except Exception as e:
+            code = getattr(e, "code", "capability_backend_unavailable")
+            return f"Capability preflight failed ({code}): {e}"
+
+        visible_ids = {str(item.get("id")) for item in visible if item.get("id")}
+        missing = [
+            capability_id
+            for capability_id in required
+            if capability_id not in visible_ids
+        ]
+        if not missing:
+            return None
+
+        return (
+            f"Skill '{skill.name}' requires unavailable capabilities in this context: "
+            f"{', '.join(missing)}"
+        )
+
     async def execute(
         self,
         input_data: dict[str, Any],
@@ -338,6 +392,10 @@ class UseSkillTool(Tool):
         access_error = self._validate_skill_access(skill, skill_config, context)
         if access_error:
             return ToolResult.error(access_error)
+
+        capability_error = await self._validate_required_capabilities(skill, context)
+        if capability_error:
+            return ToolResult.error(capability_error)
 
         if skill.env:
             config_env = skill_config.get_env_vars() if skill_config else {}

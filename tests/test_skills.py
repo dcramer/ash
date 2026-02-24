@@ -142,6 +142,49 @@ No-op.
 
         assert not registry.has("bad-access")
 
+    def test_discover_skill_with_capabilities(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "mail"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Access inbox via capabilities
+capabilities:
+  - gog.email
+  - gog.calendar
+---
+
+Use ash-sb capability for operations.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("mail")
+        assert skill.capabilities == ["gog.email", "gog.calendar"]
+
+    def test_discover_skill_rejects_invalid_capability_ids(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "bad-capability"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Invalid capability ids
+capabilities:
+  - email
+---
+
+Do something.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+        assert not registry.has("bad-capability")
+
     def test_discover_skill_with_tools_legacy_alias(self, tmp_path: Path):
         """Legacy 'tools:' frontmatter is rejected during discovery."""
         skills_dir = tmp_path / "skills"
@@ -617,6 +660,23 @@ Do something.
         is_valid, error = registry.validate_skill_file(skill_file)
         assert is_valid is False
         assert error is not None and "max_iterations" in error
+
+    def test_validate_rejects_non_namespaced_capability_ids(self, tmp_path: Path):
+        skill_file = tmp_path / "test.md"
+        skill_file.write_text(
+            """---
+description: Test skill
+capabilities:
+  - email
+---
+
+Do something.
+"""
+        )
+        registry = SkillRegistry()
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is False
+        assert error is not None and "capabilities" in error
 
 
 # =============================================================================

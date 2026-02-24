@@ -36,10 +36,20 @@ class CapabilitiesIntegration(IntegrationContributor):
         if manager is None:
             manager = await create_capability_manager(providers=providers)
             components.capability_manager = manager
-            return
+        else:
+            for provider in providers:
+                await manager.register_provider(provider)
 
-        for provider in providers:
-            await manager.register_provider(provider)
+        tool_registry = getattr(components, "tool_registry", None)
+        if tool_registry is not None and hasattr(tool_registry, "has"):
+            try:
+                if tool_registry.has("use_skill") and hasattr(tool_registry, "get"):
+                    skill_tool = tool_registry.get("use_skill")
+                    setter = getattr(skill_tool, "set_capability_manager", None)
+                    if callable(setter):
+                        setter(manager)
+            except Exception:
+                logger.warning("capability_skill_wiring_failed", exc_info=True)
 
     def register_rpc_methods(self, server, context: IntegrationContext) -> None:
         from ash.rpc.methods.capability import register_capability_methods

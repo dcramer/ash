@@ -340,6 +340,94 @@ class TestSkillAccessControls:
                 context=context,
             )
 
+
+class TestSkillCapabilityRequirements:
+    @pytest.fixture
+    def skill(self):
+        return SkillDefinition(
+            name="mail",
+            description="Read mail",
+            instructions="Do mail things",
+            sensitive=True,
+            capabilities=["gog.email"],
+        )
+
+    @pytest.fixture
+    def tool(self, skill):
+        registry = MagicMock()
+        registry.has.return_value = True
+        registry.get.return_value = skill
+        executor = MagicMock()
+        config = MagicMock(spec=AshConfig)
+        config.skills = {}
+        config.agents = {}
+        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
+        return UseSkillTool(registry, executor, config)
+
+    @pytest.mark.asyncio
+    async def test_skill_with_capabilities_requires_user_context(self, tool):
+        result = await tool.execute(
+            {"skill": "mail", "message": "check inbox"},
+            context=ToolContext(chat_id="dm-1", metadata={"chat_type": "private"}),
+        )
+
+        assert result.is_error
+        assert "requires verified user context" in result.content
+
+    @pytest.mark.asyncio
+    async def test_skill_with_capabilities_fails_when_unavailable(self, tool):
+        class _Manager:
+            async def list_capabilities(
+                self,
+                *,
+                user_id: str,
+                chat_type: str | None,
+                include_unavailable: bool = False,
+            ):
+                _ = (user_id, chat_type, include_unavailable)
+                return []
+
+        tool.set_capability_manager(_Manager())
+        result = await tool.execute(
+            {"skill": "mail", "message": "check inbox"},
+            context=ToolContext(
+                user_id="u-1",
+                chat_id="dm-1",
+                metadata={"chat_type": "private"},
+            ),
+        )
+
+        assert result.is_error
+        assert "requires unavailable capabilities" in result.content
+        assert "gog.email" in result.content
+
+    @pytest.mark.asyncio
+    async def test_skill_with_capabilities_runs_when_available(self, tool):
+        from ash.agents.types import ChildActivated
+
+        class _Manager:
+            async def list_capabilities(
+                self,
+                *,
+                user_id: str,
+                chat_type: str | None,
+                include_unavailable: bool = False,
+            ):
+                _ = (user_id, chat_type, include_unavailable)
+                return [{"id": "gog.email"}]
+
+        tool.set_capability_manager(_Manager())
+
+        with pytest.raises(ChildActivated):
+            await tool.execute(
+                {"skill": "mail", "message": "check inbox"},
+                context=ToolContext(
+                    user_id="u-1",
+                    chat_id="dm-1",
+                    metadata={"chat_type": "private"},
+                ),
+            )
+
     @pytest.mark.asyncio
     async def test_default_allow_chat_ids_blocks_other_chats(self, tool):
         tool._config.skill_defaults = SimpleNamespace(allow_chat_ids=["dm-allowed"])
@@ -357,12 +445,28 @@ class TestSkillAccessControls:
     async def test_per_skill_allow_chat_ids_overrides_defaults(self, tool):
         from ash.agents.types import ChildActivated
 
+        class _Manager:
+            async def list_capabilities(
+                self,
+                *,
+                user_id: str,
+                chat_type: str | None,
+                include_unavailable: bool = False,
+            ):
+                _ = (user_id, chat_type, include_unavailable)
+                return [{"id": "gog.email"}]
+
         tool._config.skill_defaults = SimpleNamespace(allow_chat_ids=["dm-default"])
         tool._config.skills = {
             "mail": SkillConfig(allow_chat_ids=["dm-override"]),
         }
+        tool.set_capability_manager(_Manager())
 
-        context = ToolContext(chat_id="dm-override", metadata={"chat_type": "private"})
+        context = ToolContext(
+            user_id="u-1",
+            chat_id="dm-override",
+            metadata={"chat_type": "private"},
+        )
         with pytest.raises(ChildActivated):
             await tool.execute(
                 {"skill": "mail", "message": "check inbox"},

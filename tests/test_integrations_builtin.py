@@ -309,6 +309,33 @@ async def test_capabilities_integration_registers_capability_rpc_methods(
 
 
 @pytest.mark.asyncio
+async def test_capabilities_integration_wires_use_skill_capability_manager() -> None:
+    context = _context()
+
+    class _UseSkillToolStub:
+        name = "use_skill"
+        description = "stub"
+        input_schema: dict[str, Any] = {}
+
+        def __init__(self) -> None:
+            self.manager: Any = None
+
+        def set_capability_manager(self, manager: Any) -> None:
+            self.manager = manager
+
+        async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+            return None
+
+    tool = _UseSkillToolStub()
+    context.components.tool_registry.register(cast(Any, tool))
+
+    integration = CapabilitiesIntegration()
+    await integration.setup(context)
+
+    assert tool.manager is context.components.capability_manager
+
+
+@pytest.mark.asyncio
 async def test_capabilities_integration_registers_configured_provider(
     monkeypatch,
 ) -> None:

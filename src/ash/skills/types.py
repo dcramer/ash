@@ -55,6 +55,9 @@ class SkillDefinition:
     allowed_chat_types: list[str] = field(
         default_factory=list
     )  # Empty = all chat types
+    capabilities: list[str] = field(
+        default_factory=list
+    )  # Required namespaced capabilities (e.g. "gog.email")
 
     # Subagent execution settings
     env: list[str] = field(default_factory=list)  # Env vars to inject from config

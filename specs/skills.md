@@ -106,7 +106,7 @@ Use the PERPLEXITY_API_KEY environment variable for API calls.
 
 ### Capability-Backed Skills (Contract)
 
-Status: planned. External skills that need sensitive integrations should declare
+External skills that need sensitive integrations should declare
 capability requirements and use `ash-sb capability` commands rather than direct
 credential env vars.
 
@@ -220,6 +220,7 @@ class SkillDefinition:
     # Subagent execution
     env: list[str] = field(default_factory=list)           # Env vars to inject
     packages: list[str] = field(default_factory=list)      # System packages (apt)
+    capabilities: list[str] = field(default_factory=list)  # Required namespaced capabilities
     allowed_tools: list[str] = field(default_factory=list)  # Tool whitelist
     model: str | None = None                                # Model override
     max_iterations: int = 10                                # Iteration limit
@@ -279,6 +280,7 @@ class SkillRegistry:
 | `use_skill("research", ...)` | Spawns subagent, returns result | Isolated LLM loop |
 | Skill with `env: [FOO]` | FOO injected from config | `[skills.x].FOO = "..."` |
 | Skill with `packages: [jq]` | jq installed in sandbox | Via apt-get at build |
+| Skill with `capabilities: [gog.email]` | Preflight requires capability visibility in caller context | Namespaced IDs only |
 | Skill with `allowed_tools` | Subagent restricted to those tools | Empty = all tools |
 | Skill with `model: haiku` | Uses haiku model | Config can override |
 | Skill with config `enabled = false` | Filtered from prompt | Not invocable |
@@ -291,6 +293,7 @@ class SkillRegistry:
 | Skill not found | `use_skill` returns error |
 | Skill disabled | `use_skill` returns error |
 | Missing env var in config | `use_skill` returns error with config instructions |
+| Required capabilities unavailable in caller context | `use_skill` returns error |
 | Max iterations exceeded | Returns partial result with error flag |
 | Tool not in tools | Subagent tool call blocked with error |
 

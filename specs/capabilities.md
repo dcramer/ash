@@ -348,7 +348,7 @@ The command layer carries identity context; the host resolves credentials intern
 
 Capability invocation is allowed only when all policy gates pass:
 
-1. Skill-level access policy (for example `sensitive`, `access.chat_types`, `allow_chat_ids`).
+1. Skill-level access policy (for example `sensitive`, `access.chat_types`, `allow_chat_ids`, declared `capabilities`).
 2. Capability-level access policy (sensitivity/chat-type constraints).
 3. Capability operation preconditions (auth present, required inputs, provider health).
 
