@@ -254,7 +254,7 @@ class UseSkillTool(Tool):
             return ToolResult.error("Missing required field: message")
 
         if not self._registry.has(skill_name):
-            self._registry.reload_workspace(self._config.workspace)
+            self._registry.reload_all(self._config.workspace)
             if not self._registry.has(skill_name):
                 # Include built-in skills in available list
                 available = set(self._registry.list_names())

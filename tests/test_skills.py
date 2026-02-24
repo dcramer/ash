@@ -235,6 +235,51 @@ Convert and process media files.
         skill = registry.get("media")
         assert skill.packages == ["ffmpeg", "imagemagick"]
 
+    def test_discover_coerces_string_fields_to_lists(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "coerced"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Coerced skill
+allowed_tools: bash
+env: API_KEY
+packages: jq
+authors: alice
+---
+
+Do something.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+        skill = registry.get("coerced")
+        assert skill.allowed_tools == ["bash"]
+        assert skill.env == ["API_KEY"]
+        assert skill.packages == ["jq"]
+        assert skill.authors == ["alice"]
+
+    def test_discover_skips_invalid_max_iterations_type(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "bad-iterations"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Bad max iterations
+max_iterations: nope
+---
+
+Do something.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+        assert not registry.has("bad-iterations")
+
     def test_discover_flat_markdown_ignored(self, tmp_path: Path):
         """Flat markdown files are ignored (directory skills only)."""
         skills_dir = tmp_path / "skills"
@@ -346,6 +391,29 @@ description: No instructions
         registry = SkillRegistry()
         registry.discover(tmp_path, include_bundled=False)
         assert len(registry) == 0
+
+    def test_reload_all_clears_removed_workspace_skills(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "temp-skill"
+        skill_dir.mkdir(parents=True)
+        skill_file = skill_dir / "SKILL.md"
+        skill_file.write_text(
+            """---
+description: Temporary skill
+---
+
+Do something.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False, include_user=False)
+        assert registry.has("temp-skill")
+
+        skill_file.unlink()
+        skill_dir.rmdir()
+        registry.reload_all(tmp_path, include_bundled=False, include_user=False)
+        assert not registry.has("temp-skill")
 
 
 class TestSkillRegistryValidation:
@@ -486,6 +554,22 @@ Do something.
         is_valid, error = registry.validate_skill_file(skill_file)
         assert is_valid is False
         assert error is not None and "allowed-tools" in error
+
+    def test_validate_rejects_invalid_max_iterations_type(self, tmp_path: Path):
+        skill_file = tmp_path / "test.md"
+        skill_file.write_text(
+            """---
+description: Test skill
+max_iterations: nope
+---
+
+Do something.
+"""
+        )
+        registry = SkillRegistry()
+        is_valid, error = registry.validate_skill_file(skill_file)
+        assert is_valid is False
+        assert error is not None and "max_iterations" in error
 
 
 # =============================================================================

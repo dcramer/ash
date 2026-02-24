@@ -3,6 +3,7 @@
 Handles cloning GitHub repos and symlinking local paths to the installed skills directory.
 """
 
+import hashlib
 import json
 import logging
 import shutil
@@ -157,11 +158,17 @@ class SkillInstaller:
 
     def _check_git(self) -> None:
         """Ensure git is available on host."""
-        result = subprocess.run(
-            ["git", "--version"],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "--version"],
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as e:
+            raise GitNotFoundError(
+                "git is required for installing skill repos. "
+                "Install with: apt install git / brew install git"
+            ) from e
         if result.returncode != 0:
             raise GitNotFoundError(
                 "git is required for installing skill repos. "
@@ -254,7 +261,16 @@ class SkillInstaller:
     def _source_key(self, *, repo: str | None = None, path: str | None = None) -> str:
         if repo:
             return f"repo:{repo}"
-        return f"path:{path}"
+        return f"path:{self._normalize_path(path)}"
+
+    @staticmethod
+    def _normalize_path(path: str | None) -> str | None:
+        if path is None:
+            return None
+        try:
+            return str(Path(path).expanduser().resolve(strict=False))
+        except Exception:
+            return str(Path(path).expanduser())
 
     def _record_sync_state(
         self,
@@ -310,7 +326,9 @@ class SkillInstaller:
         ~/my-skills -> local/my-skills
         /path/to/skills -> local/skills
         """
-        return self.install_path / LOCAL_DIR / original_path.name
+        digest = hashlib.sha256(str(original_path).encode("utf-8")).hexdigest()[:8]
+        safe_name = f"{original_path.name}-{digest}"
+        return self.install_path / LOCAL_DIR / safe_name
 
     def _discover_skills_in_path(self, path: Path) -> list[str]:
         """Discover skill names in a directory."""
@@ -358,6 +376,34 @@ class SkillInstaller:
                 return f"origin/{branch}"
         return "origin/main"
 
+    def _git_ref_exists(self, repo_path: Path, ref: str) -> bool:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", ref],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+    def _resolve_reset_ref(self, repo_path: Path, ref: str | None) -> str:
+        """Resolve a ref for reset/checkouts (branch, tag, or commit)."""
+        if not ref:
+            return self._get_default_branch(repo_path)
+
+        branch_ref = f"refs/remotes/origin/{ref}"
+        if self._git_ref_exists(repo_path, branch_ref):
+            return f"origin/{ref}"
+
+        tag_ref = f"refs/tags/{ref}"
+        if self._git_ref_exists(repo_path, tag_ref):
+            return tag_ref
+
+        commit_ref = f"{ref}^{{commit}}"
+        if self._git_ref_exists(repo_path, commit_ref):
+            return ref
+
+        raise SkillInstallerError(f"Ref not found in repository: {ref}")
+
     def install_repo(
         self,
         repo: str,
@@ -382,7 +428,7 @@ class SkillInstaller:
         self._check_git()
 
         sources = self._load_metadata()
-        source_key = f"repo:{repo}"
+        source_key = self._source_key(repo=repo)
         install_path = self._repo_to_path(repo)
 
         # Check if already installed
@@ -403,16 +449,26 @@ class SkillInstaller:
             shutil.rmtree(install_path)
 
         logger.info("skill_source_cloning", extra={"skill.source": repo})
-        clone_cmd = ["git", "clone", "--depth", "1"]
-        if ref:
-            clone_cmd.extend(["--branch", ref])
-        clone_cmd.extend([github_url, str(install_path)])
+        clone_cmd = ["git", "clone", github_url, str(install_path)]
 
         result = subprocess.run(clone_cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise SkillInstallerError(
                 f"Failed to clone {repo}: {result.stderr.strip()}"
             )
+
+        if ref:
+            checkout_cmd = ["git", "checkout", "--detach", ref]
+            result = subprocess.run(
+                checkout_cmd,
+                cwd=install_path,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise SkillInstallerError(
+                    f"Failed to checkout ref '{ref}' for {repo}: {result.stderr.strip()}"
+                )
 
         # Discover skills (root level or skills/ subdirectory)
         discovered_skills = self._discover_all_skills(install_path)
@@ -462,7 +518,7 @@ class SkillInstaller:
         """
         # Resolve the path
         resolved_path = Path(path).expanduser().resolve()
-        original_path_str = str(path)
+        normalized_path_str = str(resolved_path)
 
         if not resolved_path.exists():
             raise SkillInstallerError(f"Path does not exist: {resolved_path}")
@@ -470,7 +526,7 @@ class SkillInstaller:
             raise SkillInstallerError(f"Path is not a directory: {resolved_path}")
 
         sources = self._load_metadata()
-        source_key = f"path:{original_path_str}"
+        source_key = self._source_key(path=normalized_path_str)
         symlink_path = self._local_to_symlink_path(resolved_path)
 
         # Check if already installed
@@ -504,7 +560,7 @@ class SkillInstaller:
         # Create metadata
         now = datetime.now(UTC).isoformat()
         source = InstalledSource(
-            path=original_path_str,
+            path=normalized_path_str,
             installed_at=now,
             updated_at=now,
             install_path=str(symlink_path),
@@ -565,7 +621,6 @@ class SkillInstaller:
             raise ValueError("Must specify either 'repo' or 'path'")
 
         sources = self._load_metadata()
-
         source_key = self._source_key(repo=repo, path=path)
 
         if source_key not in sources:
@@ -642,7 +697,7 @@ class SkillInstaller:
             logger.info("skill_source_updating", extra={"skill.source": source.repo})
 
             # Fetch and reset to origin
-            fetch_cmd = ["git", "fetch", "origin"]
+            fetch_cmd = ["git", "fetch", "--tags", "origin"]
             result = subprocess.run(
                 fetch_cmd, cwd=install_path, capture_output=True, text=True
             )
@@ -660,11 +715,7 @@ class SkillInstaller:
                 continue
 
             # Determine the ref to reset to
-            reset_ref = (
-                f"origin/{source.ref}"
-                if source.ref
-                else self._get_default_branch(install_path)
-            )
+            reset_ref = self._resolve_reset_ref(install_path, source.ref)
 
             reset_cmd = ["git", "reset", "--hard", reset_ref]
             result = subprocess.run(

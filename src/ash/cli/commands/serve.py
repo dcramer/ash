@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
+    from ash.skills import SkillRegistry
 
 
 def register(app: typer.Typer) -> None:
@@ -144,7 +145,9 @@ async def _run_server(
 
     skill_auto_sync_task: asyncio.Task[None] | None = None
     if ash_config.skill_auto_sync and ash_config.skill_sources:
-        skill_auto_sync_task = _start_skill_auto_sync_task(ash_config)
+        skill_auto_sync_task = _start_skill_auto_sync_task(
+            ash_config, components.skill_registry
+        )
 
     # Compose integration contributors for runtime wiring.
     default_integrations = create_default_integrations(
@@ -224,7 +227,10 @@ async def _run_server(
             )
 
 
-def _start_skill_auto_sync_task(ash_config: "AshConfig") -> asyncio.Task[None]:
+def _start_skill_auto_sync_task(
+    ash_config: "AshConfig",
+    skill_registry: "SkillRegistry | None" = None,
+) -> asyncio.Task[None]:
     """Start periodic background sync of configured skill sources."""
     from ash.skills.installer import SkillInstaller
 
@@ -242,6 +248,8 @@ def _start_skill_auto_sync_task(ash_config: "AshConfig") -> asyncio.Task[None]:
                 report = await asyncio.to_thread(
                     installer.sync_all_report, ash_config.skill_sources
                 )
+                if skill_registry is not None:
+                    skill_registry.reload_all(ash_config.workspace)
                 failure_count = len(report.failed)
                 synced_count = len(report.synced)
                 if failure_count:

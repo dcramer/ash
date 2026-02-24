@@ -45,6 +45,67 @@ KNOWN_FRONTMATTER_FIELDS = {
 }
 
 
+def _coerce_str_list(name: str, value: Any) -> list[str]:
+    """Coerce a frontmatter field to list[str] with clear errors."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        items: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError(f"Field '{name}' must be a list of strings")
+            text = item.strip()
+            if text:
+                items.append(text)
+        return items
+    raise ValueError(f"Field '{name}' must be a string or list of strings")
+
+
+def _coerce_optional_str(name: str, value: Any) -> str | None:
+    """Coerce optional string fields while preserving None."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"Field '{name}' must be a string")
+    text = value.strip()
+    return text or None
+
+
+def _coerce_optional_int(name: str, value: Any, *, default: int) -> int:
+    """Coerce optional int fields with friendly string support."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError(f"Field '{name}' must be an integer")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        parsed = int(value.strip())
+    else:
+        raise ValueError(f"Field '{name}' must be an integer")
+    if parsed < 1:
+        raise ValueError(f"Field '{name}' must be >= 1")
+    return parsed
+
+
+def _coerce_bool(name: str, value: Any, *, default: bool = False) -> bool:
+    """Coerce bool fields with support for common string values."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "1"}:
+            return True
+        if lowered in {"false", "no", "0"}:
+            return False
+    raise ValueError(f"Field '{name}' must be a boolean")
+
+
 class SkillRegistry:
     """Registry for skill definitions loaded from multiple sources.
 
@@ -205,24 +266,32 @@ class SkillRegistry:
                 f"Unknown frontmatter fields for skill '{name}': {unknown_list}"
             )
 
+        description = data.get("description")
+        if not isinstance(description, str) or not description.strip():
+            raise ValueError("Field 'description' must be a non-empty string")
+
         return SkillDefinition(
             name=name,
-            description=data["description"],
+            description=description.strip(),
             instructions=instructions,
             skill_path=skill_path,
-            authors=data.get("authors", []),
-            rationale=data.get("rationale"),
-            opt_in=data.get("opt_in", False),
+            authors=_coerce_str_list("authors", data.get("authors")),
+            rationale=_coerce_optional_str("rationale", data.get("rationale")),
+            opt_in=_coerce_bool("opt_in", data.get("opt_in"), default=False),
             source_type=source_type,
             source_repo=source_repo,
             source_ref=source_ref,
-            env=data.get("env", []),
-            packages=data.get("packages", []),
-            allowed_tools=data.get("allowed_tools", []),
-            model=data.get("model"),
-            max_iterations=data.get("max_iterations", 10),
-            license=data.get("license"),
-            metadata=data.get("metadata", {}),
+            env=_coerce_str_list("env", data.get("env")),
+            packages=_coerce_str_list("packages", data.get("packages")),
+            allowed_tools=_coerce_str_list("allowed_tools", data.get("allowed_tools")),
+            model=_coerce_optional_str("model", data.get("model")),
+            max_iterations=_coerce_optional_int(
+                "max_iterations", data.get("max_iterations"), default=10
+            ),
+            license=_coerce_optional_str("license", data.get("license")),
+            metadata=data.get("metadata", {})
+            if isinstance(data.get("metadata"), dict)
+            else {},
         )
 
     def _should_include_skill(self, skill: SkillDefinition) -> bool:
@@ -331,6 +400,29 @@ class SkillRegistry:
             )
         return len(self._skills) - count_before
 
+    def reload_all(
+        self,
+        workspace_path: Path,
+        *,
+        include_bundled: bool = True,
+        include_installed: bool = True,
+        include_user: bool = True,
+    ) -> int:
+        """Reload all skill sources from scratch.
+
+        Clears the in-memory registry first so removed/renamed skills
+        are reflected immediately without process restart.
+        """
+        self._skills.clear()
+        self._skill_sources.clear()
+        self.discover(
+            workspace_path,
+            include_bundled=include_bundled,
+            include_installed=include_installed,
+            include_user=include_user,
+        )
+        return len(self._skills)
+
     def validate_skill_file(self, path: Path) -> tuple[bool, str | None]:
         if not path.exists():
             return False, f"File not found: {path}"
@@ -365,6 +457,18 @@ class SkillRegistry:
         unknown = set(data.keys()) - KNOWN_FRONTMATTER_FIELDS
         if unknown:
             return False, f"Unknown frontmatter fields: {', '.join(sorted(unknown))}"
+
+        # Validate value types/coercions consistently with discovery loading.
+        try:
+            name = data.get("name") or path.parent.name
+            self._create_skill(
+                str(name),
+                data,
+                content[match.end() :].strip(),
+                path.parent if path.name == "SKILL.md" else None,
+            )
+        except ValueError as e:
+            return False, str(e)
 
         return True, None
 

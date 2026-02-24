@@ -58,7 +58,12 @@ def _format_sha(sha: str | None) -> str:
 
 def _source_key(repo: str | None, path: str | None) -> str:
     """Generate a source key from repo or path."""
-    return f"repo:{repo}" if repo else f"path:{path}"
+    if repo:
+        return f"repo:{repo}"
+    if path is None:
+        return "path:None"
+    normalized = str(Path(path).expanduser().resolve(strict=False))
+    return f"path:{normalized}"
 
 
 def _format_sync_timestamp(value: str | None) -> str:
@@ -409,17 +414,27 @@ def register(app: typer.Typer) -> None:
                     warning("No installed repos to update")
                     return
 
+                success_count = 0
+                failure_count = 0
                 for src in repos:
                     try:
                         result = installer.update(repo=src.repo)
                         if result:
+                            success_count += 1
                             info(
                                 f"Updated {src.repo} to {_format_sha(result.commit_sha)}"
                             )
+                        else:
+                            failure_count += 1
+                            warning(f"Repo not installed: {src.repo}")
                     except SkillInstallerError as e:
+                        failure_count += 1
                         error(f"Failed to update {src.repo}: {e}")
 
-                success(f"Updated {len(repos)} repo(s)")
+                if success_count:
+                    success(f"Updated {success_count} repo(s)")
+                if failure_count:
+                    warning(f"{failure_count} repo(s) failed to update")
 
         except GitNotFoundError as e:
             error(str(e))

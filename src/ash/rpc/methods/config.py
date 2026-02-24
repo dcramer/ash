@@ -55,7 +55,7 @@ def register_config_methods(
 
             # Reload skill definitions from workspace if registry available
             if skill_registry is not None:
-                skill_registry.reload_workspace(config.workspace)
+                skill_registry.reload_all(config.workspace)
                 logger.info(
                     "skills_reloaded",
                     extra={

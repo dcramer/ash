@@ -111,6 +111,7 @@ class TestUseSkillToolErrorHandling:
 
         result = await tool.execute({"skill": "nonexistent", "message": "do"})
 
+        registry.reload_all.assert_called_once_with(tool._config.workspace)
         assert result.is_error
         assert "not found" in result.content
 

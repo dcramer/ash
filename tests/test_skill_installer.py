@@ -149,8 +149,18 @@ Instructions here.
     def test_local_to_symlink_path(self, installer):
         """Test local path to symlink path conversion."""
         path = installer._local_to_symlink_path(Path("/path/to/my-skills"))
-        assert path.name == "my-skills"
+        assert path.name.startswith("my-skills-")
         assert path.parent.name == "local"
+
+    def test_local_to_symlink_path_avoids_basename_collisions(self, installer):
+        first = installer._local_to_symlink_path(Path("/a/shared-name"))
+        second = installer._local_to_symlink_path(Path("/b/shared-name"))
+        assert first != second
+
+    def test_source_key_normalizes_paths(self, installer):
+        key1 = installer._source_key(path="~/skills")
+        key2 = installer._source_key(path=str(Path("~/skills").expanduser()))
+        assert key1 == key2
 
     def test_discover_skills_in_path(self, installer, skill_dir):
         """Test skill discovery in a directory."""
@@ -232,6 +242,21 @@ Instructions here.
         result = installer.install_source(source)
 
         assert result.path == str(skill_dir)
+
+    def test_install_repo_with_ref_checks_out_ref(self, installer):
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # git --version
+                MagicMock(returncode=0),  # git clone
+                MagicMock(returncode=0),  # git checkout --detach <ref>
+                MagicMock(returncode=0, stdout="abc123\n"),  # rev-parse HEAD
+            ]
+            with patch.object(installer, "_discover_all_skills", return_value=[]):
+                result = installer.install_repo("owner/repo", ref="v1.2.3")
+
+        assert result.ref == "v1.2.3"
+        checkout_call = mock_run.call_args_list[2]
+        assert checkout_call.args[0] == ["git", "checkout", "--detach", "v1.2.3"]
 
     def test_sync_all_updates_existing_repos(self, installer):
         """sync_all should install and then update repo sources."""
@@ -327,7 +352,8 @@ Instructions here.
 
         assert len(report.synced) == 0
         assert len(report.failed) == 1
-        state = installer.list_sync_state()["path:~/skills"]
+        normalized = str(Path("~/skills").expanduser().resolve())
+        state = installer.list_sync_state()[f"path:{normalized}"]
         assert state.last_status == "error"
         assert state.last_action == "sync_failed"
         assert state.last_error == "boom"
@@ -360,19 +386,21 @@ Instructions here.
     def test_remove_sync_state_on_uninstall(self, installer):
         """Uninstall should delete sync state entry for removed source."""
         fake_install_path = installer.install_path / "local" / "skills"
+        normalized = str(Path("~/skills").expanduser().resolve())
+        source_key = f"path:{normalized}"
         installer._sync_state = {
-            "path:~/skills": SourceSyncState(last_status="ok", last_action="installed")
+            source_key: SourceSyncState(last_status="ok", last_action="installed")
         }
         installer._sources = {
-            "path:~/skills": InstalledSource(
-                path="~/skills",
+            source_key: InstalledSource(
+                path=normalized,
                 install_path=str(fake_install_path),
             )
         }
 
         result = installer.uninstall(path="~/skills")
         assert result is True
-        assert "path:~/skills" not in installer.list_sync_state()
+        assert source_key not in installer.list_sync_state()
 
 
 class TestConfigWriter:
