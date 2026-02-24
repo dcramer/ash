@@ -1,11 +1,9 @@
 ---
-title: Systems Overview
+title: Overview
 description: Start here to configure Ash systems end to end
 sidebar:
   order: 1
 ---
-
-import { Card, CardGrid } from '@astrojs/starlight/components';
 
 Ash is built from modular systems. This page gives you one baseline config and a map to the right subsystem doc for each task.
 
@@ -71,38 +69,6 @@ If you want to:
 - Run Telegram and channel delivery -> [Chat Providers](/systems/providers/)
 - Enable inbound image handling -> [Vision](/systems/vision/)
 - Enable browser-driven workflows -> [Browser](/systems/browser/)
-
-## Subsystem Cards
-
-<CardGrid>
-  <Card title="Models" icon="rocket">
-    Configure model aliases, provider credentials, and reasoning settings.
-  </Card>
-  <Card title="Tools" icon="wrench">
-    Understand built-in tools, configuration, and custom tool extension points.
-  </Card>
-  <Card title="Skills" icon="setting">
-    Build reusable subagent workflows backed by `SKILL.md` and workspace paths.
-  </Card>
-  <Card title="Agents" icon="puzzle">
-    Configure delegated execution, including nested parent/child agent stacks.
-  </Card>
-  <Card title="Memory" icon="document">
-    Tune retention, extraction, and semantic retrieval behavior.
-  </Card>
-  <Card title="Sandbox" icon="shield">
-    Control runtime isolation, mounts, network mode, and resource limits.
-  </Card>
-  <Card title="Chat Providers" icon="telegram">
-    Configure transport channels such as Telegram and runtime access controls.
-  </Card>
-  <Card title="Vision" icon="picture">
-    Enable inbound image analysis and text-context injection.
-  </Card>
-  <Card title="Browser" icon="window">
-    Configure browser provider/runtime for session-based page actions.
-  </Card>
-</CardGrid>
 
 ## Troubleshooting
 
