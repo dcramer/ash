@@ -1194,7 +1194,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   max-width: 80%;
   box-shadow: none;
   position: relative;
-  border-radius: 0 !important;
+  border-radius: 0.75rem !important;
   white-space: normal;
   width: fit-content;
 }
@@ -1237,8 +1237,8 @@ body:has(.ash-home) .content-panel:first-of-type {
   content: '';
   position: absolute;
   bottom: -1.5px;
-  width: 1.08rem;
-  height: 1.08rem;
+  width: 2rem;
+  height: 2rem;
   border: 1.5px solid #2a2a2a;
   box-shadow: none;
 }
@@ -1250,7 +1250,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-chat-user::before {
-  right: -1.5rem;
+  right: -2.42rem;
   background:
     radial-gradient(circle at 50% 34%, #2a2a2a 0 0.16rem, transparent 0.17rem),
     radial-gradient(ellipse at 50% 78%, #2a2a2a 0 0.3rem, transparent 0.31rem),
@@ -1264,7 +1264,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-chat-ash::before {
-  left: -1.5rem;
+  left: -2.42rem;
   background: url('/ash/logo.svg') center / cover no-repeat;
 }
 
