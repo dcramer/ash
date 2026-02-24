@@ -7,8 +7,9 @@ from typing import Any, cast
 
 import pytest
 
+from ash.capabilities.types import CapabilityDefinition, CapabilityOperation
 from ash.config import AshConfig
-from ash.config.models import ModelConfig
+from ash.config.models import CapabilityProviderConfig, ModelConfig
 from ash.core.prompt import PromptContext
 from ash.core.session import SessionState
 from ash.integrations import (
@@ -305,6 +306,74 @@ async def test_capabilities_integration_registers_capability_rpc_methods(
     integration.register_rpc_methods(server, context)
     assert calls["args"][0] is server
     assert calls["args"][1] is context.components.capability_manager
+
+
+@pytest.mark.asyncio
+async def test_capabilities_integration_registers_configured_provider(
+    monkeypatch,
+) -> None:
+    context = _context()
+    context.config.capabilities.providers["gog"] = CapabilityProviderConfig(
+        enabled=True,
+        namespace="gog",
+        command=["gogcli", "bridge"],
+    )
+
+    class _FakeSubprocessProvider:
+        def __init__(
+            self,
+            *,
+            namespace: str,
+            command: list[str] | str,
+            timeout_seconds: float = 30.0,
+        ) -> None:
+            _ = command
+            _ = timeout_seconds
+            self.namespace = namespace
+
+        async def definitions(self) -> list[CapabilityDefinition]:
+            return [
+                CapabilityDefinition(
+                    id="gog.email",
+                    description="Configured provider capability",
+                    sensitive=True,
+                    operations={
+                        "list_messages": CapabilityOperation(
+                            name="list_messages",
+                            description="List inbox",
+                            requires_auth=True,
+                        )
+                    },
+                )
+            ]
+
+        async def auth_begin(self, **_kwargs):
+            raise NotImplementedError
+
+        async def auth_complete(self, **_kwargs):
+            raise NotImplementedError
+
+        async def invoke(self, **_kwargs):
+            raise NotImplementedError
+
+    monkeypatch.setattr(
+        "ash.capabilities.providers.SubprocessCapabilityProvider",
+        _FakeSubprocessProvider,
+    )
+
+    integration = CapabilitiesIntegration()
+
+    await integration.setup(context)
+    manager = getattr(context.components, "capability_manager", None)
+    assert manager is not None
+
+    private_caps = await manager.list_capabilities(
+        user_id="user-1",
+        chat_type="private",
+        include_unavailable=False,
+    )
+    ids = {item["id"] for item in private_caps}
+    assert "gog.email" in ids
 
 
 @pytest.mark.asyncio

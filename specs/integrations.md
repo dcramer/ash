@@ -49,6 +49,8 @@ class ExampleIntegration(IntegrationContributor):
 6. Hook failures must be isolated per contributor and logged with hook + contributor metadata.
 7. Contributors that fail in `setup` are excluded from later hook/lifecycle execution.
 8. If an integration introduces graph-backed entities, it owns registration of node collections and edge schemas via graph extension APIs before use.
+9. Integration contributors are trusted first-party runtime capabilities, not third-party plugin points.
+10. Third-party extensions must go through skills/capability surfaces rather than registering integration contributors directly.
 
 ## Testing Checklist
 

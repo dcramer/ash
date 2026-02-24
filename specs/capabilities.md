@@ -24,6 +24,18 @@ share skill code while preserving per-user data and credential isolation.
 4. Sensitive capability operations are restricted by chat policy (DM-only by default).
 5. Auth flows (OAuth/device/browser) are mediated by host APIs and short-lived flow handles.
 
+## Ownership Model
+
+Capabilities can be supplied by two trusted host-controlled paths:
+
+1. **Integration-owned providers (first-party)**: registered by runtime composition
+   for primary system capabilities.
+2. **External bridge providers**: configured as command bridges (for example, a
+   skill-distributed `gogcli` bridge) and executed by host capability infrastructure.
+
+Both paths must use the same namespace, token-derived context, policy checks, and
+per-user credential isolation rules.
+
 ## Requirements
 
 ### MUST
@@ -94,6 +106,22 @@ Important implications:
 - Host/provider-side credential APIs are not exposed directly to arbitrary chat interactions.
 
 ## Interface
+
+### External Provider Bridge
+
+Capability providers are configured as external bridge commands so integrations
+like `gog` can live in a skill/external repo instead of Ash core code:
+
+```toml
+[capabilities.providers.gog]
+enabled = true
+namespace = "gog"
+command = ["gogcli", "bridge"]
+timeout_seconds = 30
+```
+
+The host invokes the bridge with JSON over stdin/stdout for `definitions`,
+`auth_begin`, `auth_complete`, and `invoke`.
 
 ### Capability Definition
 

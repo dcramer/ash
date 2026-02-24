@@ -5,10 +5,19 @@ Spec contract: specs/subsystems.md (Integration Hooks), specs/capabilities.md.
 
 from __future__ import annotations
 
+import logging
+from typing import TYPE_CHECKING
+
 from ash.core.prompt import PromptContext
 from ash.core.prompt_keys import TOOL_ROUTING_RULES_KEY
 from ash.core.session import SessionState
 from ash.integrations.runtime import IntegrationContext, IntegrationContributor
+
+if TYPE_CHECKING:
+    from ash.capabilities import CapabilityProvider
+    from ash.config import AshConfig, CapabilityProviderConfig
+
+logger = logging.getLogger(__name__)
 
 
 class CapabilitiesIntegration(IntegrationContributor):
@@ -23,6 +32,7 @@ class CapabilitiesIntegration(IntegrationContributor):
         components = context.components
         manager = getattr(components, "capability_manager", None)
         providers = list(getattr(components, "capability_providers", None) or [])
+        providers.extend(_build_configured_capability_providers(context.config))
         if manager is None:
             manager = await create_capability_manager(providers=providers)
             components.capability_manager = manager
@@ -57,3 +67,44 @@ class CapabilitiesIntegration(IntegrationContributor):
             if line not in lines:
                 lines.append(line)
         return prompt_context
+
+
+def _build_configured_capability_providers(
+    config: AshConfig,
+) -> list[CapabilityProvider]:
+    providers: list[CapabilityProvider] = []
+    for provider_name, provider_config in sorted(config.capabilities.providers.items()):
+        if not provider_config.enabled:
+            continue
+        try:
+            provider = _create_capability_provider(
+                provider_name=provider_name,
+                config=provider_config,
+            )
+        except Exception as e:
+            logger.warning(
+                "capability_provider_load_failed",
+                extra={
+                    "provider_name": provider_name,
+                    "namespace": provider_config.namespace or provider_name,
+                    "command": provider_config.command,
+                    "error.message": str(e),
+                },
+            )
+            continue
+        providers.append(provider)
+    return providers
+
+
+def _create_capability_provider(
+    *,
+    provider_name: str,
+    config: CapabilityProviderConfig,
+) -> CapabilityProvider:
+    from ash.capabilities.providers import SubprocessCapabilityProvider
+
+    return SubprocessCapabilityProvider(
+        namespace=config.namespace or provider_name,
+        command=config.command,
+        timeout_seconds=config.timeout_seconds,
+    )

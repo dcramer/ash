@@ -16,6 +16,20 @@ A subsystem is NOT:
 - A plugin (subsystems are core functionality, not optional extensions)
 - Just a directory (subsystems have explicit contracts)
 
+## Extension Boundaries
+
+Ash has two different extension layers and they are intentionally not equivalent:
+
+1. **Primary capabilities (first-party)**: implemented in core subsystems/integrations.
+   These are trusted host features and may use internal runtime wiring/hooks.
+2. **Third-party extensions**: implemented as skills. Skills are the public extension
+   point and must use stable host surfaces (`use_skill`, `ash-sb`, RPC/capabilities),
+   not direct integration hook wiring.
+
+Implication: adding a new first-party product capability may justify subsystem/
+integration changes; adding third-party behavior should generally be done through
+skills and capability APIs.
+
 ## Outcomes
 
 ### Each subsystem has a single responsibility
@@ -193,6 +207,9 @@ an explicit order/priority.
 
 Runtime entrypoints and eval harnesses MUST compose integrations through the same
 composition flow. Evals are not a separate wiring model.
+
+Integration hooks are part of trusted host composition. They are not a third-party
+plugin surface.
 
 ### Testing requirements (MUST)
 

@@ -2,6 +2,8 @@
 
 import logging
 import os
+import re
+import shlex
 from pathlib import Path
 from typing import Literal
 
@@ -217,6 +219,52 @@ class TodoConfig(BaseModel):
     """Configuration for todo subsystem integration."""
 
     enabled: bool = True
+
+
+class CapabilityProviderConfig(BaseModel):
+    """Configuration for one capability provider plugin."""
+
+    enabled: bool = True
+    namespace: str | None = None
+    command: list[str]
+    timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_command(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        raw_command = normalized.get("command")
+        if isinstance(raw_command, str):
+            normalized["command"] = shlex.split(raw_command)
+        return normalized
+
+    @field_validator("namespace")
+    @classmethod
+    def _validate_namespace(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        if not re.match(r"^[a-z0-9][a-z0-9_-]*$", text):
+            raise ValueError("namespace must match [a-z0-9][a-z0-9_-]*")
+        return text
+
+    @field_validator("command")
+    @classmethod
+    def _validate_command(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value if item and item.strip()]
+        if not normalized:
+            raise ValueError("command is required")
+        return normalized
+
+
+class CapabilitiesConfig(BaseModel):
+    """Configuration for capability provider plugins."""
+
+    providers: dict[str, CapabilityProviderConfig] = Field(default_factory=dict)
 
 
 class ToolOutputTrustConfig(BaseModel):
@@ -451,6 +499,7 @@ class AshConfig(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     image: ImageConfig = Field(default_factory=ImageConfig)
     todo: TodoConfig = Field(default_factory=TodoConfig)
+    capabilities: CapabilitiesConfig = Field(default_factory=CapabilitiesConfig)
     tool_output_trust: ToolOutputTrustConfig = Field(
         default_factory=ToolOutputTrustConfig
     )

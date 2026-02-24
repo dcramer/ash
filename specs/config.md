@@ -97,6 +97,12 @@ allowed_users = ["123456789"]
 [brave_search]
 api_key = "..."  # or BRAVE_SEARCH_API_KEY env
 
+[capabilities.providers.gog]
+enabled = true
+namespace = "gog"
+command = ["gogcli", "bridge"]
+timeout_seconds = 30
+
 [embeddings]
 provider = "openai"
 model = "text-embedding-3-small"

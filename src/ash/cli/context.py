@@ -115,6 +115,18 @@ model = "codex"  # Use coding model for skill creation
 # api_key = ""  # or set BRAVE_SEARCH_API_KEY env var
 
 # =============================================================================
+# Optional: External Capability Provider (skill-owned)
+# =============================================================================
+# Registers an external capability bridge command (for example from a skill
+# package/repo) that implements the capability provider contract.
+
+# [capabilities.providers.gog]
+# enabled = true
+# namespace = "gog"
+# command = ["gogcli", "bridge"]
+# timeout_seconds = 30
+
+# =============================================================================
 # Optional: Semantic Search
 # =============================================================================
 # Requires OpenAI API key (same as above)

@@ -17,6 +17,19 @@ This enables:
 
 For sensitive external systems (email/calendar/etc.), see `specs/capabilities.md`.
 
+## Architecture Position
+
+Skills are Ash's main third-party extension surface.
+
+- Skills are **not** integration contributors and do not participate in core runtime hook wiring.
+- Skills should treat subsystems/integrations as host-owned internals.
+- When a skill needs privileged behavior, it must use host-exposed interfaces
+  (`ash-sb` commands, capability RPC contract, tool APIs) rather than direct access
+  to subsystem internals.
+
+Primary product capabilities may still be implemented as first-party integrations;
+skills consume those capabilities through stable public surfaces.
+
 ## Requirements
 
 ### MUST
@@ -29,6 +42,7 @@ For sensitive external systems (email/calendar/etc.), see `specs/capabilities.md
 - Run skill as subagent with isolated session
 - Inject env vars from config into skill execution
 - Support capability-mediated calls for sensitive external systems (contract in `specs/capabilities.md`)
+- Keep skill execution on public host interfaces; no direct integration hook registration path for skills
 - Support `allowed_tools` to restrict subagent's tools
 - Support `model` override per skill
 - Support `max_iterations` limit per skill

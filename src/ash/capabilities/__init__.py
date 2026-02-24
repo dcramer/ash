@@ -24,6 +24,7 @@ from ash.capabilities.providers import (
     CapabilityAuthCompleteResult,
     CapabilityCallContext,
     CapabilityProvider,
+    SubprocessCapabilityProvider,
 )
 from ash.capabilities.types import (
     CapabilityAccount,
@@ -45,5 +46,6 @@ __all__ = [
     "CapabilityDefinition",
     "CapabilityInvokeResult",
     "CapabilityOperation",
+    "SubprocessCapabilityProvider",
     "create_capability_manager",
 ]

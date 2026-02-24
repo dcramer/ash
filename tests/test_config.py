@@ -7,6 +7,8 @@ from ash.config.loader import _resolve_env_secrets, get_default_config, load_con
 from ash.config.models import (
     AshConfig,
     BrowserConfig,
+    CapabilitiesConfig,
+    CapabilityProviderConfig,
     ConfigError,
     EmbeddingsConfig,
     MemoryConfig,
@@ -114,6 +116,37 @@ class TestBrowserConfig:
         assert config.enabled is True
         assert config.provider == "sandbox"
         assert config.timeout_seconds == 20.0
+
+
+class TestCapabilitiesConfig:
+    def test_defaults(self):
+        config = CapabilitiesConfig()
+        assert config.providers == {}
+
+    def test_provider_config_values(self):
+        config = CapabilitiesConfig(
+            providers={
+                "gog": CapabilityProviderConfig(
+                    enabled=True,
+                    namespace="gog",
+                    command=["gogcli", "bridge"],
+                    timeout_seconds=45.0,
+                )
+            }
+        )
+        assert config.providers["gog"].enabled is True
+        assert config.providers["gog"].namespace == "gog"
+        assert config.providers["gog"].command == ["gogcli", "bridge"]
+        assert config.providers["gog"].timeout_seconds == 45.0
+
+    def test_provider_config_parses_command_string(self):
+        config = CapabilityProviderConfig.model_validate(
+            {
+                "namespace": "gog",
+                "command": "gogcli bridge --mode mock",
+            }
+        )
+        assert config.command == ["gogcli", "bridge", "--mode", "mock"]
 
 
 class TestAshConfig:
