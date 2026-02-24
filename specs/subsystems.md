@@ -131,7 +131,7 @@ Public types live in one place, not scattered across implementation files:
 | people | Complete | [specs/people.md](people.md) |
 | sessions | Needs refactor | [specs/sessions.md](sessions.md) |
 | scheduling | Complete | [specs/schedule.md](schedule.md) |
-| todos | In progress | [specs/todos.md](todos.md) |
+| todos | Complete | [specs/todos.md](todos.md) |
 | browser | Complete | [specs/browser.md](browser.md) |
 
 ## Verification
