@@ -384,21 +384,35 @@ class TelegramProvider(Provider):
                 else:
                     processing_mode = "active"
 
-        # Log ALL incoming messages with processing decision
-        logger.info(
-            "incoming_message",
-            extra={
-                "external_id": str(message.message_id),
-                "chat_id": str(message.chat.id),
-                "user_id": str(user_id) if user_id else None,
-                "username": username,
-                "chat_type": message.chat.type,
-                "was_processed": processing_mode is not None,
-                "processing_mode": processing_mode,
-                "skip_reason": skip_reason,
-                "input.preview": _truncate(message.text or message.caption or ""),
-            },
-        )
+        from ash.logging import log_context
+
+        with log_context(
+            chat_id=str(message.chat.id),
+            provider=self.name,
+            user_id=str(user_id) if user_id else None,
+            thread_id=(
+                str(message.message_thread_id)
+                if message.message_thread_id is not None
+                else None
+            ),
+            chat_type=message.chat.type,
+            source_username=username,
+        ):
+            # Log ALL incoming messages with processing decision
+            logger.info(
+                "incoming_message",
+                extra={
+                    "external_id": str(message.message_id),
+                    "chat_id": str(message.chat.id),
+                    "user_id": str(user_id) if user_id else None,
+                    "username": username,
+                    "chat_type": message.chat.type,
+                    "was_processed": processing_mode is not None,
+                    "processing_mode": processing_mode,
+                    "skip_reason": skip_reason,
+                    "input.preview": _truncate(message.text or message.caption or ""),
+                },
+            )
 
         # Record ALL incoming user messages to chat-level history.jsonl
         # Format: specs/sessions.md#historyjsonl
