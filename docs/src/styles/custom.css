@@ -338,7 +338,7 @@ starlight-toc {
 }
 
 starlight-toc a[aria-current='true'] {
-  color: #305f00 !important;
+  color: #d1ff69 !important;
   font-weight: 700;
 }
 
