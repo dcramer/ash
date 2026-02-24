@@ -1202,7 +1202,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-chat-turn {
   margin: 0;
   border: 0;
-  padding: 0.42rem 0.55rem 0.36rem;
+  padding: 0.58rem 0.72rem 0.52rem;
   font-size: 0.94rem;
   line-height: 1.45;
   max-width: calc(100% - 3rem);
