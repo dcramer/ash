@@ -761,7 +761,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-home {
   display: grid;
-  gap: 1rem;
+  gap: 1.75rem;
   padding: 0 0 3.2rem;
   max-width: 50rem;
   margin: 0 auto;
@@ -1046,7 +1046,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-home-flow {
   display: grid;
-  gap: 1rem;
+  gap: 1.5rem;
 }
 
 .ash-home-band {
@@ -1082,8 +1082,8 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-band > * {
-  margin-left: 0.65rem;
-  margin-right: 0.65rem;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .ash-home-band-acid {
@@ -1150,7 +1150,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   transform: none;
   width: 100%;
   max-width: none;
-  margin: 0.2rem 0 0;
+  margin: 0.65rem 0 0.35rem;
 }
 
 .ash-chat-demo::after {
