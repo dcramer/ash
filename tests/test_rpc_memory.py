@@ -1190,6 +1190,106 @@ class TestRPCDMSourceFiltering:
         assert len(results) == 1
         assert results[0]["content"] == "Group-sourced fact"
 
+    async def test_search_filters_personal_non_participant_in_group(
+        self, rpc_server, memory_manager
+    ):
+        """Group search excludes PERSONAL memories about non-participants."""
+        from ash.graph.edges import (
+            create_is_person_edge,
+            create_learned_in_edge,
+            create_participates_in_edge,
+        )
+        from ash.store.types import ChatEntry
+
+        group_chat = ChatEntry(
+            id="group-chat-1",
+            provider="telegram",
+            provider_id="group-456",
+            chat_type="group",
+        )
+        memory_manager.graph.add_chat(group_chat)
+
+        sender = await memory_manager.create_person(created_by="user-1", name="Bob")
+        subject = await memory_manager.create_person(created_by="user-1", name="Alice")
+        memory_manager.graph.add_edge(create_is_person_edge("user-1", sender.id))
+        memory_manager.graph.add_edge(
+            create_participates_in_edge(sender.id, group_chat.id)
+        )
+
+        mem = await memory_manager.add_memory(
+            content="Alice is looking for a new job",
+            owner_user_id="user-1",
+            subject_person_ids=[subject.id],
+            sensitivity=Sensitivity.PERSONAL,
+        )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem.id, group_chat.id))
+        memory_manager._index.search = MagicMock(return_value=[(mem.id, 0.92)])
+
+        handler = rpc_server.methods["memory.search"]
+        results = await handler(
+            {
+                "query": "new job",
+                "user_id": "user-1",
+                "provider": "telegram",
+                "chat_id": "group-456",
+                "chat_type": "group",
+            }
+        )
+
+        assert len(results) == 0
+
+    async def test_search_allows_personal_participant_in_group(
+        self, rpc_server, memory_manager
+    ):
+        """Group search includes PERSONAL memories when subject participates."""
+        from ash.graph.edges import (
+            create_is_person_edge,
+            create_learned_in_edge,
+            create_participates_in_edge,
+        )
+        from ash.store.types import ChatEntry
+
+        group_chat = ChatEntry(
+            id="group-chat-1",
+            provider="telegram",
+            provider_id="group-456",
+            chat_type="group",
+        )
+        memory_manager.graph.add_chat(group_chat)
+
+        sender = await memory_manager.create_person(created_by="user-1", name="Bob")
+        subject = await memory_manager.create_person(created_by="user-1", name="Alice")
+        memory_manager.graph.add_edge(create_is_person_edge("user-1", sender.id))
+        memory_manager.graph.add_edge(
+            create_participates_in_edge(sender.id, group_chat.id)
+        )
+        memory_manager.graph.add_edge(
+            create_participates_in_edge(subject.id, group_chat.id)
+        )
+
+        mem = await memory_manager.add_memory(
+            content="Alice is looking for a new job",
+            owner_user_id="user-1",
+            subject_person_ids=[subject.id],
+            sensitivity=Sensitivity.PERSONAL,
+        )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem.id, group_chat.id))
+        memory_manager._index.search = MagicMock(return_value=[(mem.id, 0.92)])
+
+        handler = rpc_server.methods["memory.search"]
+        results = await handler(
+            {
+                "query": "new job",
+                "user_id": "user-1",
+                "provider": "telegram",
+                "chat_id": "group-456",
+                "chat_type": "group",
+            }
+        )
+
+        assert len(results) == 1
+        assert results[0]["content"] == "Alice is looking for a new job"
+
 
 class TestRPCMemoryListTrust:
     """Tests for trust field in memory.list response."""

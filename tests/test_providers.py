@@ -991,3 +991,58 @@ class TestTelegramMessageHandler:
         assert any("Tokyo in May" in m.content for m in recent_messages)
         assert recent_messages[-1].role == Role.USER
         assert "he's still going in May" in recent_messages[-1].content
+
+    async def test_passive_memory_lookup_filters_conversation_private_cross_chat(
+        self, handler, graph_store
+    ):
+        """Passive lookup should not surface chat-private memories across chats."""
+        from ash.store.types import SearchResult
+
+        chat_group = await graph_store.ensure_chat(
+            provider="telegram", provider_id="group_123", chat_type="group"
+        )
+        chat_dm_other = await graph_store.ensure_chat(
+            provider="telegram", provider_id="dm_other", chat_type="private"
+        )
+        speaker = await graph_store.create_person(created_by="test", name="Notzeeg")
+        await graph_store.ensure_user(
+            provider="telegram",
+            provider_id="user_456",
+            username="notzeeg",
+            display_name="Notzeeg",
+            person_id=speaker.id,
+        )
+        await graph_store.ensure_person_participates_in_chat(speaker.id, chat_group.id)
+        await graph_store.ensure_person_participates_in_chat(
+            speaker.id, chat_dm_other.id
+        )
+        await graph_store.flush_graph()
+
+        private_memory = await graph_store.add_memory(
+            content="User lives in Austin",
+            source="test",
+            owner_user_id="user_456",
+            metadata={"conversation_private": True},
+            graph_chat_id=chat_dm_other.id,
+        )
+        handler._passive_handler._memory_manager = graph_store
+        graph_store.search = AsyncMock(
+            return_value=[
+                SearchResult(
+                    id=private_memory.id,
+                    content=private_memory.content,
+                    similarity=0.95,
+                    metadata={"sensitivity": private_memory.sensitivity.value},
+                )
+            ]
+        )
+
+        memories = await handler._passive_handler._query_relevant_memories(
+            query="where do i live",
+            user_id="user_456",
+            chat_id="group_123",
+            chat_type="group",
+            threshold=0.4,
+        )
+
+        assert memories is None

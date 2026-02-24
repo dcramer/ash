@@ -16,6 +16,17 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from ash.graph.edges import (
+    get_chat_participant_person_ids,
+    get_person_for_user,
+    get_subject_person_ids,
+)
+from ash.providers.base import IncomingMessage
+from ash.store.visibility import (
+    is_dm_contextually_disclosable,
+    is_group_disclosable,
+)
+
 if TYPE_CHECKING:
     from ash.config import AshConfig
     from ash.llm import LLMProvider
@@ -28,8 +39,6 @@ if TYPE_CHECKING:
     )
     from ash.providers.telegram.provider import TelegramProvider
     from ash.store.store import Store
-
-from ash.providers.base import IncomingMessage
 
 logger = logging.getLogger("telegram")
 
@@ -221,6 +230,8 @@ class PassiveHandler:
                     relevant_memories = await self._query_relevant_memories(
                         query=message.text,
                         user_id=message.user_id,
+                        chat_id=chat_id,
+                        chat_type=message.metadata.get("chat_type"),
                         lookup_timeout=passive_config.memory_lookup_timeout,
                         threshold=passive_config.memory_similarity_threshold,
                     )
@@ -445,6 +456,8 @@ class PassiveHandler:
         self,
         query: str,
         user_id: str,
+        chat_id: str,
+        chat_type: str | None = None,
         lookup_timeout: float = 2.0,
         threshold: float = 0.4,
     ) -> list[str] | None:
@@ -453,6 +466,8 @@ class PassiveHandler:
         Args:
             query: The message text to search for relevant memories.
             user_id: The user who sent the message.
+            chat_id: Current chat ID for group-memory scope.
+            chat_type: Current provider chat type.
             lookup_timeout: Maximum time to wait for memory search.
             threshold: Minimum similarity score to include a memory.
 
@@ -462,18 +477,59 @@ class PassiveHandler:
         assert self._memory_manager is not None
 
         try:
-            # Search across all user's memories, not just current chat
+            # Include both personal memories and group memories in this chat.
             results = await asyncio.wait_for(
                 self._memory_manager.search(
                     query=query,
                     limit=5,
                     owner_user_id=user_id,
+                    chat_id=chat_id,
                 ),
                 timeout=lookup_timeout,
             )
 
-            # Filter by similarity threshold and extract content
-            memories = [r.content for r in results if r.similarity >= threshold]
+            graph = self._memory_manager.graph
+            chat_entry = graph.find_chat_by_provider(self._provider.name, chat_id)
+            participant_person_ids = (
+                get_chat_participant_person_ids(graph, chat_entry.id)
+                if chat_entry is not None
+                else set()
+            )
+            querying_person_id = get_person_for_user(graph, user_id)
+            querying_person_ids = (
+                {querying_person_id} if querying_person_id is not None else set()
+            )
+
+            memories: list[str] = []
+            for result in results:
+                if result.similarity < threshold:
+                    continue
+
+                memory = graph.memories.get(result.id)
+                if memory is None:
+                    continue
+                subject_person_ids = get_subject_person_ids(graph, result.id)
+                visible = True
+                if chat_type in ("group", "supergroup"):
+                    visible = is_group_disclosable(
+                        graph,
+                        result.id,
+                        subject_person_ids,
+                        memory.sensitivity,
+                        participant_person_ids,
+                        chat_id,
+                    )
+                elif chat_type == "private":
+                    partner_person_ids = participant_person_ids - querying_person_ids
+                    visible = is_dm_contextually_disclosable(
+                        graph,
+                        result.id,
+                        subject_person_ids,
+                        partner_person_ids,
+                        chat_id,
+                    )
+                if visible:
+                    memories.append(result.content)
 
             if memories:
                 logger.debug(

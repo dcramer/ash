@@ -761,11 +761,16 @@ class SystemPromptBuilder:
         guidance = (
             "## Memory\n\n"
             "Memory is automatic — facts are extracted after each exchange.\n"
+            "Treat automatically retrieved memory as primary context.\n"
+            "If retrieved memory already answers the user's question, answer from it using the appropriate trust posture.\n"
+            "Do not ask for details that are already present in retrieved memory.\n"
             "When users explicitly ask to remember something, run `ash-sb memory extract` "
             "(no arguments needed — it processes the current message through the full pipeline).\n"
             "Always use `ash-sb memory extract` — never use `ash-sb memory add`.\n"
             'When users ask about "what you learned in this chat" or "from this conversation", '
             "use `--this-chat` to filter to memories learned in the current chat.\n"
+            "Do not use `--this-chat` unless the user explicitly asks for chat-scoped memory.\n"
+            "Run `ash-sb memory search` only when injected memory is insufficient.\n"
             "Memories marked [hearsay] were stated by someone other than the subject — "
             'use hedging language ("according to...", "X mentioned that...") when citing them.'
         )

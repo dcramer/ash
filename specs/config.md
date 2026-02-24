@@ -76,7 +76,8 @@ max_tokens = 4096
 
 [models.fast]
 provider = "openai"
-model = "gpt-5.2-mini"
+# Suggested when available: gpt-5-mini (currently unsupported on openai-oauth)
+model = "gpt-5.2"
 
 # Per-skill model overrides
 [skills.debug]

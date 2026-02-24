@@ -1288,3 +1288,36 @@ class TestDMSensitivityFloor:
         mem = await graph_store.get_memory(stored_ids[0])
         assert mem is not None
         assert mem.sensitivity == Sensitivity.SENSITIVE
+
+    @pytest.mark.asyncio
+    async def test_private_to_conversation_sets_chat_scoped_metadata(
+        self, graph_store: Store
+    ):
+        """Conversation-private facts should carry chat-scoped disclosure metadata."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import DisclosureClass, ExtractedFact, MemoryType
+
+        facts = [
+            ExtractedFact(
+                content="My street address is 123 Main St",
+                subjects=[],
+                shared=False,
+                confidence=0.9,
+                memory_type=MemoryType.IDENTITY,
+                sensitivity=Sensitivity.PERSONAL,
+                disclosure=DisclosureClass.PRIVATE_TO_CONVERSATION,
+            ),
+        ]
+
+        stored_ids = await process_extracted_facts(
+            facts=facts,
+            store=graph_store,
+            user_id="user-1",
+            chat_type="private",
+        )
+
+        assert len(stored_ids) == 1
+        mem = await graph_store.get_memory(stored_ids[0])
+        assert mem is not None
+        assert mem.metadata is not None
+        assert mem.metadata.get("conversation_private") is True

@@ -134,6 +134,7 @@ class RetrievalPipeline:
                         mem_subjects,
                         memory.sensitivity,
                         person_ids,
+                        context.chat_id,
                     ):
                         continue
                     if not passes_sensitivity_policy(
@@ -266,6 +267,7 @@ class RetrievalPipeline:
                 mem_subjects,
                 memory.sensitivity,
                 all_participant_ids,
+                context.chat_id,
             ):
                 continue
             if not passes_sensitivity_policy(
@@ -489,6 +491,7 @@ class RetrievalPipeline:
                 subject_person_ids,
                 sensitivity,
                 all_participant_ids,
+                context.chat_id,
             ):
                 filtered.append(result)
         return filtered

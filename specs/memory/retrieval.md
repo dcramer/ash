@@ -14,4 +14,10 @@ Automatic context injection uses a multi-stage retrieval pipeline:
 
 Stage 2 excludes the querying user's own memories (covered by stage 1). Stage 3 skips SUPERSEDES edges and filters by portable/privacy. RRF fusion boosts memories appearing in multiple stages.
 
+## Provenance Invariant
+
+Active memories must have `LEARNED_IN` provenance. Memories missing `LEARNED_IN`
+are invalid and must be excluded from disclosure/retrieval paths until
+remediated (backfilled or archived).
+
 Query planning is optional and bounded by config (`memory.query_planning_*`). The retrieval call can fetch more memories than final prompt budget, then prune to `memory.context_injection_limit`.

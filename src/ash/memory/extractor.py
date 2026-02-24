@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from ash.llm.types import Message, Role
 from ash.memory.secrets import contains_secret
-from ash.store.types import ExtractedFact, MemoryType, Sensitivity
+from ash.store.types import DisclosureClass, ExtractedFact, MemoryType, Sensitivity
 
 if TYPE_CHECKING:
     from ash.llm import LLMProvider
@@ -237,6 +237,7 @@ Return a JSON array of facts. Each fact has:
 - shared: true if this is group/team knowledge, false if personal
 - confidence: 0.0-1.0 how confident this should be stored
 - type: One of: "preference", "identity", "relationship", "knowledge", "context", "event", "task", "observation"
+- disclosure: One of: "public", "private_to_conversation", "reject_secret"
 - sensitivity: One of: "public", "personal", "sensitive" (see Sensitivity Classification)
 - portable: true if this is an enduring fact about a person (crosses chat boundaries), false if chat-operational/ephemeral (default true)
 - aliases: Dict mapping subject name to list of alias strings (empty dict {{}} if none)
@@ -276,13 +277,20 @@ Classify each fact's privacy level for sharing decisions:
 
 Default to "public" unless the content clearly involves private matters.
 
+## Disclosure Class:
+- "public": Can be reused across chats under normal privacy/sensitivity rules.
+- "private_to_conversation": Store, but only disclose in the same chat where learned.
+- "reject_secret": Never store (credentials, API keys, passwords, tokens, private keys, account numbers).
+
+If uncertain between "public" and "private_to_conversation", choose "private_to_conversation".
+
 Only include facts with confidence >= 0.7. If you cannot resolve a reference, do not extract it.
 
 Return ONLY valid JSON, no other text. Example:
 [
-  {{"content": "David prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference", "sensitivity": "public", "portable": true, "aliases": {{}}}},
-  {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship", "sensitivity": "public", "portable": true, "aliases": {{}}}},
-  {{"content": "Sukhpreet goes by SK", "speaker": "david", "subjects": ["Sukhpreet"], "shared": false, "confidence": 0.9, "type": "identity", "sensitivity": "public", "portable": true, "aliases": {{"Sukhpreet": ["SK"]}}}}
+  {{"content": "David prefers dark mode", "speaker": "david", "subjects": [], "shared": false, "confidence": 0.9, "type": "preference", "disclosure": "public", "sensitivity": "public", "portable": true, "aliases": {{}}}},
+  {{"content": "Sarah's birthday is March 15", "speaker": "david", "subjects": ["Sarah"], "shared": false, "confidence": 0.85, "type": "relationship", "disclosure": "public", "sensitivity": "public", "portable": true, "aliases": {{}}}},
+  {{"content": "Sukhpreet goes by SK", "speaker": "david", "subjects": ["Sukhpreet"], "shared": false, "confidence": 0.9, "type": "identity", "disclosure": "public", "sensitivity": "public", "portable": true, "aliases": {{"Sukhpreet": ["SK"]}}}}
 ]
 
 If there are no facts worth extracting, return an empty array: []"""
@@ -297,6 +305,7 @@ CLASSIFICATION_PROMPT = """You are a memory classification system. Given a singl
 Return a JSON object with:
 - subjects: Names of people this is about (empty array if about the speaker themselves)
 - type: One of: "preference", "identity", "relationship", "knowledge", "context", "event", "task", "observation"
+- disclosure: One of: "public", "private_to_conversation", "reject_secret"
 - sensitivity: One of: "public", "personal", "sensitive"
 - portable: true if this is an enduring fact about a person, false if ephemeral
 - shared: true if this is group/team knowledge, false if personal
@@ -305,11 +314,13 @@ Return a JSON object with:
 ## Guidelines:
 - subjects should contain people the fact is PRIMARILY ABOUT (not the speaker)
 - Default sensitivity to "public" unless clearly private/medical/financial. Pregnancy, reproductive health, and medical conditions are always "sensitive"
+- Use disclosure="reject_secret" for credentials/secrets (never store)
+- If non-secret but personal/confidential, prefer disclosure="private_to_conversation"
 - Default portable to true unless clearly ephemeral
 - Default shared to false unless clearly group knowledge
 
 Return ONLY valid JSON, no other text. Example:
-{{"subjects": ["Sarah"], "type": "relationship", "sensitivity": "public", "portable": true, "shared": false, "aliases": {{}}}}"""
+{{"subjects": ["Sarah"], "type": "relationship", "disclosure": "public", "sensitivity": "public", "portable": true, "shared": false, "aliases": {{}}}}"""
 
 
 VERIFICATION_PROMPT = """You are a memory verification system.
@@ -809,6 +820,21 @@ This ensures memories remain meaningful when recalled later.
             )
             return None
 
+        disclosure: DisclosureClass | None = None
+        disclosure_str = item.get("disclosure")
+        if disclosure_str:
+            try:
+                disclosure = DisclosureClass(disclosure_str)
+            except ValueError:
+                disclosure = None
+        if disclosure == DisclosureClass.REJECT_SECRET:
+            counters["secret"] += 1
+            logger.debug(
+                "secret_classified_from_extraction",
+                extra={"content_preview": content[:30]},
+            )
+            return None
+
         subjects = item.get("subjects", [])
         if not isinstance(subjects, list):
             subjects = []
@@ -830,6 +856,17 @@ This ensures memories remain meaningful when recalled later.
                 sensitivity = Sensitivity(sensitivity_str)
             except ValueError:
                 pass
+
+        if disclosure is None:
+            disclosure = (
+                DisclosureClass.PRIVATE_TO_CONVERSATION
+                if sensitivity in (Sensitivity.PERSONAL, Sensitivity.SENSITIVE)
+                else DisclosureClass.PUBLIC
+            )
+        if disclosure == DisclosureClass.PRIVATE_TO_CONVERSATION and (
+            sensitivity is None or sensitivity == Sensitivity.PUBLIC
+        ):
+            sensitivity = Sensitivity.PERSONAL
 
         portable = item.get("portable", True)
         if not isinstance(portable, bool):
@@ -854,6 +891,7 @@ This ensures memories remain meaningful when recalled later.
             memory_type=memory_type,
             speaker=speaker,
             sensitivity=sensitivity,
+            disclosure=disclosure,
             portable=portable,
             aliases=aliases,
         )

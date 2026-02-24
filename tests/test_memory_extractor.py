@@ -279,6 +279,29 @@ class TestSensitivityParsing:
         assert len(facts) == 1
         assert facts[0].sensitivity is None
 
+    def test_personal_defaults_to_private_to_conversation_disclosure(self, extractor):
+        """PERSONAL sensitivity should default to private-to-conversation disclosure."""
+        from ash.store.types import DisclosureClass
+
+        response = """[
+            {"content": "Looking for new job", "subjects": [], "shared": false, "confidence": 0.9, "sensitivity": "personal"}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert len(facts) == 1
+        assert facts[0].disclosure == DisclosureClass.PRIVATE_TO_CONVERSATION
+
+    def test_reject_secret_disclosure_drops_fact(self, extractor):
+        """Explicit reject_secret classification should drop the fact."""
+        response = """[
+            {"content": "Temporary credential for service X", "subjects": [], "shared": false, "confidence": 0.9, "disclosure": "reject_secret"}
+        ]"""
+
+        facts = extractor._parse_extraction_response(response)
+
+        assert facts == []
+
 
 class TestSecretsFiltering:
     """Tests for secrets filtering in extraction."""

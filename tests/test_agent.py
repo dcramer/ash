@@ -1011,6 +1011,8 @@ class TestSystemPromptBuilder:
 
         assert "hearsay" in prompt
         assert "hedging language" in prompt
+        assert "If retrieved memory already answers the user's question" in prompt
+        assert "Do not use `--this-chat` unless the user explicitly asks" in prompt
 
     def test_chat_history_section_is_non_actionable_and_has_verification_guidance(
         self, prompt_builder

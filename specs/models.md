@@ -43,7 +43,7 @@ max_tokens = 4096
 
 [models.fast]
 provider = "openai"
-model = "gpt-5.2-mini"  # Fast, cost-effective for simple tasks
+model = "gpt-5.2"  # Fast alias defaults to flagship; gpt-5-mini is unsupported on openai-oauth
 max_tokens = 4096
 
 [models.codex]

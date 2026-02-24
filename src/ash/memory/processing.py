@@ -20,6 +20,7 @@ from ash.store.types import (
     AssertionEnvelope,
     AssertionKind,
     AssertionPredicate,
+    DisclosureClass,
     ExtractedFact,
     MemoryType,
     PredicateObjectType,
@@ -539,6 +540,12 @@ async def process_extracted_facts(
             ):
                 effective_sensitivity = Sensitivity.PERSONAL
 
+            memory_metadata: dict[str, object] | None = None
+            if fact.disclosure == DisclosureClass.PRIVATE_TO_CONVERSATION:
+                memory_metadata = {"conversation_private": True}
+                if effective_sensitivity in (None, Sensitivity.PUBLIC):
+                    effective_sensitivity = Sensitivity.PERSONAL
+
             new_memory = await store.add_memory(
                 content=fact.content,
                 source=source,
@@ -552,6 +559,7 @@ async def process_extracted_facts(
                 extraction_confidence=fact.confidence,
                 sensitivity=effective_sensitivity,
                 portable=fact.portable,
+                metadata=memory_metadata,
                 stated_by_person_id=stated_by_pid,
                 graph_chat_id=graph_chat_id,
                 assertion=assertion,

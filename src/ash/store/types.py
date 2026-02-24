@@ -57,6 +57,19 @@ class Sensitivity(Enum):
     SENSITIVE = "sensitive"
 
 
+class DisclosureClass(Enum):
+    """Storage/disclosure class assigned at extraction time.
+
+    - REJECT_SECRET: Do not store this fact.
+    - PRIVATE_TO_CONVERSATION: Store, but constrain disclosure to source chat.
+    - PUBLIC: Store and allow standard cross-chat disclosure rules.
+    """
+
+    REJECT_SECRET = "reject_secret"  # noqa: S105 - classification label, not a credential
+    PRIVATE_TO_CONVERSATION = "private_to_conversation"
+    PUBLIC = "public"
+
+
 class AssertionKind(Enum):
     """Semantic assertion class for a memory."""
 
@@ -319,6 +332,7 @@ class ExtractedFact:
     memory_type: MemoryType = MemoryType.KNOWLEDGE
     speaker: str | None = None  # Who said this (username or identifier)
     sensitivity: Sensitivity | None = None  # Privacy classification
+    disclosure: DisclosureClass | None = None  # Reject/store class from extraction
     portable: bool = True  # Whether this fact crosses chat boundaries
     assertion: AssertionEnvelope | None = None  # Optional structured semantics override
     aliases: dict[str, list[str]] = field(

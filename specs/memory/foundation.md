@@ -126,7 +126,7 @@ A memory is disclosable if any of:
 - Memory was STATED_BY the DM partner
 - DM partner has a PARTICIPATES_IN edge to the memory's LEARNED_IN chat (they were present when it was said)
 - Memory is a self-memory (no subjects)
-- Memory has no LEARNED_IN edge (legacy data — fail-open)
+- Memory has valid LEARNED_IN provenance (missing provenance is invalid and excluded)
 
 Otherwise, memories about third parties are excluded.
 
@@ -139,7 +139,7 @@ Otherwise, memories about third parties are excluded.
 ### Backward Compatibility
 
 - `sensitivity` field defaults to `null`, treated as `public`
-- Existing memories work unchanged
+- Active memories must have LEARNED_IN provenance; missing-provenance records are invalid and should be remediated (backfilled or archived)
 
 
 ## Cross-Context Retrieval

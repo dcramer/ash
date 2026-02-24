@@ -44,6 +44,34 @@ def is_private_sourced_outside_current_chat(
     return source_chat.provider_id != current_chat_provider_id
 
 
+def is_conversation_private_memory(
+    graph: KnowledgeGraph,
+    memory_id: str,
+) -> bool:
+    """Whether a memory is explicitly chat-scoped private."""
+    memory = graph.memories.get(memory_id)
+    if memory is None or not isinstance(memory.metadata, dict):
+        return False
+    return bool(memory.metadata.get("conversation_private"))
+
+
+def is_learned_in_current_chat(
+    graph: KnowledgeGraph,
+    memory_id: str,
+    current_chat_provider_id: str | None,
+) -> bool:
+    """Whether LEARNED_IN provenance matches the current provider chat id."""
+    if not current_chat_provider_id:
+        return False
+    source_chat_id = get_learned_in_chat(graph, memory_id)
+    if not source_chat_id:
+        return False
+    source_chat = graph.chats.get(source_chat_id)
+    if source_chat is None:
+        return False
+    return source_chat.provider_id == current_chat_provider_id
+
+
 def passes_sensitivity_policy(
     sensitivity: Sensitivity,
     subject_person_ids: list[str],
@@ -68,16 +96,27 @@ def is_group_disclosable(
     subject_person_ids: list[str],
     sensitivity: Sensitivity,
     participant_person_ids: set[str],
+    current_chat_provider_id: str | None = None,
 ) -> bool:
     """Group chat disclosure policy for a single memory.
 
     Rules:
+    - conversation-private memories are only visible in the source chat
     - Memories are visible only when provenance proves they were learned
       in a non-private chat.
     - Self-memories (no subjects) are allowed.
     - PUBLIC memories are allowed.
     - PERSONAL/SENSITIVE memories require a participant subject overlap.
     """
+    if is_conversation_private_memory(
+        graph, memory_id
+    ) and not is_learned_in_current_chat(
+        graph,
+        memory_id,
+        current_chat_provider_id,
+    ):
+        return False
+
     # Fail closed for groups unless provenance proves non-private source.
     if is_private_sourced_outside_current_chat(graph, memory_id, None):
         return False
@@ -101,12 +140,22 @@ def is_dm_contextually_disclosable(
     """DM contextual disclosure filter.
 
     A memory is disclosable if:
+    - conversation-private memories are only visible in the source chat
     - It has known LEARNED_IN provenance in this same DM (for DM-sourced memories)
     - It is about the DM partner
     - It was stated by the DM partner
     - The DM partner participated in the source chat
     - It is a self-memory (no subjects)
     """
+    if is_conversation_private_memory(
+        graph, memory_id
+    ) and not is_learned_in_current_chat(
+        graph,
+        memory_id,
+        current_chat_provider_id,
+    ):
+        return False
+
     if is_private_sourced_outside_current_chat(
         graph,
         memory_id,

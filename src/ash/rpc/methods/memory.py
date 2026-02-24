@@ -4,8 +4,14 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ash.graph.edges import (
+    get_chat_participant_person_ids,
+    get_person_for_user,
+    get_subject_person_ids,
+)
 from ash.store.visibility import (
-    is_private_sourced_outside_current_chat,
+    is_dm_contextually_disclosable,
+    is_group_disclosable,
 )
 
 if TYPE_CHECKING:
@@ -135,26 +141,57 @@ def register_memory_methods(
         memory_id: str,
         chat_type: str | None,
         chat_provider_id: str | None,
+        participant_person_ids: set[str],
+        querying_person_ids: set[str],
     ) -> bool:
         """Chat context visibility gate shared by list/search RPCs."""
         graph = memory_manager.graph
+        memory = graph.memories.get(memory_id)
+        if memory is None:
+            return False
+        subject_person_ids = get_subject_person_ids(graph, memory_id)
+        sensitivity = memory.sensitivity
         if chat_type is None and chat_provider_id is not None:
             # Fail closed when a chat-scoped request does not provide/resolve type.
             return False
         if chat_type in ("group", "supergroup"):
-            # In groups, only memories proven to come from non-private chats are visible.
-            return not is_private_sourced_outside_current_chat(
+            return is_group_disclosable(
                 graph,
                 memory_id,
-                None,
+                subject_person_ids,
+                sensitivity,
+                participant_person_ids,
+                chat_provider_id,
             )
         if chat_type == "private":
-            return not is_private_sourced_outside_current_chat(
+            partner_person_ids = participant_person_ids - querying_person_ids
+            return is_dm_contextually_disclosable(
                 graph,
                 memory_id,
+                subject_person_ids,
+                partner_person_ids,
                 chat_provider_id,
             )
         return True
+
+    def _resolve_chat_participants(
+        provider: str | None,
+        chat_id: str | None,
+    ) -> set[str]:
+        if not chat_id:
+            return set()
+        graph_chat_id = _resolve_graph_chat_id(provider, chat_id)
+        if not graph_chat_id and chat_id in memory_manager.graph.chats:
+            graph_chat_id = chat_id
+        if not graph_chat_id:
+            return set()
+        return get_chat_participant_person_ids(memory_manager.graph, graph_chat_id)
+
+    def _resolve_querying_person_ids(user_id: str | None) -> set[str]:
+        if not user_id:
+            return set()
+        person_id = get_person_for_user(memory_manager.graph, user_id)
+        return {person_id} if person_id else set()
 
     async def memory_search(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Search memories using semantic search.
@@ -179,14 +216,14 @@ def register_memory_methods(
         limit = params.get("limit", 10)
         user_id = params.get("user_id")
         chat_id = params.get("chat_id")
-        chat_type = _resolve_chat_type(
-            params.get("chat_type"), params.get("provider"), chat_id
-        )
+        provider = params.get("provider")
+        chat_type = _resolve_chat_type(params.get("chat_type"), provider, chat_id)
+        participant_person_ids = _resolve_chat_participants(provider, chat_id)
+        querying_person_ids = _resolve_querying_person_ids(user_id)
 
         # Resolve graph_chat_id for --this-chat filtering
         learned_in_chat_id: str | None = None
         if params.get("this_chat"):
-            provider = params.get("provider")
             if provider and chat_id:
                 chat_entry = memory_manager.graph.find_chat_by_provider(
                     provider, chat_id
@@ -206,7 +243,15 @@ def register_memory_methods(
 
         # Filter by chat context provenance policy
         results = [
-            r for r in results if _visible_in_chat_context(r.id, chat_type, chat_id)
+            r
+            for r in results
+            if _visible_in_chat_context(
+                r.id,
+                chat_type,
+                chat_id,
+                participant_person_ids,
+                querying_person_ids,
+            )
         ]
 
         lookup = await _build_username_lookup()
@@ -665,14 +710,14 @@ def register_memory_methods(
         include_expired = params.get("include_expired", False)
         user_id = params.get("user_id")
         chat_id = params.get("chat_id")
-        chat_type = _resolve_chat_type(
-            params.get("chat_type"), params.get("provider"), chat_id
-        )
+        provider = params.get("provider")
+        chat_type = _resolve_chat_type(params.get("chat_type"), provider, chat_id)
+        participant_person_ids = _resolve_chat_participants(provider, chat_id)
+        querying_person_ids = _resolve_querying_person_ids(user_id)
 
         # Resolve graph_chat_id for --this-chat filtering
         learned_in_chat_id: str | None = None
         if params.get("this_chat"):
-            provider = params.get("provider")
             if provider and chat_id:
                 chat_entry = memory_manager.graph.find_chat_by_provider(
                     provider, chat_id
@@ -691,7 +736,15 @@ def register_memory_methods(
         )
 
         memories = [
-            m for m in memories if _visible_in_chat_context(m.id, chat_type, chat_id)
+            m
+            for m in memories
+            if _visible_in_chat_context(
+                m.id,
+                chat_type,
+                chat_id,
+                participant_person_ids,
+                querying_person_ids,
+            )
         ]
 
         lookup = await _build_username_lookup()
