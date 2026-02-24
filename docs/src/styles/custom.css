@@ -104,6 +104,18 @@ header.header::after {
   border-inline-end: 0 !important;
 }
 
+header.header .right-group,
+header.header .social-icons,
+header.header .social-icons::after {
+  border-right: 0 !important;
+  border-inline-end: 0 !important;
+}
+
+header.header .social-icons::after {
+  content: none !important;
+  display: none !important;
+}
+
 /* Header search should look like the same hard-edged UI language */
 header.header :is(
   .site-search,
@@ -115,9 +127,20 @@ header.header :is(
   border-radius: 0 !important;
 }
 
-@media (min-width: 64rem) {
+@media (min-width: 50rem) {
   header.header .site-title {
     margin-right: auto !important;
+  }
+
+  header.header > .header > .sl-flex:nth-child(2) {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  header.header > .header > .sl-flex:nth-child(2) site-search {
+    width: min(100%, 26rem);
+    margin-left: auto !important;
   }
 
   header.header :is(
@@ -129,6 +152,32 @@ header.header :is(
   ) {
     margin-left: auto !important;
   }
+}
+
+header.header site-search > button[data-open-modal] {
+  background: #f6f7fb !important;
+  color: #11130f !important;
+  border: 2px solid #11130f !important;
+  border-right-width: 6px !important;
+  border-bottom-width: 6px !important;
+  border-radius: 0 !important;
+  box-shadow: 6px 6px 0 rgba(20, 20, 15, 0.16) !important;
+  font-family: 'Sora', var(--sl-font) !important;
+  font-weight: 700 !important;
+  min-height: 2.6rem;
+}
+
+header.header site-search > button[data-open-modal]:hover {
+  background: #ffffff !important;
+  color: #0f120d !important;
+  border-color: #0f120d !important;
+}
+
+header.header site-search > button[data-open-modal] kbd {
+  background: #dce3ee !important;
+  border: 1px solid #8a94a6 !important;
+  color: #1f2836 !important;
+  border-radius: 0 !important;
 }
 
 header.header :is(
