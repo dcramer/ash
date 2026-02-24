@@ -411,6 +411,10 @@ pre code {
 .expressive-code .header .title,
 .expressive-code .header .filename {
   color: #11130f !important;
+  background: inherit !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  font-weight: 800 !important;
 }
 
 .expressive-code .header .copy {
