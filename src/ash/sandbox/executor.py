@@ -79,7 +79,16 @@ class SandboxExecutor:
                 stderr="Sandbox not initialized",
             )
 
-        container_id = await self._get_or_create_container(reuse_container)
+        try:
+            container_id = await self._get_or_create_container(reuse_container)
+        except Exception as e:
+            logger.error(
+                "sandbox_execution_failed",
+                extra={"error.message": str(e)},
+                exc_info=True,
+            )
+            return ExecutionResult(exit_code=-1, stdout="", stderr=str(e))
+        ephemeral_container = not reuse_container
         merged_env = {**self._environment, **(environment or {})}
 
         try:
@@ -102,6 +111,18 @@ class SandboxExecutor:
                 exc_info=True,
             )
             return ExecutionResult(exit_code=-1, stdout="", stderr=str(e))
+        finally:
+            if ephemeral_container:
+                try:
+                    await self._manager.remove_container(container_id)
+                except Exception as e:
+                    logger.warning(
+                        "container_removal_failed",
+                        extra={
+                            "error.message": str(e),
+                            "container.id": container_id[:12],
+                        },
+                    )
 
     async def execute_script(
         self,
@@ -144,25 +165,38 @@ class SandboxExecutor:
         container_id = await self._manager.create_container(
             environment=self._environment if self._environment else None,
         )
-        await self._manager.start_container(container_id)
+        try:
+            await self._manager.start_container(container_id)
 
-        if self._setup_command and not self._container_setup_done:
-            logger.info("container_setup_running")
-            exit_code, stdout, stderr = await self._manager.exec_command(
-                container_id,
-                self._setup_command,
-                timeout=300,
-            )
-            if exit_code != 0:
+            if self._setup_command and not self._container_setup_done:
+                logger.info("container_setup_running")
+                exit_code, stdout, stderr = await self._manager.exec_command(
+                    container_id,
+                    self._setup_command,
+                    timeout=300,
+                )
+                if exit_code != 0:
+                    logger.warning(
+                        "setup_command_failed",
+                        extra={"process.exit_code": exit_code, "error.message": stderr},
+                    )
+                else:
+                    logger.debug(
+                        f"Setup command completed: {stdout[:200] if stdout else ''}"
+                    )
+                self._container_setup_done = True
+        except Exception:
+            try:
+                await self._manager.remove_container(container_id)
+            except Exception as remove_error:
                 logger.warning(
-                    "setup_command_failed",
-                    extra={"process.exit_code": exit_code, "error.message": stderr},
+                    "container_removal_failed",
+                    extra={
+                        "error.message": str(remove_error),
+                        "container.id": container_id[:12],
+                    },
                 )
-            else:
-                logger.debug(
-                    f"Setup command completed: {stdout[:200] if stdout else ''}"
-                )
-            self._container_setup_done = True
+            raise
 
         if reuse:
             self._container_id = container_id
