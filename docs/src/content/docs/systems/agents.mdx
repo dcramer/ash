@@ -1,340 +1,155 @@
 ---
 title: Agents
-description: Core agent loop and built-in subagents
+description: Use and configure built-in subagents
 sidebar:
   order: 3
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Ash uses an agentic architecture with a main orchestrator and specialized subagents for complex tasks.
+Ash has a main orchestrator agent and optional subagents. Subagents run their own tool-and-LLM loop, then return results to the main conversation.
 
-## Agent Core
+## Agents In 30 Seconds
 
-The agent orchestrator manages conversations and coordinates between LLM, tools, and memory.
+Use a subagent when work needs an isolated multi-step loop.
 
-### Agentic Loop
+- Main agent: handles normal conversation and tool calls
+- Subagent: runs delegated work with its own prompt, iteration budget, and tool scope
 
-The agent implements an iterative loop:
+Current built-in subagents:
 
-```
-1. Receive message
-2. Build context (system prompt, history, memories)
-3. Call LLM
-4. If tool calls requested:
-   a. Execute tools
-   b. Add results to context
-   c. Go to step 3
-5. Return final response
-```
+- `task` - general multi-step worker
+- `plan` - produces structured implementation plans
 
-### Agent Class
+## When To Use Agents Vs Skills
 
-Location: `src/ash/core/agent.py`
+Use `use_agent` when you need autonomous execution across multiple iterations.
 
-```python
-class Agent:
-    async def process(
-        self,
-        message: str,
-        *,
-        session_id: str,
-        user_id: str,
-        stream: bool = True,
-    ) -> AsyncIterator[str]:
-        """Process a user message and yield response chunks."""
+Use skills when you want reusable instructions in `SKILL.md` and workflow conventions.
+
+- Agent: Python-defined behavior, isolated loop
+- Skill: markdown-defined behavior, reusable instructions
+
+See [Skills](/systems/skills/) for skill design and lifecycle.
+
+## Quick Start
+
+Ask Ash to delegate to a subagent:
+
+```bash
+uv run ash chat "Create an implementation plan for adding OAuth login; use the plan agent"
 ```
 
-### Iteration Limits
+Or delegate general execution:
 
-The agent limits tool iterations to prevent infinite loops:
-
-- **Default**: 25 iterations
-- **Configurable**: Via agent initialization
-
-### Context Building
-
-For each LLM call, the agent builds context:
-
-1. **System prompt** - From SOUL.md + capabilities
-2. **Memory retrieval** - Relevant memories via semantic search
-3. **Conversation history** - Recent messages within token budget
-4. **Tool definitions** - Available tools schema
-
-### Session Management
-
-Sessions track conversations per provider/chat:
-
-```python
-class Session:
-    id: str
-    provider: str
-    chat_id: str
-    user_id: str
-    messages: list[Message]
+```bash
+uv run ash chat "Use the task agent to inspect this repo and summarize test coverage gaps"
 ```
 
-Sessions are persisted to the database.
+The main agent decides whether to delegate and then merges the subagent result into the final reply.
 
-### Streaming
+## Configure Agents
 
-The agent supports streaming responses:
-
-```python
-async for chunk in agent.process(message, stream=True):
-    print(chunk, end="")
-```
-
-Non-streaming returns the complete response:
-
-```python
-async for response in agent.process(message, stream=False):
-    print(response)  # Single complete response
-```
-
-### Error Handling
-
-The agent handles:
-
-- **LLM errors** - Retries with exponential backoff
-- **Tool failures** - Reports error to LLM for recovery
-- **Context overflow** - Prunes history to fit token budget
-
-## Subagents
-
-Subagents are autonomous processes that run isolated LLM loops for complex multi-step tasks.
-
-Unlike skills (which are markdown instruction files the main agent reads), subagents:
-
-- Execute in their own LLM context
-- Have their own system prompt
-- Can restrict available tools
-- Run multiple iterations independently
-- Return results when complete
-
-### Agent Interface
-
-Location: `src/ash/agents/base.py`
-
-```python
-class Agent(ABC):
-    @property
-    @abstractmethod
-    def config(self) -> AgentConfig:
-        """Return agent configuration."""
-```
-
-### AgentConfig
-
-```python
-@dataclass
-class AgentConfig:
-    name: str                    # Unique identifier
-    description: str             # Description for UseAgentTool
-    system_prompt: str           # Custom system prompt
-    tools: list[str]     # Tool whitelist (empty = all)
-    max_iterations: int = 10     # Safety limit
-    model: str | None = None     # Model override (None = default)
-```
-
-### AgentContext
-
-Context passed to agent execution:
-
-```python
-@dataclass
-class AgentContext:
-    session_id: str | None = None
-    user_id: str | None = None
-    chat_id: str | None = None
-    input_data: dict[str, Any] = field(default_factory=dict)
-```
-
-### AgentResult
-
-```python
-@dataclass
-class AgentResult:
-    content: str
-    is_error: bool = False
-    iterations: int = 0
-
-    @classmethod
-    def success(cls, content: str, iterations: int = 0) -> "AgentResult": ...
-
-    @classmethod
-    def error(cls, message: str) -> "AgentResult": ...
-```
-
-## Built-in Subagents
-
-### Research Agent
-
-Location: `src/ash/agents/builtin/research.py`
-
-Multi-step research tasks with web search and content extraction:
-
-```python
-config = AgentConfig(
-    name="research",
-    description="Perform multi-step research tasks",
-    system_prompt="You are a research assistant...",
-    allowed_tools=["web_search", "web_fetch", "bash"],
-    max_iterations=25,
-)
-```
-
-Use cases:
-- Researching topics across multiple sources
-- Gathering information for complex questions
-- Comparing different approaches or solutions
-
-### Skill Writer Agent
-
-Location: `src/ash/agents/builtin/skill_writer.py`
-
-Creates new skills autonomously:
-
-```python
-config = AgentConfig(
-    name="skill-writer",
-    description="Create new skills for the assistant",
-    system_prompt="You are a skill writer...",
-    allowed_tools=["bash", "read_file", "write_file"],
-    max_iterations=15,
-)
-```
-
-Use cases:
-- Creating new workflow skills
-- Generating skill templates
-- Automating skill development
-
-## Using Subagents
-
-### Via UseAgentTool
-
-The main agent invokes subagents via the `use_agent` tool:
-
-```python
-# Agent tool call
-{
-    "name": "use_agent",
-    "input": {
-        "agent": "research",
-        "message": "Find the best practices for Python async programming",
-        "input": {"depth": "thorough"}
-    }
-}
-```
-
-### Direct Invocation (Code)
-
-```python
-from ash.agents.registry import AgentRegistry
-from ash.agents.executor import AgentExecutor
-
-registry = AgentRegistry()
-registry.load_builtin()
-
-executor = AgentExecutor(
-    registry=registry,
-    llm_provider=llm_provider,
-    tool_registry=tool_registry,
-)
-
-result = await executor.execute(
-    agent_name="research",
-    message="Research topic X",
-    context=AgentContext(session_id="123"),
-)
-```
-
-## Configuration
-
-Override agent settings in `config.toml`:
+Override built-in agent settings in `config.toml`:
 
 ```toml
-[agents.research]
-model = "sonnet"       # Use sonnet model
-max_iterations = 50    # Allow more iterations
+[agents.task]
+model = "default"         # Optional model alias override
+max_iterations = 25         # Optional iteration cap for this agent
 
-[agents.skill-writer]
-model = "sonnet"
-max_iterations = 20
+[agents.plan]
+model = "default"
+max_iterations = 10
 ```
 
-## Agent vs Skill
+Use higher iteration limits only for workflows that need more tool rounds.
 
-| Feature | Agent | Skill |
-|---------|-------|-------|
-| Execution | Own LLM loop | Main agent follows instructions |
-| Tools | Can restrict | Uses main agent's tools |
-| Context | Isolated | Shared with conversation |
-| Iterations | Multiple | N/A |
-| Definition | Python code | Markdown file |
+## How Execution Works
 
-<Aside type="tip">
-  Use **agents** for complex autonomous tasks that need multiple tool calls.
-  Use **skills** for instructions the main agent follows in conversation.
+Delegation lifecycle:
+
+1. Main agent receives a user request.
+2. Main agent issues `use_agent` when delegation is appropriate.
+3. Subagent runs its own loop (LLM -> tools -> LLM) up to `max_iterations`.
+4. Subagent returns structured output.
+5. Main agent responds to the user with that output integrated.
+
+<Aside type="note">
+  Subagent runs are isolated from the main loop but still inherit routing/session context needed for safe tool execution.
 </Aside>
 
-## Creating Custom Subagents
+## Troubleshooting
 
-1. Create a new file in `src/ash/agents/builtin/`:
+### Agent does not trigger
+
+```bash
+# Confirm the request clearly asks for delegation
+uv run ash chat "Use the plan agent to propose phases for migrating to pydantic v2"
+```
+
+If the task is simple, Ash may answer directly without delegation.
+
+### Agent stops early
+
+Increase the agent's iteration cap:
+
+```toml
+[agents.task]
+max_iterations = 40
+```
+
+### Agent output quality is poor
+
+Try a stronger model alias for that agent:
+
+```toml
+[agents.plan]
+model = "codex"
+```
+
+### Runtime/tool issues inside agent execution
+
+```bash
+uv run ash doctor
+uv run ash sandbox status
+```
+
+## Build A Custom Subagent
+
+For contributors adding a built-in agent:
+
+1. Create an agent class in `src/ash/agents/builtin/`.
+2. Return `AgentConfig` (`name`, `description`, `system_prompt`, tool scope, limits).
+3. Register it in `src/ash/agents/builtin/__init__.py`.
+
+Minimal shape:
 
 ```python
-from ash.agents.base import Agent, AgentConfig, AgentContext
+from ash.agents.base import Agent
+from ash.agents.types import AgentConfig
+
 
 class MyAgent(Agent):
     @property
     def config(self) -> AgentConfig:
         return AgentConfig(
             name="my-agent",
-            description="What this agent does",
-            system_prompt="""You are a specialized agent...
-
-Your task is to...
-
-Available tools: bash, web_search""",
-            allowed_tools=["bash", "web_search"],
+            description="One-line description",
+            system_prompt="You are a specialized assistant...",
+            allowed_tools=["read_file", "bash"],
             max_iterations=15,
         )
-
-    def build_system_prompt(self, context: AgentContext) -> str:
-        # Optionally customize prompt based on context
-        base = self.config.system_prompt
-        if context.input_data.get("verbose"):
-            base += "\n\nProvide detailed explanations."
-        return base
 ```
 
-2. Register in `src/ash/agents/builtin/__init__.py`:
+## Reference (Advanced)
 
-```python
-from ash.agents.builtin.my_agent import MyAgent
+Key files:
 
-BUILTIN_AGENTS = [
-    ResearchAgent,
-    SkillWriterAgent,
-    MyAgent,  # Add here
-]
-```
+- `src/ash/agents/base.py` - base class and prompt assembly
+- `src/ash/agents/types.py` - `AgentConfig`, `AgentContext`, `AgentResult`
+- `src/ash/agents/executor.py` - execution loop and delegation runtime
+- `src/ash/agents/registry.py` - agent registration/lookup
+- `src/ash/agents/builtin/plan.py` - `plan` agent
+- `src/ash/agents/builtin/task.py` - `task` agent
 
-3. Configure in `config.toml`:
-
-```toml
-[agents.my-agent]
-model = "sonnet"
-max_iterations = 20
-```
-
-## Safety
-
-Agents have built-in safety limits:
-
-- **Max iterations** - Prevents runaway loops
-- **Tool restrictions** - Can whitelist specific tools
-- **Isolated context** - Runs separately from main conversation
-
-The main agent decides when to delegate to subagents and receives their results.
+The `use_agent` tool is the public delegation entrypoint used by the main agent.
