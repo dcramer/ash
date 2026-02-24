@@ -10,6 +10,7 @@ from ash.config.workspace import Workspace
 from ash.core.agent import Agent, AgentConfig
 from ash.core.prompt import PromptContext, SystemPromptBuilder
 from ash.core.session import SessionState
+from ash.core.types import CHECKPOINT_METADATA_KEY
 from ash.llm.types import (
     Message,
     Role,
@@ -142,6 +143,52 @@ class TestAgent:
         assert response.iterations == 2
         assert len(response.tool_calls) == 1
         assert response.tool_calls[0]["name"] == "test_tool"
+
+    async def test_interrupt_tool_is_intercepted(self, workspace):
+        from ash.tools.builtin.interrupt import InterruptTool
+
+        tool_use_response = Message(
+            role=Role.ASSISTANT,
+            content=[
+                ToolUse(
+                    id="tool-int",
+                    name="interrupt",
+                    input={"prompt": "Pick one", "options": ["A", "B"]},
+                ),
+                ToolUse(id="tool-next", name="test_tool", input={"arg": "value"}),
+            ],
+        )
+
+        registry = ToolRegistry()
+        registry.register(InterruptTool())
+        registry.register(MockTool(name="test_tool"))
+
+        agent = Agent(
+            llm=MockLLMProvider(responses=[tool_use_response]),
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
+        )
+
+        response = await agent.process_message("Use interrupt", make_session())
+
+        assert response.checkpoint is not None
+        assert response.checkpoint["prompt"] == "Pick one"
+        assert response.checkpoint["options"] == ["A", "B"]
+        assert response.text == ""
+        assert len(response.tool_calls) == 2
+        assert response.tool_calls[0]["name"] == "interrupt"
+        assert (
+            response.tool_calls[0]["metadata"][CHECKPOINT_METADATA_KEY]["prompt"]
+            == "Pick one"
+        )
+        assert response.tool_calls[1]["name"] == "test_tool"
+        assert (
+            response.tool_calls[1]["result"]
+            == "Skipped: agent interrupted for user input"
+        )
+
+        test_tool = cast(MockTool, registry.get("test_tool"))
+        assert test_tool.execute_calls == []
 
     async def test_max_iterations_limit(self, workspace):
         tool_use_response = Message(

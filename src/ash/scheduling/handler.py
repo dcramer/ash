@@ -101,6 +101,7 @@ class MessageSender(Protocol):
 # Type for message registrar: (chat_id, message_id) -> None
 # Registers a sent message in the thread index so replies are tracked
 MessageRegistrar = Callable[[str, str], Awaitable[None]]
+MessagePersister = Callable[[ScheduleEntry, str, str], Awaitable[None]]
 
 
 class ScheduledTaskHandler:
@@ -117,6 +118,7 @@ class ScheduledTaskHandler:
         agent: "Agent",
         senders: dict[str, MessageSender],
         registrars: dict[str, MessageRegistrar] | None = None,
+        persisters: dict[str, MessagePersister] | None = None,
         timezone: str = "UTC",
         agent_executor: "AgentExecutor | None" = None,
     ):
@@ -126,12 +128,14 @@ class ScheduledTaskHandler:
             agent: Agent instance to process tasks.
             senders: Map of provider name -> send function.
             registrars: Map of provider name -> message registrar for thread tracking.
+            persisters: Map of provider name -> message persistence callback.
             timezone: Fallback IANA timezone for computing fire times.
             agent_executor: Optional executor for running subagent skill loops.
         """
         self._agent = agent
         self._senders = senders
         self._registrars = registrars or {}
+        self._persisters = persisters or {}
         self._timezone = timezone
         self._agent_executor = agent_executor
 
@@ -280,6 +284,10 @@ class ScheduledTaskHandler:
         if registrar:
             await registrar(entry.chat_id, message_id)
             logger.debug(f"Registered scheduled message {message_id} in thread index")
+
+        persister = self._persisters.get(entry.provider)
+        if persister:
+            await persister(entry, response_text, message_id)
 
     async def _run_skill_loop(
         self,

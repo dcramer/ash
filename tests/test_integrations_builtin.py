@@ -101,12 +101,14 @@ async def test_scheduling_integration_owns_lifecycle_and_rpc(monkeypatch) -> Non
             agent,
             senders,
             registrars,
+            persisters,
             timezone: str,
             agent_executor,
         ) -> None:
             self.agent = agent
             self.senders = senders
             self.registrars = registrars
+            self.persisters = persisters
             self.timezone = timezone
             self.agent_executor = agent_executor
 

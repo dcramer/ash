@@ -12,7 +12,11 @@ from ash.integrations.runtime import IntegrationContext, IntegrationContributor
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor
-    from ash.scheduling.handler import MessageRegistrar, MessageSender
+    from ash.scheduling.handler import (
+        MessagePersister,
+        MessageRegistrar,
+        MessageSender,
+    )
 
 
 class SchedulingIntegration(IntegrationContributor):
@@ -28,12 +32,14 @@ class SchedulingIntegration(IntegrationContributor):
         timezone: str = "UTC",
         senders: dict[str, MessageSender] | None = None,
         registrars: dict[str, MessageRegistrar] | None = None,
+        persisters: dict[str, MessagePersister] | None = None,
         agent_executor: AgentExecutor | None = None,
     ) -> None:
         self._schedule_file = schedule_file
         self._timezone = timezone
         self._senders = senders or {}
         self._registrars = registrars or {}
+        self._persisters = persisters or {}
         self._agent_executor = agent_executor
         self._store = None
         self._watcher = None
@@ -52,6 +58,7 @@ class SchedulingIntegration(IntegrationContributor):
                 context.components.agent,
                 self._senders,
                 self._registrars,
+                self._persisters,
                 timezone=self._timezone,
                 agent_executor=self._agent_executor,
             )

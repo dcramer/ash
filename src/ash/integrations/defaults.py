@@ -16,7 +16,7 @@ from ash.integrations.scheduling import SchedulingIntegration
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor
     from ash.integrations.runtime import IntegrationContributor
-    from ash.scheduling.handler import MessageRegistrar, MessageSender
+    from ash.scheduling.handler import MessagePersister, MessageRegistrar, MessageSender
 
 
 @dataclass(slots=True)
@@ -71,6 +71,7 @@ def _create_serve_integrations(
     timezone: str,
     senders: dict[str, MessageSender] | None,
     registrars: dict[str, MessageRegistrar] | None,
+    persisters: dict[str, MessagePersister] | None,
     agent_executor: AgentExecutor | None,
 ) -> DefaultIntegrations:
     if logs_path is None or schedule_file is None:
@@ -81,6 +82,7 @@ def _create_serve_integrations(
         timezone=timezone,
         senders=senders,
         registrars=registrars,
+        persisters=persisters,
         agent_executor=agent_executor,
     )
 
@@ -106,6 +108,7 @@ def create_default_integrations(
     timezone: str = "UTC",
     senders: dict[str, MessageSender] | None = None,
     registrars: dict[str, MessageRegistrar] | None = None,
+    persisters: dict[str, MessagePersister] | None = None,
     agent_executor: AgentExecutor | None = None,
 ) -> DefaultIntegrations:
     """Build the default integration contributors for a runtime mode."""
@@ -119,6 +122,7 @@ def create_default_integrations(
             timezone=timezone,
             senders=senders,
             registrars=registrars,
+            persisters=persisters,
             agent_executor=agent_executor,
         )
     if mode == "chat":

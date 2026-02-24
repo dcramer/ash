@@ -841,6 +841,38 @@ class TestScheduledTaskHandler:
         # Verify registrar was called with chat_id and message_id
         mock_registrar.assert_called_once_with("123", "msg_123")
 
+    @pytest.mark.asyncio
+    async def test_handle_calls_persister(self):
+        """Test handler calls persister after sending message."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.scheduling import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Response"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        mock_persister = AsyncMock()
+        handler = ScheduledTaskHandler(
+            agent=mock_agent,
+            senders={"telegram": mock_sender},
+            persisters={"telegram": mock_persister},
+        )
+
+        entry = ScheduleEntry(
+            message="Test",
+            trigger_at=datetime.now(UTC),
+            provider="telegram",
+            chat_id="123",
+            user_id="456",
+        )
+
+        await handler.handle(entry)
+
+        mock_persister.assert_called_once_with(entry, "Response", "msg_123")
+
 
 class TestScheduleEntryTimezone:
     """Tests for ScheduleEntry timezone handling."""

@@ -158,6 +158,7 @@ async def _run_server(
         timezone=ash_config.timezone,
         senders=provider_runtime.senders,
         registrars=provider_runtime.registrars,
+        persisters=provider_runtime.persisters,
         agent_executor=components.agent_executor,
     )
     async with active_integrations(

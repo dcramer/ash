@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from ash.agents.types import ChildActivated
 from ash.core.compaction import CompactionSettings, compact_messages, should_compact
@@ -64,7 +65,7 @@ def _extract_checkpoint(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | No
     Looks for the most recent use_agent call with checkpoint metadata.
     """
     for call in reversed(tool_calls):
-        if call.get("name") == "use_agent":
+        if call.get("name") in {"use_agent", "interrupt"}:
             metadata = call.get("metadata", {})
             if CHECKPOINT_METADATA_KEY in metadata:
                 return metadata[CHECKPOINT_METADATA_KEY]
@@ -669,6 +670,74 @@ class Agent:
         tool_calls: list[dict[str, Any]] = []
 
         for i, tool_use in enumerate(pending_tools):
+            if tool_use.name == "interrupt":
+                prompt = tool_use.input.get("prompt", "Checkpoint reached")
+                options = tool_use.input.get("options")
+                checkpoint = {
+                    "checkpoint_id": str(uuid4()),
+                    "prompt": prompt,
+                    "options": options,
+                    "tool_use_id": tool_use.id,
+                }
+                interrupt_result = ToolResult.success(
+                    prompt,
+                    **{CHECKPOINT_METADATA_KEY: checkpoint},
+                )
+                sanitized = self._add_sanitized_tool_result(
+                    session=session,
+                    tool_use_id=tool_use.id,
+                    tool_name=tool_use.name,
+                    result=interrupt_result,
+                )
+                tool_calls.append(
+                    {
+                        "id": tool_use.id,
+                        "name": tool_use.name,
+                        "input": tool_use.input,
+                        "result": interrupt_result.content,
+                        "is_error": sanitized.is_error,
+                        "metadata": {
+                            **(interrupt_result.metadata or {}),
+                            "tool_output_trust": {
+                                "risk_score": sanitized.risk_signal.risk_score,
+                                "matched_rules": sanitized.risk_signal.matched_rules,
+                                "action_taken": sanitized.risk_signal.action_taken,
+                                "truncated": sanitized.risk_signal.truncated,
+                                "raw_content_hash": sanitized.raw_content_hash,
+                            },
+                        },
+                    }
+                )
+                for remaining in pending_tools[i + 1 :]:
+                    skipped_result = ToolResult.error(
+                        "Skipped: agent interrupted for user input"
+                    )
+                    skipped_sanitized = self._add_sanitized_tool_result(
+                        session=session,
+                        tool_use_id=remaining.id,
+                        tool_name=remaining.name,
+                        result=skipped_result,
+                    )
+                    tool_calls.append(
+                        {
+                            "id": remaining.id,
+                            "name": remaining.name,
+                            "input": remaining.input,
+                            "result": skipped_result.content,
+                            "is_error": skipped_sanitized.is_error,
+                            "metadata": {
+                                "tool_output_trust": {
+                                    "risk_score": skipped_sanitized.risk_signal.risk_score,
+                                    "matched_rules": skipped_sanitized.risk_signal.matched_rules,
+                                    "action_taken": skipped_sanitized.risk_signal.action_taken,
+                                    "truncated": skipped_sanitized.risk_signal.truncated,
+                                    "raw_content_hash": skipped_sanitized.raw_content_hash,
+                                },
+                            },
+                        }
+                    )
+                return tool_calls, []
+
             if on_tool_start:
                 await on_tool_start(tool_use.name, tool_use.input)
 
@@ -695,7 +764,7 @@ class Agent:
                     "result": result.content,
                     "is_error": sanitized.is_error,
                     "metadata": {
-                        **result.metadata,
+                        **(result.metadata or {}),
                         "tool_output_trust": {
                             "risk_score": sanitized.risk_signal.risk_score,
                             "matched_rules": sanitized.risk_signal.matched_rules,
