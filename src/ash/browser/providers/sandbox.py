@@ -976,7 +976,9 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
             self._bridge.stop()
             self._bridge = None
         bridge = BrowserExecBridge.start(
-            executor=make_docker_exec_bridge_executor(container_name=container_name)
+            executor=make_docker_exec_bridge_executor(container_name=container_name),
+            scope_key=scope_hash,
+            target=container_name,
         )
         self._bridge = bridge
         host_port = await self._docker_resolve_host_port(container_name, 9222)

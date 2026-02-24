@@ -370,7 +370,7 @@ When capability auth/execution needs sidecar processes, use the same security mo
 the browser bridge:
 
 - Loopback-only bridge
-- Bearer-token authentication
+- Short-lived signed token authentication with scope/target claims
 - Scope-keyed runtime/container identity
 - No unauthenticated control channel
 

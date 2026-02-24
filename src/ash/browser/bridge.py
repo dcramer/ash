@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import secrets
 import subprocess
 import threading
 from collections.abc import Callable
@@ -13,14 +12,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from ash.context_token import (
+    ContextTokenError,
+    ContextTokenService,
+    get_default_context_token_service,
+)
 from ash.sandbox.executor import ExecutionResult
 
 BridgeExecutor = Callable[[str, int, dict[str, str]], ExecutionResult]
+_BRIDGE_TOKEN_SUBJECT = "browser-bridge"  # noqa: S105
+_BRIDGE_TOKEN_PROVIDER = "browser-bridge"  # noqa: S105
+_DEFAULT_BRIDGE_TOKEN_TTL_SECONDS = 120
 
 
 @dataclass(slots=True)
 class BrowserExecBridge:
-    """Loopback HTTP bridge with bearer-token auth."""
+    """Loopback HTTP bridge with signed context-token auth."""
 
     token: str
     base_url: str
@@ -33,14 +40,24 @@ class BrowserExecBridge:
         *,
         executor: BridgeExecutor,
         host: str = "127.0.0.1",
-        token: str | None = None,
+        token_service: ContextTokenService | None = None,
+        scope_key: str = "default",
+        target: str = "default",
+        token_ttl_seconds: int = _DEFAULT_BRIDGE_TOKEN_TTL_SECONDS,
     ) -> BrowserExecBridge:
         if host not in {"127.0.0.1", "localhost"}:
             raise ValueError(f"bridge_loopback_required:{host}")
 
-        bridge_token = (token or secrets.token_hex(24)).strip()
-        if not bridge_token:
-            raise ValueError("bridge_token_required")
+        scope = scope_key.strip() or "default"
+        target_name = target.strip() or "default"
+        auth_service = token_service or get_default_context_token_service()
+        bridge_token = auth_service.issue(
+            effective_user_id=_BRIDGE_TOKEN_SUBJECT,
+            provider=_BRIDGE_TOKEN_PROVIDER,
+            session_key=scope,
+            thread_id=target_name,
+            ttl_seconds=max(10, int(token_ttl_seconds)),
+        )
 
         class _BridgeServer(ThreadingHTTPServer):
             daemon_threads = True
@@ -48,7 +65,9 @@ class BrowserExecBridge:
 
             def __init__(self) -> None:
                 super().__init__((host, 0), _BridgeHandler)
-                self.bridge_token = bridge_token
+                self.bridge_token_service = auth_service
+                self.bridge_scope = scope
+                self.bridge_target = target_name
                 self.bridge_executor = executor
 
         class _BridgeHandler(BaseHTTPRequestHandler):
@@ -60,8 +79,28 @@ class BrowserExecBridge:
                         HTTPStatus.NOT_FOUND, {"error": "bridge_route_not_found"}
                     )
                     return
-                expected = f"Bearer {self.server.bridge_token}"
-                if (self.headers.get("Authorization") or "") != expected:
+                auth_header = (self.headers.get("Authorization") or "").strip()
+                if not auth_header.startswith("Bearer "):
+                    self._write_json(
+                        HTTPStatus.UNAUTHORIZED, {"error": "bridge_unauthorized"}
+                    )
+                    return
+                token = auth_header.removeprefix("Bearer ").strip()
+                try:
+                    verified = self.server.bridge_token_service.verify(token)
+                except ContextTokenError:
+                    self._write_json(
+                        HTTPStatus.UNAUTHORIZED, {"error": "bridge_unauthorized"}
+                    )
+                    return
+                if not _is_valid_bridge_context(
+                    verified_subject=verified.effective_user_id,
+                    verified_provider=verified.provider,
+                    verified_scope=verified.session_key,
+                    verified_target=verified.thread_id,
+                    expected_scope=self.server.bridge_scope,
+                    expected_target=self.server.bridge_target,
+                ):
                     self._write_json(
                         HTTPStatus.UNAUTHORIZED, {"error": "bridge_unauthorized"}
                     )
@@ -199,6 +238,26 @@ def request_bridge_exec(
         stderr=str(parsed.get("stderr") or ""),
         timed_out=bool(parsed.get("timed_out")),
     )
+
+
+def _is_valid_bridge_context(
+    *,
+    verified_subject: str,
+    verified_provider: str | None,
+    verified_scope: str | None,
+    verified_target: str | None,
+    expected_scope: str,
+    expected_target: str,
+) -> bool:
+    if verified_subject != _BRIDGE_TOKEN_SUBJECT:
+        return False
+    if (verified_provider or "") != _BRIDGE_TOKEN_PROVIDER:
+        return False
+    if (verified_scope or "") != expected_scope:
+        return False
+    if (verified_target or "") != expected_target:
+        return False
+    return True
 
 
 def make_docker_exec_bridge_executor(*, container_name: str) -> BridgeExecutor:
