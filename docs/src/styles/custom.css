@@ -859,7 +859,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   display: inline-flex;
   padding: 0.38rem 0.8rem;
   border-radius: 0 !important;
-  border: 1px solid var(--ash-ink);
+  border: 1px solid #1a1f29;
   background: #faffdd;
   color: #1d2b0e;
   font-family: 'Bebas Neue', var(--sl-font);
@@ -1443,7 +1443,7 @@ body:has(.ash-home) :is(.ash-home-title, .ash-home-subtitle) {
 }
 
 body:has(.ash-home) .ash-home-kicker {
-  border-color: #2f3a4d;
+  border-color: #1a1f29;
   background: #121b28;
   color: #d9e6fa;
 }
