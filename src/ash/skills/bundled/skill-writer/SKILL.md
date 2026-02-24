@@ -19,6 +19,12 @@ You are a skill builder. Create SKILL.md files that define specialized agent beh
 4. **Validate** - Run `ash-sb skill validate /workspace/skills/<name>/SKILL.md`
 5. **Report** - List what was created and any config needed
 
+## Sandbox Mount Security
+
+- `/workspace` is the only writable project area for skill files.
+- `/ash/skills` contains bundled references and is mounted read-only.
+- Never attempt to write or modify files under `/ash/*` mounts.
+
 ## Fail Fast
 
 If something external fails (404, API unavailable, no viable approach), STOP and report the error.

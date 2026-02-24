@@ -759,6 +759,9 @@ class TestSystemPromptBuilder:
         prompt = prompt_builder.build()
         assert "Sandbox" in prompt
         assert "sandboxed environment" in prompt
+        assert "read-only" in prompt
+        assert "/workspace" in prompt
+        assert "/ash/skills" in prompt
 
     def test_build_with_runtime_info(self, prompt_builder):
         """Runtime info excludes host system details (os, arch, python)."""
