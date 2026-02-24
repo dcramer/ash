@@ -876,7 +876,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-title {
-  margin: 0.7rem 0 0.55rem;
+  margin: 0;
   font-family: 'Bebas Neue', var(--sl-font);
   font-size: clamp(2.5rem, 8vw, 5.4rem);
   line-height: 0.88;
@@ -904,7 +904,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-subtitle {
-  margin: 0;
+  margin: 0.45rem 0 0;
   font-size: 1.03rem;
   max-width: none;
   line-height: 1.5;
@@ -984,7 +984,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-actions {
-  margin-top: 1.1rem;
+  margin-top: 0.75rem;
   display: flex;
   align-items: center;
   gap: 0.8rem;
