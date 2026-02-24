@@ -288,6 +288,7 @@ async def _run_memory_action(
         await memory_compact(store, force)
     elif action == "doctor":
         from ash.cli.commands.memory.doctor import (
+            memory_doctor_all,
             memory_doctor_attribution,
             memory_doctor_backfill_subjects,
             memory_doctor_contradictions,
@@ -357,15 +358,7 @@ async def _run_memory_action(
         elif subcommand == "contradictions":
             await memory_doctor_contradictions(store, config, force=force)
         elif subcommand == "all":
-            await memory_doctor_self_facts(store, force=force)
-            await memory_doctor_attribution(store, force=force)
-            await memory_doctor_fix_names(store, force=force)
-            await memory_doctor_quality(store, config, force=force)
-            await memory_doctor_backfill_subjects(store, force=force, config=config)
-            await memory_doctor_normalize_semantics(store, force=force)
-            await memory_doctor_reclassify(store, config, force=force)
-            await memory_doctor_dedup(store, config, force=force)
-            await memory_doctor_contradictions(store, config, force=force)
+            await memory_doctor_all(store, config, force=force)
     else:
         error(f"Unknown action: {action}")
         console.print(
