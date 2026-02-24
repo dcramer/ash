@@ -783,6 +783,9 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
             launch_cmd = (
                 f"mkdir -p {shlex.quote(base_dir)} && "
                 f"(rm -rf {shlex.quote(base_dir)}/profile/WidevineCdm >/dev/null 2>&1 || true) && "
+                f"(rm -f {shlex.quote(base_dir)}/profile/SingletonLock "
+                f"{shlex.quote(base_dir)}/profile/SingletonCookie "
+                f"{shlex.quote(base_dir)}/profile/SingletonSocket >/dev/null 2>&1 || true) && "
                 "nohup chromium "
                 f"{flags} "
                 "--remote-debugging-address=127.0.0.1 "
