@@ -163,7 +163,6 @@ class ResponseFinalizer:
         """
         from ash.providers.base import IncomingMessage
         from ash.providers.telegram.checkpoint_ui import (
-            create_checkpoint_keyboard,
             format_checkpoint_message,
         )
         from ash.tools.builtin.agents import CHECKPOINT_METADATA_KEY
@@ -195,7 +194,6 @@ class ResponseFinalizer:
                 original_message=original_message,
             )
 
-            reply_markup = create_checkpoint_keyboard(new_checkpoint)
             response_text = format_checkpoint_message(new_checkpoint)
             logger.info(
                 "nested_checkpoint_detected",

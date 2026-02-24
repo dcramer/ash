@@ -60,6 +60,16 @@ def _truncate(text: str, max_len: int = LOG_PREVIEW_MAX_LEN) -> str:
     return first_line[:max_len] + "..." if truncated else first_line
 
 
+def _coerce_reply_to_message_id(value: str | None) -> int | None:
+    """Return numeric reply target when valid, otherwise None."""
+    if not value:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 MAX_SEND_LENGTH = 4000  # Below Telegram's 4096 limit to leave room for formatting
 MAX_CAPTION_LENGTH = 1024
 
@@ -729,9 +739,7 @@ class TelegramProvider(Provider):
     async def _send_image(self, message: OutgoingMessage) -> str:
         """Send an image (optionally with caption) via Telegram."""
         parse_mode = _get_parse_mode(message.parse_mode)
-        reply_to = (
-            int(message.reply_to_message_id) if message.reply_to_message_id else None
-        )
+        reply_to = _coerce_reply_to_message_id(message.reply_to_message_id)
         image_path = str(message.image_path or "").strip()
         if not image_path:
             raise ValueError("image_path is required for image messages")
@@ -765,9 +773,7 @@ class TelegramProvider(Provider):
     async def _send_single(self, message: OutgoingMessage) -> str:
         """Send a single message via Telegram."""
         parse_mode = _get_parse_mode(message.parse_mode)
-        reply_to = (
-            int(message.reply_to_message_id) if message.reply_to_message_id else None
-        )
+        reply_to = _coerce_reply_to_message_id(message.reply_to_message_id)
 
         try:
             sent = await self._bot.send_message(
@@ -813,7 +819,7 @@ class TelegramProvider(Provider):
         sent = await self._send_with_fallback(
             chat_id=int(chat_id),
             text=text,
-            reply_to=int(reply_to) if reply_to else None,
+            reply_to=_coerce_reply_to_message_id(reply_to),
         )
         logger.debug(
             "message_sent",

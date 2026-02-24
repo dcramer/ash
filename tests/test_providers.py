@@ -71,6 +71,20 @@ class TestTelegramProvider:
         fs_input.assert_called_once_with(image_path)
         provider._bot.send_photo.assert_awaited_once()
 
+    async def test_send_ignores_non_numeric_reply_to_message_id(self, provider):
+        provider._bot.send_message.return_value = MagicMock(message_id=123)
+        msg_id = await provider.send(
+            OutgoingMessage(
+                chat_id="123",
+                text="hello",
+                reply_to_message_id="callback_4117958301749373994",
+            )
+        )
+
+        assert msg_id == "123"
+        call_kwargs = provider._bot.send_message.call_args.kwargs
+        assert call_kwargs["reply_to_message_id"] is None
+
 
 class TestTelegramMessageHandler:
     """Tests for TelegramMessageHandler."""
