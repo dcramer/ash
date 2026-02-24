@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import pytest
@@ -335,3 +336,18 @@ async def test_subprocess_provider_rejects_invalid_bridge_context(monkeypatch) -
             context=invalid_context,
         )
     assert exc_info.value.code == "capability_invalid_input"
+
+
+def _decode_b64url(text: str) -> bytes:
+    padded = text + "=" * (-len(text) % 4)
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def test_subprocess_provider_bridge_env_exports_context_token_secret() -> None:
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+    env = provider._bridge_environment()
+
+    secret_text = str(env.get("ASH_CONTEXT_TOKEN_SECRET") or "").strip()
+    assert secret_text
+    decoded = _decode_b64url(secret_text)
+    assert len(decoded) >= 16

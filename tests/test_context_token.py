@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from ash.context_token import ContextTokenError, ContextTokenService
@@ -42,3 +44,16 @@ def test_context_token_rejects_signature_tampering() -> None:
         service.verify(tampered)
 
     assert exc_info.value.code == "signature"
+
+
+def test_context_token_export_verifier_secret_round_trip() -> None:
+    service = ContextTokenService(secret=b"test-secret-key-32-bytes-minimum")
+    exported = service.export_verifier_secret()
+    padded = exported + "=" * (-len(exported) % 4)
+    verifier = ContextTokenService(
+        secret=base64.urlsafe_b64decode(padded.encode("ascii"))
+    )
+
+    token = service.issue(effective_user_id="user-1")
+    verified = verifier.verify(token)
+    assert verified.effective_user_id == "user-1"

@@ -176,6 +176,8 @@ Bridge method params:
 - `definitions`: no caller context fields required.
 - `auth_begin`, `auth_complete`, `invoke`: params MUST include `context_token`
   (host-issued signed token carrying caller scope claims).
+- Host runtime MUST provide `ASH_CONTEXT_TOKEN_SECRET` to the bridge subprocess
+  environment so trusted external providers can verify tokens cryptographically.
 - Bridge requests MUST NOT include raw caller identity/routing objects such as
   `{ "context": { "user_id": ..., "chat_id": ... } }`.
 - External bridge runtimes SHOULD verify `context_token` cryptographically before

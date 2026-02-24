@@ -238,6 +238,14 @@ class ContextTokenService:
         encoded_sig = _b64url_encode(signature)
         return f"{encoded_header}.{encoded_payload}.{encoded_sig}"
 
+    def export_verifier_secret(self) -> str:
+        """Export signing key for trusted external verifiers.
+
+        Returns URL-safe base64 without padding so subprocess bridge providers
+        can set `ASH_CONTEXT_TOKEN_SECRET` and verify context tokens.
+        """
+        return _b64url_encode(self._secret)
+
 
 def _int_claim(payload: dict[str, Any], key: str) -> int | None:
     value = payload.get(key)

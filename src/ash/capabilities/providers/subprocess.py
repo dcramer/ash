@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import secrets
 import shlex
 from datetime import datetime
@@ -21,6 +22,7 @@ from ash.capabilities.providers.base import (
 )
 from ash.capabilities.types import CapabilityDefinition, CapabilityOperation
 from ash.context_token import (
+    ENV_SECRET,
     ContextTokenService,
     get_default_context_token_service,
 )
@@ -190,6 +192,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=self._bridge_environment(),
         )
         input_bytes = json.dumps(payload, ensure_ascii=True).encode("utf-8")
         try:
@@ -229,6 +232,11 @@ class SubprocessCapabilityProvider(CapabilityProvider):
                 "bridge command returned non-object JSON",
             )
         return parsed
+
+    def _bridge_environment(self) -> dict[str, str]:
+        env = dict(os.environ)
+        env[ENV_SECRET] = self._context_token_service.export_verifier_secret()
+        return env
 
 
 def _parse_bridge_response(
