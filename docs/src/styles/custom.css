@@ -937,7 +937,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-cta-primary:hover {
-  background: #84c20c;
+  background: #d1ff69;
 }
 
 .ash-home-cta-secondary {
@@ -1482,6 +1482,11 @@ body:has(.ash-home) .ash-home-band {
 
 body:has(.ash-home) :is(.ash-home-band p, .ash-home-list li, .ash-scenario-line) {
   color: #e9e9e9;
+}
+
+body:has(.ash-home) .ash-home-band .ash-chat-turn.ash-chat-user,
+body:has(.ash-home) .ash-home-band .ash-chat-turn.ash-chat-user :is(span, .ash-chat-time) {
+  color: #000000 !important;
 }
 
 body:has(.ash-home) .ash-chat-demo {
