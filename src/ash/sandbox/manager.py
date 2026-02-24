@@ -152,6 +152,16 @@ class SandboxManager:
             )
             return False
 
+    async def get_image_id(self, image_ref: str) -> str | None:
+        """Return canonical image id (sha256:...) for an image reference."""
+        client = await self._ensure_client()
+        try:
+            image = await asyncio.to_thread(client.images.get, image_ref)
+        except ImageNotFound:
+            return None
+        image_id = str(getattr(image, "id", "") or "")
+        return image_id or None
+
     async def _build_image(self, dockerfile_path: Path) -> None:
         client = await self._ensure_client()
         await asyncio.to_thread(

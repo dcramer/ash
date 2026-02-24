@@ -11,12 +11,17 @@ class _FakeContainer:
         *,
         container_id: str,
         image: str,
+        image_id: str = "sha256:latest",
         status: str = "running",
         mounts: list[dict[str, str]] | None = None,
     ) -> None:
         self.id = container_id
         self.status = status
-        self.attrs = {"Config": {"Image": image}, "Mounts": mounts or []}
+        self.attrs = {
+            "Image": image_id,
+            "Config": {"Image": image},
+            "Mounts": mounts or [],
+        }
 
 
 class _FakeManager:
@@ -25,6 +30,7 @@ class _FakeManager:
         self.removed: list[str] = []
         self.start_should_fail = False
         self.exec_should_fail = False
+        self.expected_image_id: str | None = "sha256:latest"
         self._containers: dict[str, _FakeContainer] = {}
         self._by_name: dict[str, str] = {}
 
@@ -35,7 +41,9 @@ class _FakeManager:
         container_id = f"c{len(self.created) + 1}"
         self.created.append(container_id)
         container = _FakeContainer(
-            container_id=container_id, image="ash-sandbox:latest"
+            container_id=container_id,
+            image="ash-sandbox:latest",
+            image_id=self.expected_image_id or "sha256:latest",
         )
         self._containers[container_id] = container
         if name:
@@ -88,6 +96,10 @@ class _FakeManager:
         for name, cid in list(self._by_name.items()):
             if cid == container_id:
                 self._by_name.pop(name, None)
+
+    async def get_image_id(self, image_ref: str) -> str | None:
+        _ = image_ref
+        return self.expected_image_id
 
 
 def _patch_runtime_paths(monkeypatch, tmp_path: Path) -> None:
@@ -181,7 +193,36 @@ async def test_reuse_container_prunes_image_mismatch_then_recreates(
     manager = _FakeManager()
     shared_name = "ash-sandbox-deadbeef"
     manager._containers["stale"] = _FakeContainer(
-        container_id="stale", image="old-image-id", status="running"
+        container_id="stale",
+        image="old-image-id",
+        image_id="sha256:stale",
+        status="running",
+    )
+    manager._by_name[shared_name] = "stale"
+
+    executor = SandboxExecutor()
+    executor._manager = manager
+    executor._initialized = True
+    monkeypatch.setattr(executor, "_managed_container_name", lambda: shared_name)
+
+    result = await executor.execute("echo hi", reuse_container=True)
+    assert result.success is True
+    assert "stale" in manager.removed
+    assert manager.created == ["c1"]
+
+
+async def test_reuse_container_prunes_stale_latest_image_id_then_recreates(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _patch_runtime_paths(monkeypatch, tmp_path)
+    manager = _FakeManager()
+    manager.expected_image_id = "sha256:newlatest"
+    shared_name = "ash-sandbox-deadbeef"
+    manager._containers["stale"] = _FakeContainer(
+        container_id="stale",
+        image="ash-sandbox:latest",
+        image_id="sha256:oldlatest",
+        status="running",
     )
     manager._by_name[shared_name] = "stale"
 

@@ -269,6 +269,7 @@ class SandboxExecutor:
     async def _resolve_managed_container(self, managed_name: str | None) -> str | None:
         if not managed_name:
             return None
+        expected_image_id = await self._manager.get_image_id(self._config.image)
         state = self._read_managed_container_state()
         refs: list[str] = []
         if state:
@@ -284,11 +285,34 @@ class SandboxExecutor:
             if container is None:
                 continue
             attrs = container.attrs if isinstance(container.attrs, dict) else {}
+            container_image_id = str(attrs.get("Image") or "")
+            if (
+                expected_image_id
+                and container_image_id
+                and container_image_id != expected_image_id
+            ):
+                logger.info(
+                    "sandbox_container_image_id_mismatch_pruned",
+                    extra={
+                        "container.id": container.id[:12],
+                        "container.image_id": container_image_id,
+                        "sandbox.image": self._config.image,
+                        "sandbox.image_id": expected_image_id,
+                    },
+                )
+                await self._manager.remove_container(container.id, force=True)
+                continue
             config = attrs.get("Config", {})
             config_image = (
                 str(config.get("Image") or "") if isinstance(config, dict) else ""
             )
-            if config_image != self._config.image:
+            # Fallback for older container metadata: tag/name should match config image.
+            # TODO(2026-03-10): Remove this fallback after stale managed containers
+            # have rolled out and image-id matching has been in production for a bit.
+            if config_image and config_image not in {
+                self._config.image,
+                expected_image_id,
+            }:
                 logger.info(
                     "sandbox_container_image_mismatch_pruned",
                     extra={
