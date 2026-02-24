@@ -14,12 +14,17 @@ const { items } = Astro.props;
 
 <div class="ash-option-list">
   {items.map((item) => (
-    <article class="ash-option-card">
-      <div class="ash-option-head">
-        <code>{item.name}</code>
-        {item.defaultValue && <span class="ash-option-default">Default: {item.defaultValue}</span>}
+    <article class="ash-option-row">
+      <div class="ash-option-rail" aria-hidden="true"></div>
+      <div class="ash-option-main">
+        <div class="ash-option-head">
+          <code>{item.name}</code>
+          {item.defaultValue && (
+            <span class="ash-option-default">Default: {item.defaultValue}</span>
+          )}
+        </div>
+        <p>{item.description}</p>
       </div>
-      <p>{item.description}</p>
     </article>
   ))}
 </div>

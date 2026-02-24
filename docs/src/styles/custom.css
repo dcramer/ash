@@ -362,13 +362,23 @@ td {
 /* CLI option cards */
 .ash-option-list {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.62rem;
 }
 
-.ash-option-card {
+.ash-option-row {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
   background: #ffffff;
   border: 2px solid #11130f;
-  box-shadow: 4px 4px 0 rgba(20, 20, 15, 0.16);
+  box-shadow: 5px 5px 0 rgba(20, 20, 15, 0.19);
+}
+
+.ash-option-rail {
+  background: linear-gradient(180deg, #c9fa53 0%, #8edb00 100%);
+  border-right: 2px solid #11130f;
+}
+
+.ash-option-main {
   padding: 0.62rem 0.72rem;
 }
 
@@ -380,26 +390,31 @@ td {
 }
 
 .ash-option-head code {
-  background: #f2f7e5;
-  border: 1px solid #c1cf92;
-  color: #18240e;
+  background: #f6fbe8;
+  border: 2px solid #11130f;
+  color: #11130f;
   font-weight: 700;
+  padding: 0.1rem 0.42rem;
+  font-size: 0.9rem;
 }
 
 .ash-option-default {
   display: inline-block;
-  padding: 0.08rem 0.42rem;
-  border: 1px solid #11130f;
+  padding: 0.1rem 0.48rem;
+  border: 2px solid #11130f;
   background: #b0ff1f;
   color: #11130f;
   font-family: var(--sl-font-mono);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
-.ash-option-card p {
+.ash-option-main p {
   margin: 0.38rem 0 0;
-  color: #1d2716;
+  color: #1a2313;
+  font-size: 0.96rem;
 }
 
 starlight-aside {
