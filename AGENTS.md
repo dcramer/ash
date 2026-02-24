@@ -60,7 +60,7 @@ Use `/dex-plan` to create tasks from planning docs (specs, roadmaps).
 |------|--------------|
 | `specs/logging.md` | Adding/modifying logging |
 | `specs/sessions.md` | Session handling changes |
-| `specs/memory.md` | Memory system changes |
+| `specs/memory/index.md` | Memory system changes |
 | `specs/people.md` | People/identity system changes |
 | `specs/skills.md` | Creating or modifying skills |
 | `specs/interactive-agents.md` | Agent/subagent stack communication |

@@ -142,7 +142,7 @@ Public types live in one place, not scattered across implementation files:
 
 | Subsystem | Status | Spec |
 |-----------|--------|------|
-| memory | Complete | [specs/memory.md](memory.md) |
+| memory | Complete | [specs/memory/index.md](memory/index.md) |
 | people | Complete | [specs/people.md](people.md) |
 | sessions | Needs refactor | [specs/sessions.md](sessions.md) |
 | scheduling | Complete | [specs/schedule.md](schedule.md) |

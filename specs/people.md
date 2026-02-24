@@ -47,7 +47,7 @@ The people subsystem is best understood as a graph. Person entities are nodes; r
 | merge follow | PersonB →MERGED_INTO→ PersonA (secondary stays as redirect; traversal resolves transparently) |
 | merge history | PersonA ←MERGED_INTO← [PersonB, PersonC, ...] (queryable audit trail) |
 
-See [specs/memory.md](memory.md) for Memory-owned edges (ABOUT, STATED_BY, OWNED_BY, IN_CHAT, SUPERSEDES).
+See [specs/memory/index.md](memory/index.md) for Memory-owned edges (ABOUT, STATED_BY, OWNED_BY, IN_CHAT, SUPERSEDES).
 
 ## User Identity Model
 
