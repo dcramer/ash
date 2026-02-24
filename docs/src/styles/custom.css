@@ -117,10 +117,10 @@ header.header :is(
   background: #ffffff !important;
   color: #11130f !important;
   border: 2px solid #11130f !important;
-  border-right-width: 4px !important;
-  border-bottom-width: 4px !important;
+  border-right-width: 6px !important;
+  border-bottom-width: 6px !important;
   border-radius: 0 !important;
-  box-shadow: 3px 3px 0 rgba(20, 20, 15, 0.18);
+  box-shadow: 6px 6px 0 rgba(20, 20, 15, 0.16);
   font-weight: 600;
 }
 
@@ -208,9 +208,9 @@ a:not([class]):hover {
   background: var(--ash-lime) !important;
   color: #0f1b05 !important;
   border: 2px solid var(--ash-ink) !important;
-  border-right-width: 4px !important;
-  border-bottom-width: 4px !important;
-  box-shadow: 3px 3px 0 rgba(27, 31, 16, 0.22);
+  border-right-width: 6px !important;
+  border-bottom-width: 6px !important;
+  box-shadow: 6px 6px 0 rgba(27, 31, 16, 0.2);
 }
 
 .sl-link-button[data-variant='primary']:hover {
@@ -221,9 +221,9 @@ a:not([class]):hover {
   background: #fff9ef !important;
   color: #211f16 !important;
   border: 2px solid var(--ash-ink) !important;
-  border-right-width: 4px !important;
-  border-bottom-width: 4px !important;
-  box-shadow: 3px 3px 0 rgba(27, 31, 16, 0.18);
+  border-right-width: 6px !important;
+  border-bottom-width: 6px !important;
+  box-shadow: 6px 6px 0 rgba(27, 31, 16, 0.16);
 }
 
 nav.sidebar {
@@ -275,10 +275,10 @@ starlight-toc a[aria-current='true'] {
 .card {
   background: #f9fafc !important;
   border: 2px solid var(--ash-ink) !important;
-  border-right-width: 4px !important;
-  border-bottom-width: 4px !important;
+  border-right-width: 6px !important;
+  border-bottom-width: 6px !important;
   border-radius: 0 !important;
-  box-shadow: 4px 4px 0 rgba(24, 27, 33, 0.14);
+  box-shadow: 6px 6px 0 rgba(24, 27, 33, 0.13);
 }
 
 .card .title {
@@ -293,15 +293,15 @@ starlight-toc a[aria-current='true'] {
 
 table {
   border: 2px solid #11130f;
-  border-right-width: 4px;
-  border-bottom-width: 4px;
+  border-right-width: 6px;
+  border-bottom-width: 6px;
   border-radius: 0 !important;
   overflow: hidden;
   width: 100%;
   border-collapse: collapse;
   table-layout: auto;
   background: #ffffff;
-  box-shadow: 4px 4px 0 rgba(20, 20, 15, 0.14);
+  box-shadow: 6px 6px 0 rgba(20, 20, 15, 0.13);
 }
 
 .sl-markdown-content table {
@@ -373,22 +373,17 @@ td {
 /* CLI option list (help-style) */
 .ash-help-list {
   border: 2px solid #11130f;
-  border-right-width: 4px;
-  border-bottom-width: 4px;
-  background: #ffffff;
+  border-right-width: 6px;
+  border-bottom-width: 6px;
+  background: #ffffff !important;
   padding: 0.35rem 0.52rem;
   margin: 0;
-  box-shadow: 4px 4px 0 rgba(20, 20, 15, 0.12);
+  box-shadow: 6px 6px 0 rgba(20, 20, 15, 0.11);
 }
 
 .ash-help-row {
   display: block;
   padding: 0.34rem 0.14rem;
-  border-top: 1px solid rgba(17, 19, 15, 0.2);
-}
-
-.ash-help-row:first-child {
-  border-top: 0;
 }
 
 .ash-help-row dt,
@@ -485,9 +480,9 @@ starlight-aside[data-type='note'] :is(.icon, [slot='icon'], svg),
 pre {
   background: #ffffff !important;
   border: 2px solid #11130f !important;
-  border-right-width: 4px !important;
-  border-bottom-width: 4px !important;
-  box-shadow: 4px 4px 0 rgba(20, 20, 15, 0.14) !important;
+  border-right-width: 6px !important;
+  border-bottom-width: 6px !important;
+  box-shadow: 6px 6px 0 rgba(20, 20, 15, 0.13) !important;
   font-family: var(--sl-font-mono);
   border-radius: 0 !important;
 }
@@ -500,9 +495,10 @@ pre code {
 .expressive-code .frame {
   border-radius: 0 !important;
   border: 2px solid #11130f !important;
-  border-right-width: 4px !important;
-  border-bottom-width: 4px !important;
-  box-shadow: 4px 4px 0 rgba(20, 20, 15, 0.14) !important;
+  border-right-width: 6px !important;
+  border-bottom-width: 6px !important;
+  box-shadow: 6px 6px 0 rgba(20, 20, 15, 0.13) !important;
+  background: #ffffff !important;
 }
 
 /* Use frame border for shape; avoid nested pre borders causing header/body mismatch */
@@ -609,11 +605,11 @@ body .expressive-code .ec-line :is(
 
 .pagination-links a {
   border: 2px solid var(--ash-ink);
-  border-right-width: 4px;
-  border-bottom-width: 4px;
+  border-right-width: 6px;
+  border-bottom-width: 6px;
   border-radius: 0 !important;
   background: #ffffff;
-  box-shadow: 3px 3px 0 rgba(20, 20, 15, 0.12);
+  box-shadow: 6px 6px 0 rgba(20, 20, 15, 0.1);
 }
 
 .pagination-links a:hover {
