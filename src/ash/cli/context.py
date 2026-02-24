@@ -10,7 +10,7 @@ from ash.config import AshConfig, load_config
 # Model options by provider (ordered by recommendation for cost/speed)
 OPENAI_MODELS = [
     ("gpt-5.2", "GPT-5.2 (Recommended - flagship model)"),
-    ("gpt-5-mini", "GPT-5 Mini (Fast, cost-effective)"),
+    ("gpt-5.2-mini", "GPT-5.2 Mini (Fast, cost-effective)"),
     ("gpt-5.2-codex", "GPT-5.2 Codex (Optimized for coding)"),
 ]
 
@@ -52,7 +52,7 @@ def generate_config_template() -> str:
         TOML config template string.
     """
     default_model = OPENAI_MODELS[0][0]  # gpt-5.2
-    mini_model = OPENAI_MODELS[1][0]  # gpt-5-mini
+    fast_model = OPENAI_MODELS[1][0]  # gpt-5.2-mini
     codex_model = OPENAI_MODELS[2][0]  # gpt-5.2-codex
 
     return f'''# Ash Configuration
@@ -71,7 +71,7 @@ api_key = ""
 # =============================================================================
 # Models
 # =============================================================================
-# GPT-5.2 as default, Mini for lightweight tasks, Codex for coding
+# GPT-5.2 as default, Fast for lightweight tasks, Codex for coding
 
 [models.default]
 provider = "openai"
@@ -79,9 +79,9 @@ model = "{default_model}"
 temperature = 0.7
 max_tokens = 4096
 
-[models.mini]
+[models.fast]
 provider = "openai"
-model = "{mini_model}"
+model = "{fast_model}"
 max_tokens = 4096
 
 [models.codex]

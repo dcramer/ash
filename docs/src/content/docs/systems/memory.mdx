@@ -78,12 +78,12 @@ Use a cheaper extractor with stronger verification:
 provider = "openai"
 model = "gpt-5.2"
 
-[models.mini]
+[models.fast]
 provider = "openai"
-model = "gpt-5-mini"
+model = "gpt-5.2-mini"
 
 [memory]
-extraction_model = "mini"
+extraction_model = "fast"
 extraction_verification_enabled = true
 extraction_verification_model = "default"
 ```

@@ -28,9 +28,9 @@ model = "gpt-5.2"
 max_tokens = 4096
 
 # Fast/cheap option for lightweight tasks
-[models.mini]
+[models.fast]
 provider = "openai-oauth"
-model = "gpt-5-mini"
+model = "gpt-5.2-mini"
 max_tokens = 4096
 
 # Coding-focused option
@@ -49,7 +49,7 @@ uv run ash auth login
 Test alias selection:
 
 ```bash
-uv run ash chat --model mini "Summarize this changelog"
+uv run ash chat --model fast "Summarize this changelog"
 uv run ash chat --model codex "Refactor this Python function"
 ```
 

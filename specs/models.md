@@ -41,9 +41,9 @@ model = "gpt-5.2"  # Flagship model for general tasks
 temperature = 0.7  # Optional - omit to use API default
 max_tokens = 4096
 
-[models.mini]
+[models.fast]
 provider = "openai"
-model = "gpt-5-mini"  # Fast, cost-effective for simple tasks
+model = "gpt-5.2-mini"  # Fast, cost-effective for simple tasks
 max_tokens = 4096
 
 [models.codex]

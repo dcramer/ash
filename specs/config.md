@@ -73,9 +73,9 @@ model = "gpt-5.2"
 temperature = 0.7
 max_tokens = 4096
 
-[models.mini]
+[models.fast]
 provider = "openai"
-model = "gpt-5-mini"
+model = "gpt-5.2-mini"
 
 # Per-skill model overrides
 [skills.debug]
