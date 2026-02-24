@@ -1226,31 +1226,19 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-chat-user::after,
 .ash-chat-ash::after {
-  content: '';
-  position: absolute;
-  bottom: -1.5px;
-  width: 0.44rem;
-  height: 0.44rem;
-  background: inherit;
-  border-bottom: inherit;
+  content: none;
 }
 
 .ash-chat-user::before,
 .ash-chat-ash::before {
   content: '';
   position: absolute;
-  bottom: -1.5px;
+  top: 0;
   width: 2rem;
   height: 2rem;
   border: 1.5px solid #2a2a2a;
   border-radius: 0.55rem;
   box-shadow: none;
-}
-
-.ash-chat-user::after {
-  right: -0.36rem;
-  border-right: inherit;
-  clip-path: polygon(0 100%, 100% 100%, 100% 0);
 }
 
 .ash-chat-user::before {
@@ -1259,12 +1247,6 @@ body:has(.ash-home) .content-panel:first-of-type {
     radial-gradient(circle at 50% 34%, #2a2a2a 0 0.16rem, transparent 0.17rem),
     radial-gradient(ellipse at 50% 78%, #2a2a2a 0 0.3rem, transparent 0.31rem),
     linear-gradient(180deg, #e8e8e8 0 57%, #747474 57% 100%);
-}
-
-.ash-chat-ash::after {
-  left: -0.36rem;
-  border-left: inherit;
-  clip-path: polygon(0 0, 0 100%, 100% 100%);
 }
 
 .ash-chat-ash::before {
@@ -1501,7 +1483,7 @@ body:has(.ash-home) .ash-home-band .ash-chat-turn.ash-chat-user :is(span, .ash-c
 
 body:has(.ash-home) .ash-chat-demo {
   border: 0;
-  background: transparent;
+  background: #111111;
   box-shadow: none;
 }
 
