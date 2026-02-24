@@ -1,349 +1,193 @@
 ---
 title: Tools
-description: Tool system and execution
+description: How tools work and how to add custom tools
 sidebar:
   order: 2
 ---
 
-Tools extend the agent's capabilities with actions like running commands, searching the web, and reading files.
+Tools are how Ash takes actions. They let Ash run commands, read and write files, search the web, and call specialized agents or skills.
 
-## Overview
+## Tools In 30 Seconds
 
-Tools are the primary way Ash interacts with the world. Each tool:
-- Has a unique name and description
-- Defines input parameters via JSON Schema
-- Executes asynchronously
-- Returns structured results
+Use tools when the task needs action, not just text generation.
 
-## Tool Interface
+- Need terminal execution: use `bash`
+- Need web discovery: use `web_search`
+- Need page content: use `web_fetch`
+- Need file access: use `read_file` and `write_file`
+- Need deep autonomous work: use `use_agent`
+- Need instruction-based workflow: use `use_skill`
 
-Location: `src/ash/tools/base.py`
+Every tool has three parts:
 
-```python
-from abc import ABC, abstractmethod
-from typing import Any
+1. Name and description
+2. Input schema (JSON Schema)
+3. Async execution that returns structured output
 
-class Tool(ABC):
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Unique identifier for this tool."""
+## Quick Start
 
-    @property
-    @abstractmethod
-    def description(self) -> str:
-        """Description for the LLM."""
-
-    @property
-    @abstractmethod
-    def input_schema(self) -> dict[str, Any]:
-        """JSON Schema for input parameters."""
-
-    @abstractmethod
-    async def execute(
-        self,
-        input_data: dict[str, Any],
-        context: ToolContext,
-    ) -> ToolResult:
-        """Execute the tool and return result."""
-```
-
-### ToolContext
-
-Context provided to tool execution:
-
-```python
-@dataclass
-class ToolContext:
-    session_id: str | None = None
-    user_id: str | None = None
-    chat_id: str | None = None
-    provider: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-    env: dict[str, str] = field(default_factory=dict)
-```
-
-### ToolResult
-
-Tool execution result:
-
-```python
-@dataclass
-class ToolResult:
-    content: str
-    is_error: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def success(cls, content: str, **metadata) -> "ToolResult":
-        """Create a successful result."""
-
-    @classmethod
-    def error(cls, message: str, **metadata) -> "ToolResult":
-        """Create an error result."""
-```
-
-## Built-in Tools
-
-### Bash Tool
-
-Location: `src/ash/tools/builtin/bash.py`
-
-Executes commands in the Docker sandbox:
-
-```python
-class BashTool(Tool):
-    name = "bash"
-    description = "Execute bash commands in a sandboxed environment"
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "command": {
-                "type": "string",
-                "description": "The bash command to execute.",
-            },
-        },
-        "required": ["command"],
-    }
-```
-
-All commands run in isolated Docker containers. See [Sandbox](/systems/sandbox/) for security details.
-
-### Web Search Tool
-
-Location: `src/ash/tools/builtin/web_search.py`
-
-Searches the web using Brave Search:
-
-```python
-class WebSearchTool(Tool):
-    name = "web_search"
-    description = "Search the web for information"
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "The search query.",
-            },
-            "max_results": {
-                "type": "integer",
-                "description": "Maximum results to return (default: 10).",
-            },
-        },
-        "required": ["query"],
-    }
-```
-
-Requires Brave Search API configuration:
+Enable web search, then run a prompt that requires tools:
 
 ```toml
+# ~/.ash/config.toml
 [brave_search]
-api_key = "BSA..."
+api_key = "BSA..."  # Required for web_search
 ```
 
-### Web Fetch Tool
-
-Location: `src/ash/tools/builtin/web_fetch.py`
-
-Fetches and extracts content from URLs:
-
-```python
-class WebFetchTool(Tool):
-    name = "web_fetch"
-    description = "Fetch and read the content of a web page"
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "The URL to fetch (http or https).",
-            },
-            "extract_mode": {
-                "type": "string",
-                "enum": ["text", "markdown"],
-                "description": "Content format: 'markdown' preserves structure.",
-            },
-        },
-        "required": ["url"],
-    }
+```bash
+# Run Ash with one prompt
+uv run ash chat "Find the latest release notes for Python 3.13 and summarize key changes"
 ```
 
-Features:
-- Extracts readable content from HTML pages
-- Converts to markdown-like format (links, headings, lists)
-- Handles redirects (up to 5 hops)
-- Supports text/HTML/JSON content types
+If tool usage is healthy, Ash will call `web_search` and/or `web_fetch` before replying.
 
-### Read File Tool
+## Core Toolset
 
-Location: `src/ash/tools/builtin/files.py`
+### `bash`
 
-Reads file contents from the workspace:
+Runs shell commands in the sandbox.
 
-```python
-class ReadFileTool(Tool):
-    name = "read_file"
-    description = "Read file contents from the workspace"
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "Path to the file (relative to workspace).",
-            },
-            "offset": {
-                "type": "integer",
-                "description": "Line number to start from (1-indexed).",
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Maximum lines to read.",
-            },
-        },
-        "required": ["file_path"],
-    }
-```
+Use for:
 
-Features:
-- Returns content with line numbers
-- Pagination via offset/limit
-- Automatic truncation for large files
+- running scripts
+- inspecting repos
+- generating or validating files
 
-### Write File Tool
+See [Sandbox](/systems/sandbox/) for isolation and security controls.
 
-Location: `src/ash/tools/builtin/files.py`
+### `web_search`
 
-Writes content to files in the workspace:
+Searches the web via Brave Search.
 
-```python
-class WriteFileTool(Tool):
-    name = "write_file"
-    description = "Write content to a file in the workspace"
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "Path to write to (relative to workspace).",
-            },
-            "content": {
-                "type": "string",
-                "description": "Content to write to the file.",
-            },
-        },
-        "required": ["file_path", "content"],
-    }
-```
+Use for:
 
-Features:
-- Creates files if they don't exist
-- Creates parent directories automatically
-- Size limits enforced
+- finding current facts
+- finding official docs or release notes
+- gathering source links before answering
 
-### Use Agent Tool
+### `web_fetch`
 
-Location: `src/ash/tools/builtin/agents.py`
+Fetches and extracts content from a URL.
 
-Invokes built-in agents for complex tasks:
+Use for:
 
-```python
-class UseAgentTool(Tool):
-    name = "use_agent"
-    description = "Run a specialized agent for complex tasks"
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "agent": {
-                "type": "string",
-                "description": "Name of the agent to run.",
-            },
-            "message": {
-                "type": "string",
-                "description": "Message/task for the agent.",
-            },
-            "input": {
-                "type": "object",
-                "description": "Additional input data (optional).",
-            },
-        },
-        "required": ["agent", "message"],
-    }
-```
+- turning a single URL into readable text
+- pulling article/doc body content after search
 
-Built-in agents include:
-- **research** - Multi-step research tasks
-- **skill-writer** - Creates new skills autonomously
+### `read_file` and `write_file`
 
-See [Agents](/systems/agents/) for details.
+Access project files in workspace scope.
 
-## Tool Registry
+Use for:
 
-Location: `src/ash/tools/registry.py`
+- reading code/config/docs with line context
+- applying targeted file edits
 
-Tools are discovered and registered:
+### `browser`
 
-```python
-registry = ToolRegistry()
-registry.register(BashTool(executor))
-registry.register(WebSearchTool(cache=cache))
+Controls a real browser session when browser integration is enabled.
 
-tools = registry.all()
-tool = registry.get("bash")
-```
+Use for:
 
-## Tool Execution
+- UI workflows that need page interaction
+- screenshot-based verification
 
-Location: `src/ash/tools/executor.py`
+See [Browser](/systems/browser/) for provider/runtime setup.
 
-The executor handles tool calls from the LLM:
+### `use_agent`
 
-```python
-class ToolExecutor:
-    async def execute(
-        self,
-        tool_call: ToolCall,
-        context: ToolContext,
-    ) -> ToolResult:
-        tool = self.registry.get(tool_call.name)
-        return await tool.execute(tool_call.input, context)
-```
+Runs a specialized autonomous agent.
 
-## Configuration
+Use for:
 
-### Brave Search
+- multi-step workflows that benefit from an isolated loop
+- longer tasks where you want focused agent behavior
 
-Enable web search capabilities:
+See [Agents](/systems/agents/).
+
+### `use_skill`
+
+Runs a reusable skill from your skill registry.
+
+Use for:
+
+- instruction-driven workflows you want to reuse
+- project/team conventions encoded in `SKILL.md`
+
+See [Skills](/systems/skills/).
+
+## Configure Tools
+
+Most tool behavior is controlled by subsystem config.
 
 ```toml
-[brave_search]
-api_key = "BSA..."
-```
-
-Get an API key from [Brave Search API](https://brave.com/search/api/).
-
-### Workspace
-
-Configure the workspace directory for file operations:
-
-```toml
+# Workspace path used by file tools
 workspace = "~/.ash/workspace"
+
+# Enable web search tool
+[brave_search]
+api_key = "BSA..."
+
+# Browser tool is available when browser subsystem is enabled
+[browser]
+enabled = true
+provider = "sandbox"        # or "kernel"
+timeout_seconds = 20.0
 ```
 
-See [Configuration Reference](/configuration/reference/) for all options.
+## Troubleshooting
 
-## Creating Custom Tools
+### Tool did not run when expected
 
-1. Create a class implementing `Tool`
-2. Define `input_schema` as a JSON Schema dict
-3. Implement async `execute()` method
-4. Register with the tool registry
+```bash
+# Verify config is valid
+uv run ash config validate
 
-Example:
+# Run with a concrete tool-requiring prompt
+uv run ash chat "Read README.md and list setup steps"
+```
+
+If Ash can answer from existing context, it may skip tools. Ask for source-backed or file-backed output to force tool use.
+
+### `web_search` fails
+
+```bash
+# Confirm Brave key exists in config
+uv run ash config show
+
+# Run environment diagnostics
+uv run ash doctor
+```
+
+Common fix: add a valid `[brave_search].api_key`.
+
+### `bash` or file tools fail
+
+```bash
+# Check sandbox health
+uv run ash sandbox status
+
+# Rebuild sandbox image if needed
+uv run ash sandbox build
+```
+
+See [Sandbox](/systems/sandbox/) for runtime and mount rules.
+
+## Build A Custom Tool
+
+For Python contributors extending Ash:
+
+1. Implement `Tool` (`name`, `description`, `input_schema`, `execute`).
+2. Return `ToolResult.success(...)` or `ToolResult.error(...)`.
+3. Register the tool through integration wiring.
+
+Minimal skeleton:
 
 ```python
 from typing import Any
+
 from ash.tools.base import Tool, ToolContext, ToolResult
+
 
 class WeatherTool(Tool):
     @property
@@ -359,29 +203,23 @@ class WeatherTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "City name or coordinates.",
-                },
+                "location": {"type": "string", "description": "City or region"},
             },
             "required": ["location"],
         }
 
-    async def execute(
-        self,
-        input_data: dict[str, Any],
-        context: ToolContext,
-    ) -> ToolResult:
-        location = input_data.get("location")
-        # Implementation here
-        return ToolResult.success(f"Weather for {location}: 72°F, sunny")
+    async def execute(self, input_data: dict[str, Any], context: ToolContext) -> ToolResult:
+        location = input_data["location"]
+        return ToolResult.success(f"Weather for {location}: TODO")
 ```
 
-Register the tool:
+## Reference (Advanced)
 
-```python
-from ash.tools.registry import ToolRegistry
+Primary implementation files:
 
-registry = ToolRegistry()
-registry.register(WeatherTool())
-```
+- `src/ash/tools/base.py` - core `Tool`, `ToolContext`, `ToolResult`
+- `src/ash/tools/registry.py` - registration and lookup
+- `src/ash/tools/executor.py` - tool-call execution path
+- `src/ash/tools/builtin/*.py` - built-in tool implementations
+
+Tool definitions are passed to the model from the registry. At runtime, the executor resolves tool calls by name and executes with `ToolContext`.
