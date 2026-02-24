@@ -362,46 +362,51 @@ td {
 /* CLI option list (help-style) */
 .ash-help-list {
   border: 2px solid #11130f;
-  background: #ffffff;
-  box-shadow: 5px 5px 0 rgba(20, 20, 15, 0.16);
+  background: #fafcf6;
+  padding: 0.35rem 0.52rem;
+  margin: 0;
 }
 
 .ash-help-row {
   display: grid;
-  grid-template-columns: minmax(14rem, 22rem) minmax(0, 1fr);
-  gap: 0.8rem;
-  padding: 0.58rem 0.72rem;
-  border-top: 1px solid #11130f;
+  grid-template-columns: minmax(16rem, 24rem) minmax(0, 1fr);
+  gap: 0.95rem;
+  padding: 0.26rem 0.14rem;
+  border-top: 1px dashed rgba(17, 19, 15, 0.24);
 }
 
 .ash-help-row:first-child {
   border-top: 0;
 }
 
+.ash-help-row dt,
+.ash-help-row dd {
+  margin: 0;
+}
+
 .ash-help-flag {
   display: block;
   margin: 0;
-  padding: 0.08rem 0.18rem;
+  padding: 0;
   color: #11130f;
   font-family: var(--sl-font-mono);
   font-weight: 700;
-  background: #f3f9e2;
-  border: 1px solid #bfd18d;
+  background: transparent;
+  border: 0;
   white-space: nowrap;
   overflow-x: auto;
 }
 
 .ash-help-desc p {
   margin: 0;
-  color: #182112;
+  color: #1a2214;
 }
 
 .ash-help-default {
-  display: inline-block;
-  margin-top: 0.24rem;
   font-family: var(--sl-font-mono);
-  font-size: 0.8rem;
-  color: #3e4d2a;
+  font-size: 0.88em;
+  color: #3a4a2a;
+  font-weight: 600;
 }
 
 @media (max-width: 52rem) {

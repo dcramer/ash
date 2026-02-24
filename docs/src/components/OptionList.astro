@@ -12,16 +12,19 @@ interface Props {
 const { items } = Astro.props;
 ---
 
-<div class="ash-help-list" role="list">
+<dl class="ash-help-list">
   {items.map((item) => (
-    <article class="ash-help-row" role="listitem">
-      <code class="ash-help-flag">{item.name}</code>
-      <div class="ash-help-desc">
-        <p>{item.description}</p>
+    <div class="ash-help-row">
+      <dt><code class="ash-help-flag">{item.name}</code></dt>
+      <dd class="ash-help-desc">
+        {item.description}
         {item.defaultValue && (
-          <span class="ash-help-default">default: {item.defaultValue}</span>
+          <>
+            {' '}
+            <span class="ash-help-default">[default: {item.defaultValue}]</span>
+          </>
         )}
-      </div>
-    </article>
+      </dd>
+    </div>
   ))}
-</div>
+</dl>
