@@ -46,6 +46,7 @@ It does not own:
 9. Runtime/doctor guidance MUST NOT document host-runtime bypasses for sandbox provider.
 10. Sandbox browser runtime MUST be dedicated-container only; legacy shared-executor Chromium launch paths are unsupported.
 11. Dedicated browser containers MUST be scope-keyed (effective user scope) so independent scopes do not share a runtime container.
+12. Dedicated runtime command execution MUST traverse an authenticated loopback bridge (bearer token) rather than unauthenticated control surfaces.
 
 ## Integration Contract
 
@@ -109,3 +110,4 @@ Expected failure semantics:
 - [x] Docs match actual runtime behavior and contain no host-bypass guidance.
 - [x] Dedicated browser runtime uses scope-keyed container naming.
 - [x] Legacy shared-executor browser runtime path removed from active behavior.
+- [x] Dedicated runtime command execution uses authenticated loopback bridge.

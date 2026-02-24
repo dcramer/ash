@@ -60,6 +60,7 @@ async def test_sandbox_provider_scopes_provider_session_id_and_container_name() 
     provider._execute_host_command = stub.run  # type: ignore[assignment]
     provider._wait_for_cdp_ready = _noop_wait  # type: ignore[assignment]
     provider._run_json = _fake_run_json  # type: ignore[assignment]
+    provider._is_runtime_healthy = _always_healthy  # type: ignore[assignment]
 
     started = await provider.start_session(
         session_id="s1",
@@ -85,6 +86,7 @@ async def test_sandbox_provider_full_flow_with_dedicated_runtime() -> None:
     provider._execute_host_command = stub.run  # type: ignore[assignment]
     provider._wait_for_cdp_ready = _noop_wait  # type: ignore[assignment]
     provider._run_json = _fake_run_json  # type: ignore[assignment]
+    provider._is_runtime_healthy = _always_healthy  # type: ignore[assignment]
 
     started = await provider.start_session(
         session_id="s1",
@@ -126,6 +128,7 @@ async def test_sandbox_provider_rehydrates_session_after_restart_like_state() ->
     provider._execute_host_command = stub.run  # type: ignore[assignment]
     provider._wait_for_cdp_ready = _noop_wait  # type: ignore[assignment]
     provider._run_json = _fake_run_json  # type: ignore[assignment]
+    provider._is_runtime_healthy = _always_healthy  # type: ignore[assignment]
 
     started = await provider.start_session(
         session_id="s1",
@@ -148,15 +151,27 @@ async def test_sandbox_provider_rehydrates_session_after_restart_like_state() ->
 
 @pytest.mark.asyncio
 async def test_sandbox_provider_times_out_hung_docker_exec() -> None:
-    async def _host_timeout(
-        args: list[str], *, timeout_seconds: int
+    async def _bridge_timeout(
+        *,
+        runtime: Any,
+        command: str,
+        timeout_seconds: int,
+        environment: dict[str, str] | None = None,
     ) -> ExecutionResult:
-        _ = (args, timeout_seconds)
+        _ = (runtime, command, timeout_seconds, environment)
         return ExecutionResult(exit_code=-1, stdout="", stderr="", timed_out=True)
 
     provider = SandboxBrowserProvider()
-    provider._execute_host_command = _host_timeout  # type: ignore[assignment]
-    provider._runtime = type("R", (), {"container_name": "ash-browser-timeout"})()
+    provider._execute_via_bridge = _bridge_timeout  # type: ignore[assignment]
+    provider._runtime = type(
+        "R",
+        (),
+        {
+            "container_name": "ash-browser-timeout",
+            "bridge_base_url": "http://127.0.0.1:1",
+            "bridge_token": "t",
+        },
+    )()
     with pytest.raises(ValueError, match="sandbox_browser_action_timeout:test"):
         await provider._execute_sandbox_command(
             "echo hi",
@@ -169,6 +184,11 @@ async def test_sandbox_provider_times_out_hung_docker_exec() -> None:
 
 async def _noop_wait(*, runtime: Any) -> None:
     _ = runtime
+
+
+async def _always_healthy(runtime: Any) -> bool:
+    _ = runtime
+    return True
 
 
 async def _fake_run_json(

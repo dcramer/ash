@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
+from ash.browser.bridge import (
+    BrowserExecBridge,
+    make_docker_exec_bridge_executor,
+    request_bridge_exec,
+)
 from ash.browser.providers.base import (
     ProviderExtractResult,
     ProviderGotoResult,
@@ -35,6 +40,8 @@ class _RemoteSandboxRuntime:
     base_dir: str
     container_name: str | None = None
     host_port: int | None = None
+    bridge_base_url: str | None = None
+    bridge_token: str | None = None
 
 
 class SandboxBrowserProvider:
@@ -65,6 +72,7 @@ class SandboxBrowserProvider:
         self._session_targets: dict[str, str] = {}
         self._runtime: _RemoteSandboxRuntime | None = None
         self._active_scope_hash: str | None = None
+        self._bridge: BrowserExecBridge | None = None
         self._runtime_lock = asyncio.Lock()
         self.runs_in_sandbox_executor = True
         self._runtime_restart_attempts = max(0, int(runtime_restart_attempts))
@@ -939,6 +947,13 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
                 )
                 raise ValueError(f"sandbox_browser_launch_failed: {message}")
 
+        if self._bridge is not None:
+            self._bridge.stop()
+            self._bridge = None
+        bridge = BrowserExecBridge.start(
+            executor=make_docker_exec_bridge_executor(container_name=container_name)
+        )
+        self._bridge = bridge
         host_port = await self._docker_resolve_host_port(container_name, 9222)
         runtime = _RemoteSandboxRuntime(
             port=9222,
@@ -946,10 +961,15 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
             base_dir="/tmp/ash-browser/runtime",  # noqa: S108 - container-local runtime path
             container_name=container_name,
             host_port=host_port,
+            bridge_base_url=bridge.base_url,
+            bridge_token=bridge.token,
         )
         try:
             await self._wait_for_cdp_ready(runtime=runtime)
         except ValueError as e:
+            bridge.stop()
+            if self._bridge is bridge:
+                self._bridge = None
             await self._kill_runtime(runtime)
             raise e
         logger.info(
@@ -997,6 +1017,9 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
         return ws_ok
 
     async def _kill_runtime(self, runtime: _RemoteSandboxRuntime) -> None:
+        if self._bridge is not None:
+            self._bridge.stop()
+            self._bridge = None
         if runtime.container_name:
             _ = await self._execute_host_command(
                 ["docker", "rm", "-f", runtime.container_name],
@@ -1153,20 +1176,13 @@ asyncio.run(main())
             raise ValueError(
                 "sandbox_browser_runtime_unavailable: dedicated_container_missing"
             )
-        env_args: list[str] = []
-        for key, value in (environment or {}).items():
-            env_args.extend(["-e", f"{key}={value}"])
-        result = await self._execute_host_command(
-            [
-                "docker",
-                "exec",
-                *env_args,
-                active_runtime.container_name,
-                "bash",
-                "-lc",
-                command,
-            ],
-            timeout_seconds=max(5, timeout_seconds + 10),
+        if not active_runtime.bridge_base_url or not active_runtime.bridge_token:
+            raise ValueError("sandbox_browser_runtime_unavailable: bridge_missing")
+        result = await self._execute_via_bridge(
+            runtime=active_runtime,
+            command=command,
+            timeout_seconds=timeout_seconds,
+            environment=environment,
         )
         if result.timed_out:
             raise ValueError(
@@ -1174,26 +1190,24 @@ asyncio.run(main())
             )
         return result
 
-    _MAX_LAUNCH_ATTEMPTS = 3
-    _MAX_LAUNCH_TOTAL_SECONDS = 45.0
+    async def _execute_via_bridge(
+        self,
+        *,
+        runtime: _RemoteSandboxRuntime,
+        command: str,
+        timeout_seconds: int,
+        environment: dict[str, str] | None = None,
+    ) -> ExecutionResult:
+        if not runtime.bridge_base_url or not runtime.bridge_token:
+            raise ValueError("sandbox_browser_runtime_unavailable: bridge_missing")
+        return await asyncio.to_thread(
+            request_bridge_exec,
+            base_url=runtime.bridge_base_url,
+            token=runtime.bridge_token,
+            command=command,
+            timeout_seconds=max(1, timeout_seconds),
+            environment=environment or {},
+        )
+
     _HTTP_READY_TIMEOUT_SECONDS = 12.0
     _WS_READY_TIMEOUT_SECONDS = 8.0
-    _CHROMIUM_RUNTIME_FLAGS = (
-        "--headless=new",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-sync",
-        "--disable-background-networking",
-        "--disable-component-update",
-        "--disable-features=Translate,MediaRouter",
-        "--disable-session-crashed-bubble",
-        "--hide-crash-restore-bubble",
-        "--password-store=basic",
-        "--disable-breakpad",
-        "--disable-crash-reporter",
-        "--metrics-recording-only",
-    )

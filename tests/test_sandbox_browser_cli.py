@@ -139,6 +139,10 @@ async def test_browser_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
     async def _noop_wait(*, runtime: object) -> None:
         _ = runtime
 
+    async def _always_healthy(runtime: object) -> bool:
+        _ = runtime
+        return True
+
     async def _fake_run_json(
         *,
         code: str,
@@ -159,6 +163,7 @@ async def test_browser_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
     provider._execute_host_command = _fake_host_command  # type: ignore[assignment]
     provider._wait_for_cdp_ready = _noop_wait  # type: ignore[assignment]
     provider._run_json = _fake_run_json  # type: ignore[assignment]
+    provider._is_runtime_healthy = _always_healthy  # type: ignore[assignment]
     components = SimpleNamespace(browser_manager=browser_manager)
     context = IntegrationContext(
         config=config,
