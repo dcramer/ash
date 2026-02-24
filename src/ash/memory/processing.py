@@ -444,7 +444,7 @@ async def process_extracted_facts(
                 try:
                     pids = await store.find_person_ids_for_username(source_username)
                     if pids:
-                        stated_by_pid = next(iter(pids))
+                        stated_by_pid = sorted(pids)[0]
                 except Exception:
                     logger.debug(
                         "stated_by_resolve_failed",

@@ -1108,6 +1108,43 @@ class TestOwnerFilteringInProcessing:
         subject_pids = get_subject_person_ids(graph_store.graph, stored_ids[0])
         assert bob.id in subject_pids
 
+    @pytest.mark.asyncio
+    async def test_speaker_lookup_is_deterministic_when_multiple_ids(
+        self, graph_store: Store, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Speaker ID fallback should choose deterministically across set order."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact
+
+        async def fake_find_person_ids_for_username(_username: str) -> set[str]:
+            return {"pid-z", "pid-a"}
+
+        monkeypatch.setattr(
+            graph_store,
+            "find_person_ids_for_username",
+            fake_find_person_ids_for_username,
+        )
+
+        stored_ids = await process_extracted_facts(
+            facts=[
+                ExtractedFact(
+                    content="I prefer tea",
+                    subjects=[],
+                    shared=False,
+                    confidence=0.9,
+                    speaker="dave",
+                )
+            ],
+            store=graph_store,
+            user_id="user-1",
+        )
+
+        assert len(stored_ids) == 1
+        memory = graph_store.graph.memories[stored_ids[0]]
+        assert memory.metadata is not None
+        assertion = memory.metadata["assertion"]
+        assert assertion["speaker_person_id"] == "pid-a"
+
 
 class TestDMSensitivityFloor:
     """Tests for DM sensitivity floor on ephemeral memory types."""
