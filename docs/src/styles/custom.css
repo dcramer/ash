@@ -17,9 +17,9 @@
   --sl-color-gray-6: #121826;
   --sl-color-black: #06080d;
 
-  --sl-color-bg: #05070c;
-  --sl-color-bg-nav: #0d1109;
-  --sl-color-bg-sidebar: #090d15;
+  --sl-color-bg: #000000;
+  --sl-color-bg-nav: #000000;
+  --sl-color-bg-sidebar: #000000;
   --sl-color-bg-inline-code: #121826;
   --sl-sidebar-width: 16.75rem;
   --sl-sidebar-pad-x: 0.9rem;
@@ -51,7 +51,7 @@ body {
 body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  background: var(--ash-paper);
+  background: #000000;
   color: #eef2f7;
 }
 
@@ -92,7 +92,7 @@ body::before {
 }
 
 header.header {
-  background: #10110d !important;
+  background: #000000 !important;
   border-bottom: 1px solid #b0ff1f;
   border-right: 0 !important;
   border-inline-end: 0 !important;
@@ -297,8 +297,18 @@ a:not([class]):hover {
 }
 
 nav.sidebar {
-  border-inline-end: 1px solid var(--ash-ink);
-  background: var(--sl-color-bg-sidebar);
+  border-inline-end: 1px solid var(--ash-dark-border);
+  background: #000000;
+}
+
+#starlight__sidebar,
+.sidebar-pane,
+.sidebar-content,
+.main-frame,
+.main-pane,
+.content-panel,
+main {
+  background: #000000 !important;
 }
 
 nav.sidebar a {
