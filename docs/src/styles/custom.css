@@ -1093,7 +1093,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-home-band-slice {
   border-top-right-radius: 0.9rem;
-  margin-right: 0.6rem;
+  margin-right: 0;
 }
 
 .ash-home-band-slice::before {
@@ -1104,7 +1104,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-home-band-paper {
   background: transparent;
   border-radius: 0 !important;
-  margin-left: 0.5rem;
+  margin-left: 0;
 }
 
 .ash-home-band-paper::before {
@@ -1115,7 +1115,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-home-band-tools {
   background: transparent;
-  margin-right: 0.3rem;
+  margin-right: 0;
 }
 
 .ash-home-band-tools::before {
