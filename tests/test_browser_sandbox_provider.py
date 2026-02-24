@@ -117,6 +117,11 @@ async def test_sandbox_provider_uses_executor_for_full_flow() -> None:
 
     await provider.close_session(provider_session_id="s1")
     assert any("nohup chromium" in cmd for cmd in executor.commands)
+    launch_cmd = next(cmd for cmd in executor.commands if "nohup chromium" in cmd)
+    assert "--disable-component-update" in launch_cmd
+    assert "--disable-background-networking" in launch_cmd
+    assert "--disable-features=Translate,MediaRouter" in launch_cmd
+    assert "rm -rf " in launch_cmd and "/profile/WidevineCdm" in launch_cmd
     assert any("/json/version" in cmd for cmd in executor.commands)
     assert any("kill 12345" in cmd for cmd in executor.commands)
 

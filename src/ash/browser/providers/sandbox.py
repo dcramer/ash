@@ -779,13 +779,12 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
                 )
                 break
             port = self._pick_port()
+            flags = " ".join(self._CHROMIUM_RUNTIME_FLAGS)
             launch_cmd = (
                 f"mkdir -p {shlex.quote(base_dir)} && "
+                f"(rm -rf {shlex.quote(base_dir)}/profile/WidevineCdm >/dev/null 2>&1 || true) && "
                 "nohup chromium "
-                "--headless=new "
-                "--no-sandbox "
-                "--disable-dev-shm-usage "
-                "--disable-gpu "
+                f"{flags} "
                 "--remote-debugging-address=127.0.0.1 "
                 f"--remote-debugging-port={port} "
                 f"--user-data-dir={shlex.quote(base_dir)}/profile "
@@ -1040,3 +1039,22 @@ asyncio.run(main())
     _MAX_LAUNCH_TOTAL_SECONDS = 45.0
     _HTTP_READY_TIMEOUT_SECONDS = 12.0
     _WS_READY_TIMEOUT_SECONDS = 8.0
+    _CHROMIUM_RUNTIME_FLAGS = (
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-sync",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-features=Translate,MediaRouter",
+        "--disable-session-crashed-bubble",
+        "--hide-crash-restore-bubble",
+        "--password-store=basic",
+        "--disable-breakpad",
+        "--disable-crash-reporter",
+        "--metrics-recording-only",
+    )
