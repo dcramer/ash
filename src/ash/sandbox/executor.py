@@ -1,10 +1,13 @@
 """High-level command execution in sandbox containers."""
 
+import hashlib
+import json
 import logging
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+from ash.config.paths import get_ash_home, get_run_path
 from ash.sandbox.manager import SandboxConfig, SandboxManager
 
 logger = logging.getLogger(__name__)
@@ -156,15 +159,35 @@ class SandboxExecutor:
                     "container_removal_failed", extra={"error.message": str(e)}
                 )
             finally:
+                state = self._read_managed_container_state()
+                if state and state.get("container_id") == self._container_id:
+                    self._clear_managed_container_state()
                 self._container_id = None
 
     async def _get_or_create_container(self, reuse: bool) -> str:
         if reuse and self._container_id:
             return self._container_id
 
-        container_id = await self._manager.create_container(
-            environment=self._environment if self._environment else None,
-        )
+        managed_name = self._managed_container_name() if reuse else None
+        if reuse:
+            reused_id = await self._resolve_managed_container(managed_name)
+            if reused_id:
+                self._container_id = reused_id
+                return reused_id
+
+        try:
+            container_id = await self._manager.create_container(
+                name=managed_name,
+                environment=self._environment if self._environment else None,
+            )
+        except Exception:
+            # Name may already exist from another executor/process racing creation.
+            if reuse:
+                reused_id = await self._resolve_managed_container(managed_name)
+                if reused_id:
+                    self._container_id = reused_id
+                    return reused_id
+            raise
         try:
             await self._manager.start_container(container_id)
 
@@ -200,8 +223,90 @@ class SandboxExecutor:
 
         if reuse:
             self._container_id = container_id
+            self._write_managed_container_state(container_id, managed_name)
 
         return container_id
+
+    def _managed_container_name(self) -> str:
+        home = str(get_ash_home())
+        suffix = hashlib.sha256(home.encode("utf-8")).hexdigest()[:8]
+        return f"ash-sandbox-{suffix}"
+
+    def _managed_state_path(self) -> Path:
+        return get_run_path() / "sandbox_container.json"
+
+    def _read_managed_container_state(self) -> dict[str, str] | None:
+        path = self._managed_state_path()
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        container_id = payload.get("container_id")
+        container_name = payload.get("container_name")
+        if not isinstance(container_id, str) or not isinstance(container_name, str):
+            return None
+        return {"container_id": container_id, "container_name": container_name}
+
+    def _write_managed_container_state(
+        self, container_id: str, container_name: str | None
+    ) -> None:
+        if not container_name:
+            return
+        path = self._managed_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"container_id": container_id, "container_name": container_name}
+        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2))
+
+    def _clear_managed_container_state(self) -> None:
+        path = self._managed_state_path()
+        if path.exists():
+            path.unlink()
+
+    async def _resolve_managed_container(self, managed_name: str | None) -> str | None:
+        if not managed_name:
+            return None
+        state = self._read_managed_container_state()
+        refs: list[str] = []
+        if state:
+            refs.extend([state["container_id"], state["container_name"]])
+        refs.append(managed_name)
+
+        seen: set[str] = set()
+        for ref in refs:
+            if not ref or ref in seen:
+                continue
+            seen.add(ref)
+            container = await self._manager.get_container(ref)
+            if container is None:
+                continue
+            attrs = container.attrs if isinstance(container.attrs, dict) else {}
+            config = attrs.get("Config", {})
+            config_image = (
+                str(config.get("Image") or "") if isinstance(config, dict) else ""
+            )
+            if config_image != self._config.image:
+                logger.info(
+                    "sandbox_container_image_mismatch_pruned",
+                    extra={
+                        "container.id": container.id[:12],
+                        "container.image": config_image,
+                        "sandbox.image": self._config.image,
+                    },
+                )
+                await self._manager.remove_container(container.id, force=True)
+                continue
+            status = await self._manager.get_container_status(container.id)
+            if status != "running":
+                await self._manager.start_container(container.id)
+            self._write_managed_container_state(container.id, managed_name)
+            return container.id
+
+        self._clear_managed_container_state()
+        return None
 
     async def __aenter__(self) -> "SandboxExecutor":
         await self.initialize()

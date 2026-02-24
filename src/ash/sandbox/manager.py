@@ -275,6 +275,10 @@ class SandboxManager:
                 "/var/tmp": "size=32m,noexec,nosuid,nodev,uid=1000,gid=1000",  # noqa: S108
                 "/run": "size=16m,noexec,nosuid,nodev,uid=1000,gid=1000",
             },
+            "labels": {
+                "ash.managed": "true",
+                "ash.component": "sandbox",
+            },
         }
 
         if self._config.runtime == "runsc":
@@ -303,6 +307,22 @@ class SandboxManager:
         self._containers[container.id] = container
         logger.debug(f"Created container {container.id[:12]}")
         return container.id
+
+    async def get_container(self, container_ref: str) -> Container | None:
+        """Fetch container by id or name; return None when missing."""
+        await self._ensure_client()
+        try:
+            return await asyncio.to_thread(self.client.containers.get, container_ref)
+        except NotFound:
+            return None
+
+    async def get_container_status(self, container_ref: str) -> str | None:
+        """Return container status (running/exited/created) or None if missing."""
+        container = await self.get_container(container_ref)
+        if container is None:
+            return None
+        await asyncio.to_thread(container.reload)
+        return container.status
 
     async def start_container(self, container_id: str) -> None:
         await self._ensure_client()
