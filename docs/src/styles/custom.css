@@ -90,9 +90,47 @@ body::before {
 }
 
 header.header {
-  background: var(--sl-color-bg-nav) !important;
+  background: linear-gradient(180deg, #f8faf3 0%, #f0f3ea 100%) !important;
   border-bottom: 2px solid var(--ash-ink);
+  box-shadow: 0 3px 0 rgba(17, 19, 15, 0.14);
   backdrop-filter: none;
+}
+
+/* Header search should look like the same hard-edged UI language */
+header.header :is(
+  .site-search,
+  .search,
+  .search-field,
+  .starlight-search,
+  [data-pagefind-ui]
+) {
+  border-radius: 0 !important;
+}
+
+header.header :is(
+  input[type='search'],
+  .search-input,
+  .site-search input,
+  .starlight-search input,
+  [aria-label='Search']
+) {
+  background: #ffffff !important;
+  color: #11130f !important;
+  border: 2px solid #11130f !important;
+  border-radius: 0 !important;
+  box-shadow: 3px 3px 0 rgba(20, 20, 15, 0.18);
+  font-weight: 600;
+}
+
+header.header :is(
+  input[type='search'],
+  .search-input,
+  .site-search input,
+  .starlight-search input,
+  [aria-label='Search']
+)::placeholder {
+  color: #5a6247 !important;
+  opacity: 1;
 }
 
 .site-title {
@@ -275,8 +313,8 @@ table {
 }
 
 th {
-  background: #e5eaf2 !important;
-  color: #171d27 !important;
+  background: #e8f2d1 !important;
+  color: #1a2610 !important;
   font-family: 'Sora', var(--sl-font);
   font-weight: 700;
   font-size: 0.84rem;
@@ -302,22 +340,22 @@ td {
   display: table-cell !important;
   padding: 0.78rem 0.92rem !important;
   vertical-align: top;
-  color: #1b2230;
+  color: #1d2716;
   border-top: 1px solid #11130f !important;
 }
 
 .sl-markdown-content tbody tr:nth-child(even) {
-  background: #f8fafe;
+  background: #f7fbef;
 }
 
 .sl-markdown-content tbody tr:hover {
-  background: #f1f5fb;
+  background: #eef7dc;
 }
 
 .sl-markdown-content td code {
-  background: #eef2f8;
-  border: 1px solid #d1d9e6;
-  color: #192131;
+  background: #f2f7e5;
+  border: 1px solid #cad7a4;
+  color: #223012;
   font-size: 0.87em;
 }
 
