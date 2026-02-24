@@ -48,6 +48,7 @@
   --ash-line: rgba(245, 245, 245, 0.22);
   --ash-dark-border: #363636;
   --ash-dark-shadow: rgba(180, 180, 180, 0.22);
+  --ash-section-gap: 4.5rem;
 
   color-scheme: light;
 }
@@ -761,7 +762,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-home {
   display: grid;
-  gap: 1.75rem;
+  gap: var(--ash-section-gap);
   padding: 0 0 3.2rem;
   max-width: 50rem;
   margin: 0 auto;
@@ -1046,7 +1047,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-home-flow {
   display: grid;
-  gap: 1.5rem;
+  gap: var(--ash-section-gap);
 }
 
 .ash-home-band {
@@ -1150,7 +1151,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   transform: none;
   width: 100%;
   max-width: none;
-  margin: 0.65rem 0 0.35rem;
+  margin: 0;
 }
 
 .ash-chat-demo::after {
