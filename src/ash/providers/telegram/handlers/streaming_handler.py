@@ -192,7 +192,10 @@ class StreamingHandler:
         if (
             last_direct_send is not None
             and response_content.strip()
-            and last_direct_send[0].strip() == response_content.strip()
+            and (
+                last_direct_send[2]
+                or last_direct_send[0].strip() == response_content.strip()
+            )
         ):
             suppress_final_send = True
             sent_message_id = last_direct_send[1]

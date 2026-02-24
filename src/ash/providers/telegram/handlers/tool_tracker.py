@@ -83,7 +83,7 @@ class ProgressMessageTool:
                 image_path=image_path,
                 reply_to_message_id=reply_to,
             )
-            self._tracker.record_direct_send(message, sent_id)
+            self._tracker.record_direct_send(message, sent_id, has_image=True)
             return ToolResult.success(
                 f"Message sent successfully (id: {sent_id})",
                 sent_message_id=sent_id,
@@ -135,7 +135,7 @@ class ToolTracker:
         self.thinking_msg_id: str | None = None
         self.tool_count: int = 0
         self.progress_messages: list[str] = []
-        self._direct_sends: list[tuple[str, str]] = []
+        self._direct_sends: list[tuple[str, str, bool]] = []
 
     def _build_display_message(self, *, include_thinking: bool = True) -> str:
         """Build the consolidated message with progress on top and status on bottom.
@@ -216,12 +216,14 @@ class ToolTracker:
         """Add a progress message to be displayed."""
         self.progress_messages.append(message)
 
-    def record_direct_send(self, message: str, message_id: str) -> None:
+    def record_direct_send(
+        self, message: str, message_id: str, *, has_image: bool
+    ) -> None:
         """Record a direct provider send performed by ProgressMessageTool."""
-        self._direct_sends.append((message, message_id))
+        self._direct_sends.append((message, message_id, has_image))
 
-    def last_direct_send(self) -> tuple[str, str] | None:
-        """Return last direct send as (message_text, external_message_id)."""
+    def last_direct_send(self) -> tuple[str, str, bool] | None:
+        """Return last direct send as (message_text, external_message_id, has_image)."""
         if not self._direct_sends:
             return None
         return self._direct_sends[-1]
