@@ -359,6 +359,49 @@ td {
   font-size: 0.87em;
 }
 
+/* CLI option cards */
+.ash-option-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.ash-option-card {
+  background: #ffffff;
+  border: 2px solid #11130f;
+  box-shadow: 4px 4px 0 rgba(20, 20, 15, 0.16);
+  padding: 0.62rem 0.72rem;
+}
+
+.ash-option-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ash-option-head code {
+  background: #f2f7e5;
+  border: 1px solid #c1cf92;
+  color: #18240e;
+  font-weight: 700;
+}
+
+.ash-option-default {
+  display: inline-block;
+  padding: 0.08rem 0.42rem;
+  border: 1px solid #11130f;
+  background: #b0ff1f;
+  color: #11130f;
+  font-family: var(--sl-font-mono);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.ash-option-card p {
+  margin: 0.38rem 0 0;
+  color: #1d2716;
+}
+
 starlight-aside {
   border-width: 2px;
   border-left-width: 7px;

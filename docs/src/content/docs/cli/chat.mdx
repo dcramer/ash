@@ -5,6 +5,8 @@ sidebar:
   order: 4
 ---
 
+import OptionList from '../../../components/OptionList.astro';
+
 Start an interactive conversation or send a single prompt.
 
 ## Usage
@@ -15,17 +17,36 @@ uv run ash chat [OPTIONS] [PROMPT]
 
 ## Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `PROMPT` | Optional single prompt to send |
+<OptionList
+  items={[
+    {
+      name: 'PROMPT',
+      description: 'Optional single prompt to send.',
+    },
+  ]}
+/>
 
 ## Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--model`, `-m` | `default` | Model alias to use |
-| `--config`, `-c` | auto | Path to config file |
-| `--streaming/--no-streaming` | `--streaming` | Enable/disable streaming |
+<OptionList
+  items={[
+    {
+      name: '--model, -m',
+      defaultValue: 'default',
+      description: 'Model alias to use.',
+    },
+    {
+      name: '--config, -c',
+      defaultValue: 'auto',
+      description: 'Path to config file.',
+    },
+    {
+      name: '--streaming/--no-streaming',
+      defaultValue: '--streaming',
+      description: 'Enable or disable streaming output.',
+    },
+  ]}
+/>
 
 ## Interactive Mode
 

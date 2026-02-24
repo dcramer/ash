@@ -1,0 +1,25 @@
+---
+interface OptionItem {
+  name: string;
+  description: string;
+  defaultValue?: string;
+}
+
+interface Props {
+  items: OptionItem[];
+}
+
+const { items } = Astro.props;
+---
+
+<div class="ash-option-list">
+  {items.map((item) => (
+    <article class="ash-option-card">
+      <div class="ash-option-head">
+        <code>{item.name}</code>
+        {item.defaultValue && <span class="ash-option-default">Default: {item.defaultValue}</span>}
+      </div>
+      <p>{item.description}</p>
+    </article>
+  ))}
+</div>
