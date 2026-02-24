@@ -1,49 +1,99 @@
 ---
 title: Providers
-description: Communication channels for interacting with Ash
+description: Configure channels that deliver messages to Ash
 sidebar:
   order: 7
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Providers are transport layers between users and the agent runtime.
+Providers are transport channels between users and the Ash runtime. They control how messages arrive and where replies are sent.
 
-## Telegram Configuration
+## Providers In 30 Seconds
+
+- Provider config controls authentication and access policy
+- `ash serve` runs provider integrations
+- Telegram is the primary provider documented here
+
+## Quick Start (Telegram)
 
 ```toml
 [telegram]
-bot_token = "123456789:ABCdef..."
-allowed_users = ["@yourusername", "123456789"]
-allowed_groups = ["-100123456789"]
-group_mode = "mention"
+bot_token = "123456789:ABCdef..."     # Required
+allowed_users = ["@yourusername"]      # Restrict who can use the bot
+allowed_groups = ["-100123456789"]     # Optional group allowlist
+group_mode = "mention"                 # mention | always
 
 [telegram.passive]
-enabled = false
+enabled = false                         # Passive group listening
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `bot_token` | string | `null` | Bot token from BotFather |
-| `allowed_users` | list[string] | `[]` | Authorized users |
-| `allowed_groups` | list[string] | `[]` | Authorized groups |
-| `group_mode` | `mention`/`always` | `mention` | Group reply mode |
-| `passive.enabled` | bool | `false` | Passive group listening |
-
-## Runtime Notes
-
-- `ash serve` starts the provider runtime and server
-- Telegram provider supports active and passive group handling
-- Access is controlled by `allowed_users`/`allowed_groups`
-
-## Related Commands
+Start runtime:
 
 ```bash
 uv run ash serve
-uv run ash logs --component providers
-uv run ash doctor
+```
+
+## Configure Access
+
+Use allowlists for production deployments:
+
+```toml
+[telegram]
+allowed_users = ["@yourusername", "123456789"]
+allowed_groups = ["-100123456789"]
+```
+
+Group behavior:
+
+```toml
+[telegram]
+group_mode = "mention"  # respond when mentioned
+# group_mode = "always" # respond to all messages in allowed groups
 ```
 
 <Aside type="tip">
-  Keep `allowed_users` configured for production bot deployments.
+  Keep `allowed_users` and `allowed_groups` narrow in shared chats.
 </Aside>
+
+## Troubleshooting
+
+### Bot does not respond
+
+```bash
+uv run ash doctor
+uv run ash logs --component providers
+```
+
+Common fixes:
+
+- invalid `bot_token`
+- missing `allowed_users`/`allowed_groups` entries
+- runtime not started via `uv run ash serve`
+
+### Group replies are missing
+
+Check `group_mode` and allowlists:
+
+```toml
+[telegram]
+group_mode = "mention"
+allowed_groups = ["-100123456789"]
+```
+
+### Passive mode seems inactive
+
+Enable it explicitly:
+
+```toml
+[telegram.passive]
+enabled = true
+```
+
+## Reference (Advanced)
+
+Provider runtime and integration code:
+
+- `src/ash/providers/` - provider adapters
+- `src/ash/cli/commands/serve.py` - runtime entrypoint
+- provider logs via `uv run ash logs --component providers`
