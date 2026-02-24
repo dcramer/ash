@@ -34,8 +34,14 @@ class _FakeProvider:
         self.last_goto_timeout_seconds: float | None = None
         self.last_wait_timeout_seconds: float | None = None
 
-    async def start_session(self, *, session_id: str, profile_name: str | None):
-        _ = profile_name
+    async def start_session(
+        self,
+        *,
+        session_id: str,
+        profile_name: str | None,
+        scope_key: str | None = None,
+    ):
+        _ = (profile_name, scope_key)
         return ProviderStartResult(provider_session_id=f"p-{session_id[:8]}")
 
     async def close_session(self, *, provider_session_id: str | None) -> None:
@@ -113,8 +119,14 @@ class _FakeWarmupProvider(_FakeProvider):
 
 
 class _FailingRuntimeProvider(_FakeProvider):
-    async def start_session(self, *, session_id: str, profile_name: str | None):
-        _ = (session_id, profile_name)
+    async def start_session(
+        self,
+        *,
+        session_id: str,
+        profile_name: str | None,
+        scope_key: str | None = None,
+    ):
+        _ = (session_id, profile_name, scope_key)
         raise ValueError("sandbox_browser_launch_failed: cdp_not_ready")
 
 

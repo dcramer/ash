@@ -6,7 +6,6 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -22,7 +21,7 @@ from ash.config.models import (
 )
 from ash.integrations import BrowserIntegration, IntegrationContext, IntegrationRuntime
 from ash.integrations.rpc import active_rpc_server
-from ash.sandbox.executor import ExecutionResult, SandboxExecutor
+from ash.sandbox.executor import ExecutionResult
 
 
 def _runner(env: dict[str, str]) -> CliRunner:
@@ -111,51 +110,55 @@ async def test_browser_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
             state_dir=browser_state,
             sandbox=BrowserSandboxConfig(
                 runtime_required=False,
-                runtime_mode="legacy",
             ),
         ),
     )
+    browser_manager = create_browser_manager(config)
+    provider = browser_manager._providers["sandbox"]
 
-    class _RPCFakeExecutor:
-        async def execute(
-            self,
-            command: str,
-            command_timeout: int | None = None,
-            reuse_container: bool = True,
-            environment: dict[str, str] | None = None,
-            **kwargs: object,
-        ) -> ExecutionResult:
-            if "timeout" in kwargs and isinstance(kwargs["timeout"], (int, type(None))):
-                command_timeout = kwargs["timeout"]
-            _ = (command_timeout, reuse_container, environment)
-            if "nohup chromium" in command:
-                return ExecutionResult(exit_code=0, stdout="23456\n", stderr="")
-            if "/json/version" in command:
-                return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
-            if "/json/list" in command:
-                return ExecutionResult(
-                    exit_code=0, stdout='{"exists": true}\n', stderr=""
-                )
-            if "target_id_missing" in command:
-                return ExecutionResult(
-                    exit_code=0,
-                    stdout='{"target_id":"target-ops"}\n',
-                    stderr="",
-                )
-            if "document.body" in command:
-                return ExecutionResult(
-                    exit_code=0,
-                    stdout='{"text":""}\n',
-                    stderr="",
-                )
-            if "python -c" in command:
-                return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
+    async def _fake_host_command(
+        args: list[str], *, timeout_seconds: int
+    ) -> ExecutionResult:
+        _ = timeout_seconds
+        if args[:3] == ["docker", "image", "inspect"]:
+            return ExecutionResult(exit_code=0, stdout="[]", stderr="")
+        if args[:4] == ["docker", "inspect", "-f", "{{.State.Running}}"]:
+            return ExecutionResult(exit_code=1, stdout="", stderr="missing")
+        if args[:2] == ["docker", "create"]:
+            return ExecutionResult(exit_code=0, stdout="created", stderr="")
+        if args[:2] == ["docker", "start"]:
+            return ExecutionResult(exit_code=0, stdout="started", stderr="")
+        if args[:2] == ["docker", "port"]:
+            return ExecutionResult(exit_code=0, stdout="127.0.0.1:39422\n", stderr="")
+        if args[:3] == ["docker", "rm", "-f"]:
+            return ExecutionResult(exit_code=0, stdout="", stderr="")
+        if args[:2] == ["docker", "exec"]:
             return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
+        return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
 
-    browser_manager = create_browser_manager(
-        config,
-        sandbox_executor=cast(SandboxExecutor, _RPCFakeExecutor()),
-    )
+    async def _noop_wait(*, runtime: object) -> None:
+        _ = runtime
+
+    async def _fake_run_json(
+        *,
+        code: str,
+        args: list[str],
+        deadline_seconds: int,
+        provider_session_id: str | None = None,
+        runtime: object | None = None,
+    ) -> dict[str, object]:
+        _ = (args, deadline_seconds, provider_session_id, runtime)
+        if "/json/list" in code:
+            return {"exists": True}
+        if "target_id_missing" in code:
+            return {"target_id": "target-ops"}
+        if "mode, selector, max_chars" in code:
+            return {"text": ""}
+        return {}
+
+    provider._execute_host_command = _fake_host_command  # type: ignore[assignment]
+    provider._wait_for_cdp_ready = _noop_wait  # type: ignore[assignment]
+    provider._run_json = _fake_run_json  # type: ignore[assignment]
     components = SimpleNamespace(browser_manager=browser_manager)
     context = IntegrationContext(
         config=config,

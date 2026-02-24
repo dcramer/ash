@@ -38,6 +38,7 @@ class BrowserProvider(Protocol):
         *,
         session_id: str,
         profile_name: str | None,
+        scope_key: str | None = None,
     ) -> ProviderStartResult: ...
 
     async def close_session(self, *, provider_session_id: str | None) -> None: ...

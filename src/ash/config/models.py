@@ -232,6 +232,7 @@ class BrowserSandboxConfig(BaseModel):
 
     headless: bool = True
     browser_channel: Literal["chromium"] = "chromium"
+    # Deprecated compatibility option; "legacy" is coerced to "dedicated".
     runtime_mode: Literal["legacy", "dedicated"] = "dedicated"
     container_image: str = "ash-sandbox-browser:latest"
     container_name_prefix: str = "ash-browser-"
@@ -239,6 +240,13 @@ class BrowserSandboxConfig(BaseModel):
     runtime_required: bool = True
     runtime_warmup_on_start: bool = True
     runtime_restart_attempts: int = 1
+
+    @field_validator("runtime_mode", mode="before")
+    @classmethod
+    def _coerce_legacy_runtime_mode(cls, value: object) -> str:
+        if isinstance(value, str) and value.strip().lower() == "legacy":
+            return "dedicated"
+        return str(value) if isinstance(value, str) else "dedicated"
 
 
 class BrowserKernelConfig(BaseModel):

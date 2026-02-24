@@ -345,6 +345,7 @@ class BrowserManager:
             provider.start_session(
                 session_id=session_id,
                 profile_name=profile_name,
+                scope_key=effective_user_id,
             ),
         )
 

@@ -1,170 +1,51 @@
 from __future__ import annotations
 
-import asyncio
-from typing import cast
+from typing import Any
+
+import pytest
 
 from ash.browser.providers.sandbox import SandboxBrowserProvider
-from ash.sandbox.executor import ExecutionResult, SandboxExecutor
+from ash.sandbox.executor import ExecutionResult
 
 
-class _FakeExecutor:
+class _HostDockerStub:
     def __init__(self) -> None:
-        self.commands: list[str] = []
-        self._extract_calls = 0
+        self.calls: list[list[str]] = []
+        self.containers: dict[str, bool] = {}
 
-    async def execute(
-        self,
-        command: str,
-        deadline_seconds: int | None = None,
-        reuse_container: bool = True,
-        environment: dict[str, str] | None = None,
-        **kwargs,
-    ) -> ExecutionResult:
-        _ = (deadline_seconds, reuse_container, environment, kwargs)
-        self.commands.append(command)
-
-        if "nohup chromium" in command:
-            return ExecutionResult(exit_code=0, stdout="12345\n", stderr="")
-        if "/json/version" in command:
-            return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
-        if "python -c" in command:
-            if "/json/list" in command:
-                return ExecutionResult(
-                    exit_code=0,
-                    stdout='{"exists": true}\n',
-                    stderr="",
-                )
-            if "target_id_missing" in command:
-                return ExecutionResult(
-                    exit_code=0,
-                    stdout='{"target_id":"target-s1"}\n',
-                    stderr="",
-                )
-            if "page.goto(" in command:
-                return ExecutionResult(
-                    exit_code=0,
-                    stdout='{"url":"https://example.com","title":"Example","html":"<html></html>"}\n',
-                    stderr="",
-                )
-            if "mode, selector, max_chars" in command:
-                self._extract_calls += 1
-                if self._extract_calls == 1:
-                    return ExecutionResult(
-                        exit_code=0, stdout='{"text":"Hello"}\n', stderr=""
-                    )
-                return ExecutionResult(
-                    exit_code=0, stdout='{"title":"Example"}\n', stderr=""
-                )
-            if "page.screenshot" in command:
-                return ExecutionResult(
-                    exit_code=0,
-                    stdout='{"image_b64":"aGVsbG8="}\n',
-                    stderr="",
-                )
+    async def run(self, args: list[str], *, timeout_seconds: int) -> ExecutionResult:
+        _ = timeout_seconds
+        self.calls.append(args)
+        if args[:3] == ["docker", "image", "inspect"]:
+            return ExecutionResult(exit_code=0, stdout="[]", stderr="")
+        if args[:4] == ["docker", "inspect", "-f", "{{.State.Running}}"]:
+            name = args[4]
+            if name not in self.containers:
+                return ExecutionResult(exit_code=1, stdout="", stderr="missing")
+            return ExecutionResult(
+                exit_code=0,
+                stdout=("true" if self.containers[name] else "false"),
+                stderr="",
+            )
+        if args[:2] == ["docker", "create"]:
+            name = args[args.index("--name") + 1]
+            self.containers[name] = False
+            return ExecutionResult(exit_code=0, stdout=name, stderr="")
+        if args[:2] == ["docker", "start"]:
+            self.containers[args[2]] = True
+            return ExecutionResult(exit_code=0, stdout=args[2], stderr="")
+        if args[:2] == ["docker", "port"]:
+            return ExecutionResult(exit_code=0, stdout="127.0.0.1:39422\n", stderr="")
+        if args[:3] == ["docker", "rm", "-f"]:
+            self.containers.pop(args[3], None)
+            return ExecutionResult(exit_code=0, stdout="", stderr="")
+        if args[:2] == ["docker", "exec"]:
             return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
-        return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
-
-
-async def test_sandbox_provider_uses_executor_for_full_flow() -> None:
-    executor = _FakeExecutor()
-    provider = SandboxBrowserProvider(
-        executor=cast(SandboxExecutor, executor),
-        runtime_mode="legacy",
-    )
-
-    started = await provider.start_session(session_id="s1", profile_name=None)
-    assert started.provider_session_id == "s1"
-
-    goto = await provider.goto(
-        provider_session_id="s1",
-        url="https://example.com",
-        timeout_seconds=2.0,
-    )
-    assert goto.url == "https://example.com"
-    assert goto.title == "Example"
-
-    extract_text = await provider.extract(
-        provider_session_id="s1",
-        html=None,
-        mode="text",
-        selector=None,
-        max_chars=100,
-    )
-    assert extract_text.data["text"] == "Hello"
-
-    extract_title = await provider.extract(
-        provider_session_id="s1",
-        html=None,
-        mode="title",
-        selector=None,
-        max_chars=100,
-    )
-    assert extract_title.data["title"] == "Example"
-
-    await provider.click(provider_session_id="s1", selector="#a")
-    await provider.type(
-        provider_session_id="s1",
-        selector="#q",
-        text="hello",
-        clear_first=True,
-    )
-    await provider.wait_for(
-        provider_session_id="s1",
-        selector="#ready",
-        timeout_seconds=1.0,
-    )
-
-    shot = await provider.screenshot(provider_session_id="s1")
-    assert shot.mime_type == "image/png"
-    assert shot.image_bytes == b"hello"
-
-    await provider.close_session(provider_session_id="s1")
-    assert any("nohup chromium" in cmd for cmd in executor.commands)
-    launch_cmd = next(cmd for cmd in executor.commands if "nohup chromium" in cmd)
-    assert "--disable-component-update" in launch_cmd
-    assert "--disable-background-networking" in launch_cmd
-    assert "--disable-features=Translate,MediaRouter" in launch_cmd
-    assert "rm -rf " in launch_cmd and "/profile/WidevineCdm" in launch_cmd
-    assert "SingletonLock" in launch_cmd
-    assert "SingletonCookie" in launch_cmd
-    assert "SingletonSocket" in launch_cmd
-    assert any("/json/version" in cmd for cmd in executor.commands)
-    assert any("kill 12345" in cmd for cmd in executor.commands)
-
-
-async def test_sandbox_provider_rehydrates_session_after_restart_like_state() -> None:
-    executor = _FakeExecutor()
-    provider = SandboxBrowserProvider(
-        executor=cast(SandboxExecutor, executor),
-        runtime_mode="legacy",
-    )
-
-    started = await provider.start_session(session_id="s1", profile_name=None)
-    assert started.provider_session_id == "s1"
-    provider._sessions.clear()
-
-    extract_text = await provider.extract(
-        provider_session_id="s1",
-        html=None,
-        mode="text",
-        selector=None,
-        max_chars=100,
-    )
-    assert extract_text.data["text"] == "Hello"
-
-
-async def test_sandbox_provider_requires_executor() -> None:
-    provider = SandboxBrowserProvider(executor=None, runtime_mode="legacy")
-    try:
-        await provider.start_session(session_id="s1", profile_name=None)
-    except ValueError as e:
-        assert "sandbox_executor_required" in str(e)
-    else:
-        raise AssertionError("expected sandbox_executor_required")
+        return ExecutionResult(exit_code=0, stdout="", stderr="")
 
 
 def test_parse_json_output_ignores_noise() -> None:
-    provider = SandboxBrowserProvider(executor=None, runtime_mode="legacy")
+    provider = SandboxBrowserProvider(executor=None)
     payload = provider._parse_json_output(
         '(node:1) warning\nnot json\n{"ok": true, "value": 1}'
     )
@@ -172,85 +53,146 @@ def test_parse_json_output_ignores_noise() -> None:
     assert payload["value"] == 1
 
 
-async def test_sandbox_provider_times_out_hung_executor() -> None:
-    class _HangingExecutor:
-        async def execute(
-            self,
-            command: str,
-            command_timeout: int | None = None,
-            reuse_container: bool = True,
-            environment: dict[str, str] | None = None,
-            **kwargs,
-        ) -> ExecutionResult:
-            _ = (command, command_timeout, reuse_container, environment, kwargs)
-            await asyncio.sleep(60)
-            return ExecutionResult(exit_code=0, stdout="", stderr="")
+@pytest.mark.asyncio
+async def test_sandbox_provider_scopes_provider_session_id_and_container_name() -> None:
+    stub = _HostDockerStub()
+    provider = SandboxBrowserProvider(container_name_prefix="ash-browser-")
+    provider._execute_host_command = stub.run  # type: ignore[assignment]
+    provider._wait_for_cdp_ready = _noop_wait  # type: ignore[assignment]
+    provider._run_json = _fake_run_json  # type: ignore[assignment]
 
-    provider = SandboxBrowserProvider(
-        executor=cast(SandboxExecutor, _HangingExecutor()),
-        runtime_mode="legacy",
+    started = await provider.start_session(
+        session_id="s1",
+        profile_name=None,
+        scope_key="user-123",
     )
-    try:
+    assert started.provider_session_id is not None
+    assert started.provider_session_id.endswith(":s1")
+
+    container_name = next(
+        args[args.index("--name") + 1]
+        for args in stub.calls
+        if args[:2] == ["docker", "create"]
+    )
+    assert container_name.startswith("ash-browser-")
+    assert len(container_name) <= 63
+
+
+@pytest.mark.asyncio
+async def test_sandbox_provider_full_flow_with_dedicated_runtime() -> None:
+    stub = _HostDockerStub()
+    provider = SandboxBrowserProvider()
+    provider._execute_host_command = stub.run  # type: ignore[assignment]
+    provider._wait_for_cdp_ready = _noop_wait  # type: ignore[assignment]
+    provider._run_json = _fake_run_json  # type: ignore[assignment]
+
+    started = await provider.start_session(
+        session_id="s1",
+        profile_name=None,
+        scope_key="user-1",
+    )
+    assert started.provider_session_id is not None
+    session_id = started.provider_session_id
+
+    goto = await provider.goto(
+        provider_session_id=session_id,
+        url="https://example.com",
+        timeout_seconds=2.0,
+    )
+    assert goto.url == "https://example.com"
+    assert goto.title == "Example"
+
+    extracted = await provider.extract(
+        provider_session_id=session_id,
+        html=None,
+        mode="title",
+        selector=None,
+        max_chars=100,
+    )
+    assert extracted.data["title"] == "Example"
+
+    shot = await provider.screenshot(provider_session_id=session_id)
+    assert shot.mime_type == "image/png"
+    assert shot.image_bytes == b"hello"
+
+    await provider.close_session(provider_session_id=session_id)
+    assert any(args[:3] == ["docker", "rm", "-f"] for args in stub.calls)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_provider_rehydrates_session_after_restart_like_state() -> None:
+    stub = _HostDockerStub()
+    provider = SandboxBrowserProvider()
+    provider._execute_host_command = stub.run  # type: ignore[assignment]
+    provider._wait_for_cdp_ready = _noop_wait  # type: ignore[assignment]
+    provider._run_json = _fake_run_json  # type: ignore[assignment]
+
+    started = await provider.start_session(
+        session_id="s1",
+        profile_name=None,
+        scope_key="user-1",
+    )
+    session_id = started.provider_session_id
+    assert session_id is not None
+    provider._sessions.clear()
+
+    extracted = await provider.extract(
+        provider_session_id=session_id,
+        html=None,
+        mode="text",
+        selector=None,
+        max_chars=100,
+    )
+    assert extracted.data["text"] == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_provider_times_out_hung_docker_exec() -> None:
+    async def _host_timeout(
+        args: list[str], *, timeout_seconds: int
+    ) -> ExecutionResult:
+        _ = (args, timeout_seconds)
+        return ExecutionResult(exit_code=-1, stdout="", stderr="", timed_out=True)
+
+    provider = SandboxBrowserProvider()
+    provider._execute_host_command = _host_timeout  # type: ignore[assignment]
+    provider._runtime = type("R", (), {"container_name": "ash-browser-timeout"})()
+    with pytest.raises(ValueError, match="sandbox_browser_action_timeout:test"):
         await provider._execute_sandbox_command(
             "echo hi",
             phase="test",
             timeout_seconds=1,
             reuse_container=True,
+            runtime=provider._runtime,
         )
-    except ValueError as e:
-        assert "sandbox_browser_action_timeout:test" in str(e)
-    else:
-        raise AssertionError("expected timeout error")
 
 
-async def test_sandbox_provider_falls_back_to_tmp_runtime_dir() -> None:
-    class _DirProbeExecutor:
-        def __init__(self) -> None:
-            self.commands: list[str] = []
+async def _noop_wait(*, runtime: Any) -> None:
+    _ = runtime
 
-        async def execute(
-            self,
-            command: str,
-            command_timeout: int | None = None,
-            reuse_container: bool = True,
-            environment: dict[str, str] | None = None,
-            **kwargs,
-        ) -> ExecutionResult:
-            _ = (command_timeout, reuse_container, environment, kwargs)
-            self.commands.append(command)
-            if (
-                "test -w" in command
-                and "/home/sandbox/.cache/ash-browser/runtime" in command
-            ):
-                return ExecutionResult(
-                    exit_code=1, stdout="", stderr="permission denied"
-                )
-            if "test -w" in command and "/tmp/ash-browser/runtime" in command:  # noqa: S108
-                return ExecutionResult(exit_code=0, stdout="", stderr="")
-            if "nohup chromium" in command:
-                return ExecutionResult(exit_code=0, stdout="12345\n", stderr="")
-            if "/json/version" in command:
-                return ExecutionResult(exit_code=0, stdout="ok\n", stderr="")
-            if "python -c" in command:
-                if "/json/list" in command:
-                    return ExecutionResult(
-                        exit_code=0, stdout='{"exists": true}\n', stderr=""
-                    )
-                if "target_id_missing" in command:
-                    return ExecutionResult(
-                        exit_code=0, stdout='{"target_id":"target-s1"}\n', stderr=""
-                    )
-                return ExecutionResult(exit_code=0, stdout="{}\n", stderr="")
-            return ExecutionResult(exit_code=0, stdout="", stderr="")
 
-    executor = _DirProbeExecutor()
-    provider = SandboxBrowserProvider(
-        executor=cast(SandboxExecutor, executor),
-        runtime_mode="legacy",
-    )
-    started = await provider.start_session(session_id="s1", profile_name=None)
-    assert started.provider_session_id == "s1"
-    assert any(
-        "--user-data-dir=/tmp/ash-browser/runtime/profile" in c
-        for c in executor.commands
-    )
+async def _fake_run_json(
+    *,
+    code: str,
+    args: list[str],
+    deadline_seconds: int,
+    provider_session_id: str | None = None,
+    runtime: Any | None = None,
+) -> dict[str, Any]:
+    _ = (args, deadline_seconds, provider_session_id, runtime)
+    if "target_id_missing" in code:
+        return {"target_id": "target-s1"}
+    if "page.goto(" in code:
+        return {
+            "url": "https://example.com",
+            "title": "Example",
+            "html": "<html></html>",
+        }
+    if "mode, selector, max_chars" in code:
+        mode = args[2] if len(args) > 2 else "text"
+        return {"title": "Example"} if mode == "title" else {"text": "Hello"}
+    if "page.screenshot" in code:
+        return {"image_b64": "aGVsbG8="}
+    if "/json/list" in code:
+        return {"exists": True}
+    return {}

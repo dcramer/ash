@@ -70,8 +70,9 @@ class KernelBrowserProvider:
         *,
         session_id: str,
         profile_name: str | None,
+        scope_key: str | None = None,
     ) -> ProviderStartResult:
-        _ = profile_name
+        _ = (profile_name, scope_key)
         try:
             await asyncio.to_thread(self._blocking_start_session, session_id=session_id)
         except HTTPError as e:

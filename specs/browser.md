@@ -26,6 +26,8 @@ It does not own:
 - `runtime_required` (bool): deprecated compatibility flag; sandbox-only runtime is enforced regardless of value.
 - `runtime_warmup_on_start` (bool): warm browser runtime during integration startup.
 - `runtime_restart_attempts` (int): bounded restart attempts when runtime becomes unhealthy.
+- `container_image` (string): dedicated browser image used by the sandbox provider.
+- `container_name_prefix` (string): prefix for scope-hashed dedicated container names.
 
 ## Hard Requirements
 
@@ -42,6 +44,8 @@ It does not own:
    - CDP websocket handshake readiness
 8. CDP startup failures MUST include actionable diagnostics (phase + process/log details).
 9. Runtime/doctor guidance MUST NOT document host-runtime bypasses for sandbox provider.
+10. Sandbox browser runtime MUST be dedicated-container only; legacy shared-executor Chromium launch paths are unsupported.
+11. Dedicated browser containers MUST be scope-keyed (effective user scope) so independent scopes do not share a runtime container.
 
 ## Integration Contract
 
@@ -103,3 +107,5 @@ Expected failure semantics:
 - [x] Cross-provider session fallback is rejected.
 - [x] Retention policies are enforced and logged.
 - [x] Docs match actual runtime behavior and contain no host-bypass guidance.
+- [x] Dedicated browser runtime uses scope-keyed container naming.
+- [x] Legacy shared-executor browser runtime path removed from active behavior.
