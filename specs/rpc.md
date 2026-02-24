@@ -16,6 +16,8 @@ Files: src/ash/rpc/__init__.py, src/ash/rpc/server.py
 - Set socket permissions to owner-only (0o600)
 - Clean up socket file on server stop
 - Support retry on transient connection errors in client
+- Require `context_token` on all RPC calls; reject missing/invalid tokens
+- Derive identity/routing params (`user_id`, `chat_id`, etc.) from verified token claims
 
 ### SHOULD
 
@@ -97,7 +99,7 @@ def rpc_call(
     max_retries: int = 3,
     retry_delay: float = 0.5,
 ) -> Any:
-    """Make RPC call to host from sandbox."""
+    """Make RPC call to host from sandbox (injects ASH_CONTEXT_TOKEN)."""
 
 class RPCError(Exception):
     code: int
@@ -113,6 +115,10 @@ class RPCError(Exception):
 | `memory.list` | limit, include_expired, user_id, chat_id | list of memories |
 | `memory.delete` | memory_id | success boolean |
 
+Identity/routing parameters are populated server-side from `context_token`.
+Caller-provided values for `user_id`, `chat_id`, `chat_type`, `session_key`,
+`thread_id`, `source_username`, and related fields are ignored.
+
 ## Message Format
 
 ```
@@ -126,7 +132,11 @@ Example request:
 {
   "jsonrpc": "2.0",
   "method": "memory.search",
-  "params": {"query": "user preferences", "limit": 5},
+  "params": {
+    "query": "user preferences",
+    "limit": 5,
+    "context_token": "<signed-token>"
+  },
   "id": 1
 }
 ```
@@ -145,6 +155,8 @@ Example response:
 Default socket path: `/run/ash/rpc.sock`
 
 Override via environment: `ASH_RPC_SOCKET`
+
+Authentication context token environment: `ASH_CONTEXT_TOKEN`
 
 ## Behaviors
 

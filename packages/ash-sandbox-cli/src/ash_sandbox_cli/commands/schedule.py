@@ -1,13 +1,12 @@
 """Schedule management commands for sandboxed CLI."""
 
-import os
 import re
 from datetime import UTC, datetime
 from typing import Annotated
 
 import typer
 
-from ash_sandbox_cli.rpc import RPCError, rpc_call
+from ash_sandbox_cli.rpc import RPCError, get_context_params, rpc_call
 
 app = typer.Typer(
     name="schedule",
@@ -17,15 +16,15 @@ app = typer.Typer(
 
 
 def _get_context() -> dict[str, str]:
-    """Get routing context from environment variables."""
+    """Get routing context from signed token claims."""
+    context = get_context_params()
     return {
-        "session_id": os.environ.get("ASH_SESSION_ID", ""),
-        "user_id": os.environ.get("ASH_USER_ID", ""),
-        "chat_id": os.environ.get("ASH_CHAT_ID", ""),
-        "chat_title": os.environ.get("ASH_CHAT_TITLE", ""),
-        "provider": os.environ.get("ASH_PROVIDER", ""),
-        "username": os.environ.get("ASH_USERNAME", ""),
-        "timezone": os.environ.get("ASH_TIMEZONE", "UTC"),
+        "user_id": context.get("user_id") or "",
+        "chat_id": context.get("chat_id") or "",
+        "chat_title": context.get("chat_title") or "",
+        "provider": context.get("provider") or "",
+        "username": context.get("username") or "",
+        "timezone": context.get("timezone") or "UTC",
     }
 
 
@@ -34,7 +33,7 @@ def _require_routing_context() -> dict[str, str]:
     ctx = _get_context()
     if not ctx["provider"] or not ctx["chat_id"]:
         typer.echo(
-            "Error: Scheduling requires a provider context (ASH_PROVIDER and ASH_CHAT_ID). "
+            "Error: Scheduling requires provider and chat routing context from ASH_CONTEXT_TOKEN. "
             "Cannot schedule tasks from CLI.",
             err=True,
         )

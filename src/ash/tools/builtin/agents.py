@@ -164,12 +164,14 @@ class UseAgentTool(Tool):
                 voice=self._voice,
                 shared_prompt=self._subagent_context,
             )
+            inherited_env = dict(context.env)
         else:
             agent_context = AgentContext(
                 input_data=extra_input,
                 voice=self._voice,
                 shared_prompt=self._subagent_context,
             )
+            inherited_env = {}
 
         # Handle resume from checkpoint
         resume_from: CheckpointState | None = None
@@ -220,6 +222,7 @@ class UseAgentTool(Tool):
                 checkpoint_response=checkpoint_response,
                 session_manager=session_manager,
                 tool_use_id=tool_use_id,
+                environment=inherited_env,
             )
 
         # Interactive path: build StackFrame and raise ChildActivated
@@ -230,6 +233,7 @@ class UseAgentTool(Tool):
             agent_context,
             session_manager=session_manager,
             tool_use_id=tool_use_id,
+            environment=inherited_env,
         )
 
     async def _execute_batch(
@@ -243,12 +247,14 @@ class UseAgentTool(Tool):
         checkpoint_response: str | None = None,
         session_manager: Any = None,
         tool_use_id: str | None = None,
+        environment: dict[str, str] | None = None,
     ) -> ToolResult:
         """Execute agent in batch mode (checkpoint/passthrough agents)."""
         result = await self._executor.execute(
             agent,
             message,
             agent_context,
+            environment=environment,
             resume_from=resume_from,
             user_response=checkpoint_response,
             session_manager=session_manager,
@@ -285,6 +291,7 @@ class UseAgentTool(Tool):
         *,
         session_manager: Any = None,
         tool_use_id: str | None = None,
+        environment: dict[str, str] | None = None,
     ) -> ToolResult:
         """Build a StackFrame and raise ChildActivated for interactive execution."""
         from ash.agents.types import ChildActivated, StackFrame
@@ -335,6 +342,7 @@ class UseAgentTool(Tool):
             system_prompt=system_prompt,
             context=agent_context,
             model=resolved_model,
+            environment=environment,
             max_iterations=agent_config.max_iterations,
             effective_tools=agent_config.get_effective_tools(),
             voice=self._voice,

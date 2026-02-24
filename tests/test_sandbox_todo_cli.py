@@ -7,14 +7,28 @@ from unittest.mock import patch
 from ash_sandbox_cli.commands.todo import app
 from typer.testing import CliRunner
 
+from ash.context_token import get_default_context_token_service
+
+
+def _context_token(
+    *,
+    effective_user_id: str = "user-1",
+    chat_id: str | None = "chat-1",
+    provider: str | None = "telegram",
+    timezone: str | None = "UTC",
+) -> str:
+    return get_default_context_token_service().issue(
+        effective_user_id=effective_user_id,
+        chat_id=chat_id,
+        provider=provider,
+        timezone=timezone,
+    )
+
 
 def _runner() -> CliRunner:
     return CliRunner(
         env={
-            "ASH_USER_ID": "user-1",
-            "ASH_CHAT_ID": "chat-1",
-            "ASH_PROVIDER": "telegram",
-            "ASH_TIMEZONE": "UTC",
+            "ASH_CONTEXT_TOKEN": _context_token(),
         }
     )
 

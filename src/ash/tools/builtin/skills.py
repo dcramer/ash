@@ -219,12 +219,14 @@ class UseSkillTool(Tool):
         self,
         skill: SkillDefinition,
         skill_config: Any,
+        *,
+        base_env: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Build environment dict for skill execution."""
+        env: dict[str, str] = dict(base_env or {})
         if not skill_config:
-            return {}
+            return env
         config_env = skill_config.get_env_vars()
-        env: dict[str, str] = {}
         for var_name in skill.env:
             if var_name in config_env:
                 env[var_name] = config_env[var_name]
@@ -237,6 +239,70 @@ class UseSkillTool(Tool):
                     },
                 )
         return env
+
+    def _resolve_allowed_chat_ids(self, skill_config: Any) -> set[str]:
+        """Resolve effective allowed chat IDs (per-skill override -> defaults)."""
+        allowlist_value: Any = None
+
+        if skill_config and getattr(skill_config, "allow_chat_ids", None) is not None:
+            allowlist_value = skill_config.allow_chat_ids
+        else:
+            defaults = getattr(self._config, "skill_defaults", None)
+            if defaults is not None:
+                allowlist_value = getattr(defaults, "allow_chat_ids", None)
+
+        if allowlist_value is None:
+            raw_allowlist: list[str] = []
+        elif isinstance(allowlist_value, str):
+            raw_allowlist = [allowlist_value]
+        elif isinstance(allowlist_value, (list, tuple, set)):
+            raw_allowlist = [str(item) for item in allowlist_value]
+        else:
+            raw_allowlist = []
+
+        return {
+            str(chat_id).strip() for chat_id in raw_allowlist if str(chat_id).strip()
+        }
+
+    def _validate_skill_access(
+        self,
+        skill: SkillDefinition,
+        skill_config: Any,
+        context: ToolContext | None,
+    ) -> str | None:
+        """Return an access-denied error string when skill invocation is blocked."""
+        # Architecture/spec reference: specs/skills.md
+        chat_id = (context.chat_id if context else None) or None
+        chat_type_raw = context.metadata.get("chat_type") if context else None
+        chat_type = str(chat_type_raw).strip().lower() if chat_type_raw else None
+
+        allowed_chat_types = [t.strip().lower() for t in skill.allowed_chat_types if t]
+        if skill.sensitive and not allowed_chat_types:
+            allowed_chat_types = ["private"]
+
+        if allowed_chat_types:
+            if not chat_type:
+                return (
+                    f"Skill '{skill.name}' requires chat context and is only available in: "
+                    f"{', '.join(sorted(set(allowed_chat_types)))}"
+                )
+            if chat_type not in allowed_chat_types:
+                return (
+                    f"Skill '{skill.name}' is only available in: "
+                    f"{', '.join(sorted(set(allowed_chat_types)))}"
+                )
+
+        allowed_chat_ids = self._resolve_allowed_chat_ids(skill_config)
+        if allowed_chat_ids:
+            normalized_chat_id = str(chat_id).strip() if chat_id else ""
+            if not normalized_chat_id or normalized_chat_id not in allowed_chat_ids:
+                return (
+                    f"Skill '{skill.name}' is not enabled for this chat "
+                    "(configure [skills.defaults].allow_chat_ids or "
+                    f"[skills.{skill.name}].allow_chat_ids)."
+                )
+
+        return None
 
     async def execute(
         self,
@@ -269,6 +335,10 @@ class UseSkillTool(Tool):
         if skill_config and not skill_config.enabled:
             return ToolResult.error(f"Skill '{skill_name}' is disabled in config")
 
+        access_error = self._validate_skill_access(skill, skill_config, context)
+        if access_error:
+            return ToolResult.error(access_error)
+
         if skill.env:
             config_env = skill_config.get_env_vars() if skill_config else {}
             missing = [var for var in skill.env if var not in config_env]
@@ -280,7 +350,12 @@ class UseSkillTool(Tool):
                     + "\n".join(f'{var} = "your-value-here"' for var in missing)
                 )
 
-        env = self._build_skill_environment(skill, skill_config)
+        inherited_env = dict(context.env) if context else {}
+        env = self._build_skill_environment(
+            skill,
+            skill_config,
+            base_env=inherited_env,
+        )
         model_override = skill_config.model if skill_config else None
         agent = SkillAgent(skill, model_override=model_override)
 

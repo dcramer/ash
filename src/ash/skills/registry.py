@@ -32,6 +32,8 @@ KNOWN_FRONTMATTER_FIELDS = {
     "description",
     "authors",
     "rationale",
+    "sensitive",
+    "access",
     "allowed_tools",
     "triggers",
     "env",
@@ -104,6 +106,24 @@ def _coerce_bool(name: str, value: Any, *, default: bool = False) -> bool:
         if lowered in {"false", "no", "0"}:
             return False
     raise ValueError(f"Field '{name}' must be a boolean")
+
+
+def _coerce_chat_types(name: str, value: Any) -> list[str]:
+    items = _coerce_str_list(name, value)
+    return [item.lower() for item in items if item]
+
+
+def _coerce_access_chat_types(value: Any) -> list[str]:
+    """Coerce optional access frontmatter to allowed chat types."""
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        raise ValueError("Field 'access' must be a mapping")
+    unknown = set(value.keys()) - {"chat_types"}
+    if unknown:
+        unknown_list = ", ".join(sorted(unknown))
+        raise ValueError(f"Field 'access' has unknown keys: {unknown_list}")
+    return _coerce_chat_types("access.chat_types", value.get("chat_types"))
 
 
 class SkillRegistry:
@@ -278,6 +298,8 @@ class SkillRegistry:
             authors=_coerce_str_list("authors", data.get("authors")),
             rationale=_coerce_optional_str("rationale", data.get("rationale")),
             opt_in=_coerce_bool("opt_in", data.get("opt_in"), default=False),
+            sensitive=_coerce_bool("sensitive", data.get("sensitive"), default=False),
+            allowed_chat_types=_coerce_access_chat_types(data.get("access")),
             source_type=source_type,
             source_repo=source_repo,
             source_ref=source_ref,

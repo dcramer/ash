@@ -127,15 +127,7 @@ The sandbox receives these from the host via container environment:
 
 | Variable | Source | Purpose |
 |----------|--------|---------|
-| `ASH_SESSION_ID` | Current session | Session context |
-| `ASH_USER_ID` | Message sender | Ownership checks |
-| `ASH_CHAT_ID` | Current chat | Response routing |
-| `ASH_CHAT_TITLE` | Current chat | Display name |
-| `ASH_PROVIDER` | Current provider | Response routing |
-| `ASH_USERNAME` | Message sender | @mention name |
-| `ASH_DISPLAY_NAME` | Message sender | Human name |
-| `ASH_TIMEZONE` | Config | Default timezone for times |
-| `ASH_MESSAGE_ID` | Current message | Message context |
+| `ASH_CONTEXT_TOKEN` | Host-signed routing claims | Required RPC auth context |
 | `ASH_RPC_SOCKET` | Host RPC | Unix socket path |
 | `ASH_MOUNT_PREFIX` | Config | Path prefix for mounts |
 
@@ -148,12 +140,86 @@ Agent → bash tool → ash-sb command → RPC call → Host process → Subsyst
 ```
 
 All `ash-sb` commands are thin wrappers that:
-1. Read routing context from environment variables
+1. Read routing context from `ASH_CONTEXT_TOKEN` claims
 2. Validate inputs locally (time parsing, cron validation)
-3. Call the host via RPC over Unix socket
+3. Call the host via RPC over Unix socket (with signed `ASH_CONTEXT_TOKEN`)
 4. Format the RPC response for agent consumption
 
 No business logic lives in the sandbox CLI. It's a presentation layer.
+
+## Security Model
+
+`ash-sb` treats the sandbox process as untrusted and enforces identity/routing at
+the host RPC boundary.
+
+### Threat Model
+
+- Prompt injection can cause arbitrary CLI arguments and local env mutations.
+- Sandbox code can attempt to spoof `user_id`, `chat_id`, `provider`, or thread fields.
+- Multiple users may invoke the same skill/tool surface, so context mix-ups are data leaks.
+
+### Trust Boundary
+
+1. Host issues a short-lived signed `ASH_CONTEXT_TOKEN` per turn.
+2. Sandbox CLI must include the token on every RPC request.
+3. Host verifies token signature and time claims.
+4. Host replaces caller-supplied identity/routing params with verified claims.
+
+### Required Token Context (No Legacy Fallback)
+
+- `ASH_CONTEXT_TOKEN` is required for sandbox RPC calls.
+- `ash-sb` context helpers read routing data from token claims only.
+- Legacy routing env vars (`ASH_USER_ID`, `ASH_CHAT_ID`, etc.) are not a trusted path.
+
+This prevents context spoofing by untrusted prompt output unless an attacker can
+forge a valid token.
+
+### Verified Claims Projection
+
+After token verification, RPC methods receive trusted values for:
+
+- `user_id` (`sub`)
+- `chat_id`, `chat_type`, `chat_title`
+- `provider` (except `browser.*`, where `provider` selects browser backend)
+- `session_key`, `thread_id`
+- `source_username`, `source_display_name`
+- `message_id`, `current_user_message`
+- `timezone`
+
+Caller-provided values for these fields are ignored or cleared.
+
+### Skill Access Layering
+
+Token verification establishes *who/where* the call is from. Skill policy adds
+*whether this skill is allowed*:
+
+- `sensitive: true` skills default to DM-only (`private`) unless overridden by
+  `access.chat_types`.
+- Chat allowlists are configured in `config.toml` via:
+  - `[skills.defaults].allow_chat_ids`
+  - `[skills.<name>].allow_chat_ids` (per-skill override)
+
+### Browser Bridge Alignment
+
+Browser runtime uses the same pattern: untrusted execution side + authenticated
+host bridge (bearer token) + scope-keyed per-user runtime containers.
+
+Shared security principle across both systems:
+- Never trust caller-supplied identity/routing fields.
+- Require host-issued credentials for privileged operations.
+
+### Operational Requirements
+
+- Set a stable high-entropy `ASH_CONTEXT_TOKEN_SECRET` in host runtime.
+- Keep token TTL short (default 300s; leeway 30s).
+- Do not log raw context tokens.
+- Key user data by verified identity/scope claims, not request literals.
+
+### Non-Goals and Limits
+
+- Tokens are bearer credentials; leakage enables replay until expiry.
+- Token checks do not replace subsystem authorization checks.
+- No token revocation list today; rotation/restart invalidates outstanding tokens.
 
 ## Verification
 

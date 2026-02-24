@@ -50,6 +50,12 @@ class SkillDefinition:
     # Opt-in flag (bundled skills can require explicit enablement)
     opt_in: bool = False  # If True, requires [skills.<name>] enabled = true
 
+    # Access control metadata
+    sensitive: bool = False  # If True, defaults to DM-only unless chat types set
+    allowed_chat_types: list[str] = field(
+        default_factory=list
+    )  # Empty = all chat types
+
     # Subagent execution settings
     env: list[str] = field(default_factory=list)  # Env vars to inject from config
     packages: list[str] = field(default_factory=list)  # System packages (apt)

@@ -14,6 +14,7 @@ from ash.config.models import (
     ProviderConfig,
     SandboxConfig,
     ServerConfig,
+    SkillConfig,
     TelegramConfig,
     TodoConfig,
 )
@@ -553,3 +554,38 @@ class TestSkillAutoSyncConfig:
             }
         )
         assert config.skill_update_interval_minutes == 120
+
+    def test_parses_skill_defaults_allow_chat_ids(self):
+        config = AshConfig.model_validate(
+            {
+                "models": {"default": {"provider": "openai", "model": "test"}},
+                "skills": {
+                    "defaults": {"allow_chat_ids": ["dm-1", "dm-2"]},
+                    "research": {"enabled": True},
+                },
+            }
+        )
+        assert config.skill_defaults.allow_chat_ids == ["dm-1", "dm-2"]
+        assert config.skills["research"].allow_chat_ids is None
+
+    def test_per_skill_allow_chat_ids_override(self):
+        config = AshConfig.model_validate(
+            {
+                "models": {"default": {"provider": "openai", "model": "test"}},
+                "skills": {
+                    "defaults": {"allow_chat_ids": ["dm-default"]},
+                    "research": {"allow_chat_ids": ["dm-team"]},
+                },
+            }
+        )
+        assert config.skill_defaults.allow_chat_ids == ["dm-default"]
+        assert config.skills["research"].allow_chat_ids == ["dm-team"]
+
+    def test_skill_config_get_env_vars_ignores_allow_chat_ids(self):
+        cfg = SkillConfig.model_validate(
+            {
+                "API_KEY": "secret",
+                "allow_chat_ids": ["dm-1"],
+            }
+        )
+        assert cfg.get_env_vars() == {"API_KEY": "secret"}

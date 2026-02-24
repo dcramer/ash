@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ash.agents.types import ChildActivated
+from ash.context_token import get_default_context_token_service
 from ash.core.compaction import CompactionSettings, compact_messages, should_compact
 from ash.core.context import ContextGatherer
 from ash.core.prompt import (
@@ -92,33 +93,20 @@ def _build_routing_env(
             current_user_text = message.content
             break
 
-    env = {
-        "ASH_SESSION_ID": session.session_id or "",
-        "ASH_USER_ID": effective_user_id or "",
-        "ASH_CHAT_ID": session.chat_id or "",
-        "ASH_CHAT_TYPE": session.context.chat_type or "",
-        "ASH_CHAT_TITLE": session.context.chat_title or "",
-        "ASH_PROVIDER": session.provider or "",
-        "ASH_USERNAME": session.context.username or "",
-        "ASH_DISPLAY_NAME": session.context.display_name or "",
-        "ASH_TIMEZONE": timezone,
-        "ASH_MESSAGE_ID": session.context.current_message_id or "",
-        "ASH_CURRENT_USER_MESSAGE": current_user_text,
-        "ASH_BOT_NAME": session.context.bot_name or "",
-    }
+    env: dict[str, str] = {}
+
+    session_key_value: str | None = None
 
     # Stable session coordinate for sandbox RPC lookups.
     if session.provider:
         from ash.sessions.types import session_key
 
-        env["ASH_SESSION_KEY"] = session_key(
+        session_key_value = session_key(
             session.provider,
             session.chat_id,
             effective_user_id,
             session.context.thread_id,
         )
-    if session.context.thread_id:
-        env["ASH_THREAD_ID"] = session.context.thread_id
 
     # Provide chat state paths for sandbox access
     # ASH_CHAT_PATH: always points to chat-level state
@@ -131,6 +119,26 @@ def _build_routing_env(
             env["ASH_THREAD_PATH"] = (
                 f"{mount_prefix}/chats/{session.provider}/{session.chat_id}/threads/{thread_id}"
             )
+
+    # Host-signed context token for sandbox->host RPC trust boundaries.
+    try:
+        context_token = get_default_context_token_service().issue(
+            effective_user_id=(effective_user_id or "unknown"),
+            chat_id=session.chat_id,
+            chat_type=session.context.chat_type,
+            chat_title=session.context.chat_title,
+            provider=session.provider,
+            session_key=session_key_value,
+            thread_id=session.context.thread_id,
+            source_username=session.context.username,
+            source_display_name=session.context.display_name,
+            message_id=session.context.current_message_id,
+            current_user_message=current_user_text,
+            timezone=timezone,
+        )
+        env["ASH_CONTEXT_TOKEN"] = context_token
+    except Exception:
+        logger.warning("context_token_issue_failed", exc_info=True)
 
     return env
 

@@ -61,6 +61,10 @@ authors:                       # Who created/maintains this skill
   - alice
   - bob
 rationale: Enable deep research without main agent context bloat
+sensitive: false                # If true, defaults to DM-only unless access.chat_types set
+access:
+  chat_types:                   # Optional invocation chat-type allowlist
+    - private
 env:                           # Env vars to inject from config
   - PERPLEXITY_API_KEY
 packages:                      # System packages to install (apt)
@@ -91,6 +95,10 @@ Use the PERPLEXITY_API_KEY environment variable for API calls.
 PERPLEXITY_API_KEY = "pplx-..."  # Direct match - injected as $PERPLEXITY_API_KEY
 model = "haiku"                   # Override skill's default model
 enabled = true                    # Can disable without removing file
+allow_chat_ids = ["12345"]        # Optional per-skill chat allowlist override
+
+[skills.defaults]
+allow_chat_ids = ["12345"]        # Optional global default allowlist for all skills
 
 [skills.code-review]
 enabled = false                   # Disabled
@@ -179,6 +187,7 @@ class SkillConfig(BaseModel):
     """Per-skill configuration."""
     model: str | None = None
     enabled: bool = True
+    allow_chat_ids: list[str] | None = None
 
     class Config:
         extra = "allow"  # Allow UPPER_CASE env var fields
@@ -186,6 +195,11 @@ class SkillConfig(BaseModel):
     def get_env_vars(self) -> dict[str, str]:
         """Get env vars (extra fields with UPPER_CASE names)."""
         ...
+```
+
+```python
+class SkillDefaultsConfig(BaseModel):
+    allow_chat_ids: list[str] = []
 ```
 
 ### Registry

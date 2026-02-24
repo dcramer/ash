@@ -10,6 +10,7 @@ from ash_sandbox_cli.commands.schedule import app
 from typer.testing import CliRunner
 
 from ash.config.models import AshConfig, ModelConfig
+from ash.context_token import get_default_context_token_service
 from ash.integrations import (
     IntegrationContext,
     IntegrationRuntime,
@@ -40,14 +41,18 @@ async def test_schedule_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
     runtime = IntegrationRuntime([SchedulingIntegration(graph_dir)])
     await runtime.setup(context)
 
+    context_token = get_default_context_token_service().issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        chat_title="Main Room",
+        provider="telegram",
+        source_username="alice",
+        timezone="UTC",
+    )
     env = {
         "ASH_RPC_SOCKET": str(socket_path),
-        "ASH_PROVIDER": "telegram",
-        "ASH_CHAT_ID": "chat-1",
-        "ASH_CHAT_TITLE": "Main Room",
-        "ASH_USER_ID": "user-1",
-        "ASH_USERNAME": "alice",
-        "ASH_TIMEZONE": "UTC",
+        "ASH_CONTEXT_TOKEN": context_token,
     }
     runner = _runner(env)
 

@@ -83,7 +83,7 @@ Examples:
 
 The agent uses sandbox CLI commands to manage entries. These commands communicate with the host process via RPC (`schedule.create`, `schedule.list`, `schedule.cancel`, `schedule.update`).
 
-The commands automatically inject `chat_id`, `user_id`, `provider`, and `timezone` from environment variables (`ASH_CHAT_ID`, `ASH_USER_ID`, `ASH_PROVIDER`, `ASH_TIMEZONE`).
+The commands automatically inject `chat_id`, `user_id`, `provider`, and `timezone` from signed `ASH_CONTEXT_TOKEN` claims.
 
 **Note:** Scheduling only works from providers with persistent chats (e.g., Telegram). Cannot schedule from CLI.
 
@@ -99,7 +99,7 @@ ash-sb schedule create "Check the build" --at 2026-01-12T09:00:00Z
 # Recurring task
 ash-sb schedule create "Daily summary" --cron "0 8 * * *"
 
-# With explicit timezone (overrides ASH_TIMEZONE default)
+# With explicit timezone (overrides token timezone default)
 ash-sb schedule create "Standup" --cron "0 10 * * 1-5" --tz America/New_York
 ```
 
@@ -126,7 +126,7 @@ When timezone is UTC, a hint is shown:
 
 ### `ash-sb schedule list`
 
-By default, only shows tasks for the current room (`ASH_CHAT_ID`). Use `--all` to see tasks across all rooms.
+By default, only shows tasks for the current room (token `chat_id`). Use `--all` to see tasks across all rooms.
 
 ```bash
 # List tasks in current room (default)
@@ -166,7 +166,7 @@ Scheduled tasks (times shown in America/Los_Angeles):
 Total: 2 task(s)
 ```
 
-If `ASH_CHAT_ID` is not set (non-provider context), all tasks are shown regardless — matching the `--all` behavior.
+If token `chat_id` is not set (non-provider context), all tasks are shown regardless — matching the `--all` behavior.
 
 ### `ash-sb schedule cancel`
 

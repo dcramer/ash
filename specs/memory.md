@@ -614,7 +614,10 @@ Tools running in the sandbox can access memory via RPC:
 | `memory.delete` | Delete a memory | `memory_id` (required), `user_id`, `chat_id` |
 | `memory.forget_person` | Archive all memories about a person | `person_id` (required), `delete_person_record` (default false) |
 
-The sandbox CLI (`ash-sb memory`) wraps these RPC calls with environment-provided `ASH_USER_ID` and `ASH_CHAT_ID`. Authorization checks use these values to verify ownership before mutations.
+The sandbox CLI (`ash-sb memory`) wraps these RPC calls with a host-signed
+`ASH_CONTEXT_TOKEN`. The RPC server verifies the token and injects trusted
+identity/routing fields (`user_id`, `chat_id`, `chat_type`, etc.) before
+authorization checks run.
 
 ## Rebuild & Repair
 

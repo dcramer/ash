@@ -14,6 +14,12 @@ from ash_rpc_protocol import (
     read_message,
 )
 
+from ash.context_token import (
+    ContextTokenError,
+    ContextTokenService,
+    VerifiedContext,
+    get_default_context_token_service,
+)
 from ash.logging import log_context
 
 logger = logging.getLogger(__name__)
@@ -31,19 +37,82 @@ def _string_param(params: dict[str, Any], key: str) -> str | None:
     return text or None
 
 
+def _assign_context_value(
+    params: dict[str, Any],
+    key: str,
+    value: str | None,
+) -> None:
+    """Set key when value is present, otherwise clear stale caller input."""
+    if value is None or not str(value).strip():
+        params.pop(key, None)
+        return
+    params[key] = str(value)
+
+
+def _apply_verified_context_params(
+    params: dict[str, Any],
+    verified: VerifiedContext,
+    *,
+    method: str,
+) -> dict[str, Any]:
+    """Project verified token claims onto handler params.
+
+    Identity/routing fields supplied by the caller are ignored and replaced
+    with host-verified claims from `context_token`.
+    """
+    # Architecture/spec reference: specs/rpc.md
+    resolved = dict(params)
+    resolved.pop("context_token", None)
+
+    _assign_context_value(resolved, "user_id", verified.effective_user_id)
+    _assign_context_value(resolved, "chat_id", verified.chat_id)
+    _assign_context_value(resolved, "chat_type", verified.chat_type)
+    _assign_context_value(resolved, "chat_title", verified.chat_title)
+    _assign_context_value(resolved, "session_key", verified.session_key)
+    _assign_context_value(resolved, "thread_id", verified.thread_id)
+    _assign_context_value(resolved, "source_username", verified.source_username)
+    _assign_context_value(resolved, "source_display_name", verified.source_display_name)
+    _assign_context_value(resolved, "source_user_id", verified.source_username)
+    _assign_context_value(resolved, "source_user_name", verified.source_display_name)
+    _assign_context_value(resolved, "message_id", verified.message_id)
+    _assign_context_value(
+        resolved,
+        "current_user_message",
+        verified.current_user_message,
+    )
+    _assign_context_value(resolved, "timezone", verified.timezone)
+    _assign_context_value(resolved, "username", verified.source_username)
+
+    # Browser methods use "provider" as browser backend selection ("sandbox"/"kernel").
+    # For all other methods, "provider" is routing context and must come from token claims.
+    if not method.startswith("browser."):
+        _assign_context_value(resolved, "provider", verified.provider)
+
+    return resolved
+
+
 class RPCServer:
     """Unix domain socket RPC server using JSON-RPC 2.0."""
 
-    def __init__(self, socket_path: Path):
+    def __init__(
+        self,
+        socket_path: Path,
+        *,
+        context_token_service: ContextTokenService | None = None,
+    ):
         """Initialize RPC server.
 
         Args:
             socket_path: Path to the Unix domain socket.
+            context_token_service: Optional token verifier override.
         """
         self._socket_path = socket_path
         self._server: asyncio.Server | None = None
         self._methods: dict[str, RPCHandler] = {}
         self._running = False
+        self._context_token_service = (
+            context_token_service or get_default_context_token_service()
+        )
 
     def register(self, method: str, handler: RPCHandler) -> None:
         """Register an RPC method handler.
@@ -153,7 +222,21 @@ class RPCServer:
 
             # Execute handler
             try:
-                params = request.params or {}
+                params = dict(request.params or {})
+                try:
+                    verified = self._verify_context_token(params)
+                except ContextTokenError as e:
+                    return RPCResponse.error_response(
+                        request_id,
+                        ErrorCode.INVALID_PARAMS,
+                        f"Invalid context token ({e.code}): {e}",
+                    )
+
+                params = _apply_verified_context_params(
+                    params,
+                    verified,
+                    method=request.method,
+                )
                 with log_context(
                     chat_id=_string_param(params, "chat_id"),
                     session_id=_string_param(params, "session_key"),
@@ -182,6 +265,14 @@ class RPCServer:
             return RPCResponse.error_response(
                 request_id, ErrorCode.INTERNAL_ERROR, str(e)
             )
+
+    def _verify_context_token(self, params: dict[str, Any]) -> VerifiedContext:
+        """Validate and decode required sandbox context token."""
+        raw_token = params.get("context_token")
+        if raw_token is None:
+            raise ContextTokenError("missing", "context token is required")
+        token = raw_token if isinstance(raw_token, str) else str(raw_token)
+        return self._context_token_service.verify(token)
 
     @property
     def socket_path(self) -> Path:

@@ -12,6 +12,7 @@ from ash_sandbox_cli.commands.memory import app
 from typer.testing import CliRunner
 
 from ash.config.models import AshConfig, ModelConfig
+from ash.context_token import get_default_context_token_service
 from ash.integrations import IntegrationContext, IntegrationRuntime, MemoryIntegration
 from ash.integrations.rpc import active_rpc_server
 from ash.memory.extractor import MemoryExtractor
@@ -22,6 +23,33 @@ def _runner(env: dict[str, str]) -> CliRunner:
     return CliRunner(env=env)
 
 
+def _context_token(
+    *,
+    effective_user_id: str = "user-1",
+    chat_id: str | None = "chat-1",
+    chat_type: str | None = "group",
+    provider: str | None = "telegram",
+    thread_id: str | None = None,
+    source_username: str | None = None,
+    source_display_name: str | None = None,
+    message_id: str | None = None,
+    session_key: str | None = None,
+    current_user_message: str | None = None,
+) -> str:
+    return get_default_context_token_service().issue(
+        effective_user_id=effective_user_id,
+        chat_id=chat_id,
+        chat_type=chat_type,
+        provider=provider,
+        thread_id=thread_id,
+        source_username=source_username,
+        source_display_name=source_display_name,
+        message_id=message_id,
+        session_key=session_key,
+        current_user_message=current_user_message,
+    )
+
+
 class TestMemoryExtract:
     """Tests for 'ash memory extract' command behavior."""
 
@@ -29,15 +57,13 @@ class TestMemoryExtract:
         """When message_id is present, command should call memory.extract."""
         runner = _runner(
             {
-                "ASH_USER_ID": "user-1",
-                "ASH_CHAT_ID": "chat-1",
-                "ASH_CHAT_TYPE": "group",
-                "ASH_THREAD_ID": "thread-1",
-                "ASH_PROVIDER": "telegram",
-                "ASH_USERNAME": "alice",
-                "ASH_DISPLAY_NAME": "Alice",
-                "ASH_MESSAGE_ID": "12345",
-                "ASH_SESSION_KEY": "telegram_chat_1_thread_1",
+                "ASH_CONTEXT_TOKEN": _context_token(
+                    thread_id="thread-1",
+                    source_username="alice",
+                    source_display_name="Alice",
+                    message_id="12345",
+                    session_key="telegram_chat_1_thread_1",
+                )
             }
         )
 
@@ -63,13 +89,11 @@ class TestMemoryExtract:
         """When message_id is absent, command should call memory.extract_from_messages."""
         runner = _runner(
             {
-                "ASH_USER_ID": "user-1",
-                "ASH_CHAT_ID": "chat-1",
-                "ASH_CHAT_TYPE": "group",
-                "ASH_PROVIDER": "telegram",
-                "ASH_USERNAME": "alice",
-                "ASH_DISPLAY_NAME": "Alice",
-                "ASH_CURRENT_USER_MESSAGE": "remember my todo list",
+                "ASH_CONTEXT_TOKEN": _context_token(
+                    source_username="alice",
+                    source_display_name="Alice",
+                    current_user_message="remember my todo list",
+                )
             }
         )
 
@@ -103,14 +127,12 @@ class TestMemoryExtract:
         """When session lookup misses, command should retry using explicit message."""
         runner = _runner(
             {
-                "ASH_USER_ID": "user-1",
-                "ASH_CHAT_ID": "chat-1",
-                "ASH_CHAT_TYPE": "group",
-                "ASH_PROVIDER": "telegram",
-                "ASH_USERNAME": "alice",
-                "ASH_DISPLAY_NAME": "Alice",
-                "ASH_MESSAGE_ID": "missing-123",
-                "ASH_CURRENT_USER_MESSAGE": "remember i need to buy coffee",
+                "ASH_CONTEXT_TOKEN": _context_token(
+                    source_username="alice",
+                    source_display_name="Alice",
+                    message_id="missing-123",
+                    current_user_message="remember i need to buy coffee",
+                )
             }
         )
 
@@ -197,17 +219,20 @@ class TestMemoryExtract:
         runtime = IntegrationRuntime([MemoryIntegration()])
 
         socket_path = tmp_path / "rpc.sock"
+        context_token = get_default_context_token_service().issue(
+            effective_user_id="user-1",
+            chat_id="chat-1",
+            chat_type="group",
+            provider="telegram",
+            session_key=key,
+            thread_id="thread-1",
+            source_username="alice",
+            source_display_name="Alice",
+            message_id=external_id,
+        )
         env = {
             "ASH_RPC_SOCKET": str(socket_path),
-            "ASH_PROVIDER": "telegram",
-            "ASH_USER_ID": "user-1",
-            "ASH_CHAT_ID": "chat-1",
-            "ASH_CHAT_TYPE": "group",
-            "ASH_THREAD_ID": "thread-1",
-            "ASH_SESSION_KEY": key,
-            "ASH_MESSAGE_ID": external_id,
-            "ASH_USERNAME": "alice",
-            "ASH_DISPLAY_NAME": "Alice",
+            "ASH_CONTEXT_TOKEN": context_token,
         }
 
         async with active_rpc_server(

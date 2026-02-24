@@ -46,10 +46,22 @@ def register_config_methods(
 
             # Reload skill configurations
             skills_config = raw_config.get("skills", {})
-            from ash.config.models import SkillConfig
+            from ash.config.models import SkillConfig, SkillDefaultsConfig
+
+            config.skill_defaults = SkillDefaultsConfig.model_validate(
+                skills_config.get("defaults", {})
+            )
 
             # Update existing skill configs and add new ones
             for skill_name, skill_data in skills_config.items():
+                if skill_name in {
+                    "defaults",
+                    "sources",
+                    "auto_sync",
+                    "update_interval_minutes",
+                    "update_interval",
+                }:
+                    continue
                 if isinstance(skill_data, dict):
                     config.skills[skill_name] = SkillConfig.model_validate(skill_data)
 

@@ -573,7 +573,9 @@ def register_memory_methods(
         source_display_name = params.get("source_display_name")
 
         if not message_id:
-            raise ValueError("message_id is required (set via ASH_MESSAGE_ID)")
+            raise ValueError(
+                "message_id is required (set in signed ASH_CONTEXT_TOKEN claims)"
+            )
         if not provider:
             raise ValueError("provider is required")
         if not explicit_session_key and not chat_id:
@@ -599,7 +601,7 @@ def register_memory_methods(
         )
         resolved_message_id = message_id
         if not surrounding:
-            # ASH_MESSAGE_ID is typically an external/provider message ID.
+            # message_id claim is typically an external/provider message ID.
             external_match = await reader.get_message_by_external_id(message_id)
             if external_match is not None:
                 resolved_message_id = external_match.id

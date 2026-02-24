@@ -95,6 +95,53 @@ Research and summarize topics.
         assert skill.max_iterations == 15
         assert skill.instructions == "Research and summarize topics."
 
+    def test_discover_skill_with_sensitive_access_metadata(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "mailbox"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Access email safely
+sensitive: true
+access:
+  chat_types:
+    - private
+---
+
+Read and summarize inbox.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        skill = registry.get("mailbox")
+        assert skill.sensitive is True
+        assert skill.allowed_chat_types == ["private"]
+
+    def test_discover_skill_with_invalid_access_keys_is_rejected(self, tmp_path: Path):
+        skills_dir = tmp_path / "skills"
+        skill_dir = skills_dir / "bad-access"
+        skill_dir.mkdir(parents=True)
+
+        (skill_dir / "SKILL.md").write_text(
+            """---
+description: Invalid access schema
+access:
+  chat_ids:
+    - x
+---
+
+No-op.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        assert not registry.has("bad-access")
+
     def test_discover_skill_with_tools_legacy_alias(self, tmp_path: Path):
         """Legacy 'tools:' frontmatter is rejected during discovery."""
         skills_dir = tmp_path / "skills"

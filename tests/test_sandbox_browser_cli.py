@@ -19,6 +19,7 @@ from ash.config.models import (
     BrowserSandboxConfig,
     ModelConfig,
 )
+from ash.context_token import get_default_context_token_service
 from ash.integrations import BrowserIntegration, IntegrationContext, IntegrationRuntime
 from ash.integrations.rpc import active_rpc_server
 from ash.sandbox.executor import ExecutionResult
@@ -26,6 +27,19 @@ from ash.sandbox.executor import ExecutionResult
 
 def _runner(env: dict[str, str]) -> CliRunner:
     return CliRunner(env=env)
+
+
+def _context_token(
+    *,
+    effective_user_id: str = "u1",
+    provider: str | None = None,
+    chat_id: str | None = None,
+) -> str:
+    return get_default_context_token_service().issue(
+        effective_user_id=effective_user_id,
+        provider=provider,
+        chat_id=chat_id,
+    )
 
 
 def _ok_result(action: str, **extra: object) -> dict[str, object]:
@@ -36,7 +50,7 @@ def _ok_result(action: str, **extra: object) -> dict[str, object]:
 
 class TestBrowserSandboxCli:
     def test_start_session(self) -> None:
-        runner = _runner({"ASH_USER_ID": "u1"})
+        runner = _runner({"ASH_CONTEXT_TOKEN": _context_token(effective_user_id="u1")})
         with patch("ash_sandbox_cli.commands.browser.rpc_call") as mock_rpc:
             mock_rpc.return_value = _ok_result(
                 "session.start", session_id="s1", data={"status": "active"}
@@ -52,7 +66,7 @@ class TestBrowserSandboxCli:
         )
 
     def test_extract_non_ok_exits_nonzero(self) -> None:
-        runner = _runner({"ASH_USER_ID": "u1"})
+        runner = _runner({"ASH_CONTEXT_TOKEN": _context_token(effective_user_id="u1")})
         with patch("ash_sandbox_cli.commands.browser.rpc_call") as mock_rpc:
             mock_rpc.return_value = {
                 "ok": False,
@@ -67,7 +81,7 @@ class TestBrowserSandboxCli:
         assert payload["error_code"] == "session_not_found"
 
     def test_goto_includes_url_and_provider(self) -> None:
-        runner = _runner({"ASH_USER_ID": "u1"})
+        runner = _runner({"ASH_CONTEXT_TOKEN": _context_token(effective_user_id="u1")})
         with patch("ash_sandbox_cli.commands.browser.rpc_call") as mock_rpc:
             mock_rpc.return_value = _ok_result(
                 "page.goto", page_url="https://example.com"
@@ -173,7 +187,12 @@ async def test_browser_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
     runtime = IntegrationRuntime([BrowserIntegration()])
     await runtime.setup(context)
 
-    runner = _runner({"ASH_RPC_SOCKET": str(socket_path), "ASH_USER_ID": "user-1"})
+    runner = _runner(
+        {
+            "ASH_RPC_SOCKET": str(socket_path),
+            "ASH_CONTEXT_TOKEN": _context_token(effective_user_id="user-1"),
+        }
+    )
 
     async with active_rpc_server(
         runtime=runtime, context=context, socket_path=socket_path

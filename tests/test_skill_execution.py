@@ -1,5 +1,6 @@
 """Tests for skill execution via UseSkillTool."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from ash.agents.types import AgentContext
 from ash.config.models import AshConfig, SkillConfig
 from ash.skills.types import SkillDefinition
+from ash.tools.base import ToolContext
 from ash.tools.builtin.skills import SkillAgent, UseSkillTool
 
 
@@ -68,6 +70,7 @@ class TestUseSkillToolValidation:
         executor = MagicMock()
         config = MagicMock(spec=AshConfig)
         config.skills = {}
+        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
         return UseSkillTool(registry, executor, config)
 
     @pytest.mark.asyncio
@@ -101,6 +104,7 @@ class TestUseSkillToolErrorHandling:
         executor = MagicMock()
         config = MagicMock(spec=AshConfig)
         config.skills = {}
+        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
         config.workspace = tmp_path
         return UseSkillTool(registry, executor, config)
 
@@ -172,6 +176,7 @@ class TestUseSkillToolExecution:
         config = MagicMock(spec=AshConfig)
         config.skills = {}
         config.agents = {}
+        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
 
         return UseSkillTool(registry, executor, config)
 
@@ -263,3 +268,103 @@ class TestSkillEnvironmentBuilding:
         env = tool._build_skill_environment(skill, None)
 
         assert env == {}
+
+    def test_inherits_base_environment(self):
+        """Should preserve parent routing env and add declared skill vars."""
+        skill = SkillDefinition(
+            name="test",
+            description="Test",
+            instructions="x",
+            env=["API_KEY"],
+        )
+        skill_config = SkillConfig(**{"API_KEY": "secret"})  # type: ignore[arg-type]
+
+        registry = MagicMock()
+        executor = MagicMock()
+        config = MagicMock(spec=AshConfig)
+        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
+        tool = UseSkillTool(registry, executor, config)
+
+        env = tool._build_skill_environment(
+            skill,
+            skill_config,
+            base_env={"ASH_CONTEXT_TOKEN": "signed", "BASE": "1"},
+        )
+
+        assert env["ASH_CONTEXT_TOKEN"] == "signed"
+        assert env["BASE"] == "1"
+        assert env["API_KEY"] == "secret"
+
+
+class TestSkillAccessControls:
+    @pytest.fixture
+    def skill(self):
+        return SkillDefinition(
+            name="mail",
+            description="Read mail",
+            instructions="Do mail things",
+            sensitive=True,
+        )
+
+    @pytest.fixture
+    def tool(self, skill):
+        registry = MagicMock()
+        registry.has.return_value = True
+        registry.get.return_value = skill
+        executor = MagicMock()
+        config = MagicMock(spec=AshConfig)
+        config.skills = {}
+        config.agents = {}
+        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
+        return UseSkillTool(registry, executor, config)
+
+    @pytest.mark.asyncio
+    async def test_sensitive_skill_rejected_in_group_chat(self, tool):
+        context = ToolContext(chat_id="group-1", metadata={"chat_type": "group"})
+        result = await tool.execute(
+            {"skill": "mail", "message": "check inbox"},
+            context=context,
+        )
+
+        assert result.is_error
+        assert "only available in: private" in result.content
+
+    @pytest.mark.asyncio
+    async def test_sensitive_skill_allowed_in_private_chat(self, tool):
+        from ash.agents.types import ChildActivated
+
+        context = ToolContext(chat_id="dm-1", metadata={"chat_type": "private"})
+        with pytest.raises(ChildActivated):
+            await tool.execute(
+                {"skill": "mail", "message": "check inbox"},
+                context=context,
+            )
+
+    @pytest.mark.asyncio
+    async def test_default_allow_chat_ids_blocks_other_chats(self, tool):
+        tool._config.skill_defaults = SimpleNamespace(allow_chat_ids=["dm-allowed"])
+
+        context = ToolContext(chat_id="dm-other", metadata={"chat_type": "private"})
+        result = await tool.execute(
+            {"skill": "mail", "message": "check inbox"},
+            context=context,
+        )
+
+        assert result.is_error
+        assert "not enabled for this chat" in result.content
+
+    @pytest.mark.asyncio
+    async def test_per_skill_allow_chat_ids_overrides_defaults(self, tool):
+        from ash.agents.types import ChildActivated
+
+        tool._config.skill_defaults = SimpleNamespace(allow_chat_ids=["dm-default"])
+        tool._config.skills = {
+            "mail": SkillConfig(allow_chat_ids=["dm-override"]),
+        }
+
+        context = ToolContext(chat_id="dm-override", metadata={"chat_type": "private"})
+        with pytest.raises(ChildActivated):
+            await tool.execute(
+                {"skill": "mail", "message": "check inbox"},
+                context=context,
+            )

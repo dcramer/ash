@@ -328,6 +328,24 @@ class SkillConfig(BaseModel):
 
     model: str | None = None
     enabled: bool = True
+    allow_chat_ids: list[str] | None = None
+
+    @field_validator("allow_chat_ids", mode="before")
+    @classmethod
+    def _normalize_allow_chat_ids(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            return [text] if text else []
+        if isinstance(value, list):
+            normalized: list[str] = []
+            for item in value:
+                text = str(item).strip()
+                if text:
+                    normalized.append(text)
+            return normalized
+        raise ValueError("allow_chat_ids must be a string or list of strings")
 
     def get_env_vars(self) -> dict[str, str]:
         """Get environment variables from config, auto-uppercasing keys.
@@ -337,8 +355,31 @@ class SkillConfig(BaseModel):
         return {
             k.upper(): str(v)
             for k, v in self.model_dump().items()
-            if k.lower() not in {"model", "enabled"}
+            if k.lower() not in {"model", "enabled", "allow_chat_ids"}
         }
+
+
+class SkillDefaultsConfig(BaseModel):
+    """Global skill defaults from [skills.defaults]."""
+
+    allow_chat_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("allow_chat_ids", mode="before")
+    @classmethod
+    def _normalize_allow_chat_ids(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            return [text] if text else []
+        if isinstance(value, list):
+            normalized: list[str] = []
+            for item in value:
+                text = str(item).strip()
+                if text:
+                    normalized.append(text)
+            return normalized
+        raise ValueError("allow_chat_ids must be a string or list of strings")
 
 
 class SkillSource(BaseModel):
@@ -428,6 +469,8 @@ class AshConfig(BaseModel):
     # Skill-specific configuration: [skills.<name>] sections
     # Allows setting API keys, model override, and enabled flag per skill
     skills: dict[str, SkillConfig] = Field(default_factory=dict)
+    # Skill defaults from [skills.defaults]
+    skill_defaults: SkillDefaultsConfig = Field(default_factory=SkillDefaultsConfig)
 
     # External skill sources: [[skills.sources]] array
     skill_sources: list[SkillSource] = Field(default_factory=list)
@@ -444,6 +487,9 @@ class AshConfig(BaseModel):
             [skills]
             auto_sync = true
             update_interval_minutes = 5
+
+            [skills.defaults]
+            allow_chat_ids = ["dm-1", "dm-2"]
 
             [[skills.sources]]
             repo = "owner/repo"
@@ -469,6 +515,7 @@ class AshConfig(BaseModel):
 
         # Extract sources array and global settings
         sources = skills_data.pop("sources", [])
+        defaults = skills_data.pop("defaults", {})
         auto_sync = skills_data.pop("auto_sync", False)
         update_interval_minutes = skills_data.pop("update_interval_minutes", None)
         # Backward-compat: legacy `update_interval` was in hours.
@@ -480,6 +527,7 @@ class AshConfig(BaseModel):
                 update_interval_minutes = 5
 
         data["skill_sources"] = sources
+        data["skill_defaults"] = defaults
         data["skill_auto_sync"] = auto_sync
         data["skill_update_interval_minutes"] = update_interval_minutes
         # Remaining entries are per-skill configs

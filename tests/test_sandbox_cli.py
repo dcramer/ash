@@ -8,17 +8,32 @@ from ash_sandbox_cli.commands.schedule import app
 from ash_sandbox_cli.rpc import RPCError
 from typer.testing import CliRunner
 
+from ash.context_token import get_default_context_token_service
+
+
+def _context_token(
+    *,
+    effective_user_id: str = "user123",
+    chat_id: str | None = "chat456",
+    provider: str | None = "telegram",
+    source_username: str | None = "testuser",
+    timezone: str | None = "UTC",
+) -> str:
+    return get_default_context_token_service().issue(
+        effective_user_id=effective_user_id,
+        chat_id=chat_id,
+        provider=provider,
+        source_username=source_username,
+        timezone=timezone,
+    )
+
 
 @pytest.fixture
 def cli_runner():
     """CLI runner with routing context set."""
     return CliRunner(
         env={
-            "ASH_SESSION_ID": "test-session",
-            "ASH_USER_ID": "user123",
-            "ASH_CHAT_ID": "chat456",
-            "ASH_PROVIDER": "telegram",
-            "ASH_USERNAME": "testuser",
+            "ASH_CONTEXT_TOKEN": _context_token(),
         }
     )
 
@@ -124,7 +139,7 @@ class TestScheduleCreate:
         )
 
         assert result.exit_code == 1
-        assert "Scheduling requires a provider context" in result.output
+        assert "requires provider and chat routing context" in result.output
         mock_rpc.assert_not_called()
 
 
@@ -268,20 +283,17 @@ class TestScheduleList:
         assert "Room:" not in result.stdout
 
     def test_list_no_chat_id_shows_all(self, mock_rpc):
-        """Test that missing ASH_CHAT_ID shows all tasks (graceful fallback)."""
+        """Test that missing chat_id claim shows all tasks (graceful fallback)."""
         runner = CliRunner(
             env={
-                "ASH_SESSION_ID": "test-session",
-                "ASH_USER_ID": "user123",
-                "ASH_PROVIDER": "telegram",
-                "ASH_USERNAME": "testuser",
+                "ASH_CONTEXT_TOKEN": _context_token(chat_id=None),
             }
         )
         mock_rpc.return_value = []
 
         runner.invoke(app, ["list"])
 
-        # Without ASH_CHAT_ID, chat_id should not be in params
+        # Without chat_id claim, chat_id should not be in params
         params = mock_rpc.call_args[0][1]
         assert "chat_id" not in params
 
@@ -338,7 +350,9 @@ class TestNaturalLanguageTime:
     @pytest.fixture
     def cli_runner_with_tz(self, cli_runner):
         """CLI runner with timezone set (extends base cli_runner)."""
-        cli_runner.env["ASH_TIMEZONE"] = "America/Los_Angeles"
+        cli_runner.env["ASH_CONTEXT_TOKEN"] = _context_token(
+            timezone="America/Los_Angeles"
+        )
         return cli_runner
 
     @pytest.fixture
