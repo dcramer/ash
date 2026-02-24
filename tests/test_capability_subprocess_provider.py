@@ -9,6 +9,7 @@ from ash.capabilities.providers import (
     CapabilityCallContext,
     SubprocessCapabilityProvider,
 )
+from ash.context_token import get_default_context_token_service
 
 
 def _context() -> CapabilityCallContext:
@@ -67,6 +68,21 @@ async def test_subprocess_provider_parses_definitions(monkeypatch) -> None:
 async def test_subprocess_provider_auth_and_invoke(monkeypatch) -> None:
     async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         method = payload["method"]
+        params = payload["params"]
+        if method in {"auth_begin", "auth_complete", "invoke"}:
+            context_token = params.get("context_token")
+            assert isinstance(context_token, str)
+            assert context_token.count(".") == 2
+            assert "context" not in params
+            verified = get_default_context_token_service().verify(context_token)
+            assert verified.effective_user_id == "user-1"
+            assert verified.chat_id == "chat-1"
+            assert verified.chat_type == "private"
+            assert verified.provider == "telegram"
+            assert verified.thread_id == "thread-1"
+            assert verified.session_key == "session-1"
+            assert verified.source_username == "alice"
+            assert verified.source_display_name == "Alice"
         if method == "auth_begin":
             return {
                 "version": 1,
@@ -287,3 +303,35 @@ async def test_subprocess_provider_rejects_result_non_object(monkeypatch) -> Non
     with pytest.raises(CapabilityError) as exc_info:
         await provider.definitions()
     assert exc_info.value.code == "capability_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_subprocess_provider_rejects_invalid_bridge_context(monkeypatch) -> None:
+    async def _fake_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
+        _ = payload
+        raise AssertionError("bridge command should not run for invalid context")
+
+    monkeypatch.setattr(
+        SubprocessCapabilityProvider,
+        "_execute_command",
+        _fake_execute,
+    )
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+    invalid_context = CapabilityCallContext(
+        user_id="",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+        thread_id=None,
+        session_key=None,
+        source_username=None,
+        source_display_name=None,
+    )
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await provider.auth_begin(
+            capability_id="gog.email",
+            account_hint=None,
+            context=invalid_context,
+        )
+    assert exc_info.value.code == "capability_invalid_input"

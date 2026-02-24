@@ -20,8 +20,13 @@ from ash.capabilities.providers.base import (
     CapabilityProvider,
 )
 from ash.capabilities.types import CapabilityDefinition, CapabilityOperation
+from ash.context_token import (
+    ContextTokenService,
+    get_default_context_token_service,
+)
 
 _BRIDGE_PROTOCOL_VERSION = 1
+_BRIDGE_CONTEXT_TOKEN_TTL_SECONDS = 300
 
 
 class SubprocessCapabilityProvider(CapabilityProvider):
@@ -33,6 +38,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
         namespace: str,
         command: list[str] | str,
         timeout_seconds: float = 30.0,
+        context_token_service: ContextTokenService | None = None,
     ) -> None:
         normalized_namespace = str(namespace).strip()
         if not normalized_namespace:
@@ -40,6 +46,9 @@ class SubprocessCapabilityProvider(CapabilityProvider):
         self._namespace = normalized_namespace
         self._command = _normalize_command(command)
         self._timeout_seconds = max(1.0, float(timeout_seconds))
+        self._context_token_service = (
+            context_token_service or get_default_context_token_service()
+        )
 
     @property
     def namespace(self) -> str:
@@ -67,7 +76,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
             {
                 "capability_id": capability_id,
                 "account_hint": account_hint,
-                "context": _context_payload(context),
+                "context_token": self._issue_context_token(context),
             },
         )
         auth_url = _required_text(
@@ -97,7 +106,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
                 "flow_state": dict(flow_state),
                 "callback_url": callback_url,
                 "code": code,
-                "context": _context_payload(context),
+                "context_token": self._issue_context_token(context),
             },
         )
         account_ref = _required_text(
@@ -131,7 +140,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
                 "input_data": dict(input_data),
                 "account_ref": account_ref,
                 "idempotency_key": idempotency_key,
-                "context": _context_payload(context),
+                "context_token": self._issue_context_token(context),
             },
         )
         output = result.get("output")
@@ -155,6 +164,25 @@ class SubprocessCapabilityProvider(CapabilityProvider):
         }
         raw_response = await self._execute_command(payload)
         return _parse_bridge_response(raw_response, request_id=request_id)
+
+    def _issue_context_token(self, context: CapabilityCallContext) -> str:
+        try:
+            return self._context_token_service.issue(
+                effective_user_id=context.user_id,
+                chat_id=context.chat_id,
+                chat_type=context.chat_type,
+                provider=context.provider,
+                thread_id=context.thread_id,
+                session_key=context.session_key,
+                source_username=context.source_username,
+                source_display_name=context.source_display_name,
+                ttl_seconds=_BRIDGE_CONTEXT_TOKEN_TTL_SECONDS,
+            )
+        except ValueError as e:
+            raise _capability_error(
+                "capability_invalid_input",
+                f"invalid bridge context: {e}",
+            ) from None
 
     async def _execute_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         proc = await asyncio.create_subprocess_exec(
@@ -274,19 +302,6 @@ def _normalize_command(command: list[str] | str) -> list[str]:
     if not parts:
         raise ValueError("provider command is required")
     return parts
-
-
-def _context_payload(context: CapabilityCallContext) -> dict[str, Any]:
-    return {
-        "user_id": context.user_id,
-        "chat_id": context.chat_id,
-        "chat_type": context.chat_type,
-        "provider": context.provider,
-        "thread_id": context.thread_id,
-        "session_key": context.session_key,
-        "source_username": context.source_username,
-        "source_display_name": context.source_display_name,
-    }
 
 
 def _parse_definition(raw: Any) -> CapabilityDefinition:

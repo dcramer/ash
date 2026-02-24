@@ -171,6 +171,16 @@ Validation rules:
 - `error` MUST be an object with non-empty `code` and `message`.
 - Envelope violations fail closed with `capability_invalid_output`.
 
+Bridge method params:
+
+- `definitions`: no caller context fields required.
+- `auth_begin`, `auth_complete`, `invoke`: params MUST include `context_token`
+  (host-issued signed token carrying caller scope claims).
+- Bridge requests MUST NOT include raw caller identity/routing objects such as
+  `{ "context": { "user_id": ..., "chat_id": ... } }`.
+- External bridge runtimes SHOULD verify `context_token` cryptographically before
+  trusting caller scope claims.
+
 ### Capability Definition
 
 ```python
