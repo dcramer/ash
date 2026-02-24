@@ -1229,7 +1229,6 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-chat-user {
   margin-left: 0;
   margin-right: 3rem;
-  padding-right: 0.55rem;
   background: linear-gradient(180deg, #b0ff1f, #b0ff1f);
   color: #000000;
   border-color: #565656;
@@ -1273,7 +1272,6 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-chat-ash {
   margin-left: 3rem;
   margin-right: 0;
-  padding-left: 0.55rem;
   background: #1c1c1c;
   color: #f0f0f0;
   border-color: var(--ash-dark-border);
