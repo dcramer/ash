@@ -56,6 +56,32 @@ async def graph_store(graph_dir, mock_index, mock_embedding_generator) -> Store:
 
 
 class TestAssertionPipeline:
+    async def test_add_memory_infers_stated_by_and_self_subject_from_source_username(
+        self, graph_store: Store
+    ):
+        from ash.graph.edges import get_stated_by_person, get_subject_person_ids
+
+        person = await graph_store.create_person(
+            created_by="user-1",
+            name="Bob",
+            relationship="self",
+            aliases=["bob"],
+        )
+
+        memory = await graph_store.add_memory(
+            content="Prefers tea",
+            owner_user_id="user-1",
+            source_username="bob",
+        )
+
+        assertion = get_assertion(memory)
+        assert assertion is not None
+        assert assertion.assertion_kind == AssertionKind.SELF_FACT
+        assert assertion.speaker_person_id == person.id
+        assert assertion.subjects == [person.id]
+        assert get_stated_by_person(graph_store.graph, memory.id) == person.id
+        assert get_subject_person_ids(graph_store.graph, memory.id) == [person.id]
+
     async def test_process_extracted_facts_writes_self_assertion(
         self, graph_store: Store
     ):
@@ -238,3 +264,45 @@ class TestAssertionPipeline:
         assert assertion is not None
         assert assertion.speaker_person_id == person.id
         assert get_stated_by_person(graph_store.graph, memory.id) == person.id
+
+    async def test_batch_update_memories_restores_legacy_semantic_drift(
+        self, graph_store: Store
+    ):
+        from ash.graph.edges import (
+            ABOUT,
+            STATED_BY,
+            get_stated_by_person,
+            get_subject_person_ids,
+        )
+
+        person = await graph_store.create_person(
+            created_by="user-1",
+            name="Bob",
+            relationship="self",
+            aliases=["bob"],
+        )
+        memory = await graph_store.add_memory(
+            content="Prefers tea",
+            owner_user_id="user-1",
+            source_username="bob",
+        )
+
+        # Simulate legacy drift: edges and assertion metadata missing.
+        for edge in graph_store.graph.get_outgoing(memory.id, edge_type=ABOUT):
+            graph_store.graph.remove_edge(edge.id)
+        for edge in graph_store.graph.get_outgoing(memory.id, edge_type=STATED_BY):
+            graph_store.graph.remove_edge(edge.id)
+        graph_store._persistence.mark_dirty("edges")
+
+        stale = graph_store.graph.memories[memory.id]
+        stale.metadata = None
+
+        await graph_store.batch_update_memories([stale])
+
+        repaired = graph_store.graph.memories[memory.id]
+        assertion = get_assertion(repaired)
+        assert assertion is not None
+        assert assertion.speaker_person_id == person.id
+        assert assertion.subjects == [person.id]
+        assert get_stated_by_person(graph_store.graph, memory.id) == person.id
+        assert get_subject_person_ids(graph_store.graph, memory.id) == [person.id]

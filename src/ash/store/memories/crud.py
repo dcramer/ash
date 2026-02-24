@@ -11,8 +11,11 @@ from ash.graph.edges import create_about_edge
 from ash.memory.secrets import contains_secret
 from ash.store.types import (
     AssertionEnvelope,
+    AssertionKind,
+    AssertionPredicate,
     MemoryEntry,
     MemoryType,
+    PredicateObjectType,
     Sensitivity,
     matches_scope,
     upsert_assertion_metadata,
@@ -26,6 +29,111 @@ logger = logging.getLogger(__name__)
 
 class MemoryCrudMixin:
     """Memory create, read, update, delete operations."""
+
+    async def _normalize_semantics_for_write(
+        self: Store,
+        *,
+        content: str,
+        memory_type: MemoryType,
+        metadata: dict[str, Any] | None,
+        subject_person_ids: list[str],
+        stated_by_person_id: str | None,
+        source_username: str | None,
+    ) -> tuple[list[str], str | None, dict[str, Any] | None]:
+        """Normalize assertion + ABOUT/STATED_BY semantics at write-time."""
+        subject_pids = self._canonicalize_person_ids(subject_person_ids)
+        stated_by = self._canonicalize_person_id(stated_by_person_id)
+
+        assertion: AssertionEnvelope | None = None
+        raw_assertion = (metadata or {}).get("assertion") if metadata else None
+        if isinstance(raw_assertion, dict):
+            try:
+                assertion = AssertionEnvelope.model_validate(raw_assertion)
+            except Exception:
+                assertion = None
+
+        if assertion is not None:
+            assertion = assertion.model_copy(
+                update={
+                    "subjects": self._canonicalize_person_ids(assertion.subjects),
+                    "speaker_person_id": self._canonicalize_person_id(
+                        assertion.speaker_person_id
+                    ),
+                }
+            )
+            if not subject_pids and assertion.subjects:
+                subject_pids = list(assertion.subjects)
+            if subject_pids and not assertion.subjects:
+                assertion.subjects = list(subject_pids)
+            if stated_by is None and assertion.speaker_person_id is not None:
+                stated_by = assertion.speaker_person_id
+            if stated_by is not None and assertion.speaker_person_id is None:
+                assertion.speaker_person_id = stated_by
+
+        # Trust parity: infer STATED_BY from source username when resolvable.
+        if stated_by is None and source_username:
+            try:
+                source_person_ids = await self.find_person_ids_for_username(
+                    source_username
+                )
+            except Exception:
+                source_person_ids = set()
+            if source_person_ids:
+                stated_by = sorted(source_person_ids)[0]
+                if assertion is not None and assertion.speaker_person_id is None:
+                    assertion.speaker_person_id = stated_by
+
+        # Ingestion parity: self-facts are linked to speaker person when available.
+        if not subject_pids and stated_by and memory_type != MemoryType.RELATIONSHIP:
+            subject_pids = [stated_by]
+            if assertion is not None and not assertion.subjects:
+                assertion.subjects = [stated_by]
+
+        if (
+            assertion is not None
+            and assertion.subjects
+            and assertion.assertion_kind
+            in {
+                AssertionKind.CONTEXT_FACT,
+                AssertionKind.GROUP_FACT,
+            }
+        ):
+            if memory_type == MemoryType.RELATIONSHIP:
+                assertion.assertion_kind = AssertionKind.RELATIONSHIP_FACT
+            elif stated_by and set(assertion.subjects) == {stated_by}:
+                assertion.assertion_kind = AssertionKind.SELF_FACT
+            else:
+                assertion.assertion_kind = AssertionKind.PERSON_FACT
+
+        if assertion is None and (
+            subject_pids or stated_by or memory_type == MemoryType.RELATIONSHIP
+        ):
+            if memory_type == MemoryType.RELATIONSHIP:
+                assertion_kind = AssertionKind.RELATIONSHIP_FACT
+            elif subject_pids and stated_by and set(subject_pids) == {stated_by}:
+                assertion_kind = AssertionKind.SELF_FACT
+            elif subject_pids:
+                assertion_kind = AssertionKind.PERSON_FACT
+            else:
+                assertion_kind = AssertionKind.CONTEXT_FACT
+
+            assertion = AssertionEnvelope(
+                assertion_kind=assertion_kind,
+                subjects=subject_pids,
+                speaker_person_id=stated_by,
+                predicates=[
+                    AssertionPredicate(
+                        name="describes",
+                        object_type=PredicateObjectType.TEXT,
+                        value=content,
+                    )
+                ],
+            )
+
+        if assertion is not None:
+            metadata = upsert_assertion_metadata(metadata, assertion)
+
+        return subject_pids, stated_by, metadata
 
     async def _resolve_subject_name(self: Store, person_ids: list[str]) -> str | None:
         if not person_ids:
@@ -127,6 +235,19 @@ class MemoryCrudMixin:
                 }
             )
             metadata = upsert_assertion_metadata(metadata, assertion)
+
+        (
+            subject_pids,
+            canonical_stated_by,
+            metadata,
+        ) = await self._normalize_semantics_for_write(
+            content=content,
+            memory_type=memory_type,
+            metadata=metadata,
+            subject_person_ids=subject_pids,
+            stated_by_person_id=canonical_stated_by,
+            source_username=source_username,
+        )
 
         memory = MemoryEntry(
             id=memory_id,
@@ -378,7 +499,8 @@ class MemoryCrudMixin:
         Args:
             entries: Memory entries to update.
             subject_person_ids_map: Optional map of memory_id -> desired subject person IDs.
-                If provided, ABOUT edges will be synced for those memories.
+                When omitted, current ABOUT edges are used as the baseline and
+                normalized semantics may still update them.
         """
         if not entries:
             return 0
@@ -387,26 +509,72 @@ class MemoryCrudMixin:
         edges_changed = False
         for entry in entries:
             if entry.id in self._graph.memories:
+                from ash.graph.edges import ABOUT, STATED_BY, create_stated_by_edge
+
+                existing_about = self._graph.get_outgoing(entry.id, edge_type=ABOUT)
+                existing_subjects = [e.target_id for e in existing_about]
+                desired_subjects = (
+                    subject_person_ids_map.get(entry.id, existing_subjects)
+                    if subject_person_ids_map
+                    else existing_subjects
+                )
+
+                existing_stated_edges = self._graph.get_outgoing(
+                    entry.id, edge_type=STATED_BY
+                )
+                existing_stated = (
+                    existing_stated_edges[0].target_id
+                    if existing_stated_edges
+                    else None
+                )
+
+                (
+                    desired_subjects,
+                    desired_stated_by,
+                    normalized_metadata,
+                ) = await self._normalize_semantics_for_write(
+                    content=entry.content,
+                    memory_type=entry.memory_type,
+                    metadata=entry.metadata,
+                    subject_person_ids=desired_subjects,
+                    stated_by_person_id=existing_stated,
+                    source_username=entry.source_username,
+                )
+
+                entry.metadata = normalized_metadata
                 self._graph.memories[entry.id] = entry
                 count += 1
 
-                # Sync ABOUT edges if subject_person_ids map is provided
-                if subject_person_ids_map and entry.id in subject_person_ids_map:
-                    from ash.graph.edges import ABOUT
+                # Always sync ABOUT edges to normalized subject attribution.
+                existing_pids = {e.target_id for e in existing_about}
+                desired_pids = set(desired_subjects)
 
-                    existing_about = self._graph.get_outgoing(entry.id, edge_type=ABOUT)
-                    existing_pids = {e.target_id for e in existing_about}
-                    desired_pids = set(subject_person_ids_map[entry.id])
-
-                    for edge in existing_about:
-                        if edge.target_id not in desired_pids:
-                            self._graph.remove_edge(edge.id)
-                            edges_changed = True
-
-                    for pid in desired_pids - existing_pids:
-                        edge = create_about_edge(entry.id, pid, created_by=entry.source)
-                        self._graph.add_edge(edge)
+                for edge in existing_about:
+                    if edge.target_id not in desired_pids:
+                        self._graph.remove_edge(edge.id)
                         edges_changed = True
+
+                for pid in desired_pids - existing_pids:
+                    edge = create_about_edge(entry.id, pid, created_by=entry.source)
+                    self._graph.add_edge(edge)
+                    edges_changed = True
+
+                # Sync STATED_BY edges based on normalized speaker attribution.
+                existing_stated_pids = {e.target_id for e in existing_stated_edges}
+                desired_stated_pids = (
+                    {desired_stated_by} if desired_stated_by else set()
+                )
+
+                for edge in existing_stated_edges:
+                    if edge.target_id not in desired_stated_pids:
+                        self._graph.remove_edge(edge.id)
+                        edges_changed = True
+
+                for pid in desired_stated_pids - existing_stated_pids:
+                    self._graph.add_edge(
+                        create_stated_by_edge(entry.id, pid, created_by=entry.source)
+                    )
+                    edges_changed = True
 
         if count > 0:
             self._persistence.mark_dirty("memories")
