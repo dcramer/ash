@@ -937,7 +937,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-cta-primary:hover {
-  color: #000000;
+  color: #000000 !important;
   background: var(--ash-lime);
 }
 
@@ -1204,7 +1204,12 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-chat-speaker {
-  display: none;
+  display: block;
+  margin: 0 0 0.24rem;
+  font-weight: 800;
+  font-size: 0.68rem;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
 }
 
 .ash-chat-user {
@@ -1277,7 +1282,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-chat-ash .ash-chat-speaker {
-  color: #565656;
+  color: #f0f0f0;
 }
 
 .ash-chat-time {
