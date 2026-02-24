@@ -16,6 +16,7 @@ from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.handlers.utils import (
     MIN_EDIT_INTERVAL,
     STREAM_DELAY,
+    merge_progress_and_response,
 )
 
 if TYPE_CHECKING:
@@ -179,13 +180,22 @@ class StreamingHandler:
             return
 
         # Build final content: progress messages + response (no stats)
-        if tracker.progress_messages:
-            parts = tracker.progress_messages + (
-                ["", response_content] if response_content else []
-            )
-            final_content = "\n".join(parts)
-        else:
-            final_content = response_content
+        final_content = merge_progress_and_response(
+            tracker.progress_messages, response_content
+        )
+
+        # If a direct send_message already delivered this exact response text
+        # (e.g. image + caption), suppress duplicate final emission.
+        suppress_final_send = False
+        sent_message_id: str | None = None
+        last_direct_send = tracker.last_direct_send()
+        if (
+            last_direct_send is not None
+            and response_content.strip()
+            and last_direct_send[0].strip() == response_content.strip()
+        ):
+            suppress_final_send = True
+            sent_message_id = last_direct_send[1]
 
         # Guard against empty content — use fallback message
         if not final_content.strip():
@@ -196,7 +206,17 @@ class StreamingHandler:
         from ash.providers.telegram.provider import MAX_SEND_LENGTH
 
         existing_msg_id = tracker.thinking_msg_id or response_msg_id
-        if len(final_content) > MAX_SEND_LENGTH and existing_msg_id:
+        if suppress_final_send:
+            if tracker.thinking_msg_id:
+                try:
+                    await self._provider.delete(
+                        message.chat_id, tracker.thinking_msg_id
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to delete thinking message for direct-send dedupe"
+                    )
+        elif len(final_content) > MAX_SEND_LENGTH and existing_msg_id:
             try:
                 await self._provider.delete(message.chat_id, existing_msg_id)
             except Exception:

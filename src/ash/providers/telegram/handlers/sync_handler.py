@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from ash.core.signals import is_no_reply
 from ash.providers.base import IncomingMessage, OutgoingMessage
+from ash.providers.telegram.handlers.utils import merge_progress_and_response
 
 if TYPE_CHECKING:
     from ash.core import Agent, SessionState
@@ -144,13 +145,22 @@ class SyncHandler:
             return response
 
         # Build final content: progress messages + response (no stats)
-        if tracker.progress_messages:
-            parts = tracker.progress_messages + (
-                ["", response_text] if response_text else []
-            )
-            final_content = "\n".join(parts)
-        else:
-            final_content = response_text
+        final_content = merge_progress_and_response(
+            tracker.progress_messages, response_text
+        )
+
+        # If a direct send_message already delivered the exact response text
+        # (e.g. image + caption), skip emitting a duplicate final reply.
+        suppress_final_send = False
+        sent_message_id: str | None = None
+        last_direct_send = tracker.last_direct_send()
+        if (
+            last_direct_send is not None
+            and response_text.strip()
+            and last_direct_send[0].strip() == response_text.strip()
+        ):
+            suppress_final_send = True
+            sent_message_id = last_direct_send[1]
 
         # Check for checkpoint in response and create inline keyboard if present
         reply_markup = None
@@ -202,7 +212,17 @@ class SyncHandler:
 
         # If final content exceeds Telegram's limit and we have an existing message,
         # delete it and send as chunked messages instead
-        if (
+        if suppress_final_send:
+            if tracker.thinking_msg_id:
+                try:
+                    await self._provider.delete(
+                        message.chat_id, tracker.thinking_msg_id
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to delete thinking message for direct-send dedupe"
+                    )
+        elif (
             tracker.thinking_msg_id
             and final_content.strip()
             and len(final_content) > MAX_SEND_LENGTH

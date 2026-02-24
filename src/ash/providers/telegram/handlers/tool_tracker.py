@@ -55,8 +55,12 @@ class ProgressMessageTool:
                     "type": "string",
                     "description": "The progress message to display",
                 },
+                "image_path": {
+                    "type": "string",
+                    "description": "Optional local image path to send directly.",
+                },
             },
-            "required": ["message"],
+            "required": [],
         }
 
     async def execute(
@@ -67,8 +71,26 @@ class ProgressMessageTool:
         from ash.tools.base import ToolResult
 
         message = input_data.get("message", "").strip()
+        image_path = str(input_data.get("image_path") or "").strip() or None
+
+        # Pass-through for image sends so screenshots/files are actually delivered.
+        if image_path:
+            reply_to = (
+                getattr(context, "reply_to_message_id", None) or self._tracker._reply_to
+            )
+            sent_id = await self._tracker.send_direct_message(
+                message=message,
+                image_path=image_path,
+                reply_to_message_id=reply_to,
+            )
+            self._tracker.record_direct_send(message, sent_id)
+            return ToolResult.success(
+                f"Message sent successfully (id: {sent_id})",
+                sent_message_id=sent_id,
+            )
+
         if not message:
-            return ToolResult.error("Message cannot be empty")
+            return ToolResult.error("Message or image_path is required")
 
         self._tracker.add_progress_message(message)
         await self._tracker.update_display()
@@ -113,6 +135,7 @@ class ToolTracker:
         self.thinking_msg_id: str | None = None
         self.tool_count: int = 0
         self.progress_messages: list[str] = []
+        self._direct_sends: list[tuple[str, str]] = []
 
     def _build_display_message(self, *, include_thinking: bool = True) -> str:
         """Build the consolidated message with progress on top and status on bottom.
@@ -193,6 +216,16 @@ class ToolTracker:
         """Add a progress message to be displayed."""
         self.progress_messages.append(message)
 
+    def record_direct_send(self, message: str, message_id: str) -> None:
+        """Record a direct provider send performed by ProgressMessageTool."""
+        self._direct_sends.append((message, message_id))
+
+    def last_direct_send(self) -> tuple[str, str] | None:
+        """Return last direct send as (message_text, external_message_id)."""
+        if not self._direct_sends:
+            return None
+        return self._direct_sends[-1]
+
     async def update_display(self) -> None:
         """Update the thinking message with current progress."""
         display_message = self._build_display_message()
@@ -213,6 +246,23 @@ class ToolTracker:
                 display_message,
                 parse_mode="markdown_v2",
             )
+
+    async def send_direct_message(
+        self,
+        *,
+        message: str,
+        image_path: str,
+        reply_to_message_id: str | None,
+    ) -> str:
+        """Send a direct image/text message via provider (bypassing progress buffer)."""
+        return await self._provider.send(
+            OutgoingMessage(
+                chat_id=self._chat_id,
+                text=message,
+                image_path=image_path,
+                reply_to_message_id=reply_to_message_id,
+            )
+        )
 
     async def finalize_response(self, response_content: str) -> str:
         """Build final content and edit/send the response, returning message ID.

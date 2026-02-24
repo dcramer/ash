@@ -13,11 +13,14 @@ import pytest
 
 from ash.providers.base import OutgoingMessage
 from ash.providers.telegram.handlers import (
+    ProgressMessageTool,
     ToolTracker,
     escape_markdown_v2,
     format_tool_brief,
 )
+from ash.providers.telegram.handlers.utils import merge_progress_and_response
 from ash.providers.telegram.provider import TelegramProvider
+from ash.tools.base import ToolContext
 
 
 class TestMessageConversion:
@@ -487,3 +490,40 @@ class TestToolTracker:
         # No stats or thinking text in final output
         assert "Thinking" not in final_text
         assert "tool call" not in final_text
+
+    async def test_progress_tool_image_passthrough_sends_direct(
+        self, tracker, mock_provider
+    ):
+        tool = ProgressMessageTool(tracker)
+        context = ToolContext(
+            session_id="session-1",
+            user_id="user-1",
+            chat_id="456",
+            provider="telegram",
+            metadata={"reply_to_message_id": "789"},
+        )
+        result = await tool.execute(
+            {
+                "message": "screenshot attached",
+                "image_path": "/workspace/screenshot.png",
+            },
+            context,
+        )
+
+        assert result.is_error is False
+        assert result.metadata is not None
+        assert result.metadata.get("sent_message_id") == "msg_123"
+        mock_provider.send.assert_called()
+        sent = mock_provider.send.call_args[0][0]
+        assert sent.image_path == "/workspace/screenshot.png"
+        assert sent.text == "screenshot attached"
+
+
+class TestProgressResponseMerge:
+    def test_merges_progress_and_response(self):
+        merged = merge_progress_and_response(["Step 1"], "Done")
+        assert merged == "Step 1\n\nDone"
+
+    def test_dedupes_identical_trailing_response(self):
+        merged = merge_progress_and_response(["Done"], "Done")
+        assert merged == "Done"

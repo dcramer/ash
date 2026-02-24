@@ -138,3 +138,16 @@ def extract_text_content(content: list[dict[str, Any]]) -> str:
         if isinstance(block, dict) and block.get("type") == "text"
     ]
     return "\n".join(texts) if texts else ""
+
+
+def merge_progress_and_response(
+    progress_messages: list[str], response_text: str
+) -> str:
+    """Build final content while avoiding duplicate trailing response text."""
+    if not progress_messages:
+        return response_text
+    response = response_text.strip()
+    if response and progress_messages[-1].strip() == response:
+        return "\n".join(progress_messages)
+    parts = progress_messages + (["", response_text] if response_text else [])
+    return "\n".join(parts)
