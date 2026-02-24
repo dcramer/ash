@@ -1217,7 +1217,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   background: linear-gradient(180deg, #b0ff1f, #b0ff1f);
   color: #000000;
   border-color: #565656;
-  text-align: right;
+  text-align: left;
   justify-self: end;
 }
 
