@@ -930,14 +930,15 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-cta-primary {
-  color: #1b1b1b;
+  color: #000000;
   background: var(--ash-lime);
   border: 0 !important;
   box-shadow: none;
 }
 
 .ash-home-cta-primary:hover {
-  background: #d1ff69;
+  color: #000000;
+  background: var(--ash-lime);
 }
 
 .ash-home-cta-secondary {
