@@ -362,9 +362,10 @@ td {
 /* CLI option list (help-style) */
 .ash-help-list {
   border: 2px solid #11130f;
-  background: #fafcf6;
+  background: #ffffff;
   padding: 0.35rem 0.52rem;
   margin: 0;
+  box-shadow: 5px 5px 0 rgba(20, 20, 15, 0.14);
 }
 
 .ash-help-row {
@@ -372,7 +373,7 @@ td {
   grid-template-columns: minmax(16rem, 24rem) minmax(0, 1fr);
   gap: 0.95rem;
   padding: 0.26rem 0.14rem;
-  border-top: 1px dashed rgba(17, 19, 15, 0.24);
+  border-top: 1px solid rgba(17, 19, 15, 0.2);
 }
 
 .ash-help-row:first-child {
@@ -388,24 +389,25 @@ td {
   display: block;
   margin: 0;
   padding: 0;
-  color: #11130f;
+  color: #0f140b;
   font-family: var(--sl-font-mono);
   font-weight: 700;
-  background: transparent;
-  border: 0;
+  background: #f3f8e7;
+  border: 1px solid #c8d9a1;
+  padding: 0.08rem 0.36rem;
   white-space: nowrap;
   overflow-x: auto;
 }
 
 .ash-help-desc p {
   margin: 0;
-  color: #1a2214;
+  color: #1a1f2a;
 }
 
 .ash-help-default {
   font-family: var(--sl-font-mono);
-  font-size: 0.88em;
-  color: #3a4a2a;
+  font-size: 0.84em;
+  color: #4f5867;
   font-weight: 600;
 }
 
