@@ -3,10 +3,17 @@
 from unittest.mock import AsyncMock, MagicMock
 
 from ash.cli.commands.memory.doctor._helpers import validate_supersession_pair
+from ash.cli.commands.memory.doctor.backfill_subjects import (
+    memory_doctor_backfill_subjects,
+)
 from ash.cli.commands.memory.doctor.contradictions import memory_doctor_contradictions
 from ash.cli.commands.memory.doctor.dedup import memory_doctor_dedup
 from ash.cli.commands.memory.doctor.quality import memory_doctor_quality
-from ash.graph.edges import create_supersedes_edge, get_superseded_by
+from ash.graph.edges import (
+    create_supersedes_edge,
+    get_subject_person_ids,
+    get_superseded_by,
+)
 
 
 async def test_doctor_contradictions_supersedes_outdated(
@@ -190,3 +197,28 @@ async def test_validate_supersession_pair_rejects_subject_authority(graph_store)
         store=graph_store, old_id=old.id, new_id=new.id
     )
     assert reason == "subject_authority"
+
+
+async def test_backfill_subjects_skips_self_display_name_matches(graph_store):
+    """Backfill should mirror extraction owner filtering for self aliases."""
+    self_person = await graph_store.create_person(
+        created_by="user-1",
+        name="David Cramer",
+        aliases=["dave"],
+        relationship="self",
+    )
+    memory = await graph_store.add_memory(
+        content="David Cramer likes tea",
+        owner_user_id="user-1",
+        source_username="dave",
+    )
+    from ash.graph.edges import ABOUT
+
+    for edge in graph_store.graph.get_outgoing(memory.id, edge_type=ABOUT):
+        graph_store.graph.remove_edge(edge.id)
+
+    await memory_doctor_backfill_subjects(graph_store, force=True, config=None)
+
+    # This is a self-fact; backfill should not create ABOUT(self) from name mention.
+    assert get_subject_person_ids(graph_store.graph, memory.id) == []
+    assert graph_store.graph.people[self_person.id].name == "David Cramer"
