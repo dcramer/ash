@@ -1,6 +1,6 @@
 ---
-title: LLM Providers
-description: Configure model aliases and provider credentials
+title: Models
+description: Configure model aliases, providers, and credentials
 sidebar:
   order: 8
 ---
@@ -9,11 +9,11 @@ import { Aside } from '@astrojs/starlight/components';
 
 Ash uses named model aliases under `[models.*]`. You pick a default alias, then optionally route specific workflows to cheaper or stronger models.
 
-## LLM Providers In 30 Seconds
+## Models In 30 Seconds
 
 - Configure one required alias: `[models.default]`
-- Point each alias at a provider model (`openai` or `anthropic`)
-- Set provider API keys in config or environment variables
+- Point each alias at a provider model (`openai`, `openai-oauth`, or `anthropic`)
+- Set provider credentials via OAuth, config, or environment variables
 - Use alias names in CLI (`--model`) and skill overrides
 
 ## Quick Start
@@ -23,25 +23,27 @@ Use this as a practical baseline:
 ```toml
 # Required default model
 [models.default]
-provider = "openai"
+provider = "openai-oauth"
 model = "gpt-5.2"
 max_tokens = 4096
 
 # Fast/cheap option for lightweight tasks
 [models.mini]
-provider = "openai"
+provider = "openai-oauth"
 model = "gpt-5-mini"
 max_tokens = 4096
 
 # Coding-focused option
 [models.codex]
-provider = "openai"
+provider = "openai-oauth"
 model = "gpt-5.2-codex"
 max_tokens = 8192
+```
 
-# Provider credentials (or use env vars)
-[openai]
-api_key = "sk-..."
+Then authenticate:
+
+```bash
+uv run ash auth login
 ```
 
 Test alias selection:
@@ -51,7 +53,7 @@ uv run ash chat --model mini "Summarize this changelog"
 uv run ash chat --model codex "Refactor this Python function"
 ```
 
-## Configure Providers And API Keys
+## Configure Providers And Credentials
 
 Provider credentials can come from config:
 
@@ -70,6 +72,13 @@ export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+For `openai-oauth`, run:
+
+```bash
+uv run ash auth login
+uv run ash auth status
+```
+
 Resolution order:
 
 1. Config (`[openai].api_key`, `[anthropic].api_key`)
@@ -81,7 +90,7 @@ Each alias block supports:
 
 ```toml
 [models.default]
-provider = "openai"      # Required: "openai" or "anthropic"
+provider = "openai-oauth" # Required: "openai" | "openai-oauth" | "anthropic"
 model = "gpt-5.2"        # Required: provider model id
 temperature = 0.7         # Optional: omit/null for reasoning-first models
 max_tokens = 4096         # Optional: default is 4096

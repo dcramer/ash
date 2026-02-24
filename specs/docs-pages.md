@@ -24,11 +24,11 @@ Files: docs/src/content/docs/systems/*.mdx
   1. `X in 30 Seconds` or equivalent quick orientation
   2. `Where/When` guidance
   3. `Quick Start` or `Create/Setup`
-  4. `Configuration`
-  5. `Troubleshooting`
-  6. `Reference (Advanced)`
+  4. `Troubleshooting`
+  5. `Reference (Advanced)`
 - Prefer one continuous example per page.
 - Keep command blocks grouped by workflow (setup, validate, diagnose).
+- Include configuration snippets only where they are directly relevant to the page.
 
 ### MAY
 
@@ -54,11 +54,6 @@ Files: docs/src/content/docs/systems/*.mdx
 ## Quick Start
 ~~~bash
 # minimal first-success workflow
-~~~
-
-## Configuration
-~~~toml
-# commented options
 ~~~
 
 ## Troubleshooting

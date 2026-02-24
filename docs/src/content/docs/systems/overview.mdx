@@ -11,13 +11,13 @@ Ash is built from modular systems. Use this page to jump straight to the subsyst
 
 ## Systems In 30 Seconds
 
-- **LLM Providers** choose models and credentials
+- **Models** choose LLM aliases, providers, and credentials
 - **Tools** execute actions (shell, web, files, browser, delegation)
 - **Skills** define reusable workflows in `SKILL.md`
 - **Agents** run delegated autonomous loops
 - **Memory** keeps context and extracted facts
 - **Sandbox** isolates command execution
-- **Providers** deliver messages (for example Telegram)
+- **Transport Providers** deliver messages (for example Telegram)
 - **Vision** analyzes inbound images
 - **Browser** performs session-based page automation
 
@@ -25,20 +25,20 @@ Ash is built from modular systems. Use this page to jump straight to the subsyst
 
 If you want to:
 
-- Configure model aliases and API keys -> [LLM Providers](/systems/llm/)
+- Configure model aliases and API keys -> [Models](/systems/llm/)
 - Understand or extend tool behavior -> [Tools](/systems/tools/)
 - Create reusable workflows -> [Skills](/systems/skills/)
 - Configure delegated agent execution -> [Agents](/systems/agents/)
 - Tune context and extraction quality -> [Memory](/systems/memory/)
 - Harden runtime security -> [Sandbox](/systems/sandbox/)
-- Configure Telegram delivery/runtime -> [Providers](/systems/providers/)
+- Configure Telegram delivery/runtime -> [Transport Providers](/systems/providers/)
 - Enable image understanding -> [Vision](/systems/vision/)
 - Run browser automation -> [Browser](/systems/browser/)
 
 ## Subsystem Cards
 
 <CardGrid>
-  <Card title="LLM Providers" icon="rocket">
+  <Card title="Models" icon="rocket">
     Configure model aliases, provider credentials, and reasoning settings.
   </Card>
   <Card title="Tools" icon="wrench">
@@ -56,7 +56,7 @@ If you want to:
   <Card title="Sandbox" icon="shield">
     Control runtime isolation, mounts, network mode, and resource limits.
   </Card>
-  <Card title="Providers" icon="telegram">
+  <Card title="Transport Providers" icon="telegram">
     Configure transport channels such as Telegram and runtime access controls.
   </Card>
   <Card title="Vision" icon="picture">
