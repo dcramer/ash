@@ -112,6 +112,7 @@ allowed_tools:
 
 Use `ash-sb capability` for email/calendar operations.
 Do not read or require raw provider credentials from environment variables.
+Capability IDs must be namespaced (for example `gog.email`, not `email`).
 ```
 
 ### Config Section

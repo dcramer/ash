@@ -125,6 +125,8 @@ Identity/routing parameters are populated server-side from `context_token`.
 Caller-provided values for `user_id`, `chat_id`, `chat_type`, `session_key`,
 `thread_id`, `source_username`, and related fields are ignored.
 Capability method details are defined in `specs/capabilities.md`.
+For `capability.*`, the `capability` parameter is a required namespaced ID
+(`namespace.name`, e.g. `gog.email`).
 
 ## Message Format
 

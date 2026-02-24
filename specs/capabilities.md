@@ -31,6 +31,8 @@ share skill code while preserving per-user data and credential isolation.
 - All capability RPC methods require valid `context_token` and fail closed otherwise.
 - Identity/routing for capability execution must come only from verified token claims.
 - Caller-provided identity/routing fields (`user_id`, `chat_id`, `chat_type`, etc.) are not trusted.
+- Capability IDs must be globally unique and namespaced as `<namespace>.<name>` (for example `gog.email`).
+- Capability RPC requests must use fully-qualified namespaced IDs; unqualified IDs are rejected.
 - Bot-initiated capability operations must run through `ash-sb` commands (no direct provider/chat path to credential lookups).
 - Skills must not receive capability credentials via environment variables.
 - Credential/materialized account state is isolated by verified `effective_user_id` (`sub` claim).
@@ -66,6 +68,18 @@ and data isolation on top of that:
 The token is necessary but not sufficient; capability-specific auth and isolation are
 required for secure multi-user operation.
 
+## Namespacing
+
+Capability surfaces are shared across integrations and external skill repos, so
+all identifiers must be namespace-safe.
+
+- Namespace owner: integration/skill package (example: `gog`).
+- Capability IDs: `<namespace>.<capability>` (example: `gog.email`, `gog.calendar`).
+- Registry behavior: duplicate capability IDs are registration errors.
+- Storage keys: include `capability_id` so namespace is part of persistence identity.
+
+This allows multiple integrations to coexist without collisions.
+
 ## Access Path Invariant
 
 For agent/bot execution, capability access is constrained to:
@@ -86,7 +100,7 @@ Important implications:
 ```python
 @dataclass
 class CapabilityDefinition:
-    id: str  # e.g. "gog.email"
+    id: str  # required namespaced id, e.g. "gog.email"
     description: str
     sensitive: bool = False
     allowed_chat_types: list[str] = field(default_factory=list)  # empty => all
