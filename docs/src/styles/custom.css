@@ -1053,7 +1053,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-home-band {
   border: 0;
   border-radius: 0 !important;
-  padding: 1rem 1rem 1rem 1.1rem;
+  padding: 0;
   background: transparent;
   position: relative;
   box-shadow: none;
@@ -1144,7 +1144,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   position: relative;
   border: 0;
   background: transparent;
-  padding: 2.05rem 0.72rem 0.72rem;
+  padding: 2.05rem 0 0.72rem;
   display: grid;
   gap: 0.42rem;
   box-shadow: none;
@@ -1161,8 +1161,8 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-chat-demo::before {
   content: 'ash • online';
   position: absolute;
-  left: -1.5px;
-  right: -1.5px;
+  left: 0;
+  right: 0;
   top: 0;
   height: 1.32rem;
   display: flex;
