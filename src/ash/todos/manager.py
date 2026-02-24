@@ -590,13 +590,6 @@ def _is_visible(
     if chat_edges:
         return chat_id is not None and any(e.target_id == chat_id for e in chat_edges)
 
-    # Fallback for legacy data without edges.
-    if todo.owner_user_id is None and todo.chat_id is None:
-        return True
-    if todo.owner_user_id is not None:
-        return user_id == todo.owner_user_id
-    if todo.chat_id is not None:
-        return chat_id == todo.chat_id
     return False
 
 

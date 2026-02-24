@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from ash.graph import GraphPersistence, hydrate_graph
 from ash.todos import create_todo_manager
+from ash.todos.types import TodoEntry, TodoStatus
 
 
 @pytest.mark.asyncio
@@ -195,3 +198,25 @@ async def test_todo_reminder_linkage_persists_as_graph_edge(tmp_path) -> None:
 
     loaded2 = hydrate_graph(await persistence.load_raw())
     assert loaded2.get_outgoing(todo.id, edge_type="TODO_REMINDER_SCHEDULED_AS") == []
+
+
+@pytest.mark.asyncio
+async def test_todo_list_hides_items_without_scope_edges(tmp_path) -> None:
+    manager = await create_todo_manager(tmp_path)
+    now = datetime.now(UTC)
+    manager.graph.add_node(
+        "todo",
+        TodoEntry(
+            id="noscope1",
+            content="injected",
+            status=TodoStatus.OPEN,
+            owner_user_id=None,
+            chat_id=None,
+            created_at=now,
+            updated_at=now,
+            revision=1,
+        ),
+    )
+
+    todos = await manager.list(user_id="u1", chat_id="room-a", include_done=True)
+    assert [t.id for t in todos] == []
