@@ -1,68 +1,85 @@
 ---
 title: Memory
-description: Context management, extraction, and retrieval
+description: Configure context retention and fact extraction
 sidebar:
   order: 5
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Ash memory combines:
+Ash memory keeps conversation context usable across long chats and stores reusable facts when extraction is enabled.
 
-- Session/chat history on disk under `~/.ash/`
-- Structured memory entries in the graph store
-- Semantic lookup via embeddings (optional)
+## Memory In 30 Seconds
 
-## Configuration
+Memory in Ash has three layers:
+
+- recent conversation context (always)
+- structured memory entries in the graph store
+- semantic retrieval via embeddings (optional)
+
+Use defaults first. Tune only if context quality or extraction behavior needs adjustment.
+
+## Quick Start
+
+Start with this baseline:
 
 ```toml
 [memory]
-max_context_messages = 20
 context_token_budget = 100000
 recency_window = 10
-system_prompt_buffer = 8000
 compaction_enabled = true
-auto_gc = true
-max_entries = null
 extraction_enabled = true
-extraction_model = null
-extraction_min_message_length = 20
-extraction_debounce_seconds = 30
 extraction_confidence_threshold = 0.7
 extraction_context_messages = 8
 extraction_verification_enabled = true
-extraction_verification_model = null
 ```
 
-### Key Options
+Verify memory tools are working:
 
-| Option | Default | Purpose |
-|--------|---------|---------|
-| `max_context_messages` | `20` | Hard cap for recent context messages |
-| `context_token_budget` | `100000` | Target context token budget |
-| `recency_window` | `10` | Messages always preserved |
-| `system_prompt_buffer` | `8000` | Reserve for instructions/tools |
-| `compaction_enabled` | `true` | Summarize older context when needed |
-| `auto_gc` | `true` | Run memory cleanup on startup |
-| `max_entries` | `null` | Optional retention cap |
-| `extraction_enabled` | `true` | Background fact extraction |
-| `extraction_model` | `null` | Optional model alias override |
-| `extraction_context_messages` | `8` | Message window used when building extraction context |
-| `extraction_verification_enabled` | `true` | Run second LLM pass to verify/rewrite extracted facts |
-| `extraction_verification_model` | `null` | Verification model selector. `null` uses `[models.default]`; accepts alias (`"mini"`) or provider model (`"openai:gpt-5.2"` / `"gpt-5.2"`). |
-| `extraction_confidence_threshold` | `0.7` | Minimum confidence to store extracted facts |
+```bash
+uv run ash memory stats
+uv run ash memory list
+uv run ash memory search "project ideas"
+```
 
-### Recommended Setups
+## Configure Memory
 
-Use a cheaper extraction model and a stronger verification model:
+Common options:
+
+```toml
+[memory]
+max_context_messages = 20              # Hard cap for recent message count
+context_token_budget = 100000          # Target token budget for assembled context
+recency_window = 10                    # Always keep this many most-recent messages
+system_prompt_buffer = 8000            # Reserved budget for prompt/tools metadata
+compaction_enabled = true              # Summarize older history when over budget
+auto_gc = true                         # Run cleanup on startup
+max_entries = null                     # Optional cap for total stored memories
+
+# Background extraction
+extraction_enabled = true
+extraction_model = null                # Optional model alias override
+extraction_min_message_length = 20
+extraction_debounce_seconds = 30
+extraction_context_messages = 8
+extraction_confidence_threshold = 0.7
+
+# Verification pass for extracted facts
+extraction_verification_enabled = true
+extraction_verification_model = null   # alias or provider model; null -> default
+```
+
+## Extraction Model Patterns
+
+Use a cheaper extractor with stronger verification:
 
 ```toml
 [models.default]
-provider = "openai-oauth"
+provider = "openai"
 model = "gpt-5.2"
 
 [models.mini]
-provider = "openai-oauth"
+provider = "openai"
 model = "gpt-5-mini"
 
 [memory]
@@ -75,12 +92,11 @@ Use a provider-qualified verification model directly:
 
 ```toml
 [memory]
-extraction_model = "mini"
 extraction_verification_enabled = true
 extraction_verification_model = "openai:gpt-5.2"
 ```
 
-Use a plain model name (resolved against the default model's provider):
+Use an unqualified provider model name (resolved against default provider):
 
 ```toml
 [memory]
@@ -88,9 +104,7 @@ extraction_verification_enabled = true
 extraction_verification_model = "gpt-5.2"
 ```
 
-## Embeddings
-
-Enable semantic retrieval with:
+## Enable Semantic Retrieval (Embeddings)
 
 ```toml
 [embeddings]
@@ -99,23 +113,67 @@ model = "text-embedding-3-small"
 ```
 
 <Aside type="note">
-  If embeddings are not configured, semantic memory tools are disabled and Ash falls back to non-embedding context behavior.
+  Without embeddings, semantic memory retrieval is disabled. Core conversation context still works.
 </Aside>
 
-## Runtime Behavior
+## Troubleshooting
 
-1. Incoming message is added to conversation context
-2. Recent history is selected using recency + token-budget rules
-3. Optional semantic retrieval adds relevant memories
-4. Background extraction can persist new memories from conversation text
-
-## CLI
+### Memory search returns nothing
 
 ```bash
 uv run ash memory list
-uv run ash memory search "project ideas"
+uv run ash memory search "your query"
+uv run ash memory stats
+```
+
+If store is empty, add a test fact and search again.
+
+### Extraction seems too noisy
+
+Raise confidence threshold or reduce extraction frequency:
+
+```toml
+[memory]
+extraction_confidence_threshold = 0.85
+extraction_debounce_seconds = 60
+```
+
+### Important context gets dropped
+
+Increase budget and recency window:
+
+```toml
+[memory]
+context_token_budget = 140000
+recency_window = 15
+```
+
+### Memory quality regresses after model changes
+
+Pin extraction and verification models explicitly:
+
+```toml
+[memory]
+extraction_model = "mini"
+extraction_verification_model = "default"
+```
+
+## Reference (Advanced)
+
+High-level runtime flow:
+
+1. Incoming message is written to context.
+2. History is selected with recency and token-budget rules.
+3. Semantic retrieval (if enabled) injects relevant stored memories.
+4. Background extraction can write new structured memories.
+
+CLI surface:
+
+```bash
+uv run ash memory list
+uv run ash memory search "..."
 uv run ash memory show <id>
-uv run ash memory add -q "User prefers concise summaries"
+uv run ash memory add -q "..."
 uv run ash memory remove <id>
 uv run ash memory gc
 uv run ash memory stats
