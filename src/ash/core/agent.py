@@ -683,6 +683,15 @@ class Agent:
                     prompt,
                     **{CHECKPOINT_METADATA_KEY: checkpoint},
                 )
+                logger.info(
+                    "agent_interrupt_intercepted",
+                    extra={
+                        "gen_ai.tool.name": "interrupt",
+                        "gen_ai.tool.call.id": tool_use.id,
+                        "checkpoint.id": checkpoint["checkpoint_id"],
+                        "input.preview": prompt[:100],
+                    },
+                )
                 sanitized = self._add_sanitized_tool_result(
                     session=session,
                     tool_use_id=tool_use.id,
@@ -735,6 +744,15 @@ class Agent:
                                 },
                             },
                         }
+                    )
+                if pending_tools[i + 1 :]:
+                    logger.info(
+                        "agent_interrupt_skipped_tools",
+                        extra={
+                            "gen_ai.tool.name": "interrupt",
+                            "gen_ai.tool.call.id": tool_use.id,
+                            "count": len(pending_tools[i + 1 :]),
+                        },
                     )
                 return tool_calls, []
 

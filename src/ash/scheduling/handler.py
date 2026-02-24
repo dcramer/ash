@@ -282,12 +282,38 @@ class ScheduledTaskHandler:
 
         registrar = self._registrars.get(entry.provider)
         if registrar:
-            await registrar(entry.chat_id, message_id)
-            logger.debug(f"Registered scheduled message {message_id} in thread index")
+            try:
+                await registrar(entry.chat_id, message_id)
+                logger.debug(
+                    f"Registered scheduled message {message_id} in thread index"
+                )
+            except Exception as e:
+                logger.error(
+                    "scheduled_response_register_failed",
+                    extra={
+                        "messaging.provider": entry.provider,
+                        "messaging.chat_id": entry.chat_id,
+                        "schedule.entry_id": entry.id,
+                        "error.type": type(e).__name__,
+                        "error.message": str(e),
+                    },
+                )
 
         persister = self._persisters.get(entry.provider)
         if persister:
-            await persister(entry, response_text, message_id)
+            try:
+                await persister(entry, response_text, message_id)
+            except Exception as e:
+                logger.error(
+                    "scheduled_response_persist_failed",
+                    extra={
+                        "messaging.provider": entry.provider,
+                        "messaging.chat_id": entry.chat_id,
+                        "schedule.entry_id": entry.id,
+                        "error.type": type(e).__name__,
+                        "error.message": str(e),
+                    },
+                )
 
     async def _run_skill_loop(
         self,

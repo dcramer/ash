@@ -1,5 +1,6 @@
 """Tests for scheduling subsystem."""
 
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -872,6 +873,82 @@ class TestScheduledTaskHandler:
         await handler.handle(entry)
 
         mock_persister.assert_called_once_with(entry, "Response", "msg_123")
+
+    @pytest.mark.asyncio
+    async def test_handle_registrar_failure_logged_without_task_failure(
+        self, caplog
+    ) -> None:
+        """Registrar errors should be logged with specific event and not bubble."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.scheduling import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Response"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        mock_registrar = AsyncMock(side_effect=RuntimeError("register boom"))
+        handler = ScheduledTaskHandler(
+            agent=mock_agent,
+            senders={"telegram": mock_sender},
+            registrars={"telegram": mock_registrar},
+        )
+
+        entry = ScheduleEntry(
+            id="reg_fail_1",
+            message="Test",
+            trigger_at=datetime.now(UTC),
+            provider="telegram",
+            chat_id="123",
+            user_id="456",
+        )
+
+        with caplog.at_level(logging.ERROR, logger="ash.scheduling.handler"):
+            await handler.handle(entry)
+
+        events = [r.message for r in caplog.records]
+        assert "scheduled_response_register_failed" in events
+        assert "scheduled_task_failed" not in events
+
+    @pytest.mark.asyncio
+    async def test_handle_persister_failure_logged_without_task_failure(
+        self, caplog
+    ) -> None:
+        """Persister errors should be logged with specific event and not bubble."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.scheduling import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Response"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        mock_persister = AsyncMock(side_effect=RuntimeError("persist boom"))
+        handler = ScheduledTaskHandler(
+            agent=mock_agent,
+            senders={"telegram": mock_sender},
+            persisters={"telegram": mock_persister},
+        )
+
+        entry = ScheduleEntry(
+            id="persist_fail_1",
+            message="Test",
+            trigger_at=datetime.now(UTC),
+            provider="telegram",
+            chat_id="123",
+            user_id="456",
+        )
+
+        with caplog.at_level(logging.ERROR, logger="ash.scheduling.handler"):
+            await handler.handle(entry)
+
+        events = [r.message for r in caplog.records]
+        assert "scheduled_response_persist_failed" in events
+        assert "scheduled_task_failed" not in events
 
 
 class TestScheduleEntryTimezone:

@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import cast
 
@@ -189,6 +190,38 @@ class TestAgent:
 
         test_tool = cast(MockTool, registry.get("test_tool"))
         assert test_tool.execute_calls == []
+
+    async def test_interrupt_tool_emits_intercept_logs(self, workspace, caplog):
+        from ash.tools.builtin.interrupt import InterruptTool
+
+        tool_use_response = Message(
+            role=Role.ASSISTANT,
+            content=[
+                ToolUse(
+                    id="tool-int",
+                    name="interrupt",
+                    input={"prompt": "Pick one"},
+                ),
+                ToolUse(id="tool-next", name="test_tool", input={"arg": "value"}),
+            ],
+        )
+
+        registry = ToolRegistry()
+        registry.register(InterruptTool())
+        registry.register(MockTool(name="test_tool"))
+
+        agent = Agent(
+            llm=MockLLMProvider(responses=[tool_use_response]),
+            tool_executor=ToolExecutor(registry),
+            prompt_builder=make_prompt_builder(workspace, registry),
+        )
+
+        with caplog.at_level(logging.INFO, logger="ash.core.agent"):
+            await agent.process_message("Use interrupt", make_session())
+
+        events = [r.message for r in caplog.records]
+        assert "agent_interrupt_intercepted" in events
+        assert "agent_interrupt_skipped_tools" in events
 
     async def test_max_iterations_limit(self, workspace):
         tool_use_response = Message(
