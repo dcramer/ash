@@ -92,8 +92,16 @@ body::before {
 header.header {
   background: #10110d !important;
   border-bottom: 2px solid #b0ff1f;
+  border-right: 0 !important;
+  border-inline-end: 0 !important;
   box-shadow: 0 3px 0 rgba(176, 255, 31, 0.2);
   backdrop-filter: none;
+}
+
+header.header::before,
+header.header::after {
+  border-right: 0 !important;
+  border-inline-end: 0 !important;
 }
 
 /* Header search should look like the same hard-edged UI language */
@@ -280,7 +288,7 @@ nav.sidebar a[aria-current='page']:hover {
 }
 
 starlight-toc {
-  border-inline-start: 2px solid var(--ash-ink);
+  border-inline-start: 0 !important;
 }
 
 starlight-toc a[aria-current='true'] {
