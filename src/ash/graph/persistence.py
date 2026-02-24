@@ -11,6 +11,8 @@ import logging
 import os
 import tempfile
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +21,82 @@ from ash.graph.graph import Edge, KnowledgeGraph
 logger = logging.getLogger(__name__)
 
 
-_VALID_COLLECTIONS = frozenset({"memories", "people", "users", "chats", "edges"})
+NodeSerializer = Callable[[Any], dict[str, Any]]
+NodeHydrator = Callable[[dict[str, Any]], Any]
+
+
+@dataclass(frozen=True)
+class NodeCollectionCodec:
+    """Collection/file metadata for graph node persistence."""
+
+    collection: str
+    node_type: str
+    serializer: NodeSerializer
+    hydrator: NodeHydrator
+
+
+_NODE_COLLECTIONS: dict[str, NodeCollectionCodec] = {}
+_BUILTINS_REGISTERED = False
+
+
+def register_node_collection(
+    *,
+    collection: str,
+    node_type: str,
+    serializer: NodeSerializer,
+    hydrator: NodeHydrator,
+    overwrite: bool = False,
+) -> None:
+    """Register a graph node collection persisted as ``<collection>.jsonl``."""
+    existing = _NODE_COLLECTIONS.get(collection)
+    codec = NodeCollectionCodec(
+        collection=collection,
+        node_type=node_type,
+        serializer=serializer,
+        hydrator=hydrator,
+    )
+    if existing is not None and not overwrite:
+        if existing.node_type != node_type:
+            raise ValueError(f"node collection already registered: {collection}")
+        return
+    _NODE_COLLECTIONS[collection] = codec
+
+
+def _register_builtin_node_collections() -> None:
+    global _BUILTINS_REGISTERED
+    if _BUILTINS_REGISTERED:
+        return
+    from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
+
+    register_node_collection(
+        collection="memories",
+        node_type="memory",
+        serializer=lambda item: item.to_dict(),
+        hydrator=MemoryEntry.from_dict,
+    )
+    register_node_collection(
+        collection="people",
+        node_type="person",
+        serializer=lambda item: item.to_dict(),
+        hydrator=PersonEntry.from_dict,
+    )
+    register_node_collection(
+        collection="users",
+        node_type="user",
+        serializer=lambda item: item.to_dict(),
+        hydrator=UserEntry.from_dict,
+    )
+    register_node_collection(
+        collection="chats",
+        node_type="chat",
+        serializer=lambda item: item.to_dict(),
+        hydrator=ChatEntry.from_dict,
+    )
+    _BUILTINS_REGISTERED = True
+
+
+def valid_collections() -> set[str]:
+    return set(_NODE_COLLECTIONS) | {"edges"}
 
 
 class GraphPersistence:
@@ -30,6 +107,7 @@ class GraphPersistence:
     """
 
     def __init__(self, graph_dir: Path) -> None:
+        _register_builtin_node_collections()
         self._dir = graph_dir
         self._dirty: set[str] = set()
 
@@ -48,11 +126,11 @@ class GraphPersistence:
         Valid names: "memories", "people", "users", "chats", "edges".
         Call ``flush()`` to write all dirty collections to disk.
         """
-        invalid = set(collections) - _VALID_COLLECTIONS
+        valid = valid_collections()
+        invalid = set(collections) - valid
         if invalid:
             raise ValueError(
-                f"Invalid collection names: {invalid}. "
-                f"Valid: {sorted(_VALID_COLLECTIONS)}"
+                f"Invalid collection names: {invalid}. Valid: {sorted(valid)}"
             )
         self._dirty.update(collections)
 
@@ -86,7 +164,28 @@ class GraphPersistence:
             self._dirty.update(dirty)
             raise
 
-    async def load_raw(self) -> dict[str, list[dict[str, Any]]]:
+    def flush_sync(self, graph: KnowledgeGraph) -> None:
+        """Synchronous variant of ``flush`` for non-async call sites."""
+        if not self._dirty:
+            return
+        dirty = self._dirty.copy()
+        self._dirty.clear()
+        try:
+            commit_id = f"g-{uuid.uuid4().hex}"
+            snapshot = _snapshot_dirty(graph, dirty)
+            _write_snapshot(self._dir, snapshot)
+            if "memories" in dirty:
+                self.update_state_sync(
+                    graph_commit_id=commit_id,
+                    active_memory_id_hash=_hash_active_memory_ids(graph),
+                )
+            else:
+                self.update_state_sync(graph_commit_id=commit_id)
+        except Exception:
+            self._dirty.update(dirty)
+            raise
+
+    async def load_raw(self) -> dict[str, Any]:
         """Load raw JSONL data from disk.
 
         Returns a dict with keys: raw_memories, raw_people, raw_users,
@@ -96,6 +195,10 @@ class GraphPersistence:
         import asyncio
 
         return await asyncio.to_thread(_load_raw_jsonl, self._dir)
+
+    def load_raw_sync(self) -> dict[str, Any]:
+        """Synchronous variant of ``load_raw``."""
+        return _load_raw_jsonl(self._dir)
 
     async def load_state(self) -> dict[str, Any]:
         """Load graph/vector state metadata."""
@@ -109,6 +212,10 @@ class GraphPersistence:
 
         await asyncio.to_thread(_update_state_sync, self.state_path, fields)
 
+    def update_state_sync(self, **fields: Any) -> None:
+        """Synchronous variant of ``update_state``."""
+        _update_state_sync(self.state_path, fields)
+
 
 def _snapshot_dirty(graph: KnowledgeGraph, dirty: set[str]) -> dict[str, list[dict]]:
     """Snapshot dirty collections into raw dicts (must run on event-loop thread).
@@ -117,14 +224,11 @@ def _snapshot_dirty(graph: KnowledgeGraph, dirty: set[str]) -> dict[str, list[di
     mutate them, producing plain lists that are safe to hand to a worker thread.
     """
     snapshot: dict[str, list[dict]] = {}
-    if "memories" in dirty:
-        snapshot["memories"] = [m.to_dict() for m in graph.memories.values()]
-    if "people" in dirty:
-        snapshot["people"] = [p.to_dict() for p in graph.people.values()]
-    if "users" in dirty:
-        snapshot["users"] = [u.to_dict() for u in graph.users.values()]
-    if "chats" in dirty:
-        snapshot["chats"] = [c.to_dict() for c in graph.chats.values()]
+    for collection, codec in _NODE_COLLECTIONS.items():
+        if collection not in dirty:
+            continue
+        nodes = graph.get_node_collection(codec.node_type)
+        snapshot[collection] = [codec.serializer(node) for node in nodes.values()]
     if "edges" in dirty:
         snapshot["edges"] = [e.to_dict() for e in graph.edges.values()]
     return snapshot
@@ -148,22 +252,26 @@ def _hash_active_memory_ids(graph: KnowledgeGraph) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _load_raw_jsonl(graph_dir: Path) -> dict[str, list[dict[str, Any]]]:
+def _load_raw_jsonl(graph_dir: Path) -> dict[str, Any]:
     """Read all JSONL files from disk synchronously (runs in thread)."""
-    raw: dict[str, list[dict[str, Any]]] = {
-        "raw_memories": [],
-        "raw_people": [],
-        "raw_users": [],
-        "raw_chats": [],
-        "raw_edges": [],
+    raw_nodes: dict[str, list[dict[str, Any]]] = {
+        collection: [] for collection in _NODE_COLLECTIONS
     }
-    for key, filename in [
-        ("raw_memories", "memories.jsonl"),
-        ("raw_people", "people.jsonl"),
-        ("raw_users", "users.jsonl"),
-        ("raw_chats", "chats.jsonl"),
-        ("raw_edges", "edges.jsonl"),
-    ]:
+    for collection in _NODE_COLLECTIONS:
+        path = graph_dir / f"{collection}.jsonl"
+        if path.exists():
+            raw_nodes[collection] = _read_jsonl(path)
+
+    raw: dict[str, Any] = {
+        "raw_nodes": raw_nodes,
+        "raw_edges": [],
+        # Backward-compatible aliases.
+        "raw_memories": raw_nodes.get("memories", []),
+        "raw_people": raw_nodes.get("people", []),
+        "raw_users": raw_nodes.get("users", []),
+        "raw_chats": raw_nodes.get("chats", []),
+    }
+    for key, filename in [("raw_edges", "edges.jsonl")]:
         path = graph_dir / filename
         if path.exists():
             raw[key] = _read_jsonl(path)
@@ -245,20 +353,30 @@ def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
         raise
 
 
-def hydrate_graph(raw_data: dict[str, list[dict[str, Any]]]) -> KnowledgeGraph:
+def hydrate_graph(raw_data: dict[str, Any]) -> KnowledgeGraph:
     """Build a KnowledgeGraph from raw JSONL dicts."""
-    from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
-
     graph = KnowledgeGraph()
 
-    for d in raw_data["raw_memories"]:
-        graph.add_memory(MemoryEntry.from_dict(d))
-    for d in raw_data["raw_people"]:
-        graph.add_person(PersonEntry.from_dict(d))
-    for d in raw_data["raw_users"]:
-        graph.add_user(UserEntry.from_dict(d))
-    for d in raw_data["raw_chats"]:
-        graph.add_chat(ChatEntry.from_dict(d))
+    raw_nodes = raw_data.get("raw_nodes")
+    if isinstance(raw_nodes, dict):
+        for collection, codec in _NODE_COLLECTIONS.items():
+            for d in raw_nodes.get(collection, []):
+                hydrated = codec.hydrator(d)
+                if hydrated is None:
+                    continue
+                graph.add_node(codec.node_type, hydrated)
+    else:
+        # Backward-compatible path.
+        from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
+
+        for d in raw_data["raw_memories"]:
+            graph.add_node("memory", MemoryEntry.from_dict(d))
+        for d in raw_data["raw_people"]:
+            graph.add_node("person", PersonEntry.from_dict(d))
+        for d in raw_data["raw_users"]:
+            graph.add_node("user", UserEntry.from_dict(d))
+        for d in raw_data["raw_chats"]:
+            graph.add_node("chat", ChatEntry.from_dict(d))
     for d in raw_data["raw_edges"]:
         graph.add_edge(Edge.from_dict(d))
 

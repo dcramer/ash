@@ -842,6 +842,8 @@ class TestSystemPromptBuilder:
         assert "read-only" in prompt
         assert "/workspace" in prompt
         assert "/ash/skills" in prompt
+        # Todo prompt guidance is integration-owned, not hardcoded in core prompt.
+        assert "ash-sb todo" not in prompt
 
     def test_build_with_runtime_info(self, prompt_builder):
         """Runtime info excludes host system details (os, arch, python)."""

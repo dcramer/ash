@@ -16,6 +16,7 @@ from ash.integrations import (
     IntegrationContext,
     RuntimeRPCIntegration,
     SchedulingIntegration,
+    TodoIntegration,
 )
 from ash.skills import SkillRegistry
 from ash.tools import ToolRegistry
@@ -33,6 +34,7 @@ def _context() -> IntegrationContext:
             tool_registry=ToolRegistry(),
             sandbox_executor=None,
             browser_manager=None,
+            memory_manager=None,
             agent=object(),
         ),
     )
@@ -74,8 +76,8 @@ async def test_scheduling_integration_owns_lifecycle_and_rpc(monkeypatch) -> Non
     server = object()
 
     class _FakeStore:
-        def __init__(self, schedule_file: Path) -> None:
-            self.schedule_file = schedule_file
+        def __init__(self, graph_dir: Path) -> None:
+            self.graph_dir = graph_dir
 
     class _FakeWatcher:
         started = False
@@ -137,7 +139,7 @@ async def test_scheduling_integration_owns_lifecycle_and_rpc(monkeypatch) -> Non
     )
 
     integration = SchedulingIntegration(
-        Path("schedule.jsonl"),
+        Path("graph"),
         timezone="America/Chicago",
         senders=cast(Any, {"telegram": _sender}),
         registrars=cast(Any, {"telegram": _registrar}),
@@ -145,7 +147,7 @@ async def test_scheduling_integration_owns_lifecycle_and_rpc(monkeypatch) -> Non
 
     await integration.setup(context)
     assert integration.store is not None
-    assert integration.store.schedule_file == Path("schedule.jsonl")
+    assert integration.store.graph_dir == Path("graph")
 
     integration.register_rpc_methods(server, context)
     assert rpc_calls["args"][0] is server
@@ -221,3 +223,53 @@ async def test_browser_integration_injects_prompt_guidance_via_hook(
     assert isinstance(principles, list)
     assert any("Use `browser` for interactive" in line for line in routing)
     assert any("page.screenshot" in line for line in principles)
+
+
+@pytest.mark.asyncio
+async def test_todo_integration_registers_todo_rpc_methods(monkeypatch) -> None:
+    context = _context()
+    server = object()
+
+    calls: dict[str, Any] = {}
+
+    def _register_todo(server_obj, manager_obj, schedule_store=None) -> None:
+        calls["args"] = (server_obj, manager_obj, schedule_store)
+
+    monkeypatch.setattr("ash.rpc.methods.todo.register_todo_methods", _register_todo)
+
+    integration = TodoIntegration(
+        graph_dir=Path("graph"),
+        schedule_enabled=True,
+    )
+    await integration.setup(context)
+    assert integration.manager is not None
+
+    integration.register_rpc_methods(server, context)
+    assert calls["args"][0] is server
+    assert calls["args"][1] is integration.manager
+    assert calls["args"][2] is not None
+
+
+@pytest.mark.asyncio
+async def test_todo_integration_owns_prompt_routing_guidance(monkeypatch) -> None:
+    context = _context()
+    integration = TodoIntegration(graph_dir=Path("graph"))
+
+    monkeypatch.setattr(
+        "ash.integrations.todo.create_todo_manager",
+        lambda *args, **kwargs: asyncio.sleep(0, result=cast(Any, object())),
+    )
+
+    await integration.setup(context)
+    session = SessionState(
+        session_id="s-1",
+        provider="telegram",
+        chat_id="c-1",
+        user_id="u-1",
+    )
+    prompt_context = integration.augment_prompt_context(
+        PromptContext(), session, context
+    )
+    routing = prompt_context.extra_context.get("tool_routing_rules")
+    assert isinstance(routing, list)
+    assert any("ash-sb todo add" in line for line in routing)

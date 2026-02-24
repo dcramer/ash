@@ -26,6 +26,11 @@ MERGED_INTO = "MERGED_INTO"  # Person → Person (source merged into target)
 HAS_RELATIONSHIP = "HAS_RELATIONSHIP"  # Person → Person (relationship link)
 LEARNED_IN = "LEARNED_IN"  # Memory → Chat (where a memory was first learned)
 PARTICIPATES_IN = "PARTICIPATES_IN"  # Person → Chat (chat membership)
+TODO_OWNED_BY = "TODO_OWNED_BY"  # Todo → User (personal owner)
+TODO_SHARED_IN = "TODO_SHARED_IN"  # Todo → Chat (shared scope)
+TODO_REMINDER_SCHEDULED_AS = "TODO_REMINDER_SCHEDULED_AS"  # Todo → ScheduleEntry
+SCHEDULE_FOR_CHAT = "SCHEDULE_FOR_CHAT"  # ScheduleEntry → Chat
+SCHEDULE_FOR_USER = "SCHEDULE_FOR_USER"  # ScheduleEntry → User
 
 
 def _make_edge_id() -> str:
@@ -316,3 +321,83 @@ def person_participates_in_chat(
     """Check if a person participates in a specific chat."""
     edges = graph.get_outgoing(person_id, edge_type=PARTICIPATES_IN)
     return any(e.target_id == chat_id for e in edges)
+
+
+def create_todo_owned_by_edge(
+    todo_id: str,
+    user_id: str,
+) -> Edge:
+    """Create a TODO_OWNED_BY edge: Todo → User."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=TODO_OWNED_BY,
+        source_type="todo",
+        source_id=todo_id,
+        target_type="user",
+        target_id=user_id,
+        created_at=datetime.now(UTC),
+    )
+
+
+def create_todo_shared_in_edge(
+    todo_id: str,
+    chat_id: str,
+) -> Edge:
+    """Create a TODO_SHARED_IN edge: Todo → Chat."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=TODO_SHARED_IN,
+        source_type="todo",
+        source_id=todo_id,
+        target_type="chat",
+        target_id=chat_id,
+        created_at=datetime.now(UTC),
+    )
+
+
+def create_todo_reminder_scheduled_as_edge(
+    todo_id: str,
+    schedule_entry_id: str,
+) -> Edge:
+    """Create a TODO_REMINDER_SCHEDULED_AS edge: Todo → ScheduleEntry."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=TODO_REMINDER_SCHEDULED_AS,
+        source_type="todo",
+        source_id=todo_id,
+        target_type="schedule_entry",
+        target_id=schedule_entry_id,
+        created_at=datetime.now(UTC),
+    )
+
+
+def create_schedule_for_chat_edge(
+    schedule_entry_id: str,
+    chat_id: str,
+) -> Edge:
+    """Create a SCHEDULE_FOR_CHAT edge: ScheduleEntry → Chat."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=SCHEDULE_FOR_CHAT,
+        source_type="schedule_entry",
+        source_id=schedule_entry_id,
+        target_type="chat",
+        target_id=chat_id,
+        created_at=datetime.now(UTC),
+    )
+
+
+def create_schedule_for_user_edge(
+    schedule_entry_id: str,
+    user_id: str,
+) -> Edge:
+    """Create a SCHEDULE_FOR_USER edge: ScheduleEntry → User."""
+    return Edge(
+        id=_make_edge_id(),
+        edge_type=SCHEDULE_FOR_USER,
+        source_type="schedule_entry",
+        source_id=schedule_entry_id,
+        target_type="user",
+        target_id=user_id,
+        created_at=datetime.now(UTC),
+    )

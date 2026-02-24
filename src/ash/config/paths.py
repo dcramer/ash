@@ -159,11 +159,6 @@ def get_auth_path() -> Path:
     return get_ash_home() / "auth.json"
 
 
-def get_schedule_file() -> Path:
-    """Get the schedule file path."""
-    return get_ash_home() / "schedule.jsonl"
-
-
 def get_browser_path() -> Path:
     """Get the browser subsystem state directory path."""
     return get_ash_home() / "browser"
@@ -252,7 +247,6 @@ def get_all_paths() -> dict[str, Path | None]:
         "config": get_config_path(),
         "graph": get_graph_dir(),
         "workspace": get_workspace_path(),
-        "schedule": get_schedule_file(),
         "browser": get_browser_path(),
         "logs": get_logs_path(),
         "run": get_run_path(),

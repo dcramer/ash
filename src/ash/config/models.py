@@ -213,6 +213,12 @@ class ImageConfig(BaseModel):
     no_caption_auto_respond: bool = True
 
 
+class TodoConfig(BaseModel):
+    """Configuration for todo subsystem integration."""
+
+    enabled: bool = True
+
+
 class ToolOutputTrustConfig(BaseModel):
     """Configuration for tool-output trust boundary behavior."""
 
@@ -392,6 +398,7 @@ class AshConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     image: ImageConfig = Field(default_factory=ImageConfig)
+    todo: TodoConfig = Field(default_factory=TodoConfig)
     tool_output_trust: ToolOutputTrustConfig = Field(
         default_factory=ToolOutputTrustConfig
     )

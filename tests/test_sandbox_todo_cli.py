@@ -1,0 +1,110 @@
+"""Tests for sandboxed CLI todo commands."""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from ash_sandbox_cli.commands.todo import app
+from typer.testing import CliRunner
+
+
+def _runner() -> CliRunner:
+    return CliRunner(
+        env={
+            "ASH_USER_ID": "user-1",
+            "ASH_CHAT_ID": "chat-1",
+            "ASH_PROVIDER": "telegram",
+            "ASH_TIMEZONE": "UTC",
+        }
+    )
+
+
+def test_todo_add_calls_rpc() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        mock_rpc.return_value = {
+            "todo": {"id": "abc12345", "content": "buy milk", "status": "open"}
+        }
+        result = runner.invoke(app, ["add", "buy milk"])
+
+    assert result.exit_code == 0
+    assert "Created todo" in result.stdout
+    mock_rpc.assert_called_once()
+    assert mock_rpc.call_args[0][0] == "todo.create"
+
+
+def test_todo_list_calls_rpc() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        mock_rpc.return_value = [
+            {"id": "abc12345", "content": "buy milk", "status": "open"},
+            {"id": "def67890", "content": "file taxes", "status": "done"},
+        ]
+        result = runner.invoke(app, ["list", "--include-done"])
+
+    assert result.exit_code == 0
+    assert "Total: 2 todo(s)" in result.stdout
+    mock_rpc.assert_called_once()
+    assert mock_rpc.call_args[0][0] == "todo.list"
+
+
+def test_todo_done_calls_rpc() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        mock_rpc.return_value = {
+            "todo": {"id": "abc12345", "content": "buy milk", "status": "done"}
+        }
+        result = runner.invoke(app, ["done", "--id", "abc12345"])
+
+    assert result.exit_code == 0
+    assert "Completed todo" in result.stdout
+    assert mock_rpc.call_args[0][0] == "todo.complete"
+
+
+def test_todo_list_all_sets_include_flags() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        mock_rpc.return_value = []
+        result = runner.invoke(app, ["list", "--all"])
+
+    assert result.exit_code == 0
+    method, params = mock_rpc.call_args[0]
+    assert method == "todo.list"
+    assert params["include_done"] is True
+    assert params["include_deleted"] is True
+
+
+def test_todo_remind_calls_update_rpc() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        mock_rpc.return_value = {
+            "todo": {
+                "id": "abc12345",
+                "content": "buy milk",
+                "status": "open",
+                "linked_schedule_entry_id": "sched1234",
+            }
+        }
+        result = runner.invoke(
+            app,
+            ["remind", "--id", "abc12345", "--at", "2026-03-01T10:00:00+00:00"],
+        )
+
+    assert result.exit_code == 0
+    method, params = mock_rpc.call_args[0]
+    assert method == "todo.update"
+    assert params["todo_id"] == "abc12345"
+    assert params["reminder_at"] is not None
+
+
+def test_todo_unremind_calls_update_rpc() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        mock_rpc.return_value = {"todo": {"id": "abc12345"}}
+        result = runner.invoke(app, ["unremind", "--id", "abc12345"])
+
+    assert result.exit_code == 0
+    method, params = mock_rpc.call_args[0]
+    assert method == "todo.update"
+    assert params["todo_id"] == "abc12345"
+    assert params["clear_reminder"] is True

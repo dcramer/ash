@@ -20,7 +20,6 @@ from ash.config.paths import (
     get_graph_dir,
     get_logs_path,
     get_run_path,
-    get_schedule_file,
     get_sessions_path,
 )
 from ash.images.service import _resolve_image_model
@@ -50,7 +49,6 @@ def run_doctor_checks() -> DoctorResult:
     findings.extend(_check_home())
     findings.extend(_check_runtime_artifacts())
     findings.extend(_check_config())
-    findings.extend(_check_schedule_file())
     findings.extend(_check_sessions_jsonl())
     findings.extend(_check_graph_state())
     findings.extend(_check_logs_dir())
@@ -527,32 +525,6 @@ def _check_image_config(config: AshConfig) -> list[DoctorFinding]:
         )
 
     return findings
-
-
-def _check_schedule_file() -> list[DoctorFinding]:
-    schedule_file = get_schedule_file()
-    if not schedule_file.exists():
-        return [
-            DoctorFinding(
-                level="ok", check="schedule.file", detail="schedule file not present"
-            )
-        ]
-
-    invalid_lines = _count_invalid_jsonl_lines(schedule_file)
-    if invalid_lines:
-        return [
-            DoctorFinding(
-                level="warning",
-                check="schedule.jsonl",
-                detail=f"{invalid_lines} invalid JSONL lines in {schedule_file}",
-                repair=f"Inspect and repair {schedule_file}",
-            )
-        ]
-    return [
-        DoctorFinding(
-            level="ok", check="schedule.jsonl", detail="schedule file is valid JSONL"
-        )
-    ]
 
 
 def _check_sessions_jsonl() -> list[DoctorFinding]:

@@ -15,7 +15,7 @@ uv run ash upgrade
 
 ## What It Does
 
-1. **Runs database migrations** - Applies any pending schema changes
+1. **Migrates schedule data into graph storage** - Imports legacy `~/.ash/schedule.jsonl` entries into `~/.ash/graph/schedules.jsonl`, writes schedule edges, and removes the legacy file
 2. **Verifies sandbox** - Checks sandbox image is built and working
 
 ## When to Run

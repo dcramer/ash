@@ -1,0 +1,47 @@
+---
+title: Todos
+description: Canonical todo lifecycle on top of ash.graph
+sidebar:
+  order: 9
+---
+
+Ash todos are graph-native records intended for reliable task tracking.
+
+## What It Provides
+
+- Canonical todo lifecycle: `open`, `done`, soft delete
+- Personal scope (owned by user) and shared scope (scoped to chat)
+- Optional reminder linkage to scheduler entries
+
+## Graph Storage
+
+Todos are stored in `~/.ash/graph/` as registered graph collections:
+
+- `todos.jsonl` (`todo` node type)
+- `todo_events.jsonl` (`todo_event` node type)
+- `edges.jsonl` (`TODO_OWNED_BY`, `TODO_SHARED_IN` edges)
+
+This keeps todo data in the same extensible graph storage model used by other Ash entities.
+
+## Runtime Surfaces
+
+Todo integration owns:
+
+- RPC methods (`todo.create`, `todo.list`, `todo.update`, etc.)
+- Sandbox CLI commands (`ash-sb todo ...`)
+- Prompt routing guidance for canonical task operations
+
+Reminder linking is internal to the todo subsystem. Public clients use `todo.update`
+reminder fields (for example via `ash-sb todo remind` / `ash-sb todo unremind`)
+rather than dedicated link/unlink RPC methods.
+
+## Configuration
+
+Enable or disable the subsystem in `~/.ash/config.toml`:
+
+```toml
+[todo]
+enabled = true
+```
+
+When disabled, todo integration is not composed into runtime hooks, and todo RPC/CLI surfaces are unavailable.

@@ -537,7 +537,7 @@ async def test_memory_and_scheduling_compose_with_single_memory_postprocess(
         components=components,
         mode="eval",
         contributors=[
-            SchedulingIntegration(tmp_path / "schedule.jsonl"),
+            SchedulingIntegration(tmp_path),
             MemoryIntegration(),
         ],
     )

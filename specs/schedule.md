@@ -1,22 +1,39 @@
 # Schedule System
 
-File-based task scheduling following the "filesystem first" principle.
+Graph-native task scheduling backed by `ash.graph` nodes and edges.
 
 ## Status: Implemented
 
 ## Overview
 
-The schedule system allows the agent to schedule future tasks using sandbox CLI commands (`ash schedule create`). The commands go through RPC to the host process, which writes entries to a JSONL file with routing context. A background watcher triggers entries when due, processes them through the agent, and routes responses back.
+The schedule system allows the agent to schedule future tasks using sandbox CLI commands (`ash schedule create`). The commands go through RPC to the host process, which writes schedule entries into graph storage. A background watcher triggers entries when due, processes them through the agent, and routes responses back.
 
-**Key principle:** All state lives in the file. `cat schedule.jsonl` shows the truth.
+**Key principle:** Canonical state lives in `ash.graph` and is extensible via node/edge schema registration.
 
-## File Format
+## Graph Storage
 
-Location: `~/.ash/schedule.jsonl`
+Location: `~/.ash/graph/`
+
+```
+~/.ash/graph/
+├── schedules.jsonl      # schedule_entry nodes
+└── edges.jsonl          # includes schedule scope edges
+```
+
+Registered schedule edges:
+- `SCHEDULE_FOR_CHAT`: `schedule_entry -> chat`
+- `SCHEDULE_FOR_USER`: `schedule_entry -> user`
+
+Relationship semantics (ownership/scope) are edge-canonical; node fields like
+`chat_id` and `user_id` are non-authoritative denormalized context.
+
+Legacy migration:
+- Import migration from `~/.ash/schedule.jsonl` into graph storage is upgrade-owned (`ash upgrade`).
+- Runtime read/write semantics are graph-native.
 
 ### One-Shot Entries
 
-Execute once at a specific time, then deleted from file:
+Execute once at a specific time, then deleted from graph storage:
 
 ```json
 {"trigger_at": "2026-01-12T09:00:00Z", "message": "Check the build", "chat_id": "123456", "provider": "telegram", "user_id": "789", "created_at": "2026-01-11T10:00:00Z"}
@@ -24,7 +41,7 @@ Execute once at a specific time, then deleted from file:
 
 ### Periodic Entries
 
-Execute on a cron schedule, `last_run` updated in file after each execution:
+Execute on a cron schedule, `last_run` updated in graph storage after each execution:
 
 ```json
 {"cron": "0 8 * * *", "message": "Daily summary", "chat_id": "123456", "provider": "telegram", "user_id": "789"}
@@ -190,19 +207,19 @@ Updated reminder (id=a1b2c3d4)
 
 ### One-Shot
 1. Agent runs `ash-sb schedule create "msg" --at TIME`
-2. Command calls `schedule.create` RPC; host writes entry to `schedule.jsonl`
+2. Command calls `schedule.create` RPC; host writes entry to graph storage
 3. Watcher detects entry is due
 4. Handler creates ephemeral session, runs agent with message
 5. Response sent back to original chat
-6. Entry deleted from file
+6. Entry deleted from graph storage
 
 ### Periodic
 1. Agent runs `ash-sb schedule create "msg" --cron "EXPR"`
-2. Command calls `schedule.create` RPC; host writes entry to `schedule.jsonl`
+2. Command calls `schedule.create` RPC; host writes entry to graph storage
 3. Watcher calculates next run from cron (and `last_run` if present)
 4. Handler creates ephemeral session, runs agent with message
 5. Response sent back to original chat
-6. `last_run` updated in file, entry preserved for next run
+6. `last_run` updated in graph storage, entry preserved for next run
 
 ### Update
 1. Agent runs `ash-sb schedule update --id ID --message "new text"`
@@ -266,7 +283,7 @@ Example: "Skipping morning greeting - it's now 3:45 PM. This runs daily at 8 AM.
 from ash.scheduling import ScheduleStore, ScheduleWatcher, ScheduledTaskHandler
 
 # Create store and watcher
-store = ScheduleStore(get_schedule_file())
+store = ScheduleStore(get_graph_dir())
 watcher = ScheduleWatcher(store, timezone="America/Los_Angeles")
 
 # Create handler with agent, senders, registrars, and executor
@@ -296,16 +313,16 @@ uv run ash serve
 "remind me in 2 minutes to check the build"
 
 # Verify entry was created:
-cat ~/.ash/schedule.jsonl
+cat ~/.ash/graph/schedules.jsonl
 
 # After 2 minutes, bot sends response to the same chat
-# Entry is removed from schedule.jsonl
+# Entry is removed from graph schedules
 ```
 
 ## Design Decisions
 
-1. **Single JSONL file** - Simple, grepable, git-friendly
-2. **State in file** - `last_run` persisted, survives restarts
+1. **Graph-backed JSONL storage** - Simple, grepable, git-friendly
+2. **State persisted in graph nodes** - `last_run` survives restarts
 3. **Delete vs update** - One-shot deleted, periodic updated in place
 4. **CLI injects context** - `ash schedule create` adds chat_id/provider from env vars
 5. **Provider required** - Requires provider with persistent chat for response routing

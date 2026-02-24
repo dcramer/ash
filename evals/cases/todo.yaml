@@ -1,0 +1,46 @@
+schema_version: "2.0"
+name: Todo Subsystem Behavior
+description: Multi-turn todo flow covering create, complete, and list semantics
+
+defaults:
+  agent: default
+  session:
+    provider: telegram
+    chat_id: eval-todo
+    chat_type: private
+    chat_title: "Todo Eval Chat"
+    user_id: eval-user-todo
+    username: todo_user
+    display_name: "Todo User"
+
+cases:
+  - id: todo_create_complete_list
+    description: Create two todos, complete one, then verify open/completed reporting
+    turns:
+      - prompt: "Add two todos for me: buy milk and call the dentist tomorrow."
+        expected_behavior: |
+          The assistant should create canonical todo entries for both requested tasks.
+        criteria:
+          - Confirms that both todo items were added
+          - Mentions both tasks in the response
+
+      - prompt: "Mark 'buy milk' as done."
+        expected_behavior: |
+          The assistant should mark the matching todo complete and confirm the update.
+        criteria:
+          - Confirms completion of buy milk
+          - Does not claim all todos are complete
+
+      - prompt: "What todos are still open, and which one did I complete?"
+        expected_behavior: |
+          The assistant should report that call the dentist tomorrow remains open
+          and buy milk is completed.
+        criteria:
+          - Identifies call the dentist tomorrow as open
+          - Identifies buy milk as completed
+          - Response is concise and user-facing
+
+    tags:
+      - todo
+      - e2e
+      - lifecycle

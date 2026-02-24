@@ -1,7 +1,7 @@
 """Scheduling subsystem — deferred task execution.
 
 Public API:
-- ScheduleStore: File-backed CRUD for schedule entries
+- ScheduleStore: Graph-backed CRUD for schedule entries
 - ScheduleWatcher: Polling loop that triggers handlers for due entries
 - ScheduledTaskHandler: Processes due entries through the agent
 

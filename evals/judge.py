@@ -247,7 +247,10 @@ class LLMJudge(Judge):
         """Format a single tool call for the prompt."""
         desc = f"- {tc['name']}"
         if tc.get("input"):
-            desc += f": {json.dumps(tc['input'], default=str)[:200]}"
+            desc += f": {json.dumps(tc['input'], default=str)[:1000]}"
+        output = tc.get("output")
+        if output:
+            desc += f"\n  output: {str(output)[:1000]}"
         if tc.get("is_error"):
             desc += " [ERROR]"
         return desc

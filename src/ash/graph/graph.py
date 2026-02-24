@@ -10,28 +10,19 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from ash.store.types import ChatEntry, MemoryEntry, PersonEntry, UserEntry
 
-    NodeEntry = MemoryEntry | PersonEntry | UserEntry | ChatEntry
+    NodeEntry = MemoryEntry | PersonEntry | UserEntry | ChatEntry | Any
 
 _logger = logging.getLogger(__name__)
 
-EdgeType = Literal[
-    "ABOUT",
-    "STATED_BY",
-    "SUPERSEDES",
-    "IS_PERSON",
-    "MERGED_INTO",
-    "HAS_RELATIONSHIP",
-    "LEARNED_IN",
-    "PARTICIPATES_IN",
-]
-NodeType = Literal["memory", "person", "user", "chat"]
+type EdgeType = str
+type NodeType = str
 
 # Valid (source_type, target_type) pairs for each edge type
 _EDGE_TYPE_SCHEMA: dict[str, tuple[str, str]] = {
@@ -44,6 +35,25 @@ _EDGE_TYPE_SCHEMA: dict[str, tuple[str, str]] = {
     "LEARNED_IN": ("memory", "chat"),
     "PARTICIPATES_IN": ("person", "chat"),
 }
+
+
+def register_edge_type_schema(
+    edge_type: str,
+    *,
+    source_type: str,
+    target_type: str,
+    overwrite: bool = False,
+) -> None:
+    """Register a typed edge schema for runtime graph validation."""
+    if edge_type in _EDGE_TYPE_SCHEMA and not overwrite:
+        existing = _EDGE_TYPE_SCHEMA[edge_type]
+        if existing != (source_type, target_type):
+            raise ValueError(
+                f"edge schema already registered for {edge_type}: "
+                f"{existing[0]}->{existing[1]}"
+            )
+        return
+    _EDGE_TYPE_SCHEMA[edge_type] = (source_type, target_type)
 
 
 class Edge(BaseModel):
@@ -95,6 +105,7 @@ class KnowledgeGraph:
     people: dict[str, PersonEntry] = field(default_factory=dict)
     users: dict[str, UserEntry] = field(default_factory=dict)
     chats: dict[str, ChatEntry] = field(default_factory=dict)
+    _extra_nodes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # Edges and adjacency indexes
     edges: dict[str, Edge] = field(default_factory=dict)
@@ -122,7 +133,57 @@ class KnowledgeGraph:
             return self.users.get(node_id)
         if ntype == "chat":
             return self.chats.get(node_id)
+        if ntype is not None:
+            return self._extra_nodes.get(ntype, {}).get(node_id)
         return None
+
+    def get_node_collection(self, node_type: str) -> dict[str, Any]:
+        """Get mutable node collection for a node type."""
+        if node_type == "memory":
+            return self.memories
+        if node_type == "person":
+            return self.people
+        if node_type == "user":
+            return self.users
+        if node_type == "chat":
+            return self.chats
+        return self._extra_nodes.setdefault(node_type, {})
+
+    def add_node(self, node_type: str, node: Any) -> None:
+        """Add a node by type using core or extension collections."""
+        if node_type == "memory":
+            self.add_memory(node)
+            return
+        if node_type == "person":
+            self.add_person(node)
+            return
+        if node_type == "user":
+            self.add_user(node)
+            return
+        if node_type == "chat":
+            self.add_chat(node)
+            return
+        self.get_node_collection(node_type)[node.id] = node
+        self.node_types[node.id] = node_type
+
+    def remove_node(self, node_type: str, node_id: str) -> None:
+        """Remove a node by type and clean incident edges."""
+        if node_type == "memory":
+            self.remove_memory(node_id)
+            return
+        if node_type == "person":
+            self.remove_person(node_id)
+            return
+        if node_type == "user":
+            self.remove_user(node_id)
+            return
+        if node_type == "chat":
+            self.remove_chat(node_id)
+            return
+        self.remove_edges_for_node(node_id)
+        collection = self.get_node_collection(node_type)
+        collection.pop(node_id, None)
+        self.node_types.pop(node_id, None)
 
     # -- Memory operations --
 

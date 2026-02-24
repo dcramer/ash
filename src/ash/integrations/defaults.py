@@ -12,6 +12,7 @@ from ash.integrations.memory import MemoryIntegration
 from ash.integrations.runtime import IntegrationMode
 from ash.integrations.runtime_rpc import RuntimeRPCIntegration
 from ash.integrations.scheduling import SchedulingIntegration
+from ash.integrations.todo import TodoIntegration
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor
@@ -28,13 +29,20 @@ class DefaultIntegrations:
 
 
 def _create_chat_integrations(
-    *, include_memory: bool, include_image: bool, include_browser: bool
+    *,
+    include_memory: bool,
+    include_image: bool,
+    include_browser: bool,
+    include_todo: bool,
+    graph_dir: Path,
 ) -> DefaultIntegrations:
     contributors: list[IntegrationContributor] = []
     if include_image:
         contributors.append(ImageIntegration())
     if include_browser:
         contributors.append(BrowserIntegration())
+    if include_todo:
+        contributors.append(TodoIntegration(graph_dir=graph_dir))
     if include_memory:
         contributors.append(MemoryIntegration())
     return DefaultIntegrations(contributors=contributors)
@@ -45,17 +53,17 @@ def _create_eval_integrations(
     include_memory: bool,
     include_image: bool,
     include_browser: bool,
-    schedule_file: Path | None,
+    include_todo: bool,
+    graph_dir: Path,
 ) -> DefaultIntegrations:
-    if schedule_file is None:
-        raise ValueError("eval integrations require schedule_file")
-
-    scheduling = SchedulingIntegration(schedule_file)
+    scheduling = SchedulingIntegration(graph_dir)
     contributors: list[IntegrationContributor] = [scheduling]
     if include_image:
         contributors.append(ImageIntegration())
     if include_browser:
         contributors.append(BrowserIntegration())
+    if include_todo:
+        contributors.append(TodoIntegration(graph_dir=graph_dir, schedule_enabled=True))
     if include_memory:
         contributors.append(MemoryIntegration())
     return DefaultIntegrations(contributors=contributors, scheduling=scheduling)
@@ -66,7 +74,8 @@ def _create_serve_integrations(
     include_memory: bool,
     include_image: bool,
     include_browser: bool,
-    schedule_file: Path | None,
+    include_todo: bool,
+    graph_dir: Path,
     logs_path: Path | None,
     timezone: str,
     senders: dict[str, MessageSender] | None,
@@ -74,11 +83,11 @@ def _create_serve_integrations(
     persisters: dict[str, MessagePersister] | None,
     agent_executor: AgentExecutor | None,
 ) -> DefaultIntegrations:
-    if logs_path is None or schedule_file is None:
-        raise ValueError("serve integrations require logs_path and schedule_file")
+    if logs_path is None:
+        raise ValueError("serve integrations require logs_path")
 
     scheduling = SchedulingIntegration(
-        schedule_file,
+        graph_dir,
         timezone=timezone,
         senders=senders,
         registrars=registrars,
@@ -91,6 +100,8 @@ def _create_serve_integrations(
         contributors.append(ImageIntegration())
     if include_browser:
         contributors.append(BrowserIntegration())
+    if include_todo:
+        contributors.append(TodoIntegration(graph_dir=graph_dir, schedule_enabled=True))
     if include_memory:
         contributors.append(MemoryIntegration())
     contributors.append(scheduling)
@@ -103,7 +114,8 @@ def create_default_integrations(
     include_memory: bool = True,
     include_image: bool = True,
     include_browser: bool = True,
-    schedule_file: Path | None = None,
+    include_todo: bool = True,
+    graph_dir: Path | None = None,
     logs_path: Path | None = None,
     timezone: str = "UTC",
     senders: dict[str, MessageSender] | None = None,
@@ -112,12 +124,17 @@ def create_default_integrations(
     agent_executor: AgentExecutor | None = None,
 ) -> DefaultIntegrations:
     """Build the default integration contributors for a runtime mode."""
+    if graph_dir is None:
+        from ash.config.paths import get_graph_dir
+
+        graph_dir = get_graph_dir()
     if mode == "serve":
         return _create_serve_integrations(
             include_memory=include_memory,
             include_image=include_image,
             include_browser=include_browser,
-            schedule_file=schedule_file,
+            include_todo=include_todo,
+            graph_dir=graph_dir,
             logs_path=logs_path,
             timezone=timezone,
             senders=senders,
@@ -130,12 +147,15 @@ def create_default_integrations(
             include_memory=include_memory,
             include_image=include_image,
             include_browser=include_browser,
+            include_todo=include_todo,
+            graph_dir=graph_dir,
         )
     if mode == "eval":
         return _create_eval_integrations(
             include_memory=include_memory,
             include_image=include_image,
             include_browser=include_browser,
-            schedule_file=schedule_file,
+            include_todo=include_todo,
+            graph_dir=graph_dir,
         )
     raise ValueError(f"unsupported integration mode: {mode}")

@@ -111,6 +111,7 @@ Total: 3 task(s)
 |---------------|---------|
 | `browser` | Start/list/control browser sessions and page actions |
 | `schedule` | Create, list, cancel, update scheduled tasks |
+| `todo` | Manage canonical todo items and reminder links |
 | `memory` | Search, list, add, extract, delete memories |
 | `logs` | Query structured server logs |
 | `config` | Reload configuration |

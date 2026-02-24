@@ -402,6 +402,15 @@ class TestNaturalLanguageTime:
         assert "Scheduled reminder" in result.stdout
         assert "America/Los_Angeles" in result.stdout
 
+    def test_create_with_this_weekday_time(self, cli_runner_with_tz, _mock_create_rpc):
+        """Test creating a task with 'this Saturday 2pm' phrasing."""
+        result = cli_runner_with_tz.invoke(
+            app, ["create", "Weekend reminder", "--at", "this Saturday 2pm"]
+        )
+
+        assert result.exit_code == 0
+        assert "Scheduled reminder" in result.stdout
+
     def test_create_with_iso8601_still_works(
         self, cli_runner_with_tz, _mock_create_rpc
     ):

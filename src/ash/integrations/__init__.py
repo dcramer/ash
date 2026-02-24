@@ -16,11 +16,13 @@ from ash.integrations.runtime import (
 )
 from ash.integrations.runtime_rpc import RuntimeRPCIntegration
 from ash.integrations.scheduling import SchedulingIntegration
+from ash.integrations.todo import TodoIntegration
 
 __all__ = [
     "MemoryIntegration",
     "BrowserIntegration",
     "ImageIntegration",
+    "TodoIntegration",
     "RuntimeRPCIntegration",
     "SchedulingIntegration",
     "compose_integrations",

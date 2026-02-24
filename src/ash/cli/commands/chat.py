@@ -169,13 +169,16 @@ async def _run_chat(
             components=components,
             mode="chat",
             sessions_path=get_sessions_path(),
-            contributors=create_default_integrations(mode="chat").contributors,
+            contributors=create_default_integrations(
+                mode="chat",
+                include_todo=ash_config.todo.enabled,
+            ).contributors,
         ) as (integration_runtime, integration_context):
             async with active_rpc_server(
                 runtime=integration_runtime,
                 context=integration_context,
                 socket_path=get_rpc_socket_path(),
-                enabled=components.memory_manager is not None,
+                enabled=True,
             ):
                 # Dump prompt mode: print system prompt and exit
                 if dump_prompt:

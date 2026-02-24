@@ -22,7 +22,7 @@ class ScheduleWatcher:
     """Watches schedule entries and triggers handlers when due.
 
     Example:
-        store = ScheduleStore(Path("~/.ash/schedule.jsonl"))
+        store = ScheduleStore(Path("~/.ash/graph"))
         watcher = ScheduleWatcher(store, timezone="America/Los_Angeles")
 
         @watcher.on_due
@@ -64,7 +64,7 @@ class ScheduleWatcher:
         self._running = True
         logger.info(
             "schedule_watcher_started",
-            extra={"file.path": str(self._store.schedule_file)},
+            extra={"file.path": str(self._store.graph_dir / "schedules.jsonl")},
         )
         self._task = asyncio.create_task(self._poll_loop())
 
@@ -91,7 +91,7 @@ class ScheduleWatcher:
                         "schedule_watcher_heartbeat",
                         extra={
                             "poll.count": self._poll_count,
-                            "file.path": str(self._store.schedule_file),
+                            "file.path": str(self._store.graph_dir / "schedules.jsonl"),
                         },
                     )
                 await self._check_schedule()

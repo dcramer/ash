@@ -1,18 +1,24 @@
-"""Schedule store — all CRUD on schedule.jsonl.
+"""Schedule store backed by ash.graph schedule nodes."""
 
-Handles reading, writing, and modifying schedule entries
-with file locking for safe concurrent access.
-"""
+from __future__ import annotations
 
 import fcntl
 import logging
+import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Any, TypeVar
+from typing import IO, Any, TypeVar, cast
 
-from ash.scheduling.types import ScheduleEntry
+from ash.graph.edges import (
+    SCHEDULE_FOR_CHAT,
+    SCHEDULE_FOR_USER,
+    create_schedule_for_chat_edge,
+    create_schedule_for_user_edge,
+)
+from ash.graph.persistence import GraphPersistence, hydrate_graph
+from ash.scheduling.types import ScheduleEntry, register_schedule_graph_schema
 
 logger = logging.getLogger(__name__)
 
@@ -20,49 +26,45 @@ _T = TypeVar("_T")
 
 
 class ScheduleStore:
-    """File-backed storage for schedule entries.
+    """Graph-backed storage for schedule entries."""
 
-    All reads and writes go through this class. Consumers that only need
-    data access (CLI, RPC) use ScheduleStore directly; the ScheduleWatcher
-    delegates here for its polling loop.
-    """
-
-    def __init__(self, schedule_file: Path) -> None:
-        self._schedule_file = schedule_file
+    def __init__(self, graph_dir: Path) -> None:
+        register_schedule_graph_schema()
+        # Backward-compatible path normalization for callers/tests that still
+        # pass a legacy schedule file path (e.g. ".../schedule.jsonl").
+        if graph_dir.suffix == ".jsonl":
+            graph_dir = graph_dir.parent / "graph"
+        self._graph_dir = graph_dir
+        self._persistence = GraphPersistence(self._graph_dir)
+        self._lock_file = self._graph_dir / ".schedule.lock"
 
     @property
-    def schedule_file(self) -> Path:
-        return self._schedule_file
+    def graph_dir(self) -> Path:
+        return self._graph_dir
 
     # ------------------------------------------------------------------
     # Read operations
     # ------------------------------------------------------------------
 
     def get_entries(self) -> list[ScheduleEntry]:
-        """Get all schedule entries."""
-        if not self._schedule_file.exists():
-            return []
-        lines = self._schedule_file.read_text().splitlines()
-        return [
-            entry
-            for i, line in enumerate(lines)
-            if (entry := ScheduleEntry.from_line(line, i)) is not None
-        ]
+        graph = self._load_graph()
+        raw = cast(dict[str, Any], graph.get_node_collection("schedule_entry"))
+        entries = [entry for entry in raw.values() if isinstance(entry, ScheduleEntry)]
+        for i, entry in enumerate(entries):
+            entry.line_number = i
+        return entries
 
     def get_entry(self, entry_id: str) -> ScheduleEntry | None:
-        """Get a single entry by ID."""
-        for entry in self.get_entries():
-            if entry.id == entry_id:
-                return entry
-        return None
+        graph = self._load_graph()
+        raw = graph.get_node_collection("schedule_entry").get(entry_id)
+        return raw if isinstance(raw, ScheduleEntry) else None
 
     def get_stats(self, timezone: str = "UTC") -> dict[str, Any]:
-        """Get summary statistics about stored entries."""
         entries = self.get_entries()
         periodic_count = sum(1 for e in entries if e.is_periodic)
         due_count = sum(1 for e in entries if e.is_due(timezone))
         return {
-            "schedule_file": str(self._schedule_file),
+            "graph_dir": str(self._graph_dir),
             "total": len(entries),
             "one_shot": len(entries) - periodic_count,
             "periodic": periodic_count,
@@ -74,33 +76,26 @@ class ScheduleStore:
     # ------------------------------------------------------------------
 
     def add_entry(self, entry: ScheduleEntry) -> None:
-        """Append an entry to the schedule file."""
-        self._schedule_file.parent.mkdir(parents=True, exist_ok=True)
-        with self._schedule_file.open("a") as f:
-            with self._file_lock(f):
-                f.write(entry.to_json_line() + "\n")
+        if not entry.id:
+            entry.id = uuid.uuid4().hex[:8]
+        entry_id = entry.id
+
+        def mutate(entries: dict[str, ScheduleEntry]) -> None:
+            entries[entry_id] = entry
+
+        self._mutate_graph(mutate, dirty_edges=True)
 
     def remove_entry(self, entry_id: str) -> bool:
-        """Remove an entry by ID.
+        removed = False
 
-        Returns:
-            True if entry was removed, False if not found.
-        """
-        if not self._schedule_file.exists():
-            return False
+        def mutate(entries: dict[str, ScheduleEntry]) -> None:
+            nonlocal removed
+            removed = entry_id in entries
+            if removed:
+                entries.pop(entry_id, None)
 
-        def mutate(lines: list[str]) -> tuple[list[str], bool]:
-            new_lines: list[str] = []
-            found = False
-            for line in lines:
-                entry = ScheduleEntry.from_line(line)
-                if entry and entry.id == entry_id:
-                    found = True
-                    continue
-                new_lines.append(line)
-            return new_lines, found
-
-        return self._mutate_lines_locked(mutate)
+        self._mutate_graph(mutate, dirty_edges=removed)
+        return removed
 
     def update_entry(
         self,
@@ -110,90 +105,51 @@ class ScheduleStore:
         cron: str | None = None,
         timezone: str | None = None,
     ) -> ScheduleEntry | None:
-        """Update an existing entry by ID.
-
-        Returns:
-            The updated entry if found, None if not found.
-
-        Raises:
-            ValueError: If update is invalid (e.g., switching trigger types,
-                        past trigger_at, invalid cron, or no fields provided).
-        """
-        # Validate at least one updatable field is provided
         if message is None and trigger_at is None and cron is None and timezone is None:
             raise ValueError("At least one updatable field must be provided")
 
-        if not self._schedule_file.exists():
-            return None
+        updated: ScheduleEntry | None = None
 
-        def mutate(lines: list[str]) -> tuple[list[str], ScheduleEntry | None]:
-            updated_entry: ScheduleEntry | None = None
-            new_lines: list[str] = []
+        def mutate(entries: dict[str, ScheduleEntry]) -> None:
+            nonlocal updated
+            entry = entries.get(entry_id)
+            if not entry:
+                return
+            updated = _apply_updates(
+                entry,
+                message=message,
+                trigger_at=trigger_at,
+                cron=cron,
+                timezone=timezone,
+            )
+            entries[entry_id] = updated
 
-            for line in lines:
-                entry = ScheduleEntry.from_line(line)
-                if entry and entry.id == entry_id:
-                    updated_entry = _apply_updates(
-                        entry,
-                        message=message,
-                        trigger_at=trigger_at,
-                        cron=cron,
-                        timezone=timezone,
-                    )
-                    new_lines.append(updated_entry.to_json_line())
-                else:
-                    new_lines.append(line)
-            return new_lines, updated_entry
-
-        return self._mutate_lines_locked(mutate)
+        self._mutate_graph(mutate)
+        return updated
 
     def clear_all(self) -> int:
-        """Remove all schedule entries.
+        removed = 0
 
-        Returns:
-            Number of entries removed.
-        """
-        if not self._schedule_file.exists():
-            return 0
+        def mutate(entries: dict[str, ScheduleEntry]) -> None:
+            nonlocal removed
+            removed = len(entries)
+            entries.clear()
 
-        def mutate(lines: list[str]) -> tuple[list[str], int]:
-            count = sum(
-                1 for line in lines if ScheduleEntry.from_line(line) is not None
-            )
-            return [], count
-
-        return self._mutate_lines_locked(mutate)
+        self._mutate_graph(mutate, dirty_edges=removed > 0)
+        return removed
 
     def remove_and_update(
         self,
         remove_ids: set[str],
         updates: dict[str, ScheduleEntry],
     ) -> None:
-        """Atomically remove some entries and update others.
+        def mutate(entries: dict[str, ScheduleEntry]) -> None:
+            for entry_id in remove_ids:
+                entries.pop(entry_id, None)
+            for entry_id, entry in updates.items():
+                entries[entry_id] = entry
 
-        Used by the watcher after triggering due entries: one-shots are
-        removed and periodic entries have their last_run updated.
-
-        Args:
-            remove_ids: Entry IDs to remove (triggered one-shots).
-            updates: Map of entry ID → updated entry (periodic with new last_run).
-        """
-        if not self._schedule_file.exists():
-            return
-
-        def mutate(lines: list[str]) -> tuple[list[str], None]:
-            new_lines: list[str] = []
-            for line in lines:
-                entry = ScheduleEntry.from_line(line)
-                if entry and entry.id and entry.id in remove_ids:
-                    continue  # Remove one-shot
-                if entry and entry.id and entry.id in updates:
-                    new_lines.append(updates[entry.id].to_json_line())
-                else:
-                    new_lines.append(line)
-            return new_lines, None
-
-        self._mutate_lines_locked(mutate)
+        self._mutate_graph(mutate, dirty_edges=bool(remove_ids))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -201,36 +157,68 @@ class ScheduleStore:
 
     @contextmanager
     def _file_lock(self, file: IO) -> Iterator[None]:
-        """Acquire exclusive lock on file."""
         try:
             fcntl.flock(file.fileno(), fcntl.LOCK_EX)
             yield
         finally:
             fcntl.flock(file.fileno(), fcntl.LOCK_UN)
 
-    def _write_lines(self, lines: list[str]) -> None:
-        """Write lines to the schedule file with locking."""
-        content = "\n".join(lines) + "\n" if lines else ""
-        with self._schedule_file.open("w") as f:
-            with self._file_lock(f):
-                f.write(content)
+    def _load_graph(self):
+        self._graph_dir.mkdir(parents=True, exist_ok=True)
+        raw_data = self._persistence.load_raw_sync()
+        return hydrate_graph(raw_data)
 
-    def _mutate_lines_locked(
-        self, mutate: Callable[[list[str]], tuple[list[str], _T]]
-    ) -> _T:
-        """Atomically read/transform/write schedule lines under one lock."""
-        self._schedule_file.parent.mkdir(parents=True, exist_ok=True)
-        with self._schedule_file.open("a+") as f:
-            with self._file_lock(f):
-                f.seek(0)
-                lines = f.read().splitlines()
-                new_lines, result = mutate(lines)
-                if new_lines != lines:
-                    content = "\n".join(new_lines) + "\n" if new_lines else ""
-                    f.seek(0)
-                    f.truncate()
-                    f.write(content)
+    def _mutate_graph(
+        self,
+        mutate: Callable[[dict[str, ScheduleEntry]], _T | None],
+        *,
+        dirty_edges: bool = False,
+    ) -> _T | None:
+        self._graph_dir.mkdir(parents=True, exist_ok=True)
+        self._lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with self._lock_file.open("a+") as lockf:
+            with self._file_lock(lockf):
+                graph = self._load_graph()
+                entries = cast(
+                    dict[str, ScheduleEntry],
+                    graph.get_node_collection("schedule_entry"),
+                )
+                previous_ids = set(entries)
+
+                result = mutate(entries)
+
+                # Rebuild schedule nodes and schedule edges from canonical entries.
+                current_ids = set(entries)
+                removed_ids = previous_ids - current_ids
+                for entry_id in removed_ids:
+                    graph.remove_node("schedule_entry", entry_id)
+                for entry_id, entry in entries.items():
+                    if graph.get_node(entry_id) is None:
+                        graph.add_node("schedule_entry", entry)
+                    self._sync_entry_edges(graph, entry)
+
+                dirty = {"schedules"}
+                if dirty_edges or removed_ids or entries:
+                    dirty.add("edges")
+                self._persist_graph(graph, dirty=dirty)
                 return result
+
+    def _sync_entry_edges(self, graph, entry: ScheduleEntry) -> None:
+        if not entry.id:
+            return
+        for edge in list(graph.get_outgoing(entry.id, edge_type=SCHEDULE_FOR_CHAT)):
+            graph.remove_edge(edge.id)
+        for edge in list(graph.get_outgoing(entry.id, edge_type=SCHEDULE_FOR_USER)):
+            graph.remove_edge(edge.id)
+        if entry.chat_id:
+            graph.add_edge(create_schedule_for_chat_edge(entry.id, entry.chat_id))
+        if entry.user_id:
+            graph.add_edge(create_schedule_for_user_edge(entry.id, entry.user_id))
+
+    def _persist_graph(self, graph, *, dirty: set[str]) -> None:
+        self._persistence.mark_dirty(*dirty)
+        self._persistence.flush_sync(graph)
 
 
 def _apply_updates(
@@ -245,17 +233,14 @@ def _apply_updates(
     Raises:
         ValueError: If the update is invalid.
     """
-    # Prevent switching trigger types
     if trigger_at is not None and entry.cron is not None:
         raise ValueError("Cannot change periodic entry to one-shot")
     if cron is not None and entry.trigger_at is not None:
         raise ValueError("Cannot change one-shot entry to periodic")
 
-    # Validate trigger_at is in future
     if trigger_at is not None and trigger_at <= datetime.now(UTC):
         raise ValueError("trigger_at must be in the future")
 
-    # Validate cron expression
     if cron is not None:
         try:
             from croniter import croniter
@@ -264,7 +249,6 @@ def _apply_updates(
         except Exception as e:
             raise ValueError(f"Invalid cron expression: {e}") from e
 
-    # Apply updates
     if message is not None:
         entry.message = message
     if trigger_at is not None:

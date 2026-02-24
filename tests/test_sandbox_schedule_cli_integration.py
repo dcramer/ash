@@ -25,7 +25,7 @@ def _runner(env: dict[str, str]) -> CliRunner:
 @pytest.mark.asyncio
 async def test_schedule_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
     """Create/list schedule entries through real RPC server + schedule integration."""
-    schedule_file = tmp_path / "schedule.jsonl"
+    graph_dir = tmp_path / "graph"
     socket_path = tmp_path / "rpc.sock"
 
     config = AshConfig(
@@ -37,7 +37,7 @@ async def test_schedule_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
         components=components,  # type: ignore[arg-type]
         mode="chat",
     )
-    runtime = IntegrationRuntime([SchedulingIntegration(schedule_file)])
+    runtime = IntegrationRuntime([SchedulingIntegration(graph_dir)])
     await runtime.setup(context)
 
     env = {

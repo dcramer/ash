@@ -9,6 +9,27 @@ import pytest
 from ash.scheduling import ScheduleEntry, ScheduleStore, ScheduleWatcher
 
 
+def _graph_schedules_file(schedule_file: Path) -> Path:
+    return schedule_file.parent / "graph" / "schedules.jsonl"
+
+
+def _make_store(schedule_file: Path) -> ScheduleStore:
+    """Create a store and import legacy fixture JSONL into graph for test setup."""
+    store = ScheduleStore(schedule_file)
+    graph_schedules = _graph_schedules_file(schedule_file)
+    if graph_schedules.exists() and graph_schedules.stat().st_size > 0:
+        return store
+    if not schedule_file.exists():
+        return store
+
+    for i, line in enumerate(schedule_file.read_text().splitlines()):
+        entry = ScheduleEntry.from_line(line, i)
+        if entry is None:
+            continue
+        store.add_entry(entry)
+    return store
+
+
 class TestScheduleEntry:
     """Tests for ScheduleEntry parsing."""
 
@@ -116,7 +137,7 @@ class TestScheduleStore:
 
     def test_get_entries_empty(self, tmp_path: Path):
         """Test getting entries from missing file."""
-        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        store = _make_store(tmp_path / "schedule.jsonl")
         assert store.get_entries() == []
 
     def test_get_entries_parses_file(self, tmp_path: Path):
@@ -127,7 +148,7 @@ class TestScheduleStore:
             '{"cron": "0 8 * * *", "message": "Task 2"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         entries = store.get_entries()
 
         assert len(entries) == 2
@@ -142,7 +163,7 @@ class TestScheduleStore:
             '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         entry = store.get_entry("task0002")
 
         assert entry is not None
@@ -155,7 +176,7 @@ class TestScheduleStore:
             '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         assert store.get_entry("nonexistent") is None
 
     def test_get_stats(self, tmp_path: Path):
@@ -166,7 +187,7 @@ class TestScheduleStore:
             '{"cron": "0 8 * * *", "message": "Periodic"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         stats = store.get_stats()
 
         assert stats["total"] == 2
@@ -178,7 +199,7 @@ class TestScheduleStore:
         """Test adding an entry to the file."""
         schedule_file = tmp_path / "schedule.jsonl"
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         entry = ScheduleEntry(
             id="newtask1",
             message="New task",
@@ -195,7 +216,7 @@ class TestScheduleStore:
     def test_add_entry_creates_parent_dirs(self, tmp_path: Path):
         """Test add_entry creates parent directories if needed."""
         schedule_file = tmp_path / "subdir" / "schedule.jsonl"
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
 
         entry = ScheduleEntry(
             id="task1",
@@ -203,7 +224,7 @@ class TestScheduleStore:
             trigger_at=datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC),
         )
         store.add_entry(entry)
-        assert schedule_file.exists()
+        assert _graph_schedules_file(schedule_file).exists()
 
     def test_add_entry_appends(self, tmp_path: Path):
         """Test add_entry appends to existing file."""
@@ -212,7 +233,7 @@ class TestScheduleStore:
             '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Existing"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         entry = ScheduleEntry(
             id="task0002",
             message="New",
@@ -232,11 +253,11 @@ class TestScheduleStore:
             '{"id": "task0003", "trigger_at": "2026-01-14T09:00:00+00:00", "message": "Task 3"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         result = store.remove_entry("task0002")  # Remove middle entry
 
         assert result is True
-        content = schedule_file.read_text()
+        content = _graph_schedules_file(schedule_file).read_text()
         assert "Task 1" in content
         assert "Task 2" not in content
         assert "Task 3" in content
@@ -249,11 +270,11 @@ class TestScheduleStore:
             '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         result = store.remove_entry("task0001")
 
         assert result is True
-        content = schedule_file.read_text()
+        content = _graph_schedules_file(schedule_file).read_text()
         assert "Task 1" not in content
         assert "Task 2" in content
 
@@ -265,11 +286,11 @@ class TestScheduleStore:
             '{"id": "task0002", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         result = store.remove_entry("task0002")
 
         assert result is True
-        content = schedule_file.read_text()
+        content = _graph_schedules_file(schedule_file).read_text()
         assert "Task 1" in content
         assert "Task 2" not in content
 
@@ -280,7 +301,7 @@ class TestScheduleStore:
             '{"id": "task0001", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
 
         assert store.remove_entry("nonexistent") is False
         assert store.remove_entry("") is False
@@ -288,7 +309,7 @@ class TestScheduleStore:
 
     def test_remove_entry_missing_file(self, tmp_path: Path):
         """Test removing from non-existent file."""
-        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        store = _make_store(tmp_path / "schedule.jsonl")
         assert store.remove_entry("nonexistent") is False
 
     def test_clear_all_success(self, tmp_path: Path):
@@ -300,25 +321,25 @@ class TestScheduleStore:
             '{"cron": "0 8 * * *", "message": "Task 3"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         count = store.clear_all()
 
         assert count == 3
-        assert schedule_file.read_text() == ""
+        assert _graph_schedules_file(schedule_file).read_text() == ""
 
     def test_clear_all_empty_file(self, tmp_path: Path):
         """Test clearing an empty file."""
         schedule_file = tmp_path / "schedule.jsonl"
         schedule_file.write_text("")
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         count = store.clear_all()
 
         assert count == 0
 
     def test_clear_all_missing_file(self, tmp_path: Path):
         """Test clearing a non-existent file."""
-        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        store = _make_store(tmp_path / "schedule.jsonl")
         count = store.clear_all()
 
         assert count == 0
@@ -330,7 +351,7 @@ class TestScheduleStore:
             '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Original"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         result = store.update_entry("task0001", message="Updated message")
 
         assert result is not None
@@ -338,7 +359,7 @@ class TestScheduleStore:
         assert result.id == "task0001"
 
         # Verify file was updated
-        content = schedule_file.read_text()
+        content = _graph_schedules_file(schedule_file).read_text()
         assert "Updated message" in content
         assert "Original" not in content
 
@@ -349,7 +370,7 @@ class TestScheduleStore:
             '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         new_time = datetime.now(UTC) + timedelta(hours=2)
         result = store.update_entry("task0001", trigger_at=new_time)
 
@@ -363,14 +384,14 @@ class TestScheduleStore:
             '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         result = store.update_entry("task0001", cron="0 9 * * *")
 
         assert result is not None
         assert result.cron == "0 9 * * *"
 
         # Verify file was updated
-        content = schedule_file.read_text()
+        content = _graph_schedules_file(schedule_file).read_text()
         assert "0 9 * * *" in content
 
     def test_update_entry_timezone(self, tmp_path: Path):
@@ -380,7 +401,7 @@ class TestScheduleStore:
             '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily", "timezone": "UTC"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         result = store.update_entry("task0001", timezone="America/Los_Angeles")
 
         assert result is not None
@@ -393,7 +414,7 @@ class TestScheduleStore:
             '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         result = store.update_entry("nonexistent", message="Updated")
 
         assert result is None
@@ -405,7 +426,7 @@ class TestScheduleStore:
             '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
 
         with pytest.raises(
             ValueError, match="Cannot change one-shot entry to periodic"
@@ -419,7 +440,7 @@ class TestScheduleStore:
             '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         future_time = datetime.now(UTC) + timedelta(hours=2)
 
         with pytest.raises(
@@ -434,7 +455,7 @@ class TestScheduleStore:
             '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         past_time = datetime.now(UTC) - timedelta(hours=1)
 
         with pytest.raises(ValueError, match="trigger_at must be in the future"):
@@ -447,7 +468,7 @@ class TestScheduleStore:
             '{"id": "task0001", "cron": "0 8 * * *", "message": "Daily"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
 
         with pytest.raises(ValueError, match="Invalid cron expression"):
             store.update_entry("task0001", cron="invalid cron")
@@ -459,14 +480,14 @@ class TestScheduleStore:
             '{"id": "task0001", "trigger_at": "2026-12-12T09:00:00+00:00", "message": "Test"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
 
         with pytest.raises(ValueError, match="At least one updatable field"):
             store.update_entry("task0001")
 
     def test_update_entry_missing_file(self, tmp_path: Path):
         """Test updating from non-existent file returns None."""
-        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        store = _make_store(tmp_path / "schedule.jsonl")
         result = store.update_entry("task0001", message="Updated")
 
         assert result is None
@@ -480,14 +501,14 @@ class TestScheduleStore:
             '{"id": "task0003", "trigger_at": "2026-12-14T09:00:00+00:00", "message": "Task 3"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         result = store.update_entry("task0002", message="Updated message")
 
         assert result is not None
         assert result.message == "Updated message"
 
         # Verify all entries are still present
-        content = schedule_file.read_text()
+        content = _graph_schedules_file(schedule_file).read_text()
         assert "Task 1" in content
         assert "Updated message" in content
         assert "Task 3" in content
@@ -503,7 +524,7 @@ class TestScheduleStore:
             '{"id": "keep1", "trigger_at": "2027-01-12T09:00:00+00:00", "message": "Keep"}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
 
         # Build updated periodic entry
         periodic = store.get_entry("periodic1")
@@ -522,13 +543,13 @@ class TestScheduleStore:
         # Periodic updated
         periodic_entry = next(e for e in entries if e.id == "periodic1")
         assert periodic_entry.last_run is not None
-        assert old_time not in schedule_file.read_text()
+        assert old_time not in _graph_schedules_file(schedule_file).read_text()
         # Other entry preserved
         assert any(e.id == "keep1" for e in entries)
 
     def test_remove_and_update_no_file(self, tmp_path: Path):
         """Test remove_and_update with missing file is a no-op."""
-        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        store = _make_store(tmp_path / "schedule.jsonl")
         store.remove_and_update(remove_ids={"x"}, updates={})  # Should not raise
 
 
@@ -543,7 +564,7 @@ class TestScheduleListRPC:
             '{"id": "t2", "cron": "0 8 * * *", "message": "Task 2", "user_id": "alice", "chat_id": "room_b"}\n'
             '{"id": "t3", "trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 3", "user_id": "bob", "chat_id": "room_a"}\n'
         )
-        return ScheduleStore(schedule_file)
+        return _make_store(schedule_file)
 
     @pytest.fixture
     def schedule_list(self, store: ScheduleStore, tmp_path: Path):
@@ -602,13 +623,13 @@ class TestScheduleWatcher:
         schedule_file = tmp_path / "schedule.jsonl"
         if content:
             schedule_file.write_text(content)
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         watcher = ScheduleWatcher(store)
         return store, watcher
 
     def test_init(self, tmp_path: Path):
         """Test watcher initialization."""
-        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        store = _make_store(tmp_path / "schedule.jsonl")
         watcher = ScheduleWatcher(store)
 
         assert watcher.store is store
@@ -617,7 +638,7 @@ class TestScheduleWatcher:
     @pytest.mark.asyncio
     async def test_start_stop(self, tmp_path: Path):
         """Test starting and stopping watcher."""
-        store = ScheduleStore(tmp_path / "schedule.jsonl")
+        store = _make_store(tmp_path / "schedule.jsonl")
         watcher = ScheduleWatcher(store, poll_interval=0.1)
 
         await watcher.start()
@@ -655,7 +676,7 @@ class TestScheduleWatcher:
             f'{{"id": "notdue1", "trigger_at": "{future}", "message": "Not due"}}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         watcher = ScheduleWatcher(store)
 
         @watcher.on_due
@@ -664,7 +685,7 @@ class TestScheduleWatcher:
 
         await watcher._check_schedule()
 
-        remaining = schedule_file.read_text()
+        remaining = _graph_schedules_file(schedule_file).read_text()
         assert "Due" not in remaining
         assert "Not due" in remaining
 
@@ -677,7 +698,7 @@ class TestScheduleWatcher:
             f'{{"id": "p1", "cron": "* * * * *", "message": "Every minute", "last_run": "{old_time}"}}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         watcher = ScheduleWatcher(store)
 
         @watcher.on_due
@@ -687,7 +708,7 @@ class TestScheduleWatcher:
         await watcher._check_schedule()
 
         # File should still have the entry but with updated last_run
-        content = schedule_file.read_text()
+        content = _graph_schedules_file(schedule_file).read_text()
         assert "Every minute" in content
         assert old_time not in content  # last_run should be updated
 
@@ -698,7 +719,7 @@ class TestScheduleWatcher:
         future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
         schedule_file.write_text(f'{{"trigger_at": "{future}", "message": "Future"}}\n')
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         watcher = ScheduleWatcher(store)
         triggered: list[ScheduleEntry] = []
 
@@ -709,7 +730,7 @@ class TestScheduleWatcher:
         await watcher._check_schedule()
 
         assert triggered == []
-        assert "Future" in schedule_file.read_text()
+        assert "Future" in _graph_schedules_file(schedule_file).read_text()
 
     @pytest.mark.asyncio
     async def test_failed_one_shot_removed(self, tmp_path: Path):
@@ -720,7 +741,7 @@ class TestScheduleWatcher:
             f'{{"id": "fail1", "trigger_at": "{past}", "message": "Fail me"}}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         watcher = ScheduleWatcher(store)
 
         @watcher.on_due
@@ -730,7 +751,7 @@ class TestScheduleWatcher:
         await watcher._check_schedule()
 
         # Entry should be removed even though handler failed
-        assert "Fail me" not in schedule_file.read_text()
+        assert "Fail me" not in _graph_schedules_file(schedule_file).read_text()
 
     @pytest.mark.asyncio
     async def test_failed_periodic_updates_last_run(self, tmp_path: Path):
@@ -741,7 +762,7 @@ class TestScheduleWatcher:
             f'{{"id": "pfail1", "cron": "* * * * *", "message": "Fail periodic", "last_run": "{old_time}"}}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         watcher = ScheduleWatcher(store)
 
         @watcher.on_due
@@ -751,7 +772,7 @@ class TestScheduleWatcher:
         await watcher._check_schedule()
 
         # Entry should still exist with updated last_run
-        content = schedule_file.read_text()
+        content = _graph_schedules_file(schedule_file).read_text()
         assert "Fail periodic" in content
         assert old_time not in content  # last_run should be updated
 
@@ -1570,7 +1591,7 @@ class TestStalenessGuard:
             f'{{"id": "stale1", "cron": "* * * * *", "message": "Stale task", "last_run": "{old_time}"}}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         watcher = ScheduleWatcher(store)
         triggered: list[ScheduleEntry] = []
 
@@ -1583,7 +1604,7 @@ class TestStalenessGuard:
         # Handler should NOT have been called
         assert len(triggered) == 0
         # Entry should still exist with updated last_run
-        content = schedule_file.read_text()
+        content = _graph_schedules_file(schedule_file).read_text()
         assert "Stale task" in content
         assert old_time not in content  # last_run advanced
 
@@ -1597,7 +1618,7 @@ class TestStalenessGuard:
             f'{{"id": "fresh1", "cron": "* * * * *", "message": "Fresh task", "last_run": "{old_time}"}}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         watcher = ScheduleWatcher(store)
         triggered: list[ScheduleEntry] = []
 
@@ -1621,7 +1642,7 @@ class TestStalenessGuard:
             f'{{"id": "oneshot_stale", "trigger_at": "{past}", "message": "Old one-shot"}}\n'
         )
 
-        store = ScheduleStore(schedule_file)
+        store = _make_store(schedule_file)
         watcher = ScheduleWatcher(store)
         triggered: list[ScheduleEntry] = []
 
@@ -1635,7 +1656,7 @@ class TestStalenessGuard:
         assert len(triggered) == 1
         assert triggered[0].message == "Old one-shot"
         # And get removed
-        assert "Old one-shot" not in schedule_file.read_text()
+        assert "Old one-shot" not in _graph_schedules_file(schedule_file).read_text()
 
 
 class TestHandlerNoReply:

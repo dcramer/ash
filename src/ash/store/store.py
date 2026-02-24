@@ -89,6 +89,11 @@ class Store(
         """Public access to the in-memory knowledge graph."""
         return self._graph
 
+    @property
+    def persistence(self) -> GraphPersistence:
+        """Public access to graph persistence for integration-owned subsystems."""
+        return self._persistence
+
     def set_llm(self, llm: LLMProvider, model: str) -> None:
         """Set LLM provider for fuzzy matching and supersession verification."""
         self._llm = llm

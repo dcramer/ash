@@ -208,8 +208,8 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
             graph_dir=graph_dir,
         )
         from ash.config.paths import (
+            get_graph_dir,
             get_rpc_socket_path,
-            get_schedule_file,
             get_sessions_path,
         )
         from ash.integrations import (
@@ -220,8 +220,9 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
 
         default_integrations = create_default_integrations(
             mode="eval",
+            graph_dir=get_graph_dir(),
             include_memory=agent_type == "memory",
-            schedule_file=get_schedule_file(),
+            include_todo=config.todo.enabled,
         )
 
         async with active_integrations(

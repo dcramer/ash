@@ -15,6 +15,7 @@ from ash.config.models import (
     SandboxConfig,
     ServerConfig,
     TelegramConfig,
+    TodoConfig,
 )
 
 
@@ -124,6 +125,8 @@ class TestAshConfig:
     def test_full_config(self, full_config):
         assert full_config.default_model.provider == "openai"
         assert "fast" in full_config.models
+        assert isinstance(full_config.todo, TodoConfig)
+        assert full_config.todo.enabled is True
 
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):

@@ -1,10 +1,10 @@
 # Graph Store
 
-> In-memory knowledge graph backed by JSONL files and numpy vectors, with explicit typed edges and multi-hop retrieval.
+> In-memory knowledge graph backed by JSONL files and numpy vectors, with explicit typed edges, extensible node/edge schema registration, and multi-hop retrieval.
 
 ## Intent
 
-The graph store is the unified storage and retrieval layer for Ash. All memories, people, users, and chats are nodes in an in-memory `KnowledgeGraph`. All relationships (memory-about-person, user-is-person, supersession chains, merge chains) are explicit typed `Edge` objects with their own adjacency indexes.
+The graph store is the unified storage and retrieval layer for Ash. Core entities (memory/people/users/chats) and extension entities (for example `todo`) are nodes in `KnowledgeGraph`. Relationships are explicit typed `Edge` objects with adjacency indexes.
 
 **Design principles:**
 - **JSONL source of truth** — Human-readable, atomic writes via tempfile + `os.replace()`
@@ -48,6 +48,9 @@ The graph store is the unified storage and retrieval layer for Ash. All memories
 | **User** | `users.jsonl` | `UserEntry` | Provider identity (Telegram user, etc.) |
 | **Chat** | `chats.jsonl` | `ChatEntry` | Chat/channel from a provider |
 
+Node collections are extensible. Integrations may register additional collections
+(`collection_name`, `node_type`, serializer/hydrator) that persist alongside core collections.
+
 ### Edge Types
 
 All edges are stored in `edges.jsonl` and indexed in in-memory adjacency lists.
@@ -60,13 +63,18 @@ All edges are stored in `edges.jsonl` and indexed in in-memory adjacency lists.
 | `IS_PERSON` | User → Person | User identity maps to person |
 | `MERGED_INTO` | Person → Person | Duplicate person merged into primary |
 | `HAS_RELATIONSHIP` | Person → Person | Relationship link between people |
+| `TODO_OWNED_BY` | Todo → User | Personal todo ownership |
+| `TODO_SHARED_IN` | Todo → Chat | Shared todo scope |
+| `TODO_REMINDER_SCHEDULED_AS` | Todo → ScheduleEntry | Internal todo reminder linkage |
+| `SCHEDULE_FOR_CHAT` | ScheduleEntry → Chat | Scheduled task chat scope |
+| `SCHEDULE_FOR_USER` | ScheduleEntry → User | Scheduled task owner scope |
 
 **Edge model** (`ash.graph.graph.Edge`, Pydantic BaseModel):
 ```python
 class Edge(BaseModel):
     id: str
-    edge_type: EdgeType     # ABOUT, SUPERSEDES, etc.
-    source_type: NodeType   # "memory", "person", "user", "chat"
+    edge_type: EdgeType     # ABOUT, SUPERSEDES, TODO_OWNED_BY, etc.
+    source_type: NodeType   # "memory", "person", "user", "chat", "todo", ...
     source_id: str
     target_type: NodeType
     target_id: str
@@ -76,12 +84,17 @@ class Edge(BaseModel):
     created_by: str | None = None
 ```
 
-### Dual-Write Pattern
+Edge schemas are extensible. Integrations may register additional edge types and
+their required `(source_type, target_type)` pair.
 
-During the FK → edge migration, both FK fields and edges are maintained:
-- **Writes** create/update both the FK field (e.g., `memory.subject_person_ids`) and the corresponding edge (e.g., `ABOUT`)
-- **Reads** use edge queries via adjacency lists for key paths (retrieval, lifecycle, supersession)
-- **Backfill** auto-populates edges from FK fields on first load when `edges.jsonl` is empty
+### Relationship Canonicalization
+
+Edges are the canonical representation of links between entities.
+
+- **Canonical rule:** Relationship semantics MUST be read from edges, not node FK/link fields.
+- **Write rule:** Mutations that create/remove links MUST update edges as the source of truth.
+- **Node payload rule:** Relationship-like node fields are treated as denormalized metadata only; they MUST NOT be authoritative for authorization, visibility, or traversal logic.
+- **Migration rule:** Backfills may derive edges from legacy node fields, but steady-state behavior must remain edge-driven.
 
 ### Key Traversals
 
@@ -119,7 +132,8 @@ Operations: `add_edge()`, `remove_edge()`, `get_outgoing()`, `get_incoming()`, `
 JSONL load/save with atomic writes. Each node type has its own `.jsonl` file.
 
 - `load_raw()` — Reads all JSONL files into raw dicts; hydration and backfill handled by caller
-- `save_memories()`, `save_people()`, `save_users()`, `save_chats()`, `save_edges()` — Atomic rewrite
+- `register_node_collection(...)` — Register extension collections
+- `flush()` — Atomic rewrite of dirty registered collections + edges
 
 ### NumpyVectorIndex (`graph/vectors.py`)
 
@@ -214,6 +228,17 @@ src/ash/graph/
 ├── persistence.py       # JSONL load/save, edge backfill
 ├── vectors.py           # NumpyVectorIndex
 └── traversal.py         # BFS multi-hop traversal
+
+## Extensibility API
+
+Integrations can extend graph schema at runtime using two registries:
+
+1. Node collection registry (`graph.persistence`)
+   - registers collection name/file + node type + serializer/hydrator
+2. Edge type schema registry (`graph.graph`)
+   - registers edge type + required source/target node types
+
+This is the contract for adding new graph-backed subsystems without hardcoding core graph internals.
 
 src/ash/store/
 ├── __init__.py          # Exports: create_store

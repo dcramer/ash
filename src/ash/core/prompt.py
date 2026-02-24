@@ -634,6 +634,8 @@ class SystemPromptBuilder:
                     "- GOOD: 'check bus arrivals for route 40 at 3rd & Pike and report them'",
                     "",
                     "Confirm scheduled times in the user's local timezone.",
+                    "When the user gives a relative time phrase (e.g. 'this Saturday', 'tomorrow morning'), mirror that phrasing in confirmation instead of inventing a new explicit date unless the user asked for a specific date.",
+                    "If a user specifies a timezone and asks for multiple reminders in one request, apply that timezone consistently to each reminder unless they explicitly override per reminder.",
                     "If a schedule command fails (non-zero exit code, Usage, or Error output), fix and retry before responding.",
                     "Never claim a reminder was created unless the command succeeded.",
                 ]

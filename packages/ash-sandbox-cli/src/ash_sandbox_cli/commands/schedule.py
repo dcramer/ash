@@ -1,6 +1,7 @@
 """Schedule management commands for sandboxed CLI."""
 
 import os
+import re
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -58,9 +59,18 @@ def _parse_time(time_str: str, timezone: str) -> datetime | None:
     Returns:
         UTC datetime if parsing succeeds, None otherwise.
     """
+    normalized = time_str.strip().rstrip(".,!?")
+    # dateparser can fail on "this <weekday>"; normalize to "<weekday>".
+    normalized = re.sub(
+        r"\bthis\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+        r"\1",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+
     # Fast path: ISO 8601
     try:
-        return datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+        return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
     except ValueError:
         pass
 
@@ -72,7 +82,7 @@ def _parse_time(time_str: str, timezone: str) -> datetime | None:
         "RETURN_AS_TIMEZONE_AWARE": True,
         "PREFER_DATES_FROM": "future",
     }
-    parsed = dateparser.parse(time_str, settings=settings)
+    parsed = dateparser.parse(normalized, settings=settings)
     if parsed:
         return parsed.astimezone(UTC)
     return None

@@ -27,7 +27,7 @@ class SchedulingIntegration(IntegrationContributor):
 
     def __init__(
         self,
-        schedule_file: Path,
+        graph_dir: Path,
         *,
         timezone: str = "UTC",
         senders: dict[str, MessageSender] | None = None,
@@ -35,7 +35,7 @@ class SchedulingIntegration(IntegrationContributor):
         persisters: dict[str, MessagePersister] | None = None,
         agent_executor: AgentExecutor | None = None,
     ) -> None:
-        self._schedule_file = schedule_file
+        self._graph_dir = graph_dir
         self._timezone = timezone
         self._senders = senders or {}
         self._registrars = registrars or {}
@@ -51,7 +51,7 @@ class SchedulingIntegration(IntegrationContributor):
     async def setup(self, context: IntegrationContext) -> None:
         from ash.scheduling import ScheduledTaskHandler, ScheduleStore, ScheduleWatcher
 
-        self._store = ScheduleStore(self._schedule_file)
+        self._store = ScheduleStore(self._graph_dir)
         if self._senders:
             self._watcher = ScheduleWatcher(self._store, timezone=self._timezone)
             schedule_handler = ScheduledTaskHandler(

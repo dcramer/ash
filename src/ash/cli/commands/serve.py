@@ -68,10 +68,10 @@ async def _run_server(
 
     from ash.config import load_config
     from ash.config.paths import (
+        get_graph_dir,
         get_logs_path,
         get_pid_path,
         get_rpc_socket_path,
-        get_schedule_file,
         get_sessions_path,
     )
     from ash.integrations import (
@@ -152,9 +152,10 @@ async def _run_server(
     # Compose integration contributors for runtime wiring.
     default_integrations = create_default_integrations(
         mode="serve",
+        graph_dir=get_graph_dir(),
         logs_path=get_logs_path(),
-        schedule_file=get_schedule_file(),
         include_memory=True,
+        include_todo=ash_config.todo.enabled,
         timezone=ash_config.timezone,
         senders=provider_runtime.senders,
         registrars=provider_runtime.registrars,
@@ -173,7 +174,7 @@ async def _run_server(
         if default_integrations.scheduling.store is None:
             raise RuntimeError("schedule integration setup failed")
         logger.debug(
-            f"Schedule store: {default_integrations.scheduling.store.schedule_file}"
+            f"Schedule store: {default_integrations.scheduling.store.graph_dir}"
         )
 
         try:

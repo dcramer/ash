@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ash.graph import register_edge_type_schema, register_node_collection
+
 logger = logging.getLogger(__name__)
 
 
@@ -207,6 +209,10 @@ class ScheduleEntry:
 
     def to_json_line(self) -> str:
         """Serialize entry back to JSON line."""
+        return json.dumps(self.to_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize entry to a JSON-serializable dict."""
         # Start with any extra fields we want to preserve
         data: dict[str, Any] = dict(self._extra)
         data["message"] = self.message
@@ -238,7 +244,7 @@ class ScheduleEntry:
             data["provider"] = self.provider
         data["created_at"] = self.created_at.isoformat()
 
-        return json.dumps(data)
+        return data
 
     @classmethod
     def from_line(cls, line: str, line_number: int = 0) -> "ScheduleEntry | None":
@@ -249,60 +255,86 @@ class ScheduleEntry:
 
         try:
             data = json.loads(line)
-            message = data.get("message", "")
-            if not message:
-                return None
-
-            def parse_datetime(key: str) -> datetime | None:
-                val = data.get(key)
-                return datetime.fromisoformat(val) if val else None
-
-            trigger_at = parse_datetime("trigger_at")
-            cron = data.get("cron")
-            last_run = parse_datetime("last_run")
-            created_at = parse_datetime("created_at")
-
-            if not trigger_at and not cron:
-                return None
-            if not created_at:
-                created_at = datetime.now(UTC)
-
-            # Collect extra fields we don't explicitly handle
-            known_fields = {
-                "id",
-                "message",
-                "trigger_at",
-                "cron",
-                "last_run",
-                "timezone",
-                "chat_id",
-                "chat_title",
-                "user_id",
-                "username",
-                "provider",
-                "created_at",
-            }
-            extra = {k: v for k, v in data.items() if k not in known_fields}
-
-            return cls(
-                message=message,
-                id=data.get("id"),
-                trigger_at=trigger_at,
-                cron=cron,
-                last_run=last_run,
-                timezone=data.get("timezone"),
-                chat_id=data.get("chat_id"),
-                chat_title=data.get("chat_title"),
-                user_id=data.get("user_id"),
-                username=data.get("username"),
-                provider=data.get("provider"),
-                created_at=created_at,
-                line_number=line_number,
-                _extra=extra,
-            )
+            return cls.from_dict(data, line_number=line_number)
         except (json.JSONDecodeError, ValueError):
             return None
+
+    @classmethod
+    def from_dict(
+        cls, data: dict[str, Any], *, line_number: int = 0
+    ) -> "ScheduleEntry | None":
+        """Parse entry from dict payload."""
+        message = data.get("message", "")
+        if not message:
+            return None
+
+        def parse_datetime(key: str) -> datetime | None:
+            val = data.get(key)
+            return datetime.fromisoformat(val) if val else None
+
+        trigger_at = parse_datetime("trigger_at")
+        cron = data.get("cron")
+        last_run = parse_datetime("last_run")
+        created_at = parse_datetime("created_at")
+
+        if not trigger_at and not cron:
+            return None
+        if not created_at:
+            created_at = datetime.now(UTC)
+
+        known_fields = {
+            "id",
+            "message",
+            "trigger_at",
+            "cron",
+            "last_run",
+            "timezone",
+            "chat_id",
+            "chat_title",
+            "user_id",
+            "username",
+            "provider",
+            "created_at",
+        }
+        extra = {k: v for k, v in data.items() if k not in known_fields}
+
+        return cls(
+            message=message,
+            id=data.get("id"),
+            trigger_at=trigger_at,
+            cron=cron,
+            last_run=last_run,
+            timezone=data.get("timezone"),
+            chat_id=data.get("chat_id"),
+            chat_title=data.get("chat_title"),
+            user_id=data.get("user_id"),
+            username=data.get("username"),
+            provider=data.get("provider"),
+            created_at=created_at,
+            line_number=line_number,
+            _extra=extra,
+        )
 
 
 # Handler receives the full entry for context-aware processing
 ScheduleHandler = Callable[[ScheduleEntry], Awaitable[Any]]
+
+
+def register_schedule_graph_schema() -> None:
+    """Register schedule node collection + schedule edges in ash.graph."""
+    register_node_collection(
+        collection="schedules",
+        node_type="schedule_entry",
+        serializer=lambda entry: entry.to_dict(),
+        hydrator=lambda payload: ScheduleEntry.from_dict(payload),
+    )
+    register_edge_type_schema(
+        "SCHEDULE_FOR_CHAT",
+        source_type="schedule_entry",
+        target_type="chat",
+    )
+    register_edge_type_schema(
+        "SCHEDULE_FOR_USER",
+        source_type="schedule_entry",
+        target_type="user",
+    )

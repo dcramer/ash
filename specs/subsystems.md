@@ -25,6 +25,7 @@ A subsystem is NOT:
 | memory | Long-term fact storage and retrieval | Conversation history, session state |
 | sessions | Conversation persistence and context | Fact extraction, semantic search |
 | scheduling | Deferred task execution | Task content, routing |
+| todos | Canonical todo lifecycle and list management | Job execution orchestration |
 | images | Inbound image understanding + context extraction | Message transport, LLM orchestration |
 | browser | Session-scoped page actions and artifacts (sandbox provider runs in container runtime) | Message transport, model orchestration |
 
@@ -130,6 +131,7 @@ Public types live in one place, not scattered across implementation files:
 | people | Complete | [specs/people.md](people.md) |
 | sessions | Needs refactor | - |
 | scheduling | Complete | [specs/schedule.md](schedule.md) |
+| todos | In progress | [specs/todos.md](todos.md) |
 | browser | In progress | [specs/browser.md](browser.md) |
 
 ## Verification

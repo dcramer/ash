@@ -1,5 +1,8 @@
 """Tests for CLI commands."""
 
+import json
+from datetime import UTC, datetime
+
 from ash.cli.app import app
 from ash.cli.commands.doctor import run_doctor_checks
 from ash.config.paths import ENV_VAR, get_ash_home
@@ -351,6 +354,75 @@ class TestUpgradeCommand:
             "migration" in result.stdout.lower() or "upgrade" in result.stdout.lower()
         )
 
+    def test_upgrade_migrates_legacy_schedule_into_graph(
+        self, cli_runner, monkeypatch, ash_home
+    ):
+        schedule_file = ash_home / "schedule.jsonl"
+        schedule_file.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "id": "sched123",
+                            "message": "Doctor appointment",
+                            "trigger_at": "2026-03-01T10:30:00+00:00",
+                            "chat_id": "chat_1",
+                            "user_id": "user_1",
+                            "created_at": "2026-02-24T00:00:00+00:00",
+                        }
+                    ),
+                    "",
+                ]
+            )
+        )
+        monkeypatch.setattr(
+            "ash.cli.commands.sandbox._get_dockerfile_path", lambda: None
+        )
+
+        result = cli_runner.invoke(app, ["upgrade"])
+        assert result.exit_code == 0
+        assert "Migrating schedule entries into ash.graph" in result.stdout
+        assert "Schedule graph ready (1 entry migrated)" in result.stdout
+
+        schedules_file = ash_home / "graph" / "schedules.jsonl"
+        assert schedules_file.exists()
+        rows = [json.loads(line) for line in schedules_file.read_text().splitlines()]
+        assert rows[0]["id"] == "sched123"
+        assert rows[0]["message"] == "Doctor appointment"
+
+        edges_file = ash_home / "graph" / "edges.jsonl"
+        assert edges_file.exists()
+        edge_rows = [json.loads(line) for line in edges_file.read_text().splitlines()]
+        edge_types = {edge["edge_type"] for edge in edge_rows}
+        assert "SCHEDULE_FOR_CHAT" in edge_types
+        assert "SCHEDULE_FOR_USER" in edge_types
+        assert not schedule_file.exists()
+
+    def test_upgrade_handles_schedule_migration_failure(
+        self, cli_runner, monkeypatch, ash_home
+    ):
+        schedule_file = ash_home / "schedule.jsonl"
+        schedule_file.write_text(
+            '{"id":"sched123","message":"Bad","trigger_at":"2026-03-01T10:30:00+00:00"}\n'
+        )
+
+        class _BoomStore:
+            def __init__(self, *_args, **_kwargs) -> None:
+                pass
+
+            def add_entry(self, _entry):
+                raise RuntimeError("boom")
+
+        monkeypatch.setattr("ash.scheduling.ScheduleStore", _BoomStore)
+        monkeypatch.setattr(
+            "ash.cli.commands.sandbox._get_dockerfile_path", lambda: None
+        )
+
+        result = cli_runner.invoke(app, ["upgrade"])
+        assert result.exit_code == 0
+        assert "Schedule migration failed (boom)" in result.stdout
+        assert "Upgrade complete!" in result.stdout
+
 
 class TestSandboxCommand:
     """Tests for 'ash sandbox' command."""
@@ -444,13 +516,20 @@ class TestScheduleCommand:
         assert "No scheduled tasks" in result.stdout
 
     def test_schedule_list_with_entries(self, cli_runner, monkeypatch, tmp_path):
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Test task"}\n'
+        from ash.scheduling import ScheduleEntry, ScheduleStore
+
+        graph_dir = tmp_path / "graph"
+        store = ScheduleStore(graph_dir)
+        store.add_entry(
+            ScheduleEntry(
+                id="task0001",
+                message="Test task",
+                trigger_at=datetime(2026, 1, 12, 9, 0, 0, tzinfo=UTC),
+            )
         )
         monkeypatch.setattr(
-            "ash.config.paths.get_schedule_file",
-            lambda: schedule_file,
+            "ash.config.paths.get_graph_dir",
+            lambda: graph_dir,
         )
 
         result = cli_runner.invoke(app, ["schedule", "list"])
@@ -458,37 +537,57 @@ class TestScheduleCommand:
         assert "Test task" in result.stdout
 
     def test_schedule_cancel_success(self, cli_runner, monkeypatch, tmp_path):
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"id": "abc12345", "trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task to cancel"}\n'
+        from ash.scheduling import ScheduleEntry, ScheduleStore
+
+        graph_dir = tmp_path / "graph"
+        store = ScheduleStore(graph_dir)
+        store.add_entry(
+            ScheduleEntry(
+                id="abc12345",
+                message="Task to cancel",
+                trigger_at=datetime(2026, 1, 12, 9, 0, 0, tzinfo=UTC),
+            )
         )
         monkeypatch.setattr(
-            "ash.config.paths.get_schedule_file",
-            lambda: schedule_file,
+            "ash.config.paths.get_graph_dir",
+            lambda: graph_dir,
         )
 
         result = cli_runner.invoke(app, ["schedule", "cancel", "--id", "abc12345"])
         assert result.exit_code == 0
         assert "Cancelled" in result.stdout
 
-        # Verify file is empty
-        assert schedule_file.read_text().strip() == ""
+        # Verify graph schedules file is empty
+        assert (graph_dir / "schedules.jsonl").read_text().strip() == ""
 
     def test_schedule_clear_with_force(self, cli_runner, monkeypatch, tmp_path):
-        schedule_file = tmp_path / "schedule.jsonl"
-        schedule_file.write_text(
-            '{"trigger_at": "2026-01-12T09:00:00+00:00", "message": "Task 1"}\n'
-            '{"trigger_at": "2026-01-13T09:00:00+00:00", "message": "Task 2"}\n'
+        from ash.scheduling import ScheduleEntry, ScheduleStore
+
+        graph_dir = tmp_path / "graph"
+        store = ScheduleStore(graph_dir)
+        store.add_entry(
+            ScheduleEntry(
+                id="task0001",
+                message="Task 1",
+                trigger_at=datetime(2026, 1, 12, 9, 0, 0, tzinfo=UTC),
+            )
+        )
+        store.add_entry(
+            ScheduleEntry(
+                id="task0002",
+                message="Task 2",
+                trigger_at=datetime(2026, 1, 13, 9, 0, 0, tzinfo=UTC),
+            )
         )
         monkeypatch.setattr(
-            "ash.config.paths.get_schedule_file",
-            lambda: schedule_file,
+            "ash.config.paths.get_graph_dir",
+            lambda: graph_dir,
         )
 
         result = cli_runner.invoke(app, ["schedule", "clear", "--force"])
         assert result.exit_code == 0
         assert "Cleared 2" in result.stdout
-        assert schedule_file.read_text() == ""
+        assert (graph_dir / "schedules.jsonl").read_text() == ""
 
 
 class TestPeopleCommand:
@@ -603,14 +702,13 @@ class TestDoctorCommand:
         assert "ash memory doctor" in result.stdout
         assert "ash people doctor" in result.stdout
 
-    def test_doctor_reports_warnings_for_stale_pid_and_bad_schedule(
+    def test_doctor_reports_warnings_for_stale_pid_file(
         self, cli_runner, monkeypatch, tmp_path
     ):
         ash_home = tmp_path / ".ash"
         run_dir = ash_home / "run"
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "ash.pid").write_text("99999999\n")
-        (ash_home / "schedule.jsonl").write_text("{bad-json}\n")
 
         monkeypatch.setenv(ENV_VAR, str(ash_home))
         get_ash_home.cache_clear()
@@ -622,7 +720,6 @@ class TestDoctorCommand:
 
         assert result.exit_code == 0
         assert "stale pid file" in result.stdout
-        assert "invalid JSONL lines" in result.stdout
         assert "Doctor found non-blocking issues" in result.stdout
 
     def test_doctor_warns_when_image_enabled_without_openai_key(

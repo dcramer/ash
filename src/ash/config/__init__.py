@@ -14,6 +14,7 @@ from ash.config.models import (
     ServerConfig,
     SkillSource,
     TelegramConfig,
+    TodoConfig,
 )
 from ash.config.paths import (
     get_ash_home,
@@ -34,6 +35,7 @@ __all__ = [
     "SentryConfig",
     "ServerConfig",
     "SkillSource",
+    "TodoConfig",
     "TelegramConfig",
     "Workspace",
     "WorkspaceLoader",

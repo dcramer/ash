@@ -15,7 +15,6 @@ from ash.config.paths import (
     get_auth_path,
     get_config_path,
     get_logs_path,
-    get_schedule_file,
 )
 
 DIR_PURPOSES: dict[str, str] = {
@@ -33,7 +32,6 @@ DIR_PURPOSES: dict[str, str] = {
 
 FILE_PURPOSES: dict[str, str] = {
     "config.toml": "Main Ash configuration",
-    "schedule.jsonl": "Scheduled task queue",
     "auth.json": "OAuth/provider credentials",
 }
 
@@ -168,7 +166,6 @@ def _render_stats() -> None:
 
     for path, purpose in (
         (get_config_path(), FILE_PURPOSES["config.toml"]),
-        (get_schedule_file(), FILE_PURPOSES["schedule.jsonl"]),
         (get_auth_path(), FILE_PURPOSES["auth.json"]),
     ):
         exists = path.exists()

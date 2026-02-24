@@ -81,8 +81,8 @@ class SandboxConfig:
     # Chats mounting (for agent to read chat state/participants)
     chats_path: Path | None = None  # Host path to chats directory
 
-    # Schedule file mounting (for schedule.jsonl)
-    schedule_file: Path | None = None  # Host path to schedule.jsonl
+    # Graph storage mounting (read-only state visibility for sandbox tools)
+    graph_dir: Path | None = None  # Host path to ~/.ash/graph
 
     # Logs mounting (for agent to inspect server logs)
     logs_path: Path | None = None  # Host path to logs directory
@@ -209,13 +209,10 @@ class SandboxManager:
                 "mode": "ro",
             }
 
-        if self._config.schedule_file:
-            # Create schedule file if it doesn't exist
-            self._config.schedule_file.parent.mkdir(parents=True, exist_ok=True)
-            self._config.schedule_file.touch(exist_ok=True)
-            volumes[str(self._config.schedule_file)] = {
-                "bind": f"{prefix}/schedule.jsonl",
-                "mode": "rw",
+        if self._config.graph_dir and self._config.graph_dir.exists():
+            volumes[str(self._config.graph_dir)] = {
+                "bind": f"{prefix}/graph",
+                "mode": "ro",
             }
 
         if self._config.logs_path and self._config.logs_path.exists():

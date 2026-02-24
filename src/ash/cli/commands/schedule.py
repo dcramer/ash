@@ -99,7 +99,7 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Manage scheduled tasks.
 
-        Scheduled tasks are stored in ~/.ash/schedule.jsonl.
+        Scheduled tasks are stored in ~/.ash/graph/schedules.jsonl.
 
         Examples:
             ash schedule list                  # List all scheduled tasks
@@ -112,27 +112,27 @@ def register(app: typer.Typer) -> None:
             click.echo(ctx.get_help())
             raise typer.Exit(0)
 
-        from ash.config.paths import get_schedule_file
+        from ash.config.paths import get_graph_dir
 
-        schedule_file = get_schedule_file()
+        graph_dir = get_graph_dir()
 
         if action == "list":
-            _schedule_list(schedule_file)
+            _schedule_list(graph_dir)
 
         elif action == "update":
             if entry_id is None:
                 error("--id is required for update")
                 raise typer.Exit(1)
-            _schedule_update(schedule_file, entry_id, message, at, cron, tz)
+            _schedule_update(graph_dir, entry_id, message, at, cron, tz)
 
         elif action == "cancel":
             if entry_id is None:
                 error("--id is required for cancel")
                 raise typer.Exit(1)
-            _schedule_cancel(schedule_file, entry_id)
+            _schedule_cancel(graph_dir, entry_id)
 
         elif action == "clear":
-            _schedule_clear(schedule_file, force)
+            _schedule_clear(graph_dir, force)
 
         else:
             error(f"Unknown action: {action}")
@@ -140,7 +140,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
 
-def _schedule_list(schedule_file) -> None:
+def _schedule_list(graph_dir) -> None:
     """List all scheduled tasks."""
     from ash.cli.console import create_table
     from ash.config import get_default_config, load_config
@@ -150,7 +150,7 @@ def _schedule_list(schedule_file) -> None:
         config = load_config()
     except FileNotFoundError:
         config = get_default_config()
-    store = ScheduleStore(schedule_file)
+    store = ScheduleStore(graph_dir)
     entries = store.get_entries()
 
     if not entries:
@@ -210,11 +210,11 @@ def _schedule_list(schedule_file) -> None:
     console.print(f"\n{dim(f'Total: {len(entries)} task(s)')}")
 
 
-def _schedule_cancel(schedule_file, entry_id: str) -> None:
+def _schedule_cancel(graph_dir, entry_id: str) -> None:
     """Cancel a scheduled task by ID."""
     from ash.scheduling import ScheduleStore
 
-    store = ScheduleStore(schedule_file)
+    store = ScheduleStore(graph_dir)
     entry = store.get_entry(entry_id)
 
     if not entry:
@@ -229,7 +229,7 @@ def _schedule_cancel(schedule_file, entry_id: str) -> None:
 
 
 def _schedule_update(
-    schedule_file,
+    graph_dir,
     entry_id: str,
     message: str | None,
     at: str | None,
@@ -244,7 +244,7 @@ def _schedule_update(
         config = load_config()
     except FileNotFoundError:
         config = get_default_config()
-    store = ScheduleStore(schedule_file)
+    store = ScheduleStore(graph_dir)
 
     # Parse --at time if provided
     trigger_at: datetime | None = None
@@ -309,11 +309,11 @@ def _parse_time(time_str: str, timezone: str) -> datetime | None:
     return None
 
 
-def _schedule_clear(schedule_file, force: bool) -> None:
+def _schedule_clear(graph_dir, force: bool) -> None:
     """Clear all scheduled tasks."""
     from ash.scheduling import ScheduleStore
 
-    store = ScheduleStore(schedule_file)
+    store = ScheduleStore(graph_dir)
     stats = store.get_stats()
 
     if stats["total"] == 0:
