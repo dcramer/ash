@@ -93,7 +93,7 @@ body::before {
 
 header.header {
   background: #000000 !important;
-  border-bottom: 1px solid #b0ff1f;
+  border-bottom: 0 !important;
   border-right: 0 !important;
   border-inline-end: 0 !important;
   box-shadow: none;
@@ -811,16 +811,16 @@ body:has(.ash-home) .content-panel:first-of-type {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: clamp(74px, 10vw, 98px);
-  height: clamp(74px, 10vw, 98px);
-  border: 1px solid var(--ash-ink);
-  background: #dfff66;
+  min-width: auto;
+  height: auto;
+  border: 0;
+  background: transparent;
   font-family: 'Bebas Neue', var(--sl-font);
-  font-size: clamp(2rem, 4.8vw, 3.1rem);
-  line-height: 1;
+  font-size: clamp(3.2rem, 9vw, 5.8rem);
+  line-height: 0.85;
   letter-spacing: 0.04em;
   text-transform: lowercase;
-  color: #161509;
+  color: #d9ff6f;
   box-shadow: none;
 }
 
@@ -923,6 +923,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-home-cta-primary {
   color: #0b1903;
   background: var(--ash-lime);
+  border: 0 !important;
   box-shadow: none;
 }
 
@@ -1429,7 +1430,8 @@ body:has(.ash-home) :is(.ash-mega-icon, .ash-home-brand-mark) {
 }
 
 body:has(.ash-home) .ash-home-brand-mark {
-  background: #172132;
+  border: 0;
+  background: transparent;
   color: #d9ff6f;
   box-shadow: none;
 }
