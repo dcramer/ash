@@ -23,7 +23,7 @@ dogfooding.
 - [x] Skill capability preflight + DM/sensitive access policy in place.
 - [x] Bundled opt-in `gog` skill scaffolded (`src/ash/skills/bundled/gog/SKILL.md`).
 - [x] Bundled `gogcli` bridge runtime shipped with Ash
-  (`src/ash/skills/bundled/gog/gogcli_bridge.py`, `gogcli` entrypoint).
+  (`src/ash/skills/bundled/gog/scripts/gogcli_bridge.py`, `gogcli` entrypoint).
 - [ ] Provider persistence for credential/account state finalized.
 - [ ] End-to-end Google OAuth and operation tests completed.
 

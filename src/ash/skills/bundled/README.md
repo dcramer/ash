@@ -58,6 +58,7 @@ Bundled skills live under this directory:
 
 ```text
 src/ash/skills/bundled/<skill-name>/SKILL.md
+src/ash/skills/bundled/<skill-name>/scripts/<helper>.py
 ```
 
 Keep bundled skills contract-compatible with installed/workspace skills so runtime

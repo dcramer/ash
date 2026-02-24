@@ -69,7 +69,7 @@ sentry = [
 [project.scripts]
 ash = "ash.cli:app"
 evals = "ash.evals_cli:main"
-gogcli = "ash.skills.bundled.gog.gogcli_bridge:main"
+gogcli = "ash.skills.bundled.gog.scripts.gogcli_bridge:main"
 
 # ============== UV CONFIGURATION ==============
 
