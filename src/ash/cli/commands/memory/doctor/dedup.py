@@ -95,7 +95,7 @@ async def memory_doctor_dedup(store: Store, config: AshConfig, force: bool) -> N
                         if existing_target and existing_target != canonical_full:
                             rejected_count += 1
                             continue
-                        reason = validate_supersession_pair(
+                        reason = await validate_supersession_pair(
                             store,
                             old_id=dup_id,
                             new_id=canonical_full,

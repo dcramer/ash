@@ -201,3 +201,40 @@ class TestAssertionPipeline:
         assert assertion.subjects == [person.id]
         assert assertion.assertion_kind == AssertionKind.PERSON_FACT
         assert get_subject_person_ids(graph_store.graph, memory.id) == [person.id]
+
+    async def test_normalize_semantics_infers_speaker_from_source_username(
+        self, graph_store: Store
+    ):
+        from ash.graph.edges import get_stated_by_person
+
+        person = await graph_store.create_person(
+            created_by="user-1",
+            name="Bob",
+            relationship="self",
+            aliases=["bob"],
+        )
+
+        memory = await graph_store.add_memory(
+            content="Prefers tea",
+            owner_user_id="user-1",
+            source_username="bob",
+            assertion=AssertionEnvelope(
+                assertion_kind=AssertionKind.CONTEXT_FACT,
+                subjects=[],
+                predicates=[
+                    AssertionPredicate(
+                        name="describes",
+                        object_type=PredicateObjectType.TEXT,
+                        value="Prefers tea",
+                    )
+                ],
+            ),
+        )
+
+        await memory_doctor_normalize_semantics(graph_store, force=True)
+
+        updated = graph_store.graph.memories[memory.id]
+        assertion = get_assertion(updated)
+        assert assertion is not None
+        assert assertion.speaker_person_id == person.id
+        assert get_stated_by_person(graph_store.graph, memory.id) == person.id

@@ -42,7 +42,12 @@ async def memory_doctor_normalize_semantics(store: Store, force: bool) -> None:
         edge_subjects = get_subject_person_ids(store.graph, memory.id)
         edge_stated_by = get_stated_by_person(store.graph, memory.id)
 
-        assertion = _get_or_compile_assertion(memory, edge_subjects, edge_stated_by)
+        assertion = await _get_or_compile_assertion(
+            store,
+            memory,
+            edge_subjects,
+            edge_stated_by,
+        )
         violations = validate_assertion(assertion)
         if violations:
             violation_count += 1
@@ -109,11 +114,23 @@ async def memory_doctor_normalize_semantics(store: Store, force: bool) -> None:
     success(f"Normalized semantics for {len(memories_to_update)} memories")
 
 
-def _get_or_compile_assertion(
+async def _get_or_compile_assertion(
+    store: Store,
     memory: MemoryEntry,
     edge_subjects: list[str],
     edge_stated_by: str | None,
 ) -> AssertionEnvelope:
+    inferred_stated_by = edge_stated_by
+    if inferred_stated_by is None and memory.source_username:
+        try:
+            source_ids = await store.find_person_ids_for_username(
+                memory.source_username
+            )
+            if source_ids:
+                inferred_stated_by = sorted(source_ids)[0]
+        except Exception:
+            inferred_stated_by = None
+
     assertion = get_assertion(memory)
     if assertion is not None:
         updates: dict[str, object] = {}
@@ -122,13 +139,13 @@ def _get_or_compile_assertion(
             updates["subjects"] = edge_subjects
             if memory.memory_type == MemoryType.RELATIONSHIP:
                 updates["assertion_kind"] = AssertionKind.RELATIONSHIP_FACT
-            elif edge_stated_by and set(edge_subjects) == {edge_stated_by}:
+            elif inferred_stated_by and set(edge_subjects) == {inferred_stated_by}:
                 updates["assertion_kind"] = AssertionKind.SELF_FACT
             else:
                 updates["assertion_kind"] = AssertionKind.PERSON_FACT
 
-        if edge_stated_by and assertion.speaker_person_id is None:
-            updates["speaker_person_id"] = edge_stated_by
+        if inferred_stated_by and assertion.speaker_person_id is None:
+            updates["speaker_person_id"] = inferred_stated_by
 
         if updates:
             return assertion.model_copy(update=updates)
@@ -147,7 +164,7 @@ def _get_or_compile_assertion(
     return compile_assertion(
         fact=fact,
         subject_person_ids=edge_subjects,
-        speaker_person_id=edge_stated_by,
+        speaker_person_id=inferred_stated_by,
     )
 
 

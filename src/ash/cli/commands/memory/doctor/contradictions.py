@@ -108,7 +108,7 @@ async def memory_doctor_contradictions(
                         if existing_target and existing_target != current_full:
                             rejected_count += 1
                             continue
-                        reason = validate_supersession_pair(
+                        reason = await validate_supersession_pair(
                             store,
                             old_id=outdated_id,
                             new_id=current_full,

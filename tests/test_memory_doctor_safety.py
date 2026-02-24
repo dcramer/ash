@@ -134,7 +134,9 @@ async def test_validate_supersession_pair_rejects_scope_mismatch(graph_store):
         owner_user_id="user-2",
     )
 
-    reason = validate_supersession_pair(store=graph_store, old_id=old.id, new_id=new.id)
+    reason = await validate_supersession_pair(
+        store=graph_store, old_id=old.id, new_id=new.id
+    )
     assert reason == "scope_mismatch"
 
 
@@ -152,5 +154,39 @@ async def test_validate_supersession_pair_rejects_cycle(graph_store):
     # Corrupt/legacy cycle precursor: old already supersedes new.
     graph_store.graph.add_edge(create_supersedes_edge(old.id, new.id))
 
-    reason = validate_supersession_pair(store=graph_store, old_id=old.id, new_id=new.id)
+    reason = await validate_supersession_pair(
+        store=graph_store, old_id=old.id, new_id=new.id
+    )
     assert reason == "cycle"
+
+
+async def test_validate_supersession_pair_rejects_subject_authority(graph_store):
+    """Doctor validator should mirror store subject-authority protections."""
+    alice = await graph_store.create_person(
+        created_by="user-1",
+        name="Alice",
+        aliases=["alice"],
+    )
+    await graph_store.create_person(
+        created_by="user-1",
+        name="Bob",
+        aliases=["bob"],
+    )
+
+    old = await graph_store.add_memory(
+        content="Alice lives in Portland",
+        owner_user_id="user-1",
+        source_username="alice",
+        subject_person_ids=[alice.id],
+    )
+    new = await graph_store.add_memory(
+        content="Alice lives in Seattle",
+        owner_user_id="user-1",
+        source_username="bob",
+        subject_person_ids=[alice.id],
+    )
+
+    reason = await validate_supersession_pair(
+        store=graph_store, old_id=old.id, new_id=new.id
+    )
+    assert reason == "subject_authority"

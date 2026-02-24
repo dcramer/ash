@@ -269,7 +269,7 @@ def _would_create_supersession_cycle(store: Store, old_id: str, new_id: str) -> 
     return False
 
 
-def validate_supersession_pair(
+async def validate_supersession_pair(
     store: Store,
     *,
     old_id: str,
@@ -301,6 +301,8 @@ def validate_supersession_pair(
         store, old_id, new_id
     ):
         return "subject_mismatch"
+    if await store._is_protected_by_subject_authority(old_memory, new_memory):
+        return "subject_authority"
     if _would_create_supersession_cycle(store, old_id, new_id):
         return "cycle"
     return None
