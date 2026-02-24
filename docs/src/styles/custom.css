@@ -624,9 +624,9 @@ pre code {
 .expressive-code figcaption.header::before {
   background: none !important;
   background-image:
-    radial-gradient(circle at center, transparent 56%, #6d6d6d 57% 64%, transparent 65%),
-    radial-gradient(circle at center, transparent 56%, #6d6d6d 57% 64%, transparent 65%),
-    radial-gradient(circle at center, transparent 56%, #6d6d6d 57% 64%, transparent 65%) !important;
+    radial-gradient(circle at center, transparent 32%, #6d6d6d 33% 82%, transparent 83%),
+    radial-gradient(circle at center, transparent 32%, #6d6d6d 33% 82%, transparent 83%),
+    radial-gradient(circle at center, transparent 32%, #6d6d6d 33% 82%, transparent 83%) !important;
   background-size: 0.48rem 0.48rem !important;
   background-position:
     0 0.01rem,
