@@ -178,9 +178,63 @@ GITHUB_TOKEN = "ghp_..."        # Unknown keys become env vars.
 MAX_RESULTS = "25"              # Also exposed as env var.
 ```
 
+Global and per-skill chat allowlists:
+
+```toml
+[skills.defaults]
+allow_chat_ids = ["12345"]      # Optional global default allowlist
+
+[skills.github-triage]
+allow_chat_ids = ["12345"]      # Optional per-skill override
+```
+
 <Aside type="note">
   Per-skill env keys are passed to the skill and uppercased automatically (for example, `gh_token` becomes `GH_TOKEN`).
 </Aside>
+
+## Capability-Backed Skills (Sensitive Integrations)
+
+For email/calendar and similar sensitive systems, skills should call
+`ash-sb capability` and declare required capability IDs in frontmatter:
+
+```yaml
+---
+description: Manage inbox and calendar through host-managed capabilities
+sensitive: true
+access:
+  chat_types:
+    - private
+capabilities:
+  - gog.email
+  - gog.calendar
+allowed_tools:
+  - bash
+---
+```
+
+Provider runtime wiring is host-owned configuration, not skill metadata:
+
+```toml
+[capabilities.providers.gog]
+enabled = true
+namespace = "gog"
+command = ["gogcli", "bridge"]
+timeout_seconds = 30
+```
+
+## Bundled Optional `gog` Skill
+
+Ash includes an opt-in bundled `gog` skill for dogfooding this contract.
+
+Enable it in `config.toml`:
+
+```toml
+[skills.gog]
+enabled = true
+```
+
+This skill remains a normal skill surface and relies on `ash-sb capability`; it
+does not add integration hooks directly.
 
 ## Troubleshooting
 

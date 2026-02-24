@@ -254,14 +254,37 @@ model = "text-embedding-3-small"
 auto_sync = false
 update_interval_minutes = 5
 
+[skills.defaults]
+allow_chat_ids = ["12345"]  # Optional default chat allowlist for all skills
+
 [[skills.sources]]
 repo = "owner/repo"
 
 [skills.research]
 enabled = true
 model = "mini"
+allow_chat_ids = ["12345"]  # Optional per-skill override
 PERPLEXITY_API_KEY = "..."
 ```
+
+## Capabilities (`[capabilities.providers.<name>]`)
+
+```toml
+[capabilities.providers.gog]
+enabled = true
+namespace = "gog"
+command = ["gogcli", "bridge"]
+timeout_seconds = 30
+```
+
+| Key | Type | Default | Notes |
+|-----|------|---------|-------|
+| `enabled` | bool | `true` | Disable provider without removing config |
+| `namespace` | string \| null | `null` | Optional explicit namespace override |
+| `command` | list[string] \| string | required | Bridge command launched by host |
+| `timeout_seconds` | float | `30.0` | Provider call timeout (1-300) |
+
+Skill metadata should declare required capability IDs only. Bridge command/container wiring lives in host config.
 
 ## Agents (`[agents.<name>]`)
 

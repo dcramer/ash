@@ -43,6 +43,8 @@ per-user credential isolation rules.
 - All capability RPC methods require valid `context_token` and fail closed otherwise.
 - Identity/routing for capability execution must come only from verified token claims.
 - Caller-provided identity/routing fields (`user_id`, `chat_id`, `chat_type`, etc.) are not trusted.
+- External provider execution details (command/container/runtime path) must come from
+  host config (`[capabilities.providers.*]`), not from untrusted skill metadata.
 - Capability IDs must be globally unique and namespaced as `<namespace>.<name>` (for example `gog.email`).
 - Capability RPC requests must use fully-qualified namespaced IDs; unqualified IDs are rejected.
 - Bot-initiated capability operations must run through `ash-sb` commands (no direct provider/chat path to credential lookups).
@@ -122,6 +124,9 @@ timeout_seconds = 30
 
 The host invokes the bridge with JSON over stdin/stdout for `definitions`,
 `auth_begin`, `auth_complete`, and `invoke`.
+
+Skill metadata declares required capability IDs only; it does not select the
+provider command/container/runtime.
 
 #### Bridge Envelope (`bridge-v1`)
 

@@ -80,6 +80,10 @@ model = "gpt-5-mini"
 # Per-skill model overrides
 [skills.debug]
 model = "codex"
+allow_chat_ids = ["12345"]
+
+[skills.defaults]
+allow_chat_ids = ["12345"]
 
 [skills.code-review]
 model = "sonnet"
@@ -118,6 +122,10 @@ For skills:
 1. `[skills.<name>] model` in config (per-skill override)
 2. `model` in SKILL.md frontmatter
 3. `"default"` fallback
+
+Skill chat allowlist resolution:
+1. `[skills.<name>].allow_chat_ids` (per-skill override, when set)
+2. `[skills.defaults].allow_chat_ids` (global default)
 
 For API keys:
 1. Provider config (`[anthropic].api_key`)

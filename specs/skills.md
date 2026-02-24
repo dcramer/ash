@@ -127,6 +127,19 @@ allowed_tools:
 Use `ash-sb capability` for email/calendar operations.
 Do not read or require raw provider credentials from environment variables.
 Capability IDs must be namespaced (for example `gog.email`, not `email`).
+
+Provider execution details are host-owned config, not skill metadata:
+
+```toml
+[capabilities.providers.gog]
+enabled = true
+namespace = "gog"
+command = ["gogcli", "bridge"]
+timeout_seconds = 30
+```
+
+Skills declare required capabilities (`gog.email`, `gog.calendar`) but do not
+declare container/command wiring.
 ```
 
 ### Config Section
@@ -148,6 +161,7 @@ enabled = false                   # Disabled
 ```
 
 Config keys match env var names exactly (UPPER_CASE). No case conversion.
+`allow_chat_ids` can be set globally in `[skills.defaults]` and overridden per skill.
 
 ### System Prompt Listing
 
