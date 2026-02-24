@@ -58,10 +58,29 @@ def _call(method: str, params: dict[str, Any]) -> Any:
         raise typer.Exit(1) from None
 
 
-def _todo_label(todo: dict[str, Any]) -> str:
-    status = todo.get("status", "open")
-    marker = "[x]" if status == "done" else "[ ]"
-    return f"{marker} {todo.get('id', '?')} {todo.get('content', '')}"
+def _todo_status(todo: dict[str, Any]) -> str:
+    return str(todo.get("status", "open")).lower()
+
+
+def _todo_marker(todo: dict[str, Any]) -> str:
+    return "[x]" if _todo_status(todo) == "done" else "[ ]"
+
+
+def _echo_todo_block(
+    todo: dict[str, Any],
+    *,
+    prefix: str | None = None,
+    include_reminder: bool = True,
+) -> None:
+    if prefix:
+        typer.echo(prefix)
+    typer.echo(f"  ID: {todo.get('id', '?')}")
+    typer.echo(f"  Status: {_todo_status(todo)} {_todo_marker(todo)}")
+    typer.echo(f"  Task: {todo.get('content', '')}")
+    if todo.get("due_at"):
+        typer.echo(f"  Due: {todo['due_at']}")
+    if include_reminder and todo.get("linked_schedule_entry_id"):
+        typer.echo(f"  Reminder: {todo['linked_schedule_entry_id']}")
 
 
 @app.command("add")
@@ -96,9 +115,7 @@ def add_todo(
 
     result = _call("todo.create", params)
     todo = result["todo"]
-    typer.echo(f"Created todo: {_todo_label(todo)}")
-    if todo.get("due_at"):
-        typer.echo(f"  Due: {todo['due_at']}")
+    _echo_todo_block(todo, prefix="Created todo:")
 
 
 @app.command("list")
@@ -133,11 +150,7 @@ def list_todos(
 
     typer.echo("Todos:")
     for todo in todos:
-        typer.echo(f"  {_todo_label(todo)}")
-        if todo.get("due_at"):
-            typer.echo(f"    Due: {todo['due_at']}")
-        if todo.get("linked_schedule_entry_id"):
-            typer.echo(f"    Reminder: {todo['linked_schedule_entry_id']}")
+        _echo_todo_block(todo, prefix="-")
     typer.echo(f"Total: {len(todos)} todo(s)")
 
 
@@ -179,7 +192,7 @@ def edit_todo(
 
     result = _call("todo.update", params)
     todo = result["todo"]
-    typer.echo(f"Updated todo: {_todo_label(todo)}")
+    _echo_todo_block(todo, prefix="Updated todo:")
 
 
 @app.command("done")
@@ -195,7 +208,7 @@ def complete_todo(
             "chat_id": ctx["chat_id"] or None,
         },
     )
-    typer.echo(f"Completed todo: {_todo_label(result['todo'])}")
+    _echo_todo_block(result["todo"], prefix="Completed todo:")
 
 
 @app.command("undone")
@@ -211,7 +224,7 @@ def uncomplete_todo(
             "chat_id": ctx["chat_id"] or None,
         },
     )
-    typer.echo(f"Reopened todo: {_todo_label(result['todo'])}")
+    _echo_todo_block(result["todo"], prefix="Reopened todo:")
 
 
 @app.command("delete")
@@ -227,7 +240,7 @@ def delete_todo(
             "chat_id": ctx["chat_id"] or None,
         },
     )
-    typer.echo(f"Deleted todo: {_todo_label(result['todo'])}")
+    _echo_todo_block(result["todo"], prefix="Deleted todo:")
 
 
 @app.command("remind")

@@ -67,4 +67,7 @@ class TodoIntegration(IntegrationContributor):
             lines.append(
                 "- For canonical todo list operations, use `ash-sb todo` instead of memory writes (`ash-sb todo add`, `ash-sb todo list`, `ash-sb todo done`)."
             )
+            lines.append(
+                "- When reporting todos to users, summarize the task text naturally and avoid exposing internal todo IDs unless the user asks for IDs or a follow-up mutation requires one."
+            )
         return prompt_context
