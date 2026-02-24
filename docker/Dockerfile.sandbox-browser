@@ -1,0 +1,28 @@
+FROM python:3.12-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    chromium \
+    curl \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    socat \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir playwright \
+  && playwright install chromium
+
+COPY scripts/sandbox-browser-entrypoint.sh /usr/local/bin/ash-sandbox-browser
+RUN chmod +x /usr/local/bin/ash-sandbox-browser
+
+RUN useradd --create-home --shell /bin/bash sandbox
+USER sandbox
+WORKDIR /home/sandbox
+
+EXPOSE 9222
+
+CMD ["ash-sandbox-browser"]

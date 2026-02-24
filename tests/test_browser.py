@@ -123,7 +123,10 @@ def _config() -> AshConfig:
         workspace=Path("tmp-workspace"),
         models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
         browser=BrowserConfig(
-            sandbox=BrowserSandboxConfig(runtime_required=False),
+            sandbox=BrowserSandboxConfig(
+                runtime_required=False,
+                runtime_mode="legacy",
+            ),
         ),
     )
 
@@ -133,7 +136,10 @@ def _strict_config() -> AshConfig:
         workspace=Path("tmp-workspace"),
         models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
         browser=BrowserConfig(
-            sandbox=BrowserSandboxConfig(runtime_required=True),
+            sandbox=BrowserSandboxConfig(
+                runtime_required=True,
+                runtime_mode="legacy",
+            ),
         ),
     )
 
@@ -538,7 +544,10 @@ async def test_create_browser_manager_omits_kernel_when_unconfigured(
         models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
         browser=BrowserConfig(
             provider="sandbox",
-            sandbox=BrowserSandboxConfig(runtime_required=False),
+            sandbox=BrowserSandboxConfig(
+                runtime_required=False,
+                runtime_mode="legacy",
+            ),
             state_dir=tmp_path / "browser-state",
         ),
     )
@@ -562,7 +571,10 @@ def test_create_browser_manager_uses_kernel_when_configured(
         models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
         browser=BrowserConfig(
             provider="kernel",
-            sandbox=BrowserSandboxConfig(runtime_required=False),
+            sandbox=BrowserSandboxConfig(
+                runtime_required=False,
+                runtime_mode="legacy",
+            ),
             state_dir=tmp_path / "browser-state",
         ),
     )
@@ -580,7 +592,10 @@ def test_create_browser_manager_uses_configured_provider_even_with_kernel_api_ke
         models={"default": ModelConfig(provider="openai", model="gpt-5.2")},
         browser=BrowserConfig(
             provider="sandbox",
-            sandbox=BrowserSandboxConfig(runtime_required=False),
+            sandbox=BrowserSandboxConfig(
+                runtime_required=False,
+                runtime_mode="legacy",
+            ),
             state_dir=tmp_path / "browser-state",
         ),
     )

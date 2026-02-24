@@ -109,7 +109,10 @@ async def test_browser_cli_end_to_end_via_real_rpc(tmp_path: Path) -> None:
             enabled=True,
             provider="sandbox",
             state_dir=browser_state,
-            sandbox=BrowserSandboxConfig(runtime_required=False),
+            sandbox=BrowserSandboxConfig(
+                runtime_required=False,
+                runtime_mode="legacy",
+            ),
         ),
     )
 

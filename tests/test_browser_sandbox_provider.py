@@ -67,7 +67,10 @@ class _FakeExecutor:
 
 async def test_sandbox_provider_uses_executor_for_full_flow() -> None:
     executor = _FakeExecutor()
-    provider = SandboxBrowserProvider(executor=cast(SandboxExecutor, executor))
+    provider = SandboxBrowserProvider(
+        executor=cast(SandboxExecutor, executor),
+        runtime_mode="legacy",
+    )
 
     started = await provider.start_session(session_id="s1", profile_name=None)
     assert started.provider_session_id == "s1"
@@ -131,7 +134,10 @@ async def test_sandbox_provider_uses_executor_for_full_flow() -> None:
 
 async def test_sandbox_provider_rehydrates_session_after_restart_like_state() -> None:
     executor = _FakeExecutor()
-    provider = SandboxBrowserProvider(executor=cast(SandboxExecutor, executor))
+    provider = SandboxBrowserProvider(
+        executor=cast(SandboxExecutor, executor),
+        runtime_mode="legacy",
+    )
 
     started = await provider.start_session(session_id="s1", profile_name=None)
     assert started.provider_session_id == "s1"
@@ -148,7 +154,7 @@ async def test_sandbox_provider_rehydrates_session_after_restart_like_state() ->
 
 
 async def test_sandbox_provider_requires_executor() -> None:
-    provider = SandboxBrowserProvider(executor=None)
+    provider = SandboxBrowserProvider(executor=None, runtime_mode="legacy")
     try:
         await provider.start_session(session_id="s1", profile_name=None)
     except ValueError as e:
@@ -158,7 +164,7 @@ async def test_sandbox_provider_requires_executor() -> None:
 
 
 def test_parse_json_output_ignores_noise() -> None:
-    provider = SandboxBrowserProvider(executor=None)
+    provider = SandboxBrowserProvider(executor=None, runtime_mode="legacy")
     payload = provider._parse_json_output(
         '(node:1) warning\nnot json\n{"ok": true, "value": 1}'
     )
@@ -181,7 +187,8 @@ async def test_sandbox_provider_times_out_hung_executor() -> None:
             return ExecutionResult(exit_code=0, stdout="", stderr="")
 
     provider = SandboxBrowserProvider(
-        executor=cast(SandboxExecutor, _HangingExecutor())
+        executor=cast(SandboxExecutor, _HangingExecutor()),
+        runtime_mode="legacy",
     )
     try:
         await provider._execute_sandbox_command(
@@ -237,7 +244,10 @@ async def test_sandbox_provider_falls_back_to_tmp_runtime_dir() -> None:
             return ExecutionResult(exit_code=0, stdout="", stderr="")
 
     executor = _DirProbeExecutor()
-    provider = SandboxBrowserProvider(executor=cast(SandboxExecutor, executor))
+    provider = SandboxBrowserProvider(
+        executor=cast(SandboxExecutor, executor),
+        runtime_mode="legacy",
+    )
     started = await provider.start_session(session_id="s1", profile_name=None)
     assert started.provider_session_id == "s1"
     assert any(

@@ -1004,6 +1004,9 @@ def create_browser_manager(
             viewport_width=config.browser.default_viewport_width,
             viewport_height=config.browser.default_viewport_height,
             executor=sandbox_executor,
+            runtime_mode=config.browser.sandbox.runtime_mode,
+            container_image=config.browser.sandbox.container_image,
+            container_name_prefix=config.browser.sandbox.container_name_prefix,
             runtime_restart_attempts=config.browser.sandbox.runtime_restart_attempts,
         )
     else:

@@ -1,7 +1,8 @@
 """Sandbox-backed browser provider.
 
 This provider never runs browser automation in the host process.
-All actions execute inside the shared sandbox container via SandboxExecutor.
+All actions execute inside container runtime (legacy shared executor container
+or dedicated browser container).
 """
 
 from __future__ import annotations
@@ -33,6 +34,8 @@ class _RemoteSandboxRuntime:
     port: int
     pid: int
     base_dir: str
+    container_name: str | None = None
+    host_port: int | None = None
 
 
 class SandboxBrowserProvider:
@@ -48,16 +51,29 @@ class SandboxBrowserProvider:
         viewport_width: int = 1280,
         viewport_height: int = 720,
         executor: SandboxExecutor | None = None,
+        runtime_mode: str = "dedicated",
+        container_image: str = "ash-sandbox-browser:latest",
+        container_name_prefix: str = "ash-browser-",
         runtime_restart_attempts: int = 1,
     ) -> None:
-        _ = (headless, browser_channel, viewport_width, viewport_height)
+        _ = (browser_channel, viewport_width, viewport_height)
+        self._headless = headless
         self._executor = executor
+        self._runtime_mode = (
+            "dedicated" if runtime_mode.strip().lower() == "dedicated" else "legacy"
+        )
+        self._container_image = container_image.strip() or "ash-sandbox-browser:latest"
+        self._container_name = (
+            f"{(container_name_prefix.strip() or 'ash-browser-')}runtime"
+        )
         self._sessions: set[str] = set()
         self._session_targets: dict[str, str] = {}
         self._runtime: _RemoteSandboxRuntime | None = None
         self._runtime_lock = asyncio.Lock()
         self._runtime_base_dir: str | None = None
-        self.runs_in_sandbox_executor = executor is not None
+        self.runs_in_sandbox_executor = (
+            executor is not None or self._runtime_mode == "dedicated"
+        )
         self._runtime_restart_attempts = max(0, int(runtime_restart_attempts))
 
     async def start_session(
@@ -691,6 +707,68 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
                 return candidate
         return 20000 + secrets.randbelow(20000)
 
+    async def _execute_host_command(
+        self, args: list[str], *, timeout_seconds: int
+    ) -> ExecutionResult:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=max(1, timeout_seconds),
+            )
+        except TimeoutError:
+            proc.kill()
+            _ = await proc.communicate()
+            return ExecutionResult(
+                exit_code=-1,
+                stdout="",
+                stderr="host_command_timed_out",
+                timed_out=True,
+            )
+        return ExecutionResult(
+            exit_code=int(proc.returncode or 0),
+            stdout=(stdout_b or b"").decode("utf-8", errors="replace"),
+            stderr=(stderr_b or b"").decode("utf-8", errors="replace"),
+        )
+
+    async def _docker_inspect_running(self, container_name: str) -> bool | None:
+        probe = await self._execute_host_command(
+            ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
+            timeout_seconds=10,
+        )
+        if not probe.success:
+            return None
+        value = (probe.stdout or "").strip().lower()
+        if value == "true":
+            return True
+        if value == "false":
+            return False
+        return None
+
+    async def _docker_resolve_host_port(
+        self, container_name: str, internal_port: int
+    ) -> int | None:
+        result = await self._execute_host_command(
+            ["docker", "port", container_name, f"{internal_port}/tcp"],
+            timeout_seconds=10,
+        )
+        if not result.success:
+            return None
+        lines = [
+            line.strip() for line in (result.stdout or "").splitlines() if line.strip()
+        ]
+        if not lines:
+            return None
+        tail = lines[-1]
+        if ":" not in tail:
+            return None
+        maybe_port = tail.rsplit(":", 1)[-1].strip()
+        return int(maybe_port) if maybe_port.isdigit() else None
+
     async def _ensure_runtime(self) -> _RemoteSandboxRuntime:
         async with self._runtime_lock:
             if self._runtime and await self._is_runtime_healthy(self._runtime):
@@ -760,6 +838,88 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
         raise ValueError(last_error)
 
     async def _launch_runtime(self) -> _RemoteSandboxRuntime:
+        if self._runtime_mode == "dedicated":
+            logger.info(
+                "browser_sandbox_runtime_starting",
+                extra={"browser.provider": "sandbox"},
+            )
+            inspect_image = await self._execute_host_command(
+                ["docker", "image", "inspect", self._container_image],
+                timeout_seconds=15,
+            )
+            if not inspect_image.success:
+                raise ValueError(
+                    "sandbox_browser_launch_failed: missing_browser_image:"
+                    f"{self._container_image}"
+                )
+
+            running = await self._docker_inspect_running(self._container_name)
+            if running is None:
+                create = await self._execute_host_command(
+                    [
+                        "docker",
+                        "create",
+                        "--name",
+                        self._container_name,
+                        "-p",
+                        "127.0.0.1::9222",
+                        "-e",
+                        f"OPENCLAW_BROWSER_HEADLESS={'1' if self._headless else '0'}",
+                        "-e",
+                        "OPENCLAW_BROWSER_ENABLE_NOVNC=0",
+                        "-e",
+                        "OPENCLAW_BROWSER_CDP_PORT=9222",
+                        self._container_image,
+                    ],
+                    timeout_seconds=20,
+                )
+                if not create.success:
+                    message = (
+                        create.stderr.strip()
+                        or create.stdout.strip()
+                        or "docker_create_failed"
+                    )
+                    raise ValueError(f"sandbox_browser_launch_failed: {message}")
+                running = False
+
+            if not running:
+                start = await self._execute_host_command(
+                    ["docker", "start", self._container_name],
+                    timeout_seconds=20,
+                )
+                if not start.success:
+                    message = (
+                        start.stderr.strip()
+                        or start.stdout.strip()
+                        or "docker_start_failed"
+                    )
+                    raise ValueError(f"sandbox_browser_launch_failed: {message}")
+
+            host_port = await self._docker_resolve_host_port(self._container_name, 9222)
+            runtime = _RemoteSandboxRuntime(
+                port=9222,
+                pid=0,
+                base_dir="/tmp/ash-browser/runtime",  # noqa: S108 - container-local runtime path
+                container_name=self._container_name,
+                host_port=host_port,
+            )
+            self._runtime = runtime
+            try:
+                await self._wait_for_cdp_ready(runtime=runtime)
+            except ValueError as e:
+                await self._kill_runtime(runtime)
+                self._runtime = None
+                raise e
+            logger.info(
+                "browser_sandbox_runtime_ready",
+                extra={
+                    "browser.provider": "sandbox",
+                    "browser.runtime_port": runtime.port,
+                    "browser.runtime_pid": runtime.pid,
+                },
+            )
+            return runtime
+
         base_dir = await self._resolve_runtime_base_dir()
         last_error = "sandbox_browser_launch_failed: unknown startup failure"
         launch_deadline = (
@@ -838,6 +998,8 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
 
     async def _resolve_runtime_base_dir(self) -> str:
         """Pick a writable runtime directory for Chromium profile/log data."""
+        if self._runtime_mode == "dedicated":
+            return "/tmp/ash-browser/runtime"  # noqa: S108 - container-local runtime path
         if self._runtime_base_dir:
             return self._runtime_base_dir
         candidates = (
@@ -889,6 +1051,12 @@ print(json.dumps({"exists": exists}, ensure_ascii=True))
         return ws_ok
 
     async def _kill_runtime(self, runtime: _RemoteSandboxRuntime) -> None:
+        if self._runtime_mode == "dedicated" and runtime.container_name:
+            _ = await self._execute_host_command(
+                ["docker", "rm", "-f", runtime.container_name],
+                timeout_seconds=10,
+            )
+            return
         _ = await self._execute_sandbox_command(
             command=f"bash -lc {shlex.quote(f'kill {runtime.pid} >/dev/null 2>&1 || true')}",
             phase="runtime_kill",
@@ -986,6 +1154,30 @@ asyncio.run(main())
         phase: str,
         probe_details: str,
     ) -> str:
+        if self._runtime_mode == "dedicated" and runtime.container_name:
+            state_probe = await self._execute_host_command(
+                [
+                    "docker",
+                    "inspect",
+                    "-f",
+                    "{{.State.Status}}",
+                    runtime.container_name,
+                ],
+                timeout_seconds=8,
+            )
+            logs = await self._execute_host_command(
+                ["docker", "logs", "--tail", "40", runtime.container_name],
+                timeout_seconds=8,
+            )
+            status = (state_probe.stdout or "").strip() or "unknown"
+            details = (logs.stderr or logs.stdout or "").strip()
+            prefix = f"sandbox_browser_launch_failed: cdp_not_ready:{phase}"
+            if details:
+                return f"{prefix}; process={status}; chromium_log={details}"
+            if probe_details:
+                return f"{prefix}; process={status}; probe={probe_details}"
+            return f"{prefix}; process={status}; probe=unavailable"
+
         proc_alive = await self._execute_sandbox_command(
             command=f"bash -lc {shlex.quote(f'kill -0 {runtime.pid} >/dev/null 2>&1 && echo alive || echo dead')}",
             phase="runtime_alive_probe",
@@ -1019,6 +1211,33 @@ asyncio.run(main())
         reuse_container: bool,
         environment: dict[str, str] | None = None,
     ) -> ExecutionResult:
+        if self._runtime_mode == "dedicated":
+            runtime = self._runtime
+            if runtime is None or not runtime.container_name:
+                raise ValueError(
+                    "sandbox_browser_runtime_unavailable: dedicated_container_missing"
+                )
+            env_args: list[str] = []
+            for key, value in (environment or {}).items():
+                env_args.extend(["-e", f"{key}={value}"])
+            result = await self._execute_host_command(
+                [
+                    "docker",
+                    "exec",
+                    *env_args,
+                    runtime.container_name,
+                    "bash",
+                    "-lc",
+                    command,
+                ],
+                timeout_seconds=max(5, timeout_seconds + 10),
+            )
+            if result.timed_out:
+                raise ValueError(
+                    f"sandbox_browser_action_timeout:{phase}:{max(5, timeout_seconds + 10)}s"
+                )
+            return result
+
         executor = self._require_executor()
         # Guard against hangs in container/image startup paths that can occur
         # before sandbox command-level timeouts are applied.

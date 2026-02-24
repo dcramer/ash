@@ -34,6 +34,24 @@ def _get_dockerfile_path() -> Path | None:
     return None
 
 
+def _get_browser_dockerfile_path() -> Path | None:
+    """Find the dedicated browser Dockerfile path."""
+    project_root = Path(__file__).parents[4]
+    dockerfile_path = project_root / "docker" / "Dockerfile.sandbox-browser"
+    if dockerfile_path.exists():
+        return dockerfile_path
+
+    import ash
+
+    if ash.__file__:
+        package_root = Path(ash.__file__).parents[2]
+        dockerfile_path = package_root / "docker" / "Dockerfile.sandbox-browser"
+        if dockerfile_path.exists():
+            return dockerfile_path
+
+    return None
+
+
 def register(app: typer.Typer) -> None:
     """Register the sandbox command."""
 
@@ -162,6 +180,26 @@ def _sandbox_build(dockerfile_path: Path, config_path: Path | None = None) -> bo
     )
 
     if result.returncode == 0:
+        browser_dockerfile = _get_browser_dockerfile_path()
+        if browser_dockerfile and browser_dockerfile.exists():
+            console.print()
+            console.print("[bold]Building dedicated browser image...[/bold]")
+            browser_result = subprocess.run(
+                [
+                    "docker",
+                    "build",
+                    "-t",
+                    "ash-sandbox-browser:latest",
+                    "-f",
+                    str(browser_dockerfile),
+                    str(build_context),
+                ],
+            )
+            if browser_result.returncode != 0:
+                console.print()
+                warning(
+                    "Dedicated browser image build failed (legacy browser runtime may still work)"
+                )
         console.print()
         success("Sandbox image built successfully!")
         console.print("You can now use the sandbox with [cyan]ash chat[/cyan]")
