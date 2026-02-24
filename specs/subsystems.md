@@ -129,10 +129,10 @@ Public types live in one place, not scattered across implementation files:
 |-----------|--------|------|
 | memory | Complete | [specs/memory.md](memory.md) |
 | people | Complete | [specs/people.md](people.md) |
-| sessions | Needs refactor | - |
+| sessions | Needs refactor | [specs/sessions.md](sessions.md) |
 | scheduling | Complete | [specs/schedule.md](schedule.md) |
 | todos | In progress | [specs/todos.md](todos.md) |
-| browser | In progress | [specs/browser.md](browser.md) |
+| browser | Complete | [specs/browser.md](browser.md) |
 
 ## Verification
 
