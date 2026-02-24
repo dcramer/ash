@@ -1,39 +1,76 @@
 ---
 title: Systems Overview
-description: Pick the right subsystem doc for your task
+description: Start here to configure Ash systems end to end
 sidebar:
   order: 1
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-Ash is built from modular systems. Use this page to jump straight to the subsystem you need.
+Ash is built from modular systems. This page gives you one baseline config and a map to the right subsystem doc for each task.
 
 ## Systems In 30 Seconds
 
-- **Models** choose LLM aliases, providers, and credentials
+- **Models** define model aliases, provider choice, and credentials
 - **Tools** execute actions (shell, web, files, browser, delegation)
-- **Skills** define reusable workflows in `SKILL.md`
-- **Agents** run delegated autonomous loops
-- **Memory** keeps context and extracted facts
-- **Sandbox** isolates command execution
-- **Transport Providers** deliver messages (for example Telegram)
-- **Vision** analyzes inbound images
-- **Browser** performs session-based page automation
+- **Skills** define reusable subagent workflows in `SKILL.md`
+- **Agents** run delegated autonomous loops (including nested execution)
+- **Memory** controls context retention and extraction quality
+- **Sandbox** enforces runtime isolation and file/network boundaries
+- **Chat Providers** connect Ash to channels like Telegram
+- **Vision** processes inbound images and injects context
+- **Browser** runs session-based page actions
+
+## Core Config Baseline
+
+Start with a minimal working `~/.ash/config.toml`:
+
+```toml title="~/.ash/config.toml"
+[models.default]
+provider = "openai-oauth"
+model = "gpt-5.2"
+max_tokens = 4096
+
+[models.mini]
+provider = "openai-oauth"
+model = "gpt-5-mini"
+
+[sandbox]
+runtime = "runc"
+network_mode = "bridge"
+workspace_access = "rw"
+
+[memory]
+context_token_budget = 100000
+recency_window = 10
+extraction_enabled = true
+
+[telegram]
+bot_token = "123456789:ABCdef..."
+allowed_users = ["@yourusername"]
+```
+
+Then authenticate and verify:
+
+```bash
+uv run ash auth login
+uv run ash config validate
+uv run ash doctor
+```
 
 ## Start By Goal
 
 If you want to:
 
-- Configure model aliases and API keys -> [Models](/systems/llm/)
-- Understand or extend tool behavior -> [Tools](/systems/tools/)
-- Create reusable workflows -> [Skills](/systems/skills/)
-- Configure delegated agent execution -> [Agents](/systems/agents/)
-- Tune context and extraction quality -> [Memory](/systems/memory/)
-- Harden runtime security -> [Sandbox](/systems/sandbox/)
-- Configure Telegram delivery/runtime -> [Transport Providers](/systems/providers/)
-- Enable image understanding -> [Vision](/systems/vision/)
-- Run browser automation -> [Browser](/systems/browser/)
+- Pick model aliases and credential strategy -> [Models](/systems/llm/)
+- Understand runtime actions and extension points -> [Tools](/systems/tools/)
+- Build reusable workflow automation -> [Skills](/systems/skills/)
+- Configure delegated and nested execution -> [Agents](/systems/agents/)
+- Tune context and extraction behavior -> [Memory](/systems/memory/)
+- Lock down runtime security and mounts -> [Sandbox](/systems/sandbox/)
+- Run Telegram and channel delivery -> [Chat Providers](/systems/providers/)
+- Enable inbound image handling -> [Vision](/systems/vision/)
+- Enable browser-driven workflows -> [Browser](/systems/browser/)
 
 ## Subsystem Cards
 
@@ -56,7 +93,7 @@ If you want to:
   <Card title="Sandbox" icon="shield">
     Control runtime isolation, mounts, network mode, and resource limits.
   </Card>
-  <Card title="Transport Providers" icon="telegram">
+  <Card title="Chat Providers" icon="telegram">
     Configure transport channels such as Telegram and runtime access controls.
   </Card>
   <Card title="Vision" icon="picture">
@@ -69,14 +106,15 @@ If you want to:
 
 ## Troubleshooting
 
-If subsystem behavior is unclear or seems broken:
+If system behavior is unclear:
 
 ```bash
-uv run ash doctor
 uv run ash config validate
+uv run ash doctor
+uv run ash logs --component providers
 ```
 
-Then check the specific subsystem page linked above for targeted diagnostics.
+Then jump to the specific subsystem page for targeted fixes.
 
 ## Reference (Advanced)
 
