@@ -108,3 +108,70 @@ def test_todo_unremind_calls_update_rpc() -> None:
     assert method == "todo.update"
     assert params["todo_id"] == "abc12345"
     assert params["clear_reminder"] is True
+
+
+def test_todo_edit_calls_update_rpc() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        mock_rpc.return_value = {
+            "todo": {"id": "abc12345", "content": "buy oat milk", "status": "open"}
+        }
+        result = runner.invoke(
+            app,
+            ["edit", "--id", "abc12345", "--text", "buy oat milk"],
+        )
+
+    assert result.exit_code == 0
+    method, params = mock_rpc.call_args[0]
+    assert method == "todo.update"
+    assert params["todo_id"] == "abc12345"
+    assert params["content"] == "buy oat milk"
+
+
+def test_todo_undone_calls_uncomplete_rpc() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        mock_rpc.return_value = {
+            "todo": {"id": "abc12345", "content": "buy milk", "status": "open"}
+        }
+        result = runner.invoke(app, ["undone", "--id", "abc12345"])
+
+    assert result.exit_code == 0
+    assert "Reopened todo" in result.stdout
+    assert mock_rpc.call_args[0][0] == "todo.uncomplete"
+
+
+def test_todo_delete_calls_rpc() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        mock_rpc.return_value = {
+            "todo": {"id": "abc12345", "content": "buy milk", "status": "open"}
+        }
+        result = runner.invoke(app, ["delete", "--id", "abc12345"])
+
+    assert result.exit_code == 0
+    assert "Deleted todo" in result.stdout
+    assert mock_rpc.call_args[0][0] == "todo.delete"
+
+
+def test_todo_edit_rejects_unparseable_due_time() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        result = runner.invoke(
+            app,
+            ["edit", "--id", "abc12345", "--due", "not-a-time"],
+        )
+
+    assert result.exit_code == 1
+    assert "Could not parse due time" in result.stderr
+    mock_rpc.assert_not_called()
+
+
+def test_todo_remind_requires_exactly_one_trigger() -> None:
+    runner = _runner()
+    with patch("ash_sandbox_cli.commands.todo.rpc_call") as mock_rpc:
+        result = runner.invoke(app, ["remind", "--id", "abc12345"])
+
+    assert result.exit_code == 1
+    assert "Must specify exactly one of --at or --cron" in result.stderr
+    mock_rpc.assert_not_called()
