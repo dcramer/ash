@@ -13,3 +13,7 @@ source = "getsentry/skills"
 [[skills]]
 name = "skill-creator"
 source = "getsentry/skills"
+
+[[skills]]
+name = "brand-guidelines"
+source = "getsentry/skills"

@@ -8,6 +8,13 @@ resolved_path = ".agents/skills/agents-md"
 commit = "187c0022b3b676f72227a04f1cfc8921a58a5020"
 integrity = "sha256-yYv5Hh88sCIYDc4IXIweB7rD8j1yHs+lZK0uib6s7xY="
 
+[skills.brand-guidelines]
+source = "getsentry/skills"
+resolved_url = "https://github.com/getsentry/skills.git"
+resolved_path = ".agents/skills/brand-guidelines"
+commit = "9ed23e218631ca6b0b6692adad2c947439754811"
+integrity = "sha256-OI4bxji4am79cV/3TNDVUfsnt6L2HBysG7epE4HFkVI="
+
 [skills.skill-creator]
 source = "getsentry/skills"
 resolved_url = "https://github.com/getsentry/skills.git"
