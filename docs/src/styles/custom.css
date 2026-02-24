@@ -584,7 +584,7 @@ pre code {
 
 .expressive-code .frame {
   border-radius: 0 !important;
-  border: 1px solid #494949 !important;
+  border: 1px solid var(--ash-dark-border) !important;
   border-right-width: 1px !important;
   border-bottom-width: 1px !important;
   box-shadow: none;
@@ -634,14 +634,14 @@ pre code {
 body .expressive-code {
   --ec-codeBg: #080808 !important;
   --ec-codeFg: #f4f4f4 !important;
-  --ec-brdCol: #494949 !important;
+  --ec-brdCol: var(--ash-dark-border) !important;
   --ec-gtrFg: #919191 !important;
   --ec-gtrBrdCol: #393939 !important;
   --ec-focusBrd: #84c20c !important;
   --ec-frm-trmTtbBg: #0e0e0e !important;
   --ec-frm-trmBg: #080808 !important;
   --ec-frm-trmTtbFg: #f2f2f2 !important;
-  --ec-frm-trmTtbBrdBtmCol: #494949 !important;
+  --ec-frm-trmTtbBrdBtmCol: transparent !important;
   --ec-frm-trmTtbDotsFg: #6d6d6d !important;
   --ec-frm-trmTtbDotsOpa: 1 !important;
   --ec-frm-inlBtnFg: #f8f8f8 !important;
@@ -649,8 +649,8 @@ body .expressive-code {
 }
 
 .expressive-code .header :is([class*='dot'], [class*='Dot']) {
-  background: #6d6d6d !important;
-  border: 1px solid #545454 !important;
+  background: transparent !important;
+  border: 1px solid #6d6d6d !important;
 }
 
 body .expressive-code .ec-line :where(span[style^='--']:not([class])) {
