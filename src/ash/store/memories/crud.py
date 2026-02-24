@@ -399,7 +399,7 @@ class MemoryCrudMixin:
     async def get_memory(self: Store, memory_id: str) -> MemoryEntry | None:
         memory = self._graph.memories.get(memory_id)
         if memory and memory.archived_at is None:
-            return memory
+            return memory.model_copy(deep=True)
         return None
 
     async def get_memory_by_prefix(self: Store, prefix: str) -> MemoryEntry | None:
@@ -407,7 +407,7 @@ class MemoryCrudMixin:
         # Try exact match first
         memory = self._graph.memories.get(prefix)
         if memory and memory.archived_at is None:
-            return memory
+            return memory.model_copy(deep=True)
 
         # Try prefix match
         matches = [
@@ -416,7 +416,7 @@ class MemoryCrudMixin:
             if mid.startswith(prefix) and m.archived_at is None
         ]
         if len(matches) == 1:
-            return matches[0]
+            return matches[0].model_copy(deep=True)
         return None
 
     async def list_memories(
@@ -463,7 +463,7 @@ class MemoryCrudMixin:
         if limit is not None:
             results = results[:limit]
 
-        return results
+        return [memory.model_copy(deep=True) for memory in results]
 
     async def delete_memory(
         self: Store,
@@ -628,4 +628,6 @@ class MemoryCrudMixin:
 
     async def get_all_memories(self: Store) -> list[MemoryEntry]:
         """Get all memories including archived."""
-        return list(self._graph.memories.values())
+        return [
+            memory.model_copy(deep=True) for memory in self._graph.memories.values()
+        ]

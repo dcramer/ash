@@ -328,6 +328,27 @@ class TestScoping:
         for m in user1_memories:
             assert m.owner_user_id == "user-1"
 
+    async def test_list_memories_returns_detached_entries(self, graph_store: Store):
+        """Mutating list results should not mutate graph state."""
+        memory = await graph_store.add_memory(
+            content="Detached", owner_user_id="user-1"
+        )
+
+        memories = await graph_store.list_memories(owner_user_id="user-1", limit=None)
+        assert len(memories) == 1
+        memories[0].content = "Mutated copy"
+
+        assert graph_store.graph.memories[memory.id].content == "Detached"
+
+    async def test_get_memory_returns_detached_entry(self, graph_store: Store):
+        """Mutating get_memory result should not mutate graph state."""
+        memory = await graph_store.add_memory(content="Original")
+        loaded = await graph_store.get_memory(memory.id)
+        assert loaded is not None
+
+        loaded.content = "Mutated copy"
+        assert graph_store.graph.memories[memory.id].content == "Original"
+
 
 class TestEphemeralDecay:
     """Tests for ephemeral memory type decay."""
