@@ -611,6 +611,10 @@ pre code {
   box-shadow: none !important;
 }
 
+.expressive-code figcaption.header {
+  border-bottom: 0 !important;
+}
+
 .expressive-code .header .title,
 .expressive-code .header .filename {
   color: #f2f2f2 !important;
