@@ -623,15 +623,21 @@ pre code {
 .expressive-code .frame.is-terminal .header::before,
 .expressive-code figcaption.header::before {
   background: none !important;
+  background-image:
+    radial-gradient(circle at center, transparent 56%, #6d6d6d 57% 64%, transparent 65%),
+    radial-gradient(circle at center, transparent 56%, #6d6d6d 57% 64%, transparent 65%),
+    radial-gradient(circle at center, transparent 56%, #6d6d6d 57% 64%, transparent 65%) !important;
+  background-size: 0.48rem 0.48rem !important;
+  background-position:
+    0 0.01rem,
+    0.78rem 0.01rem,
+    1.56rem 0.01rem !important;
+  background-repeat: no-repeat !important;
   -webkit-mask-image: none !important;
   mask-image: none !important;
-  width: auto !important;
-  height: auto !important;
-  color: #6d6d6d !important;
-  content: '○ ○ ○' !important;
-  font-size: 0.62rem !important;
-  letter-spacing: 0.16rem !important;
-  line-height: 1 !important;
+  width: 2.1rem !important;
+  height: 0.56rem !important;
+  content: '' !important;
 }
 
 .expressive-code .header .title,
