@@ -1,8 +1,5 @@
 # Browser Subsystem
 
-Implementation plan for adopting the service-style runtime model:
-- [specs/browser-runtime-v2.md](browser-runtime-v2.md)
-
 ## Scope
 
 Browser provides session-scoped page automation and artifacts for agent/tool workflows.
@@ -26,7 +23,7 @@ It does not own:
 
 `[browser.sandbox]` supports:
 
-- `runtime_required` (bool): require sandbox/container runtime.
+- `runtime_required` (bool): deprecated compatibility flag; sandbox-only runtime is enforced regardless of value.
 - `runtime_warmup_on_start` (bool): warm browser runtime during integration startup.
 - `runtime_restart_attempts` (int): bounded restart attempts when runtime becomes unhealthy.
 
@@ -44,15 +41,65 @@ It does not own:
    - HTTP endpoint readiness (`/json/version` with `webSocketDebuggerUrl`)
    - CDP websocket handshake readiness
 8. CDP startup failures MUST include actionable diagnostics (phase + process/log details).
+9. Runtime/doctor guidance MUST NOT document host-runtime bypasses for sandbox provider.
 
 ## Integration Contract
 
 - Browser registers through integration composition hooks (`specs/subsystems.md` + `specs/integrations.md`).
 - Browser RPC and tool surfaces MUST delegate to the browser subsystem manager.
+- Core harness MUST NOT add browser-specific orchestration branches outside integration hooks.
+
+## Public Action Contract
+
+Manager action surface:
+
+- Session lifecycle:
+  - `session.start`
+  - `session.list`
+  - `session.show`
+  - `session.close`
+  - `session.archive`
+- Page actions:
+  - `page.goto`
+  - `page.extract`
+  - `page.click`
+  - `page.type`
+  - `page.wait_for`
+  - `page.screenshot`
+
+Required behavior:
+
+1. Session routing must be explicit by `session_id` or `session_name`.
+2. Cross-provider session fallback is rejected.
+3. `page.goto` writes latest HTML/title metadata for follow-up extraction.
+4. `page.extract` supports `mode=text|title`.
+5. `page.screenshot` writes artifact refs under browser artifact storage.
+6. Error responses are normalized in `BrowserActionResult` and include actionable runtime hints when browser runtime is unavailable.
+
+## Security Invariants
+
+1. Browser sandbox provider never executes browser automation in host runtime.
+2. Browser manager runtime gate must fail closed when sandbox runtime is unavailable.
+3. Browser provider implementations must execute via sandbox executor/runtime process.
+4. Tool/rpc/cli surfaces must all route through manager/runtime gate (single enforcement point).
+
+## Operational Verification
+
+CLI smoke path:
+
+- `ash browser smoke <url>`
+- Flow: `session.start -> page.goto -> page.extract(title/text) -> page.screenshot -> session.archive`
+- This command is required for rapid runtime validation in production-like environments.
+
+Expected failure semantics:
+
+- Runtime unavailable: `sandbox_runtime_required` with non-retry guidance.
+- Action timeout: bounded `browser_action_timeout:<action>:<seconds>s`.
+- Unknown action/session mismatch: deterministic error codes.
 
 ## Verification Checklist
 
-- [ ] Sandbox provider actions execute in sandbox/container runtime.
-- [ ] Cross-provider session fallback is rejected.
-- [ ] Retention policies are enforced and logged.
-- [ ] Docs match actual runtime behavior.
+- [x] Sandbox provider actions execute in sandbox/container runtime.
+- [x] Cross-provider session fallback is rejected.
+- [x] Retention policies are enforced and logged.
+- [x] Docs match actual runtime behavior and contain no host-bypass guidance.

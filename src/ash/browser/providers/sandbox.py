@@ -471,7 +471,7 @@ asyncio.run(main())
         create_if_missing: bool,
         runtime_port: int | None = None,
     ) -> str:
-        # Architecture/spec reference: specs/browser-runtime-v2.md (Phase 2)
+        # Architecture/spec reference: specs/browser.md
         port = runtime_port or await self._resolve_session_port(session_id)
         target_id = self._session_targets.get(session_id)
         if target_id and await self._target_exists(port=port, target_id=target_id):
