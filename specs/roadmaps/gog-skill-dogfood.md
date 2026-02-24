@@ -22,7 +22,8 @@ an optional `gog` skill for first-party dogfooding.
 - [x] Signed context token propagation to external providers in place.
 - [x] Skill capability preflight + DM/sensitive access policy in place.
 - [x] Bundled opt-in `gog` skill scaffolded (`src/ash/skills/bundled/gog/SKILL.md`).
-- [ ] External `gogcli` bridge implementation completed (outside this repo).
+- [x] Reference `gogcli` bridge runtime implemented for local dogfood (`scripts/gogcli_bridge.py`).
+- [ ] External `gogcli` package/repo publishing completed (outside this repo).
 - [ ] Provider persistence for credential/account state finalized.
 - [ ] End-to-end Google OAuth and operation tests completed.
 
@@ -42,6 +43,19 @@ enabled = true
 
 [skills.defaults]
 allow_chat_ids = ["<dm-chat-id>"]  # optional global guardrail
+```
+
+### Local Dogfood Bridge Command (Current Repo)
+
+For local testing before external packaging, point provider command to the
+reference bridge script:
+
+```toml
+[capabilities.providers.gog]
+enabled = true
+namespace = "gog"
+command = ["python", "/path/to/ash/scripts/gogcli_bridge.py", "bridge"]
+timeout_seconds = 30
 ```
 
 ## External `gogcli` Work Plan

@@ -234,6 +234,16 @@ command = ["gogcli", "bridge"]
 timeout_seconds = 30
 ```
 
+For local dogfooding in this repo, you can point to the reference bridge script:
+
+```toml
+[capabilities.providers.gog]
+enabled = true
+namespace = "gog"
+command = ["python", "/path/to/ash/scripts/gogcli_bridge.py", "bridge"]
+timeout_seconds = 30
+```
+
 ## Bundled Optional `gog` Skill
 
 Ash includes an opt-in bundled `gog` skill for dogfooding this contract.
