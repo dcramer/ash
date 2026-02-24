@@ -1208,7 +1208,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   max-width: calc(100% - 3rem);
   box-shadow: none;
   position: relative;
-  border-radius: 0.75rem !important;
+  border-radius: 0 !important;
   white-space: normal;
   width: fit-content;
 }
