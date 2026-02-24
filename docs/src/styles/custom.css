@@ -764,9 +764,9 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-mega {
-  border: 3px solid #0f100a;
-  background: #b8ff1f;
-  color: #0f100a;
+  border: 0;
+  background: transparent;
+  color: #eaf2ff;
   padding: clamp(0.9rem, 2.8vw, 1.7rem);
   box-shadow: none;
 }
@@ -786,7 +786,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 .ash-mega-icon {
   width: clamp(3.2rem, 9vw, 5.8rem);
   height: clamp(3.2rem, 9vw, 5.8rem);
-  border: 1px solid #0f100a;
+  border: 0;
   flex: 0 0 auto;
 }
 
@@ -841,9 +841,9 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-hero {
-  border: 3px solid var(--ash-ink);
+  border: 0;
   border-radius: 0 !important;
-  background: #fff4da;
+  background: transparent;
   box-shadow: none;
 }
 
@@ -981,10 +981,10 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-proof {
-  border: 1px solid rgba(20, 20, 15, 0.24);
+  border: 0;
   border-radius: 0 !important;
   padding: 0.85rem;
-  background: rgba(255, 255, 255, 0.45);
+  background: transparent;
 }
 
 .ash-proof-kicker {
@@ -1039,7 +1039,7 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-band {
-  border: 1px solid rgba(20, 20, 15, 0.2);
+  border: 0;
   border-radius: 0 !important;
   padding: 1rem 1rem 1rem 1.1rem;
   background: transparent;
@@ -1048,24 +1048,24 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-home-band::before {
-  content: '';
+  content: none;
   position: absolute;
   left: 1rem;
   right: 1rem;
   top: 0.72rem;
   height: 0.18rem;
   border-radius: 0 !important;
-  background: rgba(176, 255, 31, 0.68);
+  background: transparent;
 }
 
 .ash-home-band::after {
-  content: '';
+  content: none;
   position: absolute;
   left: 1rem;
   right: 1.8rem;
   top: 2.2rem;
   height: 0.14rem;
-  background: rgba(176, 255, 31, 0.34);
+  background: transparent;
   transform: rotate(-0.5deg);
   pointer-events: none;
 }
@@ -1130,16 +1130,8 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-chat-demo {
   position: relative;
-  border: 1.5px solid #181c10;
-  background:
-    linear-gradient(180deg, rgba(239, 247, 226, 0.96), rgba(241, 249, 229, 0.96)),
-    repeating-linear-gradient(
-      135deg,
-      rgba(190, 218, 168, 0.08) 0,
-      rgba(190, 218, 168, 0.08) 8px,
-      rgba(248, 252, 240, 0.08) 8px,
-      rgba(248, 252, 240, 0.08) 16px
-    );
+  border: 0;
+  background: transparent;
   padding: 2.05rem 0.72rem 0.72rem;
   display: grid;
   gap: 0.42rem;
@@ -1415,8 +1407,8 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 /* Homepage dark-theme overrides */
 body:has(.ash-home) .ash-mega {
-  border-color: var(--ash-dark-border);
-  background: #101821;
+  border: 0;
+  background: transparent;
   color: #eaf2ff;
   box-shadow: none;
 }
@@ -1441,8 +1433,8 @@ body:has(.ash-home) .ash-home-brand-sub {
 }
 
 body:has(.ash-home) .ash-home-hero {
-  border-color: var(--ash-dark-border);
-  background: #0d131d;
+  border: 0;
+  background: transparent;
   box-shadow: none;
 }
 
@@ -1467,8 +1459,8 @@ body:has(.ash-home) :is(.ash-home-cta-secondary:hover, .ash-home-jumps a:hover, 
 }
 
 body:has(.ash-home) .ash-home-proof {
-  border-color: var(--ash-dark-border);
-  background: #0f1724;
+  border: 0;
+  background: transparent;
 }
 
 body:has(.ash-home) :is(.ash-proof-kicker, .ash-proof-list li, .ash-proof-foot) {
@@ -1476,7 +1468,7 @@ body:has(.ash-home) :is(.ash-proof-kicker, .ash-proof-list li, .ash-proof-foot) 
 }
 
 body:has(.ash-home) .ash-home-band {
-  border-color: var(--ash-dark-border);
+  border: 0;
 }
 
 body:has(.ash-home) :is(.ash-home-band p, .ash-home-list li, .ash-scenario-line) {
@@ -1484,16 +1476,8 @@ body:has(.ash-home) :is(.ash-home-band p, .ash-home-list li, .ash-scenario-line)
 }
 
 body:has(.ash-home) .ash-chat-demo {
-  border-color: var(--ash-dark-border);
-  background:
-    linear-gradient(180deg, rgba(15, 23, 36, 0.98), rgba(14, 20, 32, 0.98)),
-    repeating-linear-gradient(
-      135deg,
-      rgba(140, 154, 176, 0.07) 0,
-      rgba(140, 154, 176, 0.07) 8px,
-      rgba(22, 31, 47, 0.07) 8px,
-      rgba(22, 31, 47, 0.07) 16px
-    );
+  border: 0;
+  background: transparent;
   box-shadow: none;
 }
 
