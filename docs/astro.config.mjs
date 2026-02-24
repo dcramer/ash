@@ -44,10 +44,6 @@ export default defineConfig({
           autogenerate: { directory: "systems" },
         },
         {
-          label: "Configuration",
-          autogenerate: { directory: "configuration" },
-        },
-        {
           label: "Development",
           collapsed: true,
           autogenerate: { directory: "development" },
