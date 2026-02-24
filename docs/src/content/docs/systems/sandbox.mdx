@@ -1,15 +1,23 @@
 ---
 title: Sandbox
-description: Docker container isolation for secure command execution
+description: Secure container runtime for tool execution
 sidebar:
   order: 6
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Ash executes bash commands inside Docker sandboxes. Host command execution is not used for tool calls.
+Ash runs command tools inside Docker containers. Tool calls do not execute directly on your host shell.
 
-## Configuration
+## Sandbox In 30 Seconds
+
+- `bash` and file-adjacent execution run in a container runtime
+- mounts and network are controlled by `[sandbox]` config
+- security defaults are restrictive, with explicit opt-ins
+
+## Quick Start
+
+Use default sandbox behavior first:
 
 ```toml
 [sandbox]
@@ -17,40 +25,103 @@ image = "ash-sandbox:latest"
 timeout = 60
 memory_limit = "512m"
 cpu_limit = 1.0
-runtime = "runc"
-network_mode = "bridge"
-dns_servers = []
-http_proxy = ""
-workspace_access = "rw"
-sessions_access = "ro"
-chats_access = "ro"
-source_access = "none"
+runtime = "runc"               # or "runsc"
+network_mode = "bridge"        # or "none"
+workspace_access = "rw"        # none | ro | rw
+sessions_access = "ro"         # none | ro
+chats_access = "ro"            # none | ro
+source_access = "none"         # none | ro
 mount_prefix = "/ash"
-apt_packages = []
-python_packages = []
-setup_command = ""
 ```
 
-## Key Options
+Verify runtime health:
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `runtime` | `runc` | Container runtime (`runc` or `runsc`) |
-| `network_mode` | `bridge` | Network mode (`bridge` or `none`) |
-| `workspace_access` | `rw` | Workspace mount mode (`none`, `ro`, `rw`) |
-| `sessions_access` | `ro` | Sessions mount mode (`none`, `ro`) |
-| `chats_access` | `ro` | Chats mount mode (`none`, `ro`) |
-| `source_access` | `none` | Source mount mode (`none`, `ro`) |
-| `mount_prefix` | `/ash` | Prefix for internal bind mount paths |
+```bash
+uv run ash sandbox status
+```
 
-## Security Controls
+## Configure Access And Isolation
 
-- Read-only root filesystem
-- Dropped Linux capabilities
-- No-new-privileges
-- Resource limits (CPU, memory, process count)
-- Configurable network isolation
+Common hardening changes:
+
+```toml
+[sandbox]
+network_mode = "none"          # Block outbound network
+workspace_access = "ro"        # Prevent file writes to workspace
+source_access = "ro"           # Allow source inspection without writes
+runtime = "runsc"              # gVisor runtime if available
+```
+
+Package/runtime customization:
+
+```toml
+[sandbox]
+apt_packages = ["jq", "ripgrep"]
+python_packages = ["httpx"]
+setup_command = "uv pip install --user rich"
+```
+
+## Security Model
+
+Sandbox execution applies:
+
+- process and resource limits
+- reduced Linux capabilities
+- no-new-privileges controls
+- configurable mount access for workspace/sessions/chats/source
 
 <Aside type="caution">
   `workspace_access = "rw"` allows tool commands to modify files in your mounted workspace.
 </Aside>
+
+## Troubleshooting
+
+### Sandbox is unavailable
+
+```bash
+uv run ash sandbox status
+uv run ash doctor
+```
+
+### Command runtime fails repeatedly
+
+Rebuild the sandbox image:
+
+```bash
+uv run ash sandbox build
+```
+
+### Tool cannot reach the network
+
+Check `network_mode`:
+
+```toml
+[sandbox]
+network_mode = "bridge"
+```
+
+### Tools can read but not write files
+
+Set workspace mount mode intentionally:
+
+```toml
+[sandbox]
+workspace_access = "rw"
+```
+
+## Reference (Advanced)
+
+Main config fields:
+
+- `runtime`: `runc` or `runsc`
+- `network_mode`: `bridge` or `none`
+- `workspace_access`: `none`, `ro`, `rw`
+- `sessions_access`: `none`, `ro`
+- `chats_access`: `none`, `ro`
+- `source_access`: `none`, `ro`
+- `mount_prefix`: bind mount prefix for internal paths
+
+Related docs:
+
+- [Tools](/systems/tools/)
+- [Browser](/systems/browser/)
