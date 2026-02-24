@@ -339,6 +339,30 @@ Instructions here.
         assert state.previous_commit_sha == "oldsha"
         assert state.current_commit_sha == "newsha"
         assert state.commit_changed is True
+        assert len(report.changed) == 1
+
+    def test_sync_all_report_marks_checked_no_change_as_not_changed(self, installer):
+        source = SkillSource(repo="owner/repo")
+        installed = InstalledSource(
+            repo="owner/repo",
+            install_path="installed/owner__repo",
+            commit_sha="same",
+        )
+        updated = InstalledSource(
+            repo="owner/repo",
+            install_path="installed/owner__repo",
+            commit_sha="same",
+        )
+        installer._sources = {"repo:owner/repo": installed}
+
+        with (
+            patch.object(installer, "install_source", return_value=installed),
+            patch.object(installer, "update", return_value=updated),
+        ):
+            report = installer.sync_all_report([source])
+
+        assert len(report.synced) == 1
+        assert len(report.changed) == 0
 
     def test_sync_all_report_records_failure_state(self, installer):
         """sync_all_report should persist failure health metadata."""
@@ -401,6 +425,53 @@ Instructions here.
         result = installer.uninstall(path="~/skills")
         assert result is True
         assert source_key not in installer.list_sync_state()
+
+    def test_load_metadata_migrates_legacy_path_keys(self, installer):
+        legacy_path = "~/legacy-skills"
+        metadata_path = installer._metadata_path()
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_path.write_text(
+            """
+{
+  "version": 1,
+  "sources": {
+    "path:~/legacy-skills": {
+      "path": "~/legacy-skills",
+      "installed_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z",
+      "install_path": "/tmp/legacy"
+    }
+  }
+}
+""".strip()
+        )
+
+        installed = installer.list_installed()
+        assert len(installed) == 1
+        normalized = str(Path(legacy_path).expanduser().resolve())
+        assert installed[0].path == normalized
+        assert f"path:{normalized}" in installer._load_metadata()
+
+    def test_load_sync_state_migrates_legacy_path_keys(self, installer):
+        state_path = installer._sync_state_path()
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(
+            """
+{
+  "version": 1,
+  "sources": {
+    "path:~/legacy-skills": {
+      "last_status": "ok",
+      "last_action": "checked_no_change"
+    }
+  }
+}
+""".strip()
+        )
+
+        states = installer.list_sync_state()
+        normalized = str(Path("~/legacy-skills").expanduser().resolve())
+        assert f"path:{normalized}" in states
 
 
 class TestConfigWriter:

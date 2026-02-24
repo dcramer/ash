@@ -409,9 +409,9 @@ class SystemPromptBuilder:
         lines = [
             "## Skills",
             "",
-            "**MANDATORY**: Before every reply, scan the skill list below.",
-            "If the user's request matches a skill, invoke it with `use_skill` — do not attempt the task yourself.",
-            "If no skill applies, respond directly.",
+            "When a request matches a skill, invoke it with `use_skill` instead of doing that work yourself.",
+            "Use normal direct replies when no skill is a clear fit.",
+            "Only inspect a skill's instructions when you decide to use that skill.",
             "",
             "You may also invoke skills proactively — for example, use debug-self when you encounter tool errors or unexpected behavior, even if the user didn't ask you to debug.",
             "",

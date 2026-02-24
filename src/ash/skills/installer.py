@@ -145,6 +145,7 @@ class SyncReport:
     """Outcome summary for a sync pass."""
 
     synced: list[InstalledSource] = field(default_factory=list)
+    changed: list[InstalledSource] = field(default_factory=list)
     failed: list[tuple[SkillSource, str]] = field(default_factory=list)
 
 
@@ -195,10 +196,25 @@ class SkillInstaller:
 
         try:
             data = json.loads(metadata_path.read_text())
-            self._sources = {
-                key: InstalledSource.from_dict(value)
-                for key, value in data.get("sources", {}).items()
-            }
+            sources: dict[str, InstalledSource] = {}
+            migrated = False
+            for key, value in data.get("sources", {}).items():
+                if not isinstance(value, dict):
+                    migrated = True
+                    continue
+                source = InstalledSource.from_dict(value)
+                canonical_key = self._canonical_source_key(key, source)
+                if canonical_key != key:
+                    migrated = True
+                if canonical_key in sources and canonical_key != key:
+                    logger.warning(
+                        "skill_sources_metadata_key_collision",
+                        extra={"skill.source_key": canonical_key},
+                    )
+                sources[canonical_key] = source
+            self._sources = sources
+            if migrated:
+                self._save_metadata()
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning(
                 "sources_metadata_load_failed", extra={"error.message": str(e)}
@@ -233,11 +249,19 @@ class SkillInstaller:
 
         try:
             data = json.loads(state_path.read_text())
-            self._sync_state = {
-                key: SourceSyncState.from_dict(value)
-                for key, value in data.get("sources", {}).items()
-                if isinstance(value, dict)
-            }
+            states: dict[str, SourceSyncState] = {}
+            migrated = False
+            for key, value in data.get("sources", {}).items():
+                if not isinstance(value, dict):
+                    migrated = True
+                    continue
+                canonical_key = self._canonical_key_from_string(key)
+                if canonical_key != key:
+                    migrated = True
+                states[canonical_key] = SourceSyncState.from_dict(value)
+            self._sync_state = states
+            if migrated:
+                self._save_sync_state()
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning("sync_state_load_failed", extra={"error.message": str(e)})
             self._sync_state = {}
@@ -262,6 +286,18 @@ class SkillInstaller:
         if repo:
             return f"repo:{repo}"
         return f"path:{self._normalize_path(path)}"
+
+    def _canonical_key_from_string(self, key: str) -> str:
+        if key.startswith("path:"):
+            normalized = self._normalize_path(key[len("path:") :])
+            return f"path:{normalized}"
+        return key
+
+    def _canonical_source_key(self, key: str, source: InstalledSource) -> str:
+        if source.repo:
+            return f"repo:{source.repo}"
+        source.path = self._normalize_path(source.path)
+        return self._source_key(path=source.path) if source.path else key
 
     @staticmethod
     def _normalize_path(path: str | None) -> str | None:
@@ -448,8 +484,20 @@ class SkillInstaller:
         if install_path.exists():
             shutil.rmtree(install_path)
 
+        logger.warning(
+            "skill_source_trust_required",
+            extra={
+                "skill.source": repo,
+                "skill.source_type": "repo",
+                "skill.note": "remote skills run local instructions; install only trusted sources",
+            },
+        )
         logger.info("skill_source_cloning", extra={"skill.source": repo})
-        clone_cmd = ["git", "clone", github_url, str(install_path)]
+        clone_cmd = ["git", "clone"]
+        if ref is None:
+            # Fast path for floating/default branch installs.
+            clone_cmd.extend(["--depth", "1"])
+        clone_cmd.extend([github_url, str(install_path)])
 
         result = subprocess.run(clone_cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -794,6 +842,8 @@ class SkillInstaller:
                     current_commit_sha=synced.commit_sha if source.repo else None,
                 )
                 report.synced.append(synced)
+                if action != "checked_no_change":
+                    report.changed.append(synced)
             except SkillInstallerError as e:
                 self._record_sync_state(
                     source_key=source_key,

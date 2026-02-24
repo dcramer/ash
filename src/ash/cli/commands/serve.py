@@ -248,10 +248,11 @@ def _start_skill_auto_sync_task(
                 report = await asyncio.to_thread(
                     installer.sync_all_report, ash_config.skill_sources
                 )
-                if skill_registry is not None:
+                if skill_registry is not None and report.changed:
                     skill_registry.reload_all(ash_config.workspace)
                 failure_count = len(report.failed)
                 synced_count = len(report.synced)
+                changed_count = len(report.changed)
                 if failure_count:
                     failure_streak += 1
                 else:
@@ -260,6 +261,7 @@ def _start_skill_auto_sync_task(
                     "skill_sources_auto_sync_complete",
                     extra={
                         "count": synced_count,
+                        "changed_count": changed_count,
                         "failed_count": failure_count,
                     },
                 )
