@@ -116,10 +116,12 @@ Total: 3 task(s)
 | `logs` | Query structured server logs |
 | `config` | Reload configuration |
 | `skill` | Validate and list workspace skills |
+| `capability` | List/invoke host-managed sensitive capabilities and run capability auth flows (contract) |
 
 See individual subsystem specs for command-specific output formats:
 - Schedule: [specs/schedule.md](schedule.md)
 - Browser: [docs/src/content/docs/systems/browser.mdx](../docs/src/content/docs/systems/browser.mdx)
+- Capabilities (contract): [specs/capabilities.md](capabilities.md)
 
 ## Environment Variables
 
@@ -207,6 +209,10 @@ host bridge (bearer token) + scope-keyed per-user runtime containers.
 Shared security principle across both systems:
 - Never trust caller-supplied identity/routing fields.
 - Require host-issued credentials for privileged operations.
+
+For capability-backed sensitive integrations, bot operations must run via `ash-sb`
+so `ASH_CONTEXT_TOKEN` is attached automatically and host-side credential scope is
+derived from verified claims (not prompt-provided params).
 
 ### Operational Requirements
 

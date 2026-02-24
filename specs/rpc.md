@@ -2,7 +2,7 @@
 
 > Unix domain socket RPC for sandbox-to-host communication
 
-Files: src/ash/rpc/__init__.py, src/ash/rpc/server.py
+Files: src/ash/rpc/__init__.py, src/ash/rpc/server.py, src/ash/rpc/methods/
 
 ## Requirements
 
@@ -18,6 +18,8 @@ Files: src/ash/rpc/__init__.py, src/ash/rpc/server.py
 - Support retry on transient connection errors in client
 - Require `context_token` on all RPC calls; reject missing/invalid tokens
 - Derive identity/routing params (`user_id`, `chat_id`, etc.) from verified token claims
+- Enforce capability RPC security contracts in `specs/capabilities.md` for `capability.*` methods
+- Keep credential/material access server-side; RPC results must not disclose raw credential secrets
 
 ### SHOULD
 
@@ -114,10 +116,15 @@ class RPCError(Exception):
 | `memory.add` | content, source, expires_days, user_id, chat_id, subjects, shared | memory entry |
 | `memory.list` | limit, include_expired, user_id, chat_id | list of memories |
 | `memory.delete` | memory_id | success boolean |
+| `capability.list` | include_unavailable | visible capabilities |
+| `capability.invoke` | capability, operation, input | operation result |
+| `capability.auth.begin` | capability, account_hint | auth flow handle + URL |
+| `capability.auth.complete` | flow_id, callback_url/code | linked account/auth completion |
 
 Identity/routing parameters are populated server-side from `context_token`.
 Caller-provided values for `user_id`, `chat_id`, `chat_type`, `session_key`,
 `thread_id`, `source_username`, and related fields are ignored.
+Capability method details are defined in `specs/capabilities.md`.
 
 ## Message Format
 

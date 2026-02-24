@@ -28,6 +28,7 @@ A subsystem is NOT:
 | todos | Canonical todo lifecycle and list management | Job execution orchestration |
 | images | Inbound image understanding + context extraction | Message transport, LLM orchestration |
 | browser | Session-scoped page actions and artifacts (sandbox provider runs in container runtime) | Message transport, model orchestration |
+| capabilities | Host-managed sensitive external operations with verified identity and scoped auth state | Prompt orchestration, provider message transport |
 
 ### Consumers use public API only
 
@@ -133,6 +134,7 @@ Public types live in one place, not scattered across implementation files:
 | scheduling | Complete | [specs/schedule.md](schedule.md) |
 | todos | Complete | [specs/todos.md](todos.md) |
 | browser | Complete | [specs/browser.md](browser.md) |
+| capabilities | Contract (planned) | [specs/capabilities.md](capabilities.md) |
 
 ## Verification
 

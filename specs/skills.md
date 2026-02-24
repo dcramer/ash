@@ -13,6 +13,9 @@ This enables:
 - **Tool restrictions**: Skills can limit which tools the subagent uses
 - **Context compression**: Main agent passes relevant context, not full history
 - **Model flexibility**: Skills can specify different models (e.g., haiku for simple tasks)
+- **Capability mediation for sensitive systems**: Skills can call host-managed capabilities with token-verified identity instead of direct credential env vars
+
+For sensitive external systems (email/calendar/etc.), see `specs/capabilities.md`.
 
 ## Requirements
 
@@ -25,6 +28,7 @@ This enables:
 - Invoke skills via `use_skill` tool (not by reading files)
 - Run skill as subagent with isolated session
 - Inject env vars from config into skill execution
+- Support capability-mediated calls for sensitive external systems (contract in `specs/capabilities.md`)
 - Support `allowed_tools` to restrict subagent's tools
 - Support `model` override per skill
 - Support `max_iterations` limit per skill
@@ -84,6 +88,30 @@ Given a research query, search for accurate, up-to-date information
 and return a structured summary with sources.
 
 Use the PERPLEXITY_API_KEY environment variable for API calls.
+```
+
+### Capability-Backed Skills (Contract)
+
+Status: planned. External skills that need sensitive integrations should declare
+capability requirements and use `ash-sb capability` commands rather than direct
+credential env vars.
+
+```yaml
+---
+description: Manage inbox and calendar with host-managed capability auth
+sensitive: true
+access:
+  chat_types:
+    - private
+capabilities:
+  - gog.email
+  - gog.calendar
+allowed_tools:
+  - bash
+---
+
+Use `ash-sb capability` for email/calendar operations.
+Do not read or require raw provider credentials from environment variables.
 ```
 
 ### Config Section
