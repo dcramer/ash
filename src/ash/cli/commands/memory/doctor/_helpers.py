@@ -180,28 +180,32 @@ async def search_and_cluster(
 
         for memory in memories:
             try:
+                from ash.graph.edges import get_subject_person_ids
+
                 owner_user_id, chat_id = memory_scope_key(memory)
-                results = await store.search(
-                    memory.content,
-                    limit=10,
+                subject_person_ids = get_subject_person_ids(store.graph, memory.id)
+                results = await store.find_conflicting_memories(
+                    new_content=memory.content,
                     owner_user_id=owner_user_id,
                     chat_id=chat_id,
+                    subject_person_ids=subject_person_ids or None,
+                    similarity_threshold=similarity_threshold,
                 )
-                for result in results:
-                    if result.id == memory.id:
+                for result_memory, similarity in results:
+                    if result_memory.id == memory.id:
                         continue
-                    if result.similarity < similarity_threshold:
+                    if similarity < similarity_threshold:
                         continue
-                    result_memory = mem_by_id.get(result.id)
-                    if result_memory is None:
+                    mem = mem_by_id.get(result_memory.id)
+                    if mem is None:
                         continue
-                    if memory_scope_key(result_memory) != memory_scope_key(memory):
+                    if memory_scope_key(mem) != memory_scope_key(memory):
                         continue
-                    pair = frozenset({memory.id, result.id})
+                    pair = frozenset({memory.id, result_memory.id})
                     if pair in seen_pairs:
                         continue
                     seen_pairs.add(pair)
-                    uf.union(memory.id, result.id)
+                    uf.union(memory.id, result_memory.id)
             except Exception as e:
                 dim(f"Search failed for {memory.id[:8]}: {e}")
 

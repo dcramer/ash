@@ -58,7 +58,13 @@ class SupersessionMixin:
         owner_user_id: str | None = None,
         chat_id: str | None = None,
         subject_person_ids: list[str] | None = None,
+        similarity_threshold: float | None = None,
     ) -> list[tuple[MemoryEntry, float]]:
+        threshold = (
+            CONFLICT_SIMILARITY_THRESHOLD
+            if similarity_threshold is None
+            else similarity_threshold
+        )
         try:
             query_embedding = await self._embeddings.embed(new_content)
         except Exception:
@@ -69,7 +75,7 @@ class SupersessionMixin:
 
         conflicts: list[tuple[MemoryEntry, float]] = []
         for memory_id, similarity in similar:
-            if similarity < CONFLICT_SIMILARITY_THRESHOLD:
+            if similarity < threshold:
                 continue
             memory = self._graph.memories.get(memory_id)
             if not memory:
