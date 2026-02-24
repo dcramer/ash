@@ -12,18 +12,15 @@ interface Props {
 const { items } = Astro.props;
 ---
 
-<div class="ash-option-list">
+<div class="ash-help-list" role="list">
   {items.map((item) => (
-    <article class="ash-option-row">
-      <div class="ash-option-rail" aria-hidden="true"></div>
-      <div class="ash-option-main">
-        <div class="ash-option-head">
-          <code>{item.name}</code>
-          {item.defaultValue && (
-            <span class="ash-option-default">Default: {item.defaultValue}</span>
-          )}
-        </div>
+    <article class="ash-help-row" role="listitem">
+      <code class="ash-help-flag">{item.name}</code>
+      <div class="ash-help-desc">
         <p>{item.description}</p>
+        {item.defaultValue && (
+          <span class="ash-help-default">default: {item.defaultValue}</span>
+        )}
       </div>
     </article>
   ))}

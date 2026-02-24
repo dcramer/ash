@@ -359,62 +359,56 @@ td {
   font-size: 0.87em;
 }
 
-/* CLI option cards */
-.ash-option-list {
-  display: grid;
-  gap: 0.62rem;
-}
-
-.ash-option-row {
-  display: grid;
-  grid-template-columns: 9px minmax(0, 1fr);
+/* CLI option list (help-style) */
+.ash-help-list {
+  border: 2px solid #11130f;
   background: #ffffff;
-  border: 2px solid #11130f;
-  box-shadow: 5px 5px 0 rgba(20, 20, 15, 0.19);
+  box-shadow: 5px 5px 0 rgba(20, 20, 15, 0.16);
 }
 
-.ash-option-rail {
-  background: linear-gradient(180deg, #c9fa53 0%, #8edb00 100%);
-  border-right: 2px solid #11130f;
+.ash-help-row {
+  display: grid;
+  grid-template-columns: minmax(14rem, 22rem) minmax(0, 1fr);
+  gap: 0.8rem;
+  padding: 0.58rem 0.72rem;
+  border-top: 1px solid #11130f;
 }
 
-.ash-option-main {
-  padding: 0.62rem 0.72rem;
+.ash-help-row:first-child {
+  border-top: 0;
 }
 
-.ash-option-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.ash-option-head code {
-  background: #f6fbe8;
-  border: 2px solid #11130f;
-  color: #11130f;
-  font-weight: 700;
-  padding: 0.1rem 0.42rem;
-  font-size: 0.9rem;
-}
-
-.ash-option-default {
-  display: inline-block;
-  padding: 0.1rem 0.48rem;
-  border: 2px solid #11130f;
-  background: #b0ff1f;
+.ash-help-flag {
+  display: block;
+  margin: 0;
+  padding: 0.08rem 0.18rem;
   color: #11130f;
   font-family: var(--sl-font-mono);
-  font-size: 0.74rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  background: #f3f9e2;
+  border: 1px solid #bfd18d;
+  white-space: nowrap;
+  overflow-x: auto;
 }
 
-.ash-option-main p {
-  margin: 0.38rem 0 0;
-  color: #1a2313;
-  font-size: 0.96rem;
+.ash-help-desc p {
+  margin: 0;
+  color: #182112;
+}
+
+.ash-help-default {
+  display: inline-block;
+  margin-top: 0.24rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.8rem;
+  color: #3e4d2a;
+}
+
+@media (max-width: 52rem) {
+  .ash-help-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.38rem;
+  }
 }
 
 starlight-aside {
