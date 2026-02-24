@@ -655,7 +655,25 @@ body .expressive-code {
   border: 1px solid #6d6d6d !important;
   box-shadow: none !important;
   color: transparent !important;
+  fill: transparent !important;
+  stroke: #6d6d6d !important;
   opacity: 1 !important;
+}
+
+.expressive-code .header :is([class*='dot'], [class*='Dot'])::before,
+.expressive-code .header :is([class*='dot'], [class*='Dot'])::after {
+  background: transparent !important;
+  border: 1px solid #6d6d6d !important;
+  box-shadow: none !important;
+  color: transparent !important;
+  fill: transparent !important;
+  stroke: #6d6d6d !important;
+}
+
+.expressive-code .header svg :is(circle, ellipse) {
+  fill: transparent !important;
+  stroke: #6d6d6d !important;
+  stroke-width: 1 !important;
 }
 
 body .expressive-code .ec-line :where(span[style^='--']:not([class])) {
