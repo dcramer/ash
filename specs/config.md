@@ -16,6 +16,7 @@ Files: src/ash/config/loader.py, src/ash/config/models.py, src/ash/config/paths.
 - Support named model configurations (`[models.<alias>]`)
 - Require a `default` model alias
 - Support per-skill model overrides (`[skills.<name>] model = "<alias>"`)
+- Support bundled integration presets (`[bundles.<name>]`)
 - Generate config template programmatically (no static file)
 
 ### SHOULD
@@ -37,6 +38,7 @@ Files: src/ash/config/loader.py, src/ash/config/models.py, src/ash/config/paths.
 class AshConfig(BaseModel):
     models: dict[str, ModelConfig]  # Named model configurations
     skills: dict[str, dict[str, str]]  # Per-skill config (model overrides)
+    bundles: dict[str, dict[str, bool]]  # Bundled integration presets
     sandbox: SandboxConfig
     memory: MemoryConfig
     server: ServerConfig
@@ -85,6 +87,9 @@ allow_chat_ids = ["12345"]
 [skills.defaults]
 allow_chat_ids = ["12345"]
 
+[bundles.gog]
+enabled = true
+
 [skills.code-review]
 model = "sonnet"
 
@@ -126,6 +131,12 @@ For skills:
 Skill chat allowlist resolution:
 1. `[skills.<name>].allow_chat_ids` (per-skill override, when set)
 2. `[skills.defaults].allow_chat_ids` (global default)
+
+Bundled `gog` preset behavior:
+1. `[bundles.gog].enabled = true` applies defaults:
+   - `skills.gog.enabled = true`
+   - `capabilities.providers.gog = { enabled=true, namespace="gog", command=["gogcli","bridge"], timeout_seconds=30 }`
+2. Explicit `[skills.gog]` and `[capabilities.providers.gog]` values take precedence over preset defaults.
 
 For API keys:
 1. Provider config (`[anthropic].api_key`)

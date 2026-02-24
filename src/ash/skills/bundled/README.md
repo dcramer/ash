@@ -44,8 +44,10 @@ Skill metadata must not define provider/container command wiring.
 
 This can live in a single third-party repo/package as long as Ash wiring stays split:
 
-- skill enablement: `[skills.gog] enabled = true`
-- provider wiring: `[capabilities.providers.gog] ...`
+- preset toggle: `[bundles.gog] enabled = true`
+- optional explicit overrides:
+  - skill enablement: `[skills.gog] enabled = true`
+  - provider wiring: `[capabilities.providers.gog] ...`
 
 ## Layout
 

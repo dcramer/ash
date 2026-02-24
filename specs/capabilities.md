@@ -115,12 +115,19 @@ Capability providers are configured as external bridge commands so integrations
 like `gog` can live in a skill/external repo instead of Ash core code:
 
 ```toml
+[bundles.gog]
+enabled = true
+
 [capabilities.providers.gog]
 enabled = true
 namespace = "gog"
 command = ["gogcli", "bridge"]
 timeout_seconds = 30
 ```
+
+Bundle preset semantics:
+- `bundles.gog.enabled = true` applies default `skills.gog` + `capabilities.providers.gog` wiring.
+- Explicit provider config values override preset defaults.
 
 The host invokes the bridge with JSON over stdin/stdout for `definitions`,
 `auth_begin`, `auth_complete`, and `invoke`.

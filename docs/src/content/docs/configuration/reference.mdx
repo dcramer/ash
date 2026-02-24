@@ -267,6 +267,22 @@ allow_chat_ids = ["12345"]  # Optional per-skill override
 PERPLEXITY_API_KEY = "..."
 ```
 
+## Bundles (`[bundles.<name>]`)
+
+Use bundle toggles for packaged skill + provider presets.
+
+```toml
+[bundles.gog]
+enabled = true
+```
+
+When enabled, Ash applies defaults for the bundled `gog` package:
+
+- `skills.gog.enabled = true`
+- `capabilities.providers.gog = { enabled = true, namespace = "gog", command = ["gogcli", "bridge"], timeout_seconds = 30 }`
+
+Explicit `[skills.gog]` and `[capabilities.providers.gog]` values override those defaults.
+
 ## Capabilities (`[capabilities.providers.<name>]`)
 
 ```toml

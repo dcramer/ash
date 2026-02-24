@@ -234,16 +234,6 @@ command = ["gogcli", "bridge"]
 timeout_seconds = 30
 ```
 
-For local dogfooding in this repo, you can point to the reference bridge script:
-
-```toml
-[capabilities.providers.gog]
-enabled = true
-namespace = "gog"
-command = ["python", "/path/to/ash/scripts/gogcli_bridge.py", "bridge"]
-timeout_seconds = 30
-```
-
 ## Bundled Optional `gog` Skill
 
 Ash includes an opt-in bundled `gog` skill for dogfooding this contract.
@@ -251,12 +241,23 @@ Ash includes an opt-in bundled `gog` skill for dogfooding this contract.
 Enable it in `config.toml`:
 
 ```toml
-[skills.gog]
+[bundles.gog]
 enabled = true
 ```
 
-This skill remains a normal skill surface and relies on `ash-sb capability`; it
-does not add integration hooks directly.
+This preset enables both the bundled `gog` skill and default
+`gogcli bridge` provider wiring. You can still override either section directly:
+
+```toml
+[skills.gog]
+enabled = true
+
+[capabilities.providers.gog]
+enabled = true
+namespace = "gog"
+command = ["gogcli", "bridge"]
+timeout_seconds = 30
+```
 
 ## Troubleshooting
 

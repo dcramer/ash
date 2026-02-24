@@ -5,7 +5,7 @@ import os
 import re
 import shlex
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -470,6 +470,18 @@ class SkillSource(BaseModel):
         return self
 
 
+class BundleConfig(BaseModel):
+    """Configuration for a bundled optional integration package."""
+
+    enabled: bool = False
+
+
+class BundlesConfig(BaseModel):
+    """Top-level bundle toggles from [bundles.*]."""
+
+    gog: BundleConfig = Field(default_factory=BundleConfig)
+
+
 class ConfigError(Exception):
     """Configuration error."""
 
@@ -530,6 +542,8 @@ class AshConfig(BaseModel):
     skills: dict[str, SkillConfig] = Field(default_factory=dict)
     # Skill defaults from [skills.defaults]
     skill_defaults: SkillDefaultsConfig = Field(default_factory=SkillDefaultsConfig)
+    # Bundle presets from [bundles.*]
+    bundles: BundlesConfig = Field(default_factory=BundlesConfig)
 
     # External skill sources: [[skills.sources]] array
     skill_sources: list[SkillSource] = Field(default_factory=list)
@@ -565,32 +579,35 @@ class AshConfig(BaseModel):
         if not isinstance(data, dict):
             return data
 
-        skills_data = data.get("skills")
-        if not isinstance(skills_data, dict):
-            return data
-
         # Make a copy to avoid mutating the original
-        skills_data = dict(skills_data)
+        data = dict(data)
 
-        # Extract sources array and global settings
-        sources = skills_data.pop("sources", [])
-        defaults = skills_data.pop("defaults", {})
-        auto_sync = skills_data.pop("auto_sync", False)
-        update_interval_minutes = skills_data.pop("update_interval_minutes", None)
-        # Backward-compat: legacy `update_interval` was in hours.
-        update_interval_hours = skills_data.pop("update_interval", None)
-        if update_interval_minutes is None:
-            if update_interval_hours is not None:
-                update_interval_minutes = int(update_interval_hours) * 60
-            else:
-                update_interval_minutes = 5
+        skills_data = data.get("skills")
+        if isinstance(skills_data, dict):
+            # Make a copy to avoid mutating the original
+            skills_data = dict(skills_data)
 
-        data["skill_sources"] = sources
-        data["skill_defaults"] = defaults
-        data["skill_auto_sync"] = auto_sync
-        data["skill_update_interval_minutes"] = update_interval_minutes
-        # Remaining entries are per-skill configs
-        data["skills"] = skills_data
+            # Extract sources array and global settings
+            sources = skills_data.pop("sources", [])
+            defaults = skills_data.pop("defaults", {})
+            auto_sync = skills_data.pop("auto_sync", False)
+            update_interval_minutes = skills_data.pop("update_interval_minutes", None)
+            # Backward-compat: legacy `update_interval` was in hours.
+            update_interval_hours = skills_data.pop("update_interval", None)
+            if update_interval_minutes is None:
+                if update_interval_hours is not None:
+                    update_interval_minutes = int(update_interval_hours) * 60
+                else:
+                    update_interval_minutes = 5
+
+            data["skill_sources"] = sources
+            data["skill_defaults"] = defaults
+            data["skill_auto_sync"] = auto_sync
+            data["skill_update_interval_minutes"] = update_interval_minutes
+            # Remaining entries are per-skill configs
+            data["skills"] = skills_data
+
+        _apply_bundle_presets(data)
         return data
 
     @model_validator(mode="after")
@@ -733,3 +750,45 @@ class AshConfig(BaseModel):
             name: os.environ.get(value[1:], "") if value.startswith("$") else value
             for name, value in self.env.items()
         }
+
+
+def _apply_bundle_presets(data: dict[str, Any]) -> None:
+    """Apply opinionated bundle presets without overriding explicit config."""
+    bundles = data.get("bundles")
+    if not isinstance(bundles, dict):
+        return
+    gog = bundles.get("gog")
+    if not isinstance(gog, dict):
+        return
+    enabled = gog.get("enabled")
+    if enabled is not True:
+        return
+
+    # Enable bundled gog skill by default.
+    skills = data.get("skills")
+    if not isinstance(skills, dict):
+        skills = {}
+    skill_gog = skills.get("gog")
+    if not isinstance(skill_gog, dict):
+        skill_gog = {}
+    skill_gog.setdefault("enabled", True)
+    skills["gog"] = skill_gog
+    data["skills"] = skills
+
+    # Wire default external provider bridge command by default.
+    capabilities = data.get("capabilities")
+    if not isinstance(capabilities, dict):
+        capabilities = {}
+    providers = capabilities.get("providers")
+    if not isinstance(providers, dict):
+        providers = {}
+    provider_gog = providers.get("gog")
+    if not isinstance(provider_gog, dict):
+        provider_gog = {}
+    provider_gog.setdefault("enabled", True)
+    provider_gog.setdefault("namespace", "gog")
+    provider_gog.setdefault("command", ["gogcli", "bridge"])
+    provider_gog.setdefault("timeout_seconds", 30.0)
+    providers["gog"] = provider_gog
+    capabilities["providers"] = providers
+    data["capabilities"] = capabilities
