@@ -802,14 +802,14 @@ class TestTelegramMessageHandler:
         )
 
         # Create recent direct interaction history:
-        # active user message -> bot reply -> current user follow-up (no mention).
+        # passive-engaged user message -> bot reply -> current user follow-up (no mention).
         writer = ChatHistoryWriter("telegram", "group_123")
         writer.record_user_message(
             content="@ash_bot can you help?",
             created_at=datetime.now(UTC) - timedelta(seconds=30),
             user_id="user_456",
             username="otheruser",
-            metadata={"external_id": "97", "processing_mode": "active"},
+            metadata={"external_id": "97", "processing_mode": "passive"},
         )
         writer.record_bot_message(
             content="Sure, what's up?",

@@ -422,10 +422,6 @@ class PassiveHandler:
         ):
             return False
 
-        prev_meta = previous_user_entry.metadata or {}
-        if prev_meta.get("processing_mode") != "active":
-            return False
-
         now_ts = message.timestamp or datetime.now(UTC)
         delta = (now_ts - assistant_entry.created_at).total_seconds()
         if delta < 0:

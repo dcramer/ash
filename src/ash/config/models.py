@@ -60,12 +60,12 @@ class PassiveListeningConfig(BaseModel):
 
     # Throttling
     chat_cooldown_minutes: int = (
-        5  # Minimum minutes between passive engagements per chat
+        1  # Minimum minutes between passive engagements per chat
     )
-    max_engagements_per_hour: int = 10  # Global rate limit across all chats
-    skip_after_active_messages: int = 3  # Skip passive if N active messages recently
+    max_engagements_per_hour: int = 30  # Global rate limit across all chats
+    skip_after_active_messages: int = 6  # Skip passive if N active messages recently
     direct_followup_window_seconds: int = (
-        120  # Bypass passive throttle for direct follow-ups within this window
+        180  # Bypass passive throttle for direct follow-ups within this window
     )
 
     # Extraction
