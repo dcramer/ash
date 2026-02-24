@@ -10,11 +10,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ash.providers.base import OutgoingMessage
+from ash.providers.telegram.handlers.provenance import ProvenanceState
 from ash.providers.telegram.handlers.utils import (
     MAX_MESSAGE_LENGTH,
     escape_markdown_v2,
     format_tool_brief,
 )
+from ash.tools.base import ToolResult
 
 if TYPE_CHECKING:
     from ash.agents import AgentRegistry
@@ -136,6 +138,7 @@ class ToolTracker:
         self.tool_count: int = 0
         self.progress_messages: list[str] = []
         self._direct_sends: list[tuple[str, str, bool]] = []
+        self._provenance = ProvenanceState()
 
     def _build_display_message(self, *, include_thinking: bool = True) -> str:
         """Build the consolidated message with progress on top and status on bottom.
@@ -211,6 +214,20 @@ class ToolTracker:
                 display_message,
                 parse_mode="markdown_v2",
             )
+
+    async def on_tool_complete(
+        self, tool_name: str, tool_input: dict[str, Any], result: ToolResult
+    ) -> None:
+        """Record tool completion data for final user-visible provenance."""
+        self._provenance.add_from_tool(
+            tool_name=tool_name,
+            tool_input=tool_input,
+            result=result,
+        )
+
+    def build_provenance_clause(self) -> str | None:
+        """Render concise inline provenance when verified evidence exists."""
+        return self._provenance.render_inline(max_domains=3)
 
     def add_progress_message(self, message: str) -> None:
         """Add a progress message to be displayed."""

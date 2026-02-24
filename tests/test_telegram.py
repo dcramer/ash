@@ -18,9 +18,13 @@ from ash.providers.telegram.handlers import (
     escape_markdown_v2,
     format_tool_brief,
 )
-from ash.providers.telegram.handlers.utils import merge_progress_and_response
+from ash.providers.telegram.handlers.provenance import ProvenanceState
+from ash.providers.telegram.handlers.utils import (
+    append_inline_attribution,
+    merge_progress_and_response,
+)
 from ash.providers.telegram.provider import TelegramProvider
-from ash.tools.base import ToolContext
+from ash.tools.base import ToolContext, ToolResult
 
 
 class TestMessageConversion:
@@ -527,3 +531,83 @@ class TestProgressResponseMerge:
     def test_dedupes_identical_trailing_response(self):
         merged = merge_progress_and_response(["Done"], "Done")
         assert merged == "Done"
+
+
+class TestResponseAttribution:
+    def test_appends_inline_attribution(self):
+        text = append_inline_attribution(
+            "Here is the answer.", "I checked docs.python.org."
+        )
+        assert text == "Here is the answer. I checked docs.python.org."
+
+    def test_skips_when_no_attribution(self):
+        text = append_inline_attribution("Plain response", None)
+        assert text == "Plain response"
+
+
+class TestProvenanceState:
+    def test_collects_top_domains_and_skills(self):
+        state = ProvenanceState()
+        state.add_from_tool(
+            "web_search",
+            {"query": "python"},
+            ToolResult.success("ok", domains=["docs.python.org", "docs.python.org"]),
+        )
+        state.add_from_tool(
+            "web_fetch",
+            {"url": "https://example.com/page"},
+            ToolResult.success("ok", final_url="https://example.com/page"),
+        )
+        state.add_from_tool(
+            "use_skill",
+            {"skill": "dex", "message": "track task"},
+            ToolResult.success("ok"),
+        )
+        state.add_from_tool(
+            "web_fetch",
+            {"url": "https://one.test"},
+            ToolResult.success("ok", final_url="https://one.test"),
+        )
+        state.add_from_tool(
+            "web_fetch",
+            {"url": "https://two.test"},
+            ToolResult.success("ok", final_url="https://two.test"),
+        )
+
+        attribution = state.render_inline(max_domains=3)
+        assert attribution is not None
+        assert "docs.python.org" in attribution
+        assert "example.com" in attribution
+        assert "one.test" in attribution
+        assert "two.test" not in attribution
+        assert "/dex" in attribution
+
+    def test_ignores_tool_errors(self):
+        state = ProvenanceState()
+        state.add_from_tool(
+            "web_fetch",
+            {"url": "https://ignored.test"},
+            ToolResult.error("failed", final_url="https://ignored.test"),
+        )
+        assert state.render_inline() is None
+
+
+class TestTrackerProvenance:
+    async def test_tracker_builds_provenance_clause(self):
+        provider = MagicMock()
+        tracker = ToolTracker(provider=provider, chat_id="456", reply_to="789")
+        await tracker.on_tool_complete(
+            "web_fetch",
+            {"url": "https://docs.python.org/3/"},
+            ToolResult.success("ok", final_url="https://docs.python.org/3/"),
+        )
+        await tracker.on_tool_complete(
+            "use_skill",
+            {"skill": "dex", "message": "update task"},
+            ToolResult.success("ok"),
+        )
+
+        clause = tracker.build_provenance_clause()
+        assert clause is not None
+        assert "docs.python.org" in clause
+        assert "/dex" in clause

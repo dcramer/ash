@@ -37,6 +37,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _effective_tool_calls(
+    response_tool_calls: list[dict[str, Any]],
+    session: SessionState,
+) -> list[dict[str, Any]]:
+    if response_tool_calls:
+        return response_tool_calls
+    # ChildActivated/headless paths may not populate response.tool_calls.
+    # Fall back to session-derived tool uses for deterministic eval assertions.
+    return extract_tool_calls_from_session(session.to_json())
+
+
+def _telegram_like_response_text(
+    response_text: str,
+    tool_calls: list[dict[str, Any]],
+) -> str:
+    """Approximate Telegram finalization text in eval runs."""
+    from ash.providers.telegram.handlers.provenance import (
+        build_provenance_clause_from_tool_calls,
+    )
+    from ash.providers.telegram.handlers.utils import append_inline_attribution
+
+    provenance = build_provenance_clause_from_tool_calls(tool_calls)
+    return append_inline_attribution(response_text, provenance)
+
+
 def _record_eval_user_message(
     session: SessionState,
     *,
@@ -267,24 +292,28 @@ async def run_eval_case(
             session=session,
             user_id="eval-user",
         )
+        effective_tool_calls = _effective_tool_calls(response.tool_calls, session)
+        rendered_response_text = _telegram_like_response_text(
+            response.text, effective_tool_calls
+        )
 
         # Pre-judge: Check forbidden tools deterministically
-        forbidden_result = check_forbidden_tools(case, response.tool_calls)
+        forbidden_result = check_forbidden_tools(case, effective_tool_calls)
         if forbidden_result:
             return EvalResult(
                 case=case,
-                response_text=response.text,
-                tool_calls=response.tool_calls,
+                response_text=rendered_response_text,
+                tool_calls=effective_tool_calls,
                 judge_result=forbidden_result,
             )
         disallowed_result = check_disallowed_tool_result_substrings(
-            case, response.tool_calls
+            case, effective_tool_calls
         )
         if disallowed_result:
             return EvalResult(
                 case=case,
-                response_text=response.text,
-                tool_calls=response.tool_calls,
+                response_text=rendered_response_text,
+                tool_calls=effective_tool_calls,
                 judge_result=disallowed_result,
             )
 
@@ -292,14 +321,14 @@ async def run_eval_case(
         judge = LLMJudge(judge_llm, config)
         judge_result = await judge.evaluate(
             case=case,
-            response_text=response.text,
-            tool_calls=response.tool_calls,
+            response_text=rendered_response_text,
+            tool_calls=effective_tool_calls,
         )
 
         return EvalResult(
             case=case,
-            response_text=response.text,
-            tool_calls=response.tool_calls,
+            response_text=rendered_response_text,
+            tool_calls=effective_tool_calls,
             judge_result=judge_result,
         )
 
@@ -769,28 +798,32 @@ async def _execute_and_judge(
             user_id=user_id,
             agent_executor=agent_executor,
         )
+        effective_tool_calls = _effective_tool_calls(response.tool_calls, session)
+        rendered_response_text = _telegram_like_response_text(
+            response.text, effective_tool_calls
+        )
         _record_eval_assistant_message(
             session,
-            assistant_message=response.text,
+            assistant_message=rendered_response_text,
         )
 
         # Pre-judge: forbidden tools check
-        forbidden_result = check_forbidden_tools(case, response.tool_calls)
+        forbidden_result = check_forbidden_tools(case, effective_tool_calls)
         if forbidden_result:
             return EvalResult(
                 case=case,
-                response_text=response.text,
-                tool_calls=response.tool_calls,
+                response_text=rendered_response_text,
+                tool_calls=effective_tool_calls,
                 judge_result=forbidden_result,
             )
         disallowed_result = check_disallowed_tool_result_substrings(
-            case, response.tool_calls
+            case, effective_tool_calls
         )
         if disallowed_result:
             return EvalResult(
                 case=case,
-                response_text=response.text,
-                tool_calls=response.tool_calls,
+                response_text=rendered_response_text,
+                tool_calls=effective_tool_calls,
                 judge_result=disallowed_result,
             )
 
@@ -798,11 +831,11 @@ async def _execute_and_judge(
         judge = LLMJudge(judge_llm, config)
         judge_result = await judge.evaluate(
             case=case,
-            response_text=response.text,
-            tool_calls=response.tool_calls,
+            response_text=rendered_response_text,
+            tool_calls=effective_tool_calls,
         )
 
-        logger.info("[%s] Response: %s", case.id, response.text)
+        logger.info("[%s] Response: %s", case.id, rendered_response_text)
         logger.info(
             "[%s] Judge: passed=%s, score=%s",
             case.id,
@@ -815,8 +848,8 @@ async def _execute_and_judge(
 
         return EvalResult(
             case=case,
-            response_text=response.text,
-            tool_calls=response.tool_calls,
+            response_text=rendered_response_text,
+            tool_calls=effective_tool_calls,
             judge_result=judge_result,
         )
 

@@ -195,6 +195,21 @@ For streaming mode, balance responsiveness with API efficiency:
 **Fast responses (<5s)**: Sent as single message, no streaming edits.
 **Slow responses (>5s)**: Start streaming after delay, rate-limited edits.
 
+### Response Provenance
+
+When tool/skill output materially informs the final reply, include concise inline
+attribution in the user-visible response.
+
+- Attribution is evidence-driven only:
+  - Include web/browser source domains when verified tool output contains them.
+  - Include skill attribution as `/<skill>` when `use_skill` contributes.
+- Do not fabricate provenance when no verified source/tool output exists.
+- Keep attribution concise and natural (not step-by-step traces).
+- Limit domain attribution to the top 1-3 unique domains.
+- Applies to both sync and streaming Telegram response handlers.
+- Direct-send + dedupe flows must preserve attribution semantics without duplicating
+  the main response body.
+
 ## Behaviors
 
 | Scenario | Behavior |
@@ -255,3 +270,7 @@ uv run pytest tests/test_providers.py -v
 - [ ] "Thinking..." message updates with each tool status
 - [ ] Fast responses (<5s) sent as single message
 - [ ] Slow responses (>5s) stream with rate-limited edits
+- [ ] Tool/skill-informed replies include concise inline provenance
+- [ ] Web/browser attribution shows top 1-3 source domains when available
+- [ ] Skill-informed replies cite `/<skill>`
+- [ ] No attribution is injected when no verified evidence exists

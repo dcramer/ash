@@ -5,6 +5,7 @@ import logging
 import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from ash.llm.retry import RetryConfig, with_retry
 from ash.sandbox import SandboxExecutor
@@ -18,6 +19,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+
+
+def _extract_domains(response: SearchResponse) -> list[str]:
+    domains: list[str] = []
+    seen: set[str] = set()
+    for result in response.results:
+        host = (urlparse(result.url).netloc or "").strip().lower()
+        if not host:
+            continue
+        if host.startswith("www."):
+            host = host[4:]
+        if host in seen:
+            continue
+        seen.add(host)
+        domains.append(host)
+    return domains
+
 
 # Python script to execute inside sandbox
 # Outputs JSON for reliable parsing and accurate result counting
@@ -297,6 +315,7 @@ class WebSearchTool(Tool):
                     cached=True,
                     search_time_ms=cached.search_time_ms,
                     search_type=search_type,
+                    domains=_extract_domains(cached),
                 )
 
         async def do_search() -> SearchResponse:
@@ -347,6 +366,7 @@ class WebSearchTool(Tool):
                 cached=response.cached,
                 search_time_ms=response.search_time_ms,
                 search_type=search_type,
+                domains=_extract_domains(response),
             )
 
         except Exception as e:

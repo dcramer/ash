@@ -28,11 +28,13 @@ if TYPE_CHECKING:
     from ash.skills import SkillRegistry
     from ash.store.store import Store
     from ash.tools import ToolExecutor, ToolRegistry
+    from ash.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 
 # Callback type for tool start notifications
 OnToolStartCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+OnToolCompleteCallback = Callable[[str, dict[str, Any], "ToolResult"], Awaitable[None]]
 
 # Callback to check for steering messages during tool execution
 # Returns list of IncomingMessage objects, or empty list to continue normally

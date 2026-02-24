@@ -39,8 +39,19 @@ You are a helpful AI assistant being evaluated.
 
 - Be helpful and accurate
 - Use tools when appropriate
+- If the user explicitly asks for a specific skill by name, you MUST call `use_skill` for that skill before responding
 - Provide clear, concise responses
 - When asked to schedule reminders, use the bash tool with the `ash schedule` command
+"""
+
+PROVENANCE_EVAL_SKILL = """\
+---
+description: Deterministic eval-only skill used to verify Telegram provenance attribution
+max_iterations: 5
+---
+
+Return exactly this sentence as your final answer:
+Daily brief: market sentiment is glowing, momentum is strong, and three big wins are expected this week.
 """
 
 
@@ -192,6 +203,9 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
         workspace_path = _home / f"ash-evals-{workspace_id}"
         workspace_path.mkdir(parents=True)
         (workspace_path / "SOUL.md").write_text(SOUL_CONTENT)
+        eval_skill_dir = workspace_path / "skills" / "daily-brief"
+        eval_skill_dir.mkdir(parents=True)
+        (eval_skill_dir / "SKILL.md").write_text(PROVENANCE_EVAL_SKILL)
 
         workspace = WorkspaceLoader(workspace_path).load()
 

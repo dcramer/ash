@@ -16,6 +16,7 @@ from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.handlers.utils import (
     MIN_EDIT_INTERVAL,
     STREAM_DELAY,
+    append_inline_attribution,
     merge_progress_and_response,
 )
 
@@ -103,6 +104,7 @@ class StreamingHandler:
                 session,
                 user_id=message.user_id,
                 on_tool_start=tracker.on_tool_start,
+                on_tool_complete=tracker.on_tool_complete,
                 get_steering_messages=get_steering_messages,
                 tool_overrides={progress_tool.name: progress_tool},
             ):
@@ -179,9 +181,14 @@ class StreamingHandler:
             self._log_response("[NO_REPLY]")
             return
 
-        # Build final content: progress messages + response (no stats)
+        # Build final content: progress messages + response (no stats).
+        # specs/telegram.md (Response Provenance): inline, evidence-based attribution.
+        provenance_clause = tracker.build_provenance_clause()
+        emitted_response_content = append_inline_attribution(
+            response_content, provenance_clause
+        )
         final_content = merge_progress_and_response(
-            tracker.progress_messages, response_content
+            tracker.progress_messages, emitted_response_content
         )
 
         # If a direct send_message already delivered this exact response text
@@ -202,7 +209,9 @@ class StreamingHandler:
 
         # Guard against empty content — use fallback message
         if not final_content.strip():
-            final_content = "I processed your request but couldn't generate a response."
+            fallback = "I processed your request but couldn't generate a response."
+            final_content = fallback
+            emitted_response_content = fallback
 
         # If final content exceeds Telegram's limit and we have an existing message,
         # delete it and send as chunked messages instead
@@ -219,6 +228,25 @@ class StreamingHandler:
                     logger.debug(
                         "Failed to delete thinking message for direct-send dedupe"
                     )
+            if (
+                provenance_clause
+                and last_direct_send is not None
+                and sent_message_id
+                and not last_direct_send[2]
+            ):
+                attributed_direct = append_inline_attribution(
+                    last_direct_send[0], provenance_clause
+                )
+                if attributed_direct != last_direct_send[0]:
+                    try:
+                        await self._provider.edit(
+                            message.chat_id, sent_message_id, attributed_direct
+                        )
+                        emitted_response_content = attributed_direct
+                    except Exception:
+                        logger.debug(
+                            "Failed to edit direct-send message with provenance"
+                        )
         elif len(final_content) > MAX_SEND_LENGTH and existing_msg_id:
             try:
                 await self._provider.delete(message.chat_id, existing_msg_id)
@@ -252,7 +280,7 @@ class StreamingHandler:
             message.chat_id,
             message.user_id,
             message.text,
-            response_content,
+            emitted_response_content,
             external_id=message.id,
             reply_to_external_id=message.reply_to_message_id,
             response_external_id=sent_message_id,
@@ -262,4 +290,4 @@ class StreamingHandler:
             branch_id=session.context.branch_id,
             skip_user_message=True,
         )
-        self._log_response(response_content)
+        self._log_response(emitted_response_content)

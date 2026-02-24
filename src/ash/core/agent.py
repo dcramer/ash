@@ -30,6 +30,7 @@ from ash.core.types import (
     GetSteeringMessagesCallback,
     IncomingMessagePreprocessor,
     MessagePostprocessHook,
+    OnToolCompleteCallback,
     OnToolStartCallback,
     PromptContextAugmenter,
     SandboxEnvAugmenter,
@@ -673,6 +674,7 @@ class Agent:
         session: SessionState,
         tool_context: ToolContext,
         on_tool_start: OnToolStartCallback | None,
+        on_tool_complete: OnToolCompleteCallback | None = None,
         get_steering_messages: GetSteeringMessagesCallback | None = None,
     ) -> tuple[list[dict[str, Any]], list[IncomingMessage]]:
         tool_calls: list[dict[str, Any]] = []
@@ -775,6 +777,8 @@ class Agent:
                 tool_use.input,
                 per_tool_context,
             )
+            if on_tool_complete:
+                await on_tool_complete(tool_use.name, tool_use.input, result)
             sanitized = self._add_sanitized_tool_result(
                 session=session,
                 tool_use_id=tool_use.id,
@@ -865,12 +869,12 @@ class Agent:
 
             from ash.agents.executor import run_to_completion
 
-            result_text = await run_to_completion(
+            result_text, tool_calls = await run_to_completion(
                 agent_executor, ca.main_frame, ca.child_frame
             )
             return AgentResponse(
                 text=result_text or "",
-                tool_calls=[],
+                tool_calls=tool_calls,
                 iterations=0,
             )
 
@@ -880,6 +884,7 @@ class Agent:
         session: SessionState,
         user_id: str | None = None,
         on_tool_start: OnToolStartCallback | None = None,
+        on_tool_complete: OnToolCompleteCallback | None = None,
         get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_manager: Any = None,  # Type: SessionManager | None
         tool_overrides: dict[str, Any] | None = None,
@@ -958,6 +963,7 @@ class Agent:
                         session,
                         tool_context,
                         on_tool_start,
+                        on_tool_complete,
                         get_steering_messages,
                     )
                 except ChildActivated as ca:
@@ -1016,6 +1022,7 @@ class Agent:
         session: SessionState,
         user_id: str | None = None,
         on_tool_start: OnToolStartCallback | None = None,
+        on_tool_complete: OnToolCompleteCallback | None = None,
         get_steering_messages: GetSteeringMessagesCallback | None = None,
         session_manager: Any = None,  # Type: SessionManager | None
         tool_overrides: dict[str, Any] | None = None,
@@ -1105,6 +1112,7 @@ class Agent:
                         session,
                         tool_context,
                         on_tool_start,
+                        on_tool_complete,
                         get_steering_messages,
                     )
                 except ChildActivated as ca:

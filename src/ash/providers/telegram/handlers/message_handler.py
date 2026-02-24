@@ -14,6 +14,9 @@ from ash.core import Agent
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.handlers.checkpoint_handler import CheckpointHandler
 from ash.providers.telegram.handlers.passive_handler import PassiveHandler
+from ash.providers.telegram.handlers.provenance import (
+    build_provenance_clause_from_tool_calls,
+)
 from ash.providers.telegram.handlers.session_handler import (
     SessionHandler,
     SessionLock,
@@ -21,6 +24,7 @@ from ash.providers.telegram.handlers.session_handler import (
 from ash.providers.telegram.handlers.tool_tracker import (
     ToolTracker,
 )
+from ash.providers.telegram.handlers.utils import append_inline_attribution
 from ash.providers.telegram.provider import _truncate
 from ash.sessions.types import session_key as make_session_key
 
@@ -29,6 +33,7 @@ if TYPE_CHECKING:
 
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.config import AshConfig
+    from ash.core import SessionState
     from ash.llm import LLMProvider
     from ash.memory.extractor import MemoryExtractor
     from ash.providers.telegram.provider import TelegramProvider
@@ -37,6 +42,43 @@ if TYPE_CHECKING:
     from ash.tools.registry import ToolRegistry
 
 logger = logging.getLogger("telegram")
+
+
+def _extract_tool_calls_from_session(session: SessionState) -> list[dict[str, Any]]:
+    from ash.llm.types import ToolResult as LLMToolResult
+    from ash.llm.types import ToolUse
+
+    ordered_calls: list[dict[str, Any]] = []
+    tool_results_by_id: dict[str, tuple[str, bool]] = {}
+    for msg in session.messages:
+        content = msg.content
+        if isinstance(content, str):
+            continue
+        for block in content:
+            if isinstance(block, ToolUse):
+                ordered_calls.append(
+                    {
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
+                    }
+                )
+            elif isinstance(block, LLMToolResult):
+                tool_results_by_id[block.tool_use_id] = (block.content, block.is_error)
+
+    tool_calls: list[dict[str, Any]] = []
+    for call in ordered_calls:
+        output, is_error = tool_results_by_id.get(call["id"], ("", False))
+        tool_calls.append(
+            {
+                "id": call["id"],
+                "name": call["name"],
+                "input": call["input"],
+                "result": output,
+                "is_error": is_error,
+            }
+        )
+    return tool_calls
 
 
 class TelegramMessageHandler:
@@ -683,8 +725,18 @@ class TelegramMessageHandler:
 
             match result.action:
                 case TurnAction.SEND_TEXT:
+                    # Spec reference: specs/telegram.md (Response Provenance)
+                    provenance_clause: str | None = None
+                    if top.agent_type == "main":
+                        tool_calls = _extract_tool_calls_from_session(top.session)
+                        provenance_clause = build_provenance_clause_from_tool_calls(
+                            tool_calls
+                        )
                     response_external_id = await self._send_stack_response(
-                        message, result.text, thinking_msg_id=thinking_msg_id
+                        message,
+                        result.text,
+                        thinking_msg_id=thinking_msg_id,
+                        provenance_clause=provenance_clause,
                     )
                     thinking_msg_id = None  # Consume after first use
                     # If top is the main agent, pop it (main agent done)
@@ -812,24 +864,30 @@ class TelegramMessageHandler:
         text: str,
         *,
         thinking_msg_id: str | None = None,
+        provenance_clause: str | None = None,
     ) -> str | None:
         """Send a response from the interactive subagent stack.
 
         If thinking_msg_id is provided and the content fits, edits the
         thinking message instead of sending a new one. Returns the message ID.
         """
-        if not text.strip():
+        final_text = append_inline_attribution(text, provenance_clause)
+
+        if not final_text.strip():
             return None
         bot_name = self._provider.bot_username or "bot"
         logger.info(
             "bot_response_sent",
-            extra={"telegram.bot_name": bot_name, "output.preview": _truncate(text)},
+            extra={
+                "telegram.bot_name": bot_name,
+                "output.preview": _truncate(final_text),
+            },
         )
 
         from ash.providers.telegram.provider import MAX_SEND_LENGTH
 
-        if thinking_msg_id and len(text) <= MAX_SEND_LENGTH:
-            await self._provider.edit(message.chat_id, thinking_msg_id, text)
+        if thinking_msg_id and len(final_text) <= MAX_SEND_LENGTH:
+            await self._provider.edit(message.chat_id, thinking_msg_id, final_text)
             return thinking_msg_id
 
         if thinking_msg_id:
@@ -842,7 +900,7 @@ class TelegramMessageHandler:
         return await self._provider.send(
             OutgoingMessage(
                 chat_id=message.chat_id,
-                text=text,
+                text=final_text,
                 reply_to_message_id=message.id,
             )
         )

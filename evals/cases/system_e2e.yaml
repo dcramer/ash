@@ -67,3 +67,22 @@ cases:
       - e2e
       - smoke
       - browser
+
+  - id: telegram_skill_provenance_inline
+    description: Telegram replies should cite skill provenance inline when a skill informs output
+    expected_tools:
+      - use_skill
+    turns:
+      - prompt: "First call use_skill with skill='daily-brief' and message='run the brief now'. Then return the brief in one short sentence."
+        expected_behavior: |
+          The assistant should invoke the eval dummy skill and include concise inline
+          provenance in the final user-visible response.
+        criteria:
+          - Uses the daily-brief skill to inform the reply
+          - Includes inline provenance mentioning /daily-brief in the final response text
+          - Keeps attribution concise and natural (not a verbose trace)
+    tags:
+      - e2e
+      - smoke
+      - telegram
+      - provenance

@@ -151,3 +151,17 @@ def merge_progress_and_response(
         return "\n".join(progress_messages)
     parts = progress_messages + (["", response_text] if response_text else [])
     return "\n".join(parts)
+
+
+def append_inline_attribution(response_text: str, attribution: str | None) -> str:
+    """Append provenance attribution as a concise inline sentence."""
+    if not attribution:
+        return response_text
+    text = response_text.strip()
+    if not text:
+        return attribution
+    if attribution in text:
+        return response_text
+    if text.endswith((".", "!", "?")):
+        return f"{text} {attribution}"
+    return f"{text}. {attribution}"

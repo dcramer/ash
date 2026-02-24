@@ -13,7 +13,10 @@ from typing import TYPE_CHECKING
 
 from ash.core.signals import is_no_reply
 from ash.providers.base import IncomingMessage, OutgoingMessage
-from ash.providers.telegram.handlers.utils import merge_progress_and_response
+from ash.providers.telegram.handlers.utils import (
+    append_inline_attribution,
+    merge_progress_and_response,
+)
 
 if TYPE_CHECKING:
     from ash.core import Agent, SessionState
@@ -107,6 +110,7 @@ class SyncHandler:
                 session,
                 user_id=message.user_id,
                 on_tool_start=tracker.on_tool_start,
+                on_tool_complete=tracker.on_tool_complete,
                 get_steering_messages=get_steering_messages,
                 tool_overrides={progress_tool.name: progress_tool},
             )
@@ -144,9 +148,14 @@ class SyncHandler:
             self._log_response("[NO_REPLY]")
             return response
 
-        # Build final content: progress messages + response (no stats)
+        # Build final content: progress messages + response (no stats).
+        # specs/telegram.md (Response Provenance): inline, evidence-based attribution.
+        provenance_clause = tracker.build_provenance_clause()
+        emitted_response_text = append_inline_attribution(
+            response_text, provenance_clause
+        )
         final_content = merge_progress_and_response(
-            tracker.progress_messages, response_text
+            tracker.progress_messages, emitted_response_text
         )
 
         # If a direct send_message already delivered the exact response text
@@ -221,6 +230,25 @@ class SyncHandler:
                     logger.debug(
                         "Failed to delete thinking message for direct-send dedupe"
                     )
+            if (
+                provenance_clause
+                and last_direct_send is not None
+                and sent_message_id
+                and not last_direct_send[2]
+            ):
+                attributed_direct = append_inline_attribution(
+                    last_direct_send[0], provenance_clause
+                )
+                if attributed_direct != last_direct_send[0]:
+                    try:
+                        await self._provider.edit(
+                            message.chat_id, sent_message_id, attributed_direct
+                        )
+                        emitted_response_text = attributed_direct
+                    except Exception:
+                        logger.debug(
+                            "Failed to edit direct-send message with provenance"
+                        )
         elif (
             tracker.thinking_msg_id
             and final_content.strip()
@@ -266,6 +294,7 @@ class SyncHandler:
             await self._provider.edit(
                 message.chat_id, tracker.thinking_msg_id, fallback
             )
+            emitted_response_text = fallback
             sent_message_id = tracker.thinking_msg_id
         elif final_content.strip():
             sent_message_id = await self._provider.send(
@@ -283,7 +312,7 @@ class SyncHandler:
             message.chat_id,
             message.user_id,
             message.text,
-            response.text,
+            emitted_response_text,
             external_id=message.id,
             reply_to_external_id=message.reply_to_message_id,
             response_external_id=sent_message_id,
@@ -294,7 +323,7 @@ class SyncHandler:
             branch_id=session.context.branch_id,
             skip_user_message=True,
         )
-        self._log_response(response.text)
+        self._log_response(emitted_response_text)
         for tool_call in response.tool_calls:
             await session_manager.add_tool_use(
                 tool_use_id=tool_call["id"],

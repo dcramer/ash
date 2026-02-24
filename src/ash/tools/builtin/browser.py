@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from ash.browser import BrowserManager, format_browser_result
 from ash.tools.base import Tool, ToolContext, ToolResult
@@ -134,5 +135,13 @@ class BrowserTool(Tool):
         )
         payload = format_browser_result(result)
         if result.ok:
-            return ToolResult.success(payload)
+            metadata: dict[str, Any] = {}
+            if result.page_url:
+                metadata["page_url"] = result.page_url
+                host = (urlparse(result.page_url).netloc or "").strip().lower()
+                if host.startswith("www."):
+                    host = host[4:]
+                if host:
+                    metadata["domain"] = host
+            return ToolResult.success(payload, **metadata)
         return ToolResult.error(payload, error_code=result.error_code)

@@ -325,4 +325,7 @@ class ScheduledTaskHandler:
         from ash.agents.executor import run_to_completion
 
         assert self._agent_executor is not None
-        return await run_to_completion(self._agent_executor, main_frame, child_frame)
+        result_text, _tool_calls = await run_to_completion(
+            self._agent_executor, main_frame, child_frame
+        )
+        return result_text

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ash.agents.base import Agent
 from ash.agents.types import (
@@ -47,7 +47,7 @@ async def run_to_completion(
     child_frame: "StackFrame",
     *,
     max_turns: int = 50,
-) -> str | None:
+) -> tuple[str | None, list[dict[str, Any]]]:
     """Run a subagent skill loop to completion without user interaction.
 
     Pushes the main and child frames onto a temporary stack and drives
@@ -65,9 +65,11 @@ async def run_to_completion(
         max_turns: Safety limit on total turns.
 
     Returns:
-        Collected text output, or None if no output was produced.
+        Tuple of (collected text output, reconstructed main-agent tool calls).
     """
     from ash.agents.types import AgentStack, TurnAction
+    from ash.llm.types import ToolResult as LLMToolResult
+    from ash.llm.types import ToolUse
 
     stack = AgentStack()
     stack.push(main_frame)
@@ -218,7 +220,38 @@ async def run_to_completion(
                 )
             break
 
-    return "\n\n".join(collected_text) if collected_text else None
+    ordered_calls: list[dict[str, Any]] = []
+    tool_results_by_id: dict[str, tuple[str, bool]] = {}
+    for msg in main_frame.session.messages:
+        content = msg.content
+        if isinstance(content, str):
+            continue
+        for block in content:
+            if isinstance(block, ToolUse):
+                ordered_calls.append(
+                    {
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
+                    }
+                )
+            elif isinstance(block, LLMToolResult):
+                tool_results_by_id[block.tool_use_id] = (block.content, block.is_error)
+
+    tool_calls: list[dict[str, Any]] = []
+    for call in ordered_calls:
+        output, is_error = tool_results_by_id.get(call["id"], ("", False))
+        tool_calls.append(
+            {
+                "id": call["id"],
+                "name": call["name"],
+                "input": call["input"],
+                "result": output,
+                "is_error": is_error,
+            }
+        )
+
+    return ("\n\n".join(collected_text) if collected_text else None, tool_calls)
 
 
 class AgentExecutor:

@@ -34,6 +34,7 @@ from ash.providers.telegram.handlers.utils import (
     MAX_MESSAGE_LENGTH,
     MIN_EDIT_INTERVAL,
     STREAM_DELAY,
+    append_inline_attribution,
     escape_markdown_v2,
     extract_text_content,
     format_tool_brief,
@@ -57,6 +58,7 @@ __all__ = [
     "MAX_MESSAGE_LENGTH",
     "MIN_EDIT_INTERVAL",
     "STREAM_DELAY",
+    "append_inline_attribution",
     # Formatting functions
     "escape_markdown_v2",
     "format_tool_brief",
