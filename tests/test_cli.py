@@ -156,14 +156,13 @@ class TestMemoryCommand:
         )
         assert result.exit_code == 0
         assert [name for name, _force in calls] == [
-            "prune-missing-provenance",
             "self-facts",
-            "backfill-subjects",
             "attribution",
             "fix-names",
+            "quality",
+            "backfill-subjects",
             "normalize-semantics",
             "reclassify",
-            "quality",
             "dedup",
             "contradictions",
         ]
@@ -257,7 +256,7 @@ class TestMemoryCommand:
             app, ["memory", "doctor", "all", "--force", "--config", str(config_file)]
         )
         assert result.exit_code == 0
-        assert len(calls) == 10
+        assert len(calls) == 9
         assert all(force is True for _name, force in calls)
 
 

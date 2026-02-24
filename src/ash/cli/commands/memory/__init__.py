@@ -340,7 +340,7 @@ async def _run_memory_action(
         elif subcommand == "self-facts":
             await memory_doctor_self_facts(store, force=force)
         elif subcommand == "backfill-subjects":
-            await memory_doctor_backfill_subjects(store, force=force)
+            await memory_doctor_backfill_subjects(store, force=force, config=config)
         elif subcommand == "attribution":
             await memory_doctor_attribution(store, force=force)
         elif subcommand == "fix-names":
@@ -354,14 +354,13 @@ async def _run_memory_action(
         elif subcommand == "contradictions":
             await memory_doctor_contradictions(store, config, force=force)
         elif subcommand == "all":
-            await memory_doctor_prune_missing_provenance(store, force=force)
             await memory_doctor_self_facts(store, force=force)
-            await memory_doctor_backfill_subjects(store, force=force)
             await memory_doctor_attribution(store, force=force)
             await memory_doctor_fix_names(store, force=force)
+            await memory_doctor_quality(store, config, force=force)
+            await memory_doctor_backfill_subjects(store, force=force, config=config)
             await memory_doctor_normalize_semantics(store, force=force)
             await memory_doctor_reclassify(store, config, force=force)
-            await memory_doctor_quality(store, config, force=force)
             await memory_doctor_dedup(store, config, force=force)
             await memory_doctor_contradictions(store, config, force=force)
     else:

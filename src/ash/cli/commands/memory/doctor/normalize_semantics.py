@@ -8,7 +8,13 @@ from ash.cli.commands.memory.doctor._helpers import confirm_or_cancel, truncate
 from ash.cli.console import console, create_table, success, warning
 from ash.graph.edges import STATED_BY, create_stated_by_edge, get_stated_by_person
 from ash.memory.processing import compile_assertion, validate_assertion
-from ash.store.types import ExtractedFact, get_assertion, upsert_assertion_metadata
+from ash.store.types import (
+    AssertionKind,
+    ExtractedFact,
+    MemoryType,
+    get_assertion,
+    upsert_assertion_metadata,
+)
 
 if TYPE_CHECKING:
     from ash.store.store import Store
@@ -110,6 +116,22 @@ def _get_or_compile_assertion(
 ) -> AssertionEnvelope:
     assertion = get_assertion(memory)
     if assertion is not None:
+        updates: dict[str, object] = {}
+
+        if edge_subjects and not assertion.subjects:
+            updates["subjects"] = edge_subjects
+            if memory.memory_type == MemoryType.RELATIONSHIP:
+                updates["assertion_kind"] = AssertionKind.RELATIONSHIP_FACT
+            elif edge_stated_by and set(edge_subjects) == {edge_stated_by}:
+                updates["assertion_kind"] = AssertionKind.SELF_FACT
+            else:
+                updates["assertion_kind"] = AssertionKind.PERSON_FACT
+
+        if edge_stated_by and assertion.speaker_person_id is None:
+            updates["speaker_person_id"] = edge_stated_by
+
+        if updates:
+            return assertion.model_copy(update=updates)
         return assertion
 
     fact = ExtractedFact(

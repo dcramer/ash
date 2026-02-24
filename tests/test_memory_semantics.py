@@ -4,6 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ash.cli.commands.memory.doctor.normalize_semantics import (
+    memory_doctor_normalize_semantics,
+)
 from ash.graph.graph import KnowledgeGraph
 from ash.graph.persistence import GraphPersistence
 from ash.memory.embeddings import EmbeddingGenerator
@@ -162,3 +165,39 @@ class TestAssertionPipeline:
         metadata = results[0].metadata or {}
         assert metadata.get("assertion_kind") == "person_fact"
         assert metadata.get("speaker_person_id") == person.id
+
+    async def test_normalize_semantics_adopts_edge_subjects_for_existing_assertion(
+        self, graph_store: Store
+    ):
+        from ash.graph.edges import create_about_edge, get_subject_person_ids
+
+        person = await graph_store.create_person(created_by="user-1", name="Sarah")
+
+        memory = await graph_store.add_memory(
+            content="Sarah's birthday is August 12",
+            owner_user_id="user-1",
+            assertion=AssertionEnvelope(
+                assertion_kind=AssertionKind.CONTEXT_FACT,
+                subjects=[],
+                predicates=[
+                    AssertionPredicate(
+                        name="describes",
+                        object_type=PredicateObjectType.TEXT,
+                        value="Sarah's birthday is August 12",
+                    )
+                ],
+            ),
+        )
+
+        graph_store.graph.add_edge(create_about_edge(memory.id, person.id))
+        graph_store._persistence.mark_dirty("edges")
+        await graph_store.flush_graph()
+
+        await memory_doctor_normalize_semantics(graph_store, force=True)
+
+        updated = graph_store.graph.memories[memory.id]
+        assertion = get_assertion(updated)
+        assert assertion is not None
+        assert assertion.subjects == [person.id]
+        assert assertion.assertion_kind == AssertionKind.PERSON_FACT
+        assert get_subject_person_ids(graph_store.graph, memory.id) == [person.id]
