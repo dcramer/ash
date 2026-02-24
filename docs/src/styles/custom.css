@@ -90,9 +90,9 @@ body::before {
 }
 
 header.header {
-  background: linear-gradient(180deg, #f8faf3 0%, #f0f3ea 100%) !important;
-  border-bottom: 2px solid var(--ash-ink);
-  box-shadow: 0 3px 0 rgba(17, 19, 15, 0.14);
+  background: #10110d !important;
+  border-bottom: 2px solid #b0ff1f;
+  box-shadow: 0 3px 0 rgba(176, 255, 31, 0.2);
   backdrop-filter: none;
 }
 
@@ -105,6 +105,22 @@ header.header :is(
   [data-pagefind-ui]
 ) {
   border-radius: 0 !important;
+}
+
+@media (min-width: 64rem) {
+  header.header .site-title {
+    margin-right: auto !important;
+  }
+
+  header.header :is(
+    .site-search,
+    .search,
+    .search-field,
+    .starlight-search,
+    [data-pagefind-ui]
+  ) {
+    margin-left: auto !important;
+  }
 }
 
 header.header :is(
@@ -139,7 +155,7 @@ header.header :is(
   font-family: 'Bebas Neue', var(--sl-font);
   font-size: 1.5rem !important;
   letter-spacing: 0.03em;
-  color: var(--ash-ink) !important;
+  color: #dfff86 !important;
   display: flex !important;
   align-items: center;
   gap: 0.5rem;
