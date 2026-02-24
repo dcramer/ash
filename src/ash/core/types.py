@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from ash.llm.thinking import ThinkingConfig
 from ash.llm.types import ToolUse
+from ash.tools.trust import ToolOutputTrustPolicy
 
 if TYPE_CHECKING:
     from ash.agents import AgentExecutor, AgentRegistry
@@ -82,6 +83,9 @@ class AgentConfig:
     compaction_reserve_tokens: int = 16384  # Buffer to trigger compaction
     compaction_keep_recent_tokens: int = 20000  # Always keep recent context
     compaction_summary_max_tokens: int = 2000  # Max tokens for summary
+    tool_output_trust_policy: ToolOutputTrustPolicy = field(
+        default_factory=ToolOutputTrustPolicy.defaults
+    )
 
 
 @dataclass

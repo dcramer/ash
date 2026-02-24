@@ -213,6 +213,14 @@ class ImageConfig(BaseModel):
     no_caption_auto_respond: bool = True
 
 
+class ToolOutputTrustConfig(BaseModel):
+    """Configuration for tool-output trust boundary behavior."""
+
+    mode: Literal["warn_sanitize", "block", "log_only"] = "warn_sanitize"
+    max_chars: int = Field(default=12_000, ge=256, le=200_000)
+    include_provenance_header: bool = True
+
+
 class BrowserSandboxConfig(BaseModel):
     """Sandbox provider config for browser integration."""
 
@@ -383,6 +391,9 @@ class AshConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     image: ImageConfig = Field(default_factory=ImageConfig)
+    tool_output_trust: ToolOutputTrustConfig = Field(
+        default_factory=ToolOutputTrustConfig
+    )
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     conversation: ConversationConfig = Field(default_factory=ConversationConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)

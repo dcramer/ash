@@ -16,7 +16,12 @@ from ash.agents.types import (
 )
 from ash.core.session import SessionState
 from ash.llm.types import ToolDefinition
-from ash.tools.base import ToolContext
+from ash.tools.base import ToolContext, ToolResult
+from ash.tools.trust import (
+    SanitizedToolResult,
+    ToolOutputTrustPolicy,
+    sanitize_tool_result_for_model,
+)
 
 if TYPE_CHECKING:
     from ash.config import AshConfig
@@ -228,6 +233,44 @@ class AgentExecutor:
         self._llm = llm_provider
         self._tools = tool_executor
         self._config = config
+        trust_config = getattr(config, "tool_output_trust", None)
+        self._tool_output_trust_policy = ToolOutputTrustPolicy(
+            mode=getattr(trust_config, "mode", "warn_sanitize"),
+            max_chars=getattr(trust_config, "max_chars", 12_000),
+            include_provenance_header=getattr(
+                trust_config, "include_provenance_header", True
+            ),
+            injection_patterns=ToolOutputTrustPolicy.defaults().injection_patterns,
+            redact_patterns=ToolOutputTrustPolicy.defaults().redact_patterns,
+        )
+
+    def _sanitize_tool_result(
+        self,
+        *,
+        tool_name: str,
+        tool_use_id: str,
+        result: ToolResult,
+    ) -> SanitizedToolResult:
+        sanitized = sanitize_tool_result_for_model(
+            tool_name=tool_name,
+            result=result,
+            policy=self._tool_output_trust_policy,
+        )
+        if sanitized.risk_signal.risk_score > 0:
+            logger.warning(
+                "tool_output_trust_signal",
+                extra={
+                    "gen_ai.tool.name": tool_name,
+                    "gen_ai.tool.call.id": tool_use_id,
+                    "risk_score": sanitized.risk_signal.risk_score,
+                    "matched_rules": sanitized.risk_signal.matched_rules,
+                    "action_taken": sanitized.risk_signal.action_taken,
+                    "truncated": sanitized.risk_signal.truncated,
+                    "modified": sanitized.was_modified,
+                    "raw_content_hash": sanitized.raw_content_hash,
+                },
+            )
+        return sanitized
 
     @staticmethod
     def _build_result_metadata(tool_context: ToolContext) -> dict[str, str]:
@@ -579,10 +622,17 @@ class AgentExecutor:
                 # Add error results for any other tools that were called
                 for tool_use in tool_uses:
                     if tool_use.name != "interrupt":
+                        skipped_result = self._sanitize_tool_result(
+                            tool_name=tool_use.name,
+                            tool_use_id=tool_use.id,
+                            result=ToolResult.error(
+                                "Skipped: agent interrupted for user input"
+                            ),
+                        )
                         session.add_tool_result(
                             tool_use.id,
-                            "Skipped: agent interrupted for user input",
-                            is_error=True,
+                            skipped_result.model_content,
+                            is_error=skipped_result.is_error,
                         )
 
                 prompt = interrupt_tool.input.get("prompt", "Checkpoint reached")
@@ -614,18 +664,32 @@ class AgentExecutor:
                 if tool_use.name == "use_agent":
                     target_agent = tool_use.input.get("agent", "")
                     if target_agent == agent_config.name:
+                        self_ref_result = self._sanitize_tool_result(
+                            tool_name=tool_use.name,
+                            tool_use_id=tool_use.id,
+                            result=ToolResult.error(
+                                f"Agent '{agent_config.name}' cannot invoke itself"
+                            ),
+                        )
                         session.add_tool_result(
                             tool_use.id,
-                            f"Agent '{agent_config.name}' cannot invoke itself",
-                            is_error=True,
+                            self_ref_result.model_content,
+                            is_error=self_ref_result.is_error,
                         )
                         continue
 
                 if effective_tools and tool_use.name not in effective_tools:
+                    unavailable_result = self._sanitize_tool_result(
+                        tool_name=tool_use.name,
+                        tool_use_id=tool_use.id,
+                        result=ToolResult.error(
+                            f"Tool '{tool_use.name}' is not available to this agent"
+                        ),
+                    )
                     session.add_tool_result(
                         tool_use.id,
-                        f"Tool '{tool_use.name}' is not available to this agent",
-                        is_error=True,
+                        unavailable_result.model_content,
+                        is_error=unavailable_result.is_error,
                     )
                     continue
 
@@ -642,12 +706,30 @@ class AgentExecutor:
                     output = f"Tool error: {e}"
                     is_error = True
 
-                session.add_tool_result(tool_use.id, output, is_error=is_error)
+                sanitized = self._sanitize_tool_result(
+                    tool_name=tool_use.name,
+                    tool_use_id=tool_use.id,
+                    result=ToolResult(content=output, is_error=is_error),
+                )
+                session.add_tool_result(
+                    tool_use.id,
+                    sanitized.model_content,
+                    is_error=sanitized.is_error,
+                )
                 if session_manager and agent_session_id:
                     await session_manager.add_tool_result(
                         tool_use_id=tool_use.id,
                         output=output,
-                        success=not is_error,
+                        success=not sanitized.is_error,
+                        metadata={
+                            "tool_output_trust": {
+                                "risk_score": sanitized.risk_signal.risk_score,
+                                "matched_rules": sanitized.risk_signal.matched_rules,
+                                "action_taken": sanitized.risk_signal.action_taken,
+                                "truncated": sanitized.risk_signal.truncated,
+                                "raw_content_hash": sanitized.raw_content_hash,
+                            }
+                        },
                         agent_session_id=agent_session_id,
                     )
 
@@ -794,12 +876,28 @@ class AgentExecutor:
                     )
             elif tool_result is not None:
                 tu_id, content, is_error = tool_result
-                session.add_tool_result(tu_id, content, is_error)
+                resumed_result = self._sanitize_tool_result(
+                    tool_name="child_result",
+                    tool_use_id=tu_id,
+                    result=ToolResult(content=content, is_error=is_error),
+                )
+                session.add_tool_result(
+                    tu_id, resumed_result.model_content, resumed_result.is_error
+                )
                 if session_manager and agent_session_id:
                     await session_manager.add_tool_result(
                         tool_use_id=tu_id,
                         output=content,
-                        success=not is_error,
+                        success=not resumed_result.is_error,
+                        metadata={
+                            "tool_output_trust": {
+                                "risk_score": resumed_result.risk_signal.risk_score,
+                                "matched_rules": resumed_result.risk_signal.matched_rules,
+                                "action_taken": resumed_result.risk_signal.action_taken,
+                                "truncated": resumed_result.risk_signal.truncated,
+                                "raw_content_hash": resumed_result.raw_content_hash,
+                            }
+                        },
                         agent_session_id=agent_session_id,
                     )
 
@@ -850,8 +948,15 @@ class AgentExecutor:
                     if tool_use.name == "complete":
                         result_text = tool_use.input.get("result", "")
                         # Add tool result so session is well-formed
+                        complete_result = self._sanitize_tool_result(
+                            tool_name=tool_use.name,
+                            tool_use_id=tool_use.id,
+                            result=ToolResult.success(result_text),
+                        )
                         session.add_tool_result(
-                            tool_use.id, result_text, is_error=False
+                            tool_use.id,
+                            complete_result.model_content,
+                            is_error=complete_result.is_error,
                         )
                         return TurnResult(TurnAction.COMPLETE, text=result_text)
 
@@ -864,10 +969,17 @@ class AgentExecutor:
                         frame.effective_tools
                         and tool_use.name not in frame.effective_tools
                     ):
+                        unavailable_result = self._sanitize_tool_result(
+                            tool_name=tool_use.name,
+                            tool_use_id=tool_use.id,
+                            result=ToolResult.error(
+                                f"Tool '{tool_use.name}' is not available to this agent"
+                            ),
+                        )
                         session.add_tool_result(
                             tool_use.id,
-                            f"Tool '{tool_use.name}' is not available to this agent",
-                            is_error=True,
+                            unavailable_result.model_content,
+                            is_error=unavailable_result.is_error,
                         )
                         continue
 
@@ -886,15 +998,31 @@ class AgentExecutor:
                         result = await self._tools.execute(
                             tool_use.name, tool_use.input, per_tool_context
                         )
+                        sanitized = self._sanitize_tool_result(
+                            tool_name=tool_use.name,
+                            tool_use_id=tool_use.id,
+                            result=result,
+                        )
                         session.add_tool_result(
-                            tool_use.id, result.content, is_error=result.is_error
+                            tool_use.id,
+                            sanitized.model_content,
+                            is_error=sanitized.is_error,
                         )
                         # Log tool result
                         if session_manager and agent_session_id:
                             await session_manager.add_tool_result(
                                 tool_use_id=tool_use.id,
                                 output=result.content,
-                                success=not result.is_error,
+                                success=not sanitized.is_error,
+                                metadata={
+                                    "tool_output_trust": {
+                                        "risk_score": sanitized.risk_signal.risk_score,
+                                        "matched_rules": sanitized.risk_signal.matched_rules,
+                                        "action_taken": sanitized.risk_signal.action_taken,
+                                        "truncated": sanitized.risk_signal.truncated,
+                                        "raw_content_hash": sanitized.raw_content_hash,
+                                    }
+                                },
                                 agent_session_id=agent_session_id,
                             )
                     except ChildActivated as ca:
@@ -907,14 +1035,30 @@ class AgentExecutor:
                             "interactive_turn_tool_error",
                             extra={"error.message": str(e)},
                         )
+                        error_result = self._sanitize_tool_result(
+                            tool_name=tool_use.name,
+                            tool_use_id=tool_use.id,
+                            result=ToolResult.error(f"Tool error: {e}"),
+                        )
                         session.add_tool_result(
-                            tool_use.id, f"Tool error: {e}", is_error=True
+                            tool_use.id,
+                            error_result.model_content,
+                            is_error=error_result.is_error,
                         )
                         if session_manager and agent_session_id:
                             await session_manager.add_tool_result(
                                 tool_use_id=tool_use.id,
                                 output=f"Tool error: {e}",
                                 success=False,
+                                metadata={
+                                    "tool_output_trust": {
+                                        "risk_score": error_result.risk_signal.risk_score,
+                                        "matched_rules": error_result.risk_signal.matched_rules,
+                                        "action_taken": error_result.risk_signal.action_taken,
+                                        "truncated": error_result.risk_signal.truncated,
+                                        "raw_content_hash": error_result.raw_content_hash,
+                                    }
+                                },
                                 agent_session_id=agent_session_id,
                             )
 

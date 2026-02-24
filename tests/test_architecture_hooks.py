@@ -357,3 +357,22 @@ def test_serve_uses_shared_server_runner() -> None:
     assert "ServerRunner(" in text, (
         f"Expected shared server runner in {path.relative_to(ROOT)}"
     )
+
+
+def test_tool_output_handoff_is_sanitized_before_session_write() -> None:
+    boundary_files = [
+        ROOT / "src/ash/core/agent.py",
+        ROOT / "src/ash/agents/executor.py",
+    ]
+    raw_handoff_pattern = re.compile(
+        r"session\.add_tool_result\([^\\n]*result\.content"
+    )
+
+    for path in boundary_files:
+        text = path.read_text(encoding="utf-8")
+        assert "sanitize_tool_result_for_model" in text, (
+            f"Expected tool-output sanitizer usage in {path.relative_to(ROOT)}"
+        )
+        assert not raw_handoff_pattern.search(text), (
+            f"Raw tool result content handed to session in {path.relative_to(ROOT)}"
+        )

@@ -42,7 +42,8 @@ from ash.llm.types import (
     TextContent,
     ToolUse,
 )
-from ash.tools import ToolContext, ToolExecutor, ToolRegistry
+from ash.tools import ToolContext, ToolExecutor, ToolRegistry, ToolResult
+from ash.tools.trust import SanitizedToolResult, sanitize_tool_result_for_model
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -187,6 +188,7 @@ class Agent:
             incoming_message_preprocessors or []
         )
         self._message_postprocess_hooks = tuple(message_postprocess_hooks or [])
+        self._tool_output_trust_policy = self._config.tool_output_trust_policy
 
     def install_integration_hooks(
         self,
@@ -586,6 +588,42 @@ class Agent:
         if tool_context.reply_to_message_id:
             session.context.reply_to_message_id = tool_context.reply_to_message_id
 
+    def _add_sanitized_tool_result(
+        self,
+        *,
+        session: SessionState,
+        tool_use_id: str,
+        tool_name: str,
+        result: ToolResult,
+    ) -> SanitizedToolResult:
+        """Apply trust boundary before adding tool results to model-visible session."""
+        sanitized = sanitize_tool_result_for_model(
+            tool_name=tool_name,
+            result=result,
+            policy=self._tool_output_trust_policy,
+        )
+        if sanitized.risk_signal.risk_score > 0:
+            logger.warning(
+                "tool_output_trust_signal",
+                extra={
+                    "gen_ai.tool.name": tool_name,
+                    "gen_ai.tool.call.id": tool_use_id,
+                    "risk_score": sanitized.risk_signal.risk_score,
+                    "matched_rules": sanitized.risk_signal.matched_rules,
+                    "action_taken": sanitized.risk_signal.action_taken,
+                    "truncated": sanitized.risk_signal.truncated,
+                    "modified": sanitized.was_modified,
+                    "raw_content_hash": sanitized.raw_content_hash,
+                },
+            )
+
+        session.add_tool_result(
+            tool_use_id=tool_use_id,
+            content=sanitized.model_content,
+            is_error=sanitized.is_error,
+        )
+        return sanitized
+
     def _build_child_activated(
         self,
         ca: ChildActivated,
@@ -642,6 +680,12 @@ class Agent:
                 tool_use.input,
                 per_tool_context,
             )
+            sanitized = self._add_sanitized_tool_result(
+                session=session,
+                tool_use_id=tool_use.id,
+                tool_name=tool_use.name,
+                result=result,
+            )
 
             tool_calls.append(
                 {
@@ -649,15 +693,18 @@ class Agent:
                     "name": tool_use.name,
                     "input": tool_use.input,
                     "result": result.content,
-                    "is_error": result.is_error,
-                    "metadata": result.metadata,
+                    "is_error": sanitized.is_error,
+                    "metadata": {
+                        **result.metadata,
+                        "tool_output_trust": {
+                            "risk_score": sanitized.risk_signal.risk_score,
+                            "matched_rules": sanitized.risk_signal.matched_rules,
+                            "action_taken": sanitized.risk_signal.action_taken,
+                            "truncated": sanitized.risk_signal.truncated,
+                            "raw_content_hash": sanitized.raw_content_hash,
+                        },
+                    },
                 }
-            )
-
-            session.add_tool_result(
-                tool_use_id=tool_use.id,
-                content=result.content,
-                is_error=result.is_error,
             )
 
             if get_steering_messages and i < len(pending_tools) - 1:
@@ -673,10 +720,11 @@ class Agent:
                                 "is_error": True,
                             }
                         )
-                        session.add_tool_result(
+                        self._add_sanitized_tool_result(
+                            session=session,
                             tool_use_id=remaining.id,
-                            content="Skipped: user sent new message",
-                            is_error=True,
+                            tool_name=remaining.name,
+                            result=ToolResult.error("Skipped: user sent new message"),
                         )
                     logger.info(
                         "steering_received",
@@ -1009,6 +1057,7 @@ async def create_agent(
     from ash.tools.builtin.files import ReadFileTool, WriteFileTool
     from ash.tools.builtin.search_cache import SearchCache
     from ash.tools.builtin.skills import UseSkillTool
+    from ash.tools.trust import ToolOutputTrustPolicy
 
     model_config = config.get_model(model_alias)
     llm = config.create_llm_provider_for_model(model_alias)
@@ -1118,6 +1167,7 @@ async def create_agent(
     thinking_config = (
         resolve_thinking(model_config.thinking) if model_config.thinking else None
     )
+    default_trust_policy = ToolOutputTrustPolicy.defaults()
 
     agent = Agent(
         llm=llm,
@@ -1145,6 +1195,15 @@ async def create_agent(
             compaction_reserve_tokens=config.memory.compaction_reserve_tokens,
             compaction_keep_recent_tokens=config.memory.compaction_keep_recent_tokens,
             compaction_summary_max_tokens=config.memory.compaction_summary_max_tokens,
+            tool_output_trust_policy=ToolOutputTrustPolicy(
+                mode=config.tool_output_trust.mode,
+                max_chars=config.tool_output_trust.max_chars,
+                include_provenance_header=(
+                    config.tool_output_trust.include_provenance_header
+                ),
+                injection_patterns=default_trust_policy.injection_patterns,
+                redact_patterns=default_trust_policy.redact_patterns,
+            ),
         ),
     )
 
