@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from ash.config import AshConfig, Workspace
     from ash.core.prompt import RuntimeInfo
     from ash.memory.extractor import MemoryExtractor
+    from ash.memory.query_planner import MemoryQueryPlanner
     from ash.providers.base import IncomingMessage
     from ash.store.store import Store
     from ash.store.types import PersonEntry, RetrievedContext
@@ -160,6 +161,9 @@ class Agent:
         memory_extractor: MemoryExtractor | None = None,
         config: AgentConfig | None = None,
         graph_store: Store | None = None,
+        memory_query_planner: MemoryQueryPlanner | None = None,
+        memory_context_limit: int = 10,
+        memory_retrieval_limit: int = 25,
         mount_prefix: str = "/ash",
         prompt_context_augmenters: list[PromptContextAugmenter] | None = None,
         sandbox_env_augmenters: list[SandboxEnvAugmenter] | None = None,
@@ -190,6 +194,9 @@ class Agent:
         self._memory: Store | None = graph_store
         self._memory_extractor = memory_extractor
         self._people: Store | None = graph_store
+        self._memory_query_planner = memory_query_planner
+        self._memory_context_limit = max(1, memory_context_limit)
+        self._memory_retrieval_limit = max(1, memory_retrieval_limit)
         self._config = config or AgentConfig()
         self._mount_prefix = mount_prefix
         self._prompt_context_augmenters = tuple(prompt_context_augmenters or [])
@@ -497,7 +504,12 @@ class Agent:
 
         # Use ContextGatherer to retrieve memory and people context
         ctx = session.context
-        context_gatherer = ContextGatherer(self._memory)
+        context_gatherer = ContextGatherer(
+            self._memory,
+            query_planner=self._memory_query_planner,
+            max_total_memories=self._memory_context_limit,
+            retrieval_memories=self._memory_retrieval_limit,
+        )
         gathered = await context_gatherer.gather(
             user_id=effective_user_id,
             user_message=user_message,
@@ -1150,6 +1162,10 @@ async def create_agent(
     from ash.agents import AgentExecutor, AgentRegistry
     from ash.agents.builtin import register_builtin_agents
     from ash.core.prompt import RuntimeInfo
+    from ash.memory.query_planner import (
+        LLMQueryPlanner,
+        resolve_query_planner_runtime,
+    )
     from ash.memory.runtime import initialize_memory_runtime
     from ash.sandbox import SandboxExecutor
     from ash.sandbox.packages import build_setup_command, collect_skill_packages
@@ -1219,6 +1235,21 @@ async def create_agent(
     )
     graph_store = memory_runtime.store
     memory_extractor = memory_runtime.extractor
+    memory_query_planner = None
+    if config.memory.query_planning_enabled:
+        try:
+            planner_llm, planner_model = resolve_query_planner_runtime(
+                config=config,
+                requested_alias=config.memory.query_planning_model_alias,
+                default_alias="default",
+            )
+            memory_query_planner = LLMQueryPlanner(
+                llm=planner_llm,
+                model=planner_model,
+                retrieval_limit=config.memory.query_planning_fetch_memories,
+            )
+        except Exception:
+            logger.warning("memory_query_planner_disabled", exc_info=True)
 
     tool_executor = ToolExecutor(tool_registry)
     logger.info("tools_registered", extra={"count": len(tool_registry)})
@@ -1279,6 +1310,9 @@ async def create_agent(
         runtime=runtime,
         memory_extractor=memory_extractor,
         graph_store=graph_store,
+        memory_query_planner=memory_query_planner,
+        memory_context_limit=config.memory.context_injection_limit,
+        memory_retrieval_limit=config.memory.query_planning_fetch_memories,
         mount_prefix=config.sandbox.mount_prefix,
         prompt_context_augmenters=prompt_context_augmenters,
         sandbox_env_augmenters=sandbox_env_augmenters,

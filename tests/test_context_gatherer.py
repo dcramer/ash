@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ash.core.context import ContextGatherer, GatheredContext
+from ash.memory.query_planner import PlannedMemoryQuery
 from ash.store.types import PersonEntry, RetrievedContext, SearchResult
 
 
@@ -196,3 +197,63 @@ class TestContextGatherer:
         assert result.known_people is not None
         assert len(result.known_people) == 1
         assert result.known_people[0].name == "Sarah"
+
+    @pytest.mark.asyncio
+    async def test_planner_rewrites_to_single_retrieval_query(self):
+        """Planner should rewrite to one retrieval query with planner fetch limit."""
+        result_context = RetrievedContext(
+            memories=[
+                SearchResult(
+                    id="mem-location",
+                    content="You live in San Francisco",
+                    similarity=0.95,
+                    metadata={},
+                    source_type="memory",
+                )
+            ]
+        )
+        planner = MagicMock()
+        planner.plan = AsyncMock(
+            return_value=PlannedMemoryQuery(query="my location city", max_results=25)
+        )
+
+        mock_store = MagicMock()
+        mock_store.get_context_for_message = AsyncMock(return_value=result_context)
+        mock_store.list_people = AsyncMock(return_value=[])
+        mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
+
+        gatherer = ContextGatherer(
+            store=mock_store,
+            query_planner=planner,
+            max_total_memories=10,
+        )
+        result = await gatherer.gather(user_id="user-1", user_message="check weather")
+
+        assert result.memory is not None
+        assert [m.id for m in result.memory.memories] == ["mem-location"]
+        assert mock_store.get_context_for_message.await_count == 1
+        first_call = mock_store.get_context_for_message.await_args_list[0]
+        assert first_call.kwargs["user_message"] == "my location city"
+        assert first_call.kwargs["max_memories"] == 25
+        planner.plan.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_planner_failure_falls_back_to_base_query(self):
+        """Planner failure should not block normal retrieval."""
+        planner = MagicMock()
+        planner.plan = AsyncMock(side_effect=RuntimeError("timeout"))
+        mock_store = MagicMock()
+        mock_store.get_context_for_message = AsyncMock(
+            return_value=RetrievedContext(memories=[])
+        )
+        mock_store.list_people = AsyncMock(return_value=[])
+        mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
+
+        gatherer = ContextGatherer(store=mock_store, query_planner=planner)
+        await gatherer.gather(
+            user_id="user-1", user_message="what did I say yesterday?"
+        )
+
+        assert mock_store.get_context_for_message.await_count == 1

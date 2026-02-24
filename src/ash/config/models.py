@@ -199,6 +199,16 @@ class MemoryConfig(BaseModel):
     extraction_verification_model: str | None = (
         None  # Verification model alias or provider model name (None = use default)
     )
+    query_planning_enabled: bool = (
+        True  # Enable a fast LLM planner that rewrites one retrieval query
+    )
+    query_planning_model_alias: str | None = (
+        None  # Planner model alias from [models.*] (None = use [models.default])
+    )
+    query_planning_fetch_memories: int = (
+        25  # Initial retrieval count before pruning to final context budget
+    )
+    context_injection_limit: int = 10  # Final memory count injected into prompt
 
 
 class ImageConfig(BaseModel):

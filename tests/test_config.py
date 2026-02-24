@@ -106,6 +106,10 @@ class TestMemoryConfig:
     def test_defaults(self):
         config = MemoryConfig()
         assert config.max_context_messages == 20
+        assert config.query_planning_enabled is True
+        assert config.query_planning_model_alias is None
+        assert config.query_planning_fetch_memories == 25
+        assert config.context_injection_limit == 10
 
 
 class TestBrowserConfig:

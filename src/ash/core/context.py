@@ -11,9 +11,13 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ash.memory.query_planner import PlannedMemoryQuery
+from ash.store.types import RetrievedContext
+
 if TYPE_CHECKING:
+    from ash.memory.query_planner import MemoryQueryPlanner
     from ash.store.store import Store
-    from ash.store.types import PersonEntry, RetrievedContext
+    from ash.store.types import PersonEntry
 
 
 logger = logging.getLogger(__name__)
@@ -41,14 +45,27 @@ class ContextGatherer:
     to reduce complexity and improve testability.
     """
 
-    def __init__(self, store: Store | None):
+    def __init__(
+        self,
+        store: Store | None,
+        *,
+        query_planner: MemoryQueryPlanner | None = None,
+        max_total_memories: int = 10,
+        retrieval_memories: int = 25,
+    ):
         """Initialize context gatherer.
 
         Args:
             store: Unified store for memory and people operations.
                    If None, context gathering is disabled.
+            query_planner: Optional planner that rewrites retrieval query.
+            max_total_memories: Maximum memories to inject after pruning.
+            retrieval_memories: Number of memories to fetch before pruning.
         """
         self._store = store
+        self._query_planner = query_planner
+        self._max_total_memories = max(1, max_total_memories)
+        self._retrieval_memories = max(1, retrieval_memories)
 
     async def gather(
         self,
@@ -117,29 +134,22 @@ class ContextGatherer:
         try:
             start_time = time.monotonic()
 
-            # Build participant info for cross-context retrieval
-            participant_person_ids: dict[str, set[str]] | None = None
-
-            # Resolve sender's person IDs for cross-context (both private and group).
-            # Privacy filter already blocks SENSITIVE facts in group chats.
-            if sender_username:
-                resolved_person_ids = sender_person_ids
-                if resolved_person_ids is None:
-                    resolved_person_ids = await self._resolve_sender_person_ids(
-                        sender_username
-                    )
-                try:
-                    if resolved_person_ids:
-                        participant_person_ids = {sender_username: resolved_person_ids}
-                except Exception:
-                    logger.debug("Failed to resolve participant person IDs")
-
-            memory_context = await self._store.get_context_for_message(
-                user_id=user_id,
+            # Spec reference: specs/memory/retrieval.md
+            participant_person_ids = await self._build_participant_person_ids(
+                sender_username=sender_username,
+                sender_person_ids=sender_person_ids,
+            )
+            query_plan = await self._build_query_plan(
                 user_message=user_message,
+                chat_type=chat_type,
+                sender_username=sender_username,
+            )
+            memory_context = await self._retrieve_for_query(
+                user_id=user_id,
                 chat_id=chat_id,
                 chat_type=chat_type,
                 participant_person_ids=participant_person_ids,
+                query_plan=query_plan,
             )
 
             duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -171,6 +181,82 @@ class ContextGatherer:
         except Exception:
             logger.warning("memory_retrieval_failed", exc_info=True)
             return None
+
+    async def _build_participant_person_ids(
+        self,
+        *,
+        sender_username: str | None,
+        sender_person_ids: set[str] | None,
+    ) -> dict[str, set[str]] | None:
+        participant_person_ids: dict[str, set[str]] | None = None
+        if not sender_username:
+            return participant_person_ids
+
+        resolved_person_ids = sender_person_ids
+        if resolved_person_ids is None:
+            resolved_person_ids = await self._resolve_sender_person_ids(sender_username)
+        if resolved_person_ids:
+            participant_person_ids = {sender_username: resolved_person_ids}
+
+        return participant_person_ids
+
+    async def _build_query_plan(
+        self,
+        *,
+        user_message: str,
+        chat_type: str | None,
+        sender_username: str | None,
+    ) -> PlannedMemoryQuery:
+        base_query = PlannedMemoryQuery(
+            query=user_message,
+            max_results=self._retrieval_memories,
+        )
+        if self._query_planner is None:
+            return base_query
+
+        try:
+            return await self._query_planner.plan(
+                user_message=user_message,
+                chat_type=chat_type,
+                sender_username=sender_username,
+            )
+        except Exception:
+            logger.warning("memory_query_planning_failed", exc_info=True)
+            return base_query
+
+    async def _retrieve_for_query(
+        self,
+        *,
+        user_id: str,
+        chat_id: str | None,
+        chat_type: str | None,
+        participant_person_ids: dict[str, set[str]] | None,
+        query_plan: PlannedMemoryQuery,
+    ) -> RetrievedContext | None:
+        assert self._store is not None
+
+        try:
+            context = await self._store.get_context_for_message(
+                user_id=user_id,
+                user_message=query_plan.query,
+                chat_id=chat_id,
+                max_memories=max(1, query_plan.max_results),
+                chat_type=chat_type,
+                participant_person_ids=participant_person_ids,
+            )
+        except Exception as error:
+            logger.warning(
+                "memory_query_retrieval_failed",
+                extra={"error.message": str(error)},
+            )
+            return None
+
+        sorted_memories = sorted(
+            context.memories,
+            key=lambda memory: memory.similarity,
+            reverse=True,
+        )
+        return RetrievedContext(memories=sorted_memories[: self._max_total_memories])
 
     async def _list_known_people(
         self,
