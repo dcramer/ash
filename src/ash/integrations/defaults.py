@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ash.integrations.browser import BrowserIntegration
+from ash.integrations.capabilities import CapabilitiesIntegration
 from ash.integrations.image import ImageIntegration
 from ash.integrations.memory import MemoryIntegration
 from ash.integrations.runtime import IntegrationMode
@@ -41,6 +42,7 @@ def _create_chat_integrations(
         contributors.append(ImageIntegration())
     if include_browser:
         contributors.append(BrowserIntegration())
+    contributors.append(CapabilitiesIntegration())
     if include_todo:
         contributors.append(TodoIntegration(graph_dir=graph_dir))
     if include_memory:
@@ -62,6 +64,7 @@ def _create_eval_integrations(
         contributors.append(ImageIntegration())
     if include_browser:
         contributors.append(BrowserIntegration())
+    contributors.append(CapabilitiesIntegration())
     if include_todo:
         contributors.append(TodoIntegration(graph_dir=graph_dir, schedule_enabled=True))
     if include_memory:
@@ -100,6 +103,7 @@ def _create_serve_integrations(
         contributors.append(ImageIntegration())
     if include_browser:
         contributors.append(BrowserIntegration())
+    contributors.append(CapabilitiesIntegration())
     if include_todo:
         contributors.append(TodoIntegration(graph_dir=graph_dir, schedule_enabled=True))
     if include_memory:

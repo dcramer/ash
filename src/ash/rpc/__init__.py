@@ -23,6 +23,7 @@ from ash_rpc_protocol import (
 )
 
 from ash.rpc.methods import (
+    register_capability_methods,
     register_config_methods,
     register_log_methods,
     register_memory_methods,
@@ -34,6 +35,7 @@ __all__ = [
     # Server
     "RPCServer",
     # Methods
+    "register_capability_methods",
     "register_config_methods",
     "register_log_methods",
     "register_memory_methods",

@@ -1312,6 +1312,7 @@ async def create_agent(
         memory_manager=graph_store,
         memory_extractor=memory_extractor,
         browser_manager=None,
+        capability_manager=None,
         sandbox_executor=shared_executor,
         agent_registry=agent_registry,
         agent_executor=agent_executor,

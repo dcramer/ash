@@ -6,6 +6,7 @@ import pytest
 
 from ash.integrations import (
     BrowserIntegration,
+    CapabilitiesIntegration,
     ImageIntegration,
     MemoryIntegration,
     RuntimeRPCIntegration,
@@ -18,31 +19,34 @@ from ash.integrations import (
 def test_create_default_integrations_chat_includes_memory() -> None:
     result = create_default_integrations(mode="chat")
 
-    assert len(result.contributors) == 4
+    assert len(result.contributors) == 5
     assert isinstance(result.contributors[0], ImageIntegration)
     assert isinstance(result.contributors[1], BrowserIntegration)
-    assert isinstance(result.contributors[2], TodoIntegration)
-    assert isinstance(result.contributors[3], MemoryIntegration)
+    assert isinstance(result.contributors[2], CapabilitiesIntegration)
+    assert isinstance(result.contributors[3], TodoIntegration)
+    assert isinstance(result.contributors[4], MemoryIntegration)
     assert result.scheduling is None
 
 
 def test_create_default_integrations_chat_can_disable_memory() -> None:
     result = create_default_integrations(mode="chat", include_memory=False)
 
-    assert len(result.contributors) == 3
+    assert len(result.contributors) == 4
     assert isinstance(result.contributors[0], ImageIntegration)
     assert isinstance(result.contributors[1], BrowserIntegration)
-    assert isinstance(result.contributors[2], TodoIntegration)
+    assert isinstance(result.contributors[2], CapabilitiesIntegration)
+    assert isinstance(result.contributors[3], TodoIntegration)
     assert result.scheduling is None
 
 
 def test_create_default_integrations_chat_can_disable_todo() -> None:
     result = create_default_integrations(mode="chat", include_todo=False)
 
-    assert len(result.contributors) == 3
+    assert len(result.contributors) == 4
     assert isinstance(result.contributors[0], ImageIntegration)
     assert isinstance(result.contributors[1], BrowserIntegration)
-    assert isinstance(result.contributors[2], MemoryIntegration)
+    assert isinstance(result.contributors[2], CapabilitiesIntegration)
+    assert isinstance(result.contributors[3], MemoryIntegration)
     assert result.scheduling is None
 
 
@@ -57,12 +61,13 @@ def test_create_default_integrations_eval_order() -> None:
         include_memory=True,
     )
 
-    assert len(result.contributors) == 5
+    assert len(result.contributors) == 6
     assert isinstance(result.contributors[0], SchedulingIntegration)
     assert isinstance(result.contributors[1], ImageIntegration)
     assert isinstance(result.contributors[2], BrowserIntegration)
-    assert isinstance(result.contributors[3], TodoIntegration)
-    assert isinstance(result.contributors[4], MemoryIntegration)
+    assert isinstance(result.contributors[3], CapabilitiesIntegration)
+    assert isinstance(result.contributors[4], TodoIntegration)
+    assert isinstance(result.contributors[5], MemoryIntegration)
     assert isinstance(result.scheduling, SchedulingIntegration)
 
 
@@ -72,11 +77,12 @@ def test_create_default_integrations_eval_can_disable_memory() -> None:
         include_memory=False,
     )
 
-    assert len(result.contributors) == 4
+    assert len(result.contributors) == 5
     assert isinstance(result.contributors[0], SchedulingIntegration)
     assert isinstance(result.contributors[1], ImageIntegration)
     assert isinstance(result.contributors[2], BrowserIntegration)
-    assert isinstance(result.contributors[3], TodoIntegration)
+    assert isinstance(result.contributors[3], CapabilitiesIntegration)
+    assert isinstance(result.contributors[4], TodoIntegration)
     assert isinstance(result.scheduling, SchedulingIntegration)
 
 
@@ -86,11 +92,12 @@ def test_create_default_integrations_eval_can_disable_todo() -> None:
         include_todo=False,
     )
 
-    assert len(result.contributors) == 4
+    assert len(result.contributors) == 5
     assert isinstance(result.contributors[0], SchedulingIntegration)
     assert isinstance(result.contributors[1], ImageIntegration)
     assert isinstance(result.contributors[2], BrowserIntegration)
-    assert isinstance(result.contributors[3], MemoryIntegration)
+    assert isinstance(result.contributors[3], CapabilitiesIntegration)
+    assert isinstance(result.contributors[4], MemoryIntegration)
     assert isinstance(result.scheduling, SchedulingIntegration)
 
 
@@ -106,13 +113,14 @@ def test_create_default_integrations_serve_order() -> None:
         logs_path=Path("logs"),
     )
 
-    assert len(result.contributors) == 6
+    assert len(result.contributors) == 7
     assert isinstance(result.contributors[0], RuntimeRPCIntegration)
     assert isinstance(result.contributors[1], ImageIntegration)
     assert isinstance(result.contributors[2], BrowserIntegration)
-    assert isinstance(result.contributors[3], TodoIntegration)
-    assert isinstance(result.contributors[4], MemoryIntegration)
-    assert isinstance(result.contributors[5], SchedulingIntegration)
+    assert isinstance(result.contributors[3], CapabilitiesIntegration)
+    assert isinstance(result.contributors[4], TodoIntegration)
+    assert isinstance(result.contributors[5], MemoryIntegration)
+    assert isinstance(result.contributors[6], SchedulingIntegration)
     assert isinstance(result.scheduling, SchedulingIntegration)
 
 
@@ -123,12 +131,13 @@ def test_create_default_integrations_serve_can_disable_memory() -> None:
         logs_path=Path("logs"),
     )
 
-    assert len(result.contributors) == 5
+    assert len(result.contributors) == 6
     assert isinstance(result.contributors[0], RuntimeRPCIntegration)
     assert isinstance(result.contributors[1], ImageIntegration)
     assert isinstance(result.contributors[2], BrowserIntegration)
-    assert isinstance(result.contributors[3], TodoIntegration)
-    assert isinstance(result.contributors[4], SchedulingIntegration)
+    assert isinstance(result.contributors[3], CapabilitiesIntegration)
+    assert isinstance(result.contributors[4], TodoIntegration)
+    assert isinstance(result.contributors[5], SchedulingIntegration)
     assert isinstance(result.scheduling, SchedulingIntegration)
 
 
@@ -139,12 +148,13 @@ def test_create_default_integrations_serve_can_disable_todo() -> None:
         logs_path=Path("logs"),
     )
 
-    assert len(result.contributors) == 5
+    assert len(result.contributors) == 6
     assert isinstance(result.contributors[0], RuntimeRPCIntegration)
     assert isinstance(result.contributors[1], ImageIntegration)
     assert isinstance(result.contributors[2], BrowserIntegration)
-    assert isinstance(result.contributors[3], MemoryIntegration)
-    assert isinstance(result.contributors[4], SchedulingIntegration)
+    assert isinstance(result.contributors[3], CapabilitiesIntegration)
+    assert isinstance(result.contributors[4], MemoryIntegration)
+    assert isinstance(result.contributors[5], SchedulingIntegration)
     assert isinstance(result.scheduling, SchedulingIntegration)
 
 

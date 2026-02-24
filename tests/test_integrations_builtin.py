@@ -13,6 +13,7 @@ from ash.core.prompt import PromptContext
 from ash.core.session import SessionState
 from ash.integrations import (
     BrowserIntegration,
+    CapabilitiesIntegration,
     IntegrationContext,
     RuntimeRPCIntegration,
     SchedulingIntegration,
@@ -279,3 +280,49 @@ async def test_todo_integration_owns_prompt_routing_guidance(monkeypatch) -> Non
     routing = prompt_context.extra_context.get("tool_routing_rules")
     assert isinstance(routing, list)
     assert any("ash-sb todo add" in line for line in routing)
+
+
+@pytest.mark.asyncio
+async def test_capabilities_integration_registers_capability_rpc_methods(
+    monkeypatch,
+) -> None:
+    context = _context()
+    server = object()
+    calls: dict[str, Any] = {}
+
+    def _register_capability(server_obj, manager_obj) -> None:
+        calls["args"] = (server_obj, manager_obj)
+
+    monkeypatch.setattr(
+        "ash.rpc.methods.capability.register_capability_methods",
+        _register_capability,
+    )
+
+    integration = CapabilitiesIntegration()
+    await integration.setup(context)
+    assert getattr(context.components, "capability_manager", None) is not None
+
+    integration.register_rpc_methods(server, context)
+    assert calls["args"][0] is server
+    assert calls["args"][1] is context.components.capability_manager
+
+
+@pytest.mark.asyncio
+async def test_capabilities_integration_owns_prompt_routing_guidance() -> None:
+    context = _context()
+    integration = CapabilitiesIntegration()
+    await integration.setup(context)
+    session = SessionState(
+        session_id="s-1",
+        provider="telegram",
+        chat_id="c-1",
+        user_id="u-1",
+    )
+    prompt_context = integration.augment_prompt_context(
+        PromptContext(),
+        session,
+        context,
+    )
+    routing = prompt_context.extra_context.get("tool_routing_rules")
+    assert isinstance(routing, list)
+    assert any("ash-sb capability" in line for line in routing)
