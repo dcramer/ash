@@ -295,6 +295,61 @@ async def enrich_owner_names(
                 owner_names.append(alias.value)
 
 
+async def resolve_speaker_person_id(
+    store: Store,
+    *,
+    explicit_person_id: str | None = None,
+    source_username: str | None = None,
+    user_id: str | None = None,
+) -> str | None:
+    """Resolve speaker person ID using the same deterministic lookup everywhere."""
+    if explicit_person_id:
+        return explicit_person_id
+    if not source_username:
+        return None
+    if user_id and source_username == user_id:
+        return None
+    try:
+        person_ids = await store.find_person_ids_for_username(source_username)
+    except Exception:
+        logger.debug(
+            "stated_by_resolve_failed",
+            extra={"source.username": source_username},
+        )
+        return None
+    return sorted(person_ids)[0] if person_ids else None
+
+
+async def build_owner_names_for_speaker(
+    store: Store,
+    *,
+    source_username: str | None,
+    source_display_name: str | None,
+) -> list[str]:
+    """Build extraction-style owner names for owner filtering and self checks."""
+    owner_names: list[str] = []
+    if source_username:
+        owner_names.append(source_username)
+    if source_display_name and source_display_name not in owner_names:
+        owner_names.append(source_display_name)
+
+    speaker_person_id = await resolve_speaker_person_id(
+        store,
+        source_username=source_username,
+    )
+    if speaker_person_id:
+        speaker_person = await store.get_person(speaker_person_id)
+        if (
+            speaker_person
+            and speaker_person.name
+            and speaker_person.name not in owner_names
+        ):
+            owner_names.append(speaker_person.name)
+        await enrich_owner_names(store, owner_names, speaker_person_id)
+
+    return owner_names
+
+
 async def process_extracted_facts(
     facts: list[ExtractedFact],
     store: Store,
@@ -437,19 +492,12 @@ async def process_extracted_facts(
             )
 
             # Resolve stated_by person for STATED_BY edge
-            stated_by_pid: str | None = None
-            if speaker_person_id:
-                stated_by_pid = speaker_person_id
-            elif source_username and source_username != user_id:
-                try:
-                    pids = await store.find_person_ids_for_username(source_username)
-                    if pids:
-                        stated_by_pid = sorted(pids)[0]
-                except Exception:
-                    logger.debug(
-                        "stated_by_resolve_failed",
-                        extra={"source.username": source_username},
-                    )
+            stated_by_pid = await resolve_speaker_person_id(
+                store,
+                explicit_person_id=speaker_person_id,
+                source_username=source_username,
+                user_id=user_id,
+            )
 
             if fact.assertion is not None:
                 assertion = fact.assertion.model_copy(

@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING
 from ash.cli.commands.memory.doctor._helpers import confirm_or_cancel, truncate
 from ash.cli.console import console, create_table, success, warning
 from ash.graph.edges import STATED_BY, create_stated_by_edge, get_stated_by_person
-from ash.memory.processing import compile_assertion, validate_assertion
+from ash.memory.processing import (
+    compile_assertion,
+    resolve_speaker_person_id,
+    validate_assertion,
+)
 from ash.store.types import (
     AssertionKind,
     ExtractedFact,
@@ -161,15 +165,11 @@ async def _get_or_compile_assertion(
     edge_stated_by: str | None,
 ) -> AssertionEnvelope:
     inferred_stated_by = edge_stated_by
-    if inferred_stated_by is None and memory.source_username:
-        try:
-            source_ids = await store.find_person_ids_for_username(
-                memory.source_username
-            )
-            if source_ids:
-                inferred_stated_by = sorted(source_ids)[0]
-        except Exception:
-            inferred_stated_by = None
+    if inferred_stated_by is None:
+        inferred_stated_by = await resolve_speaker_person_id(
+            store,
+            source_username=memory.source_username,
+        )
 
     assertion = get_assertion(memory)
     if assertion is not None:

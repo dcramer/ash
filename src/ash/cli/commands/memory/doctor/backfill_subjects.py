@@ -11,7 +11,7 @@ from ash.cli.commands.memory.doctor._helpers import (
 )
 from ash.cli.console import console, create_table, success
 from ash.core.filters import build_owner_matchers, is_owner_name
-from ash.memory.processing import enrich_owner_names
+from ash.memory.processing import build_owner_names_for_speaker
 from ash.store.types import MemoryType
 
 if TYPE_CHECKING:
@@ -211,28 +211,10 @@ async def _build_owner_matchers(
     store: Store, memory: MemoryEntry
 ) -> OwnerMatchers | None:
     """Build extraction-style owner matchers from speaker identity and aliases."""
-    owner_names: list[str] = []
-    if memory.source_username:
-        owner_names.append(memory.source_username)
-    if memory.source_display_name and memory.source_display_name not in owner_names:
-        owner_names.append(memory.source_display_name)
-
-    if memory.source_username:
-        try:
-            speaker_ids = await store.find_person_ids_for_username(
-                memory.source_username
-            )
-        except Exception:
-            speaker_ids = set()
-        if speaker_ids:
-            speaker_person_id = sorted(speaker_ids)[0]
-            speaker_person = await store.get_person(speaker_person_id)
-            if (
-                speaker_person
-                and speaker_person.name
-                and speaker_person.name not in owner_names
-            ):
-                owner_names.append(speaker_person.name)
-            await enrich_owner_names(store, owner_names, speaker_person_id)
+    owner_names = await build_owner_names_for_speaker(
+        store,
+        source_username=memory.source_username,
+        source_display_name=memory.source_display_name,
+    )
 
     return build_owner_matchers(owner_names) if owner_names else None
