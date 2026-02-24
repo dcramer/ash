@@ -16,9 +16,12 @@ from ash_rpc_protocol import (
 )
 
 DEFAULT_SOCKET_PATH = "/opt/ash/rpc.sock"
+DEFAULT_TCP_HOST = "host.docker.internal"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 0.5  # seconds
 CONTEXT_TOKEN_ENV = "ASH_CONTEXT_TOKEN"  # noqa: S105
+RPC_HOST_ENV = "ASH_RPC_HOST"  # noqa: S105
+RPC_PORT_ENV = "ASH_RPC_PORT"  # noqa: S105
 
 
 class RPCError(Exception):
@@ -28,6 +31,22 @@ class RPCError(Exception):
         super().__init__(message)
         self.code = code
         self.data = data
+
+
+def _decode_rpc_response(sock: socket.socket) -> Any:
+    """Read and decode one RPC response from an open socket."""
+    data = read_message_sync(sock)
+    if data is None:
+        raise ConnectionError("Connection closed by server")
+
+    response = RPCResponse.from_dict(json.loads(data))
+    if response.error:
+        raise RPCError(
+            code=response.error.code,
+            message=response.error.message,
+            data=response.error.data,
+        )
+    return response.result
 
 
 def rpc_call(
@@ -53,8 +72,29 @@ def rpc_call(
     """
     socket_path = os.environ.get("ASH_RPC_SOCKET", DEFAULT_SOCKET_PATH)
 
-    if not Path(socket_path).exists():
-        raise ConnectionError(f"RPC socket not found: {socket_path}")
+    raw_tcp_host = os.environ.get(RPC_HOST_ENV)
+    raw_tcp_port = os.environ.get(RPC_PORT_ENV)
+    tcp_host = (raw_tcp_host or "").strip()
+    tcp_port: int | None = None
+    if raw_tcp_port:
+        text_port = raw_tcp_port.strip()
+        if text_port:
+            try:
+                tcp_port = int(text_port)
+            except ValueError as e:
+                raise ConnectionError(
+                    f"Invalid {RPC_PORT_ENV}: {raw_tcp_port!r}"
+                ) from e
+            if tcp_port <= 0 or tcp_port > 65535:
+                raise ConnectionError(f"Invalid {RPC_PORT_ENV}: {raw_tcp_port!r}")
+    if tcp_port is not None and not tcp_host:
+        tcp_host = DEFAULT_TCP_HOST
+    tcp_enabled = bool(tcp_host and tcp_port is not None)
+
+    if not Path(socket_path).exists() and not tcp_enabled:
+        raise ConnectionError(
+            f"RPC socket not found: {socket_path}; no {RPC_HOST_ENV}/{RPC_PORT_ENV} fallback configured"
+        )
 
     context_token = (os.environ.get(CONTEXT_TOKEN_ENV) or "").strip()
     if not context_token:
@@ -70,36 +110,31 @@ def rpc_call(
 
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            sock.connect(socket_path)
-            sock.sendall(request.to_bytes())
+        socket_exists = Path(socket_path).exists()
+        if socket_exists:
+            unix_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                unix_sock.connect(socket_path)
+                unix_sock.sendall(request.to_bytes())
+                return _decode_rpc_response(unix_sock)
+            except (ConnectionError, OSError, json.JSONDecodeError) as e:
+                last_error = e
+            finally:
+                unix_sock.close()
 
-            # Read response
-            data = read_message_sync(sock)
-            if data is None:
-                raise ConnectionError("Connection closed by server")
+        if tcp_enabled and tcp_host and tcp_port is not None:
+            tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                tcp_sock.connect((tcp_host, tcp_port))
+                tcp_sock.sendall(request.to_bytes())
+                return _decode_rpc_response(tcp_sock)
+            except (ConnectionError, OSError, json.JSONDecodeError) as e:
+                last_error = e
+            finally:
+                tcp_sock.close()
 
-            # Parse response
-            response = RPCResponse.from_dict(json.loads(data))
-
-            if response.error:
-                raise RPCError(
-                    code=response.error.code,
-                    message=response.error.message,
-                    data=response.error.data,
-                )
-
-            return response.result
-
-        except (ConnectionError, OSError, json.JSONDecodeError) as e:
-            # Retry on connection errors and corrupt responses
-            last_error = e
-            if attempt < max_retries:
-                time.sleep(retry_delay)
-            # Continue to next attempt
-        finally:
-            sock.close()
+        if attempt < max_retries:
+            time.sleep(retry_delay)
 
     # All retries exhausted
     raise ConnectionError(

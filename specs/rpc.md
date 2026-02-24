@@ -1,6 +1,6 @@
 # RPC
 
-> Unix domain socket RPC for sandbox-to-host communication
+> RPC for sandbox-to-host communication (Unix socket primary, TCP fallback)
 
 Files: src/ash/rpc/__init__.py, src/ash/rpc/server.py, src/ash/rpc/methods/
 
@@ -8,7 +8,7 @@ Files: src/ash/rpc/__init__.py, src/ash/rpc/server.py, src/ash/rpc/methods/
 
 ### MUST
 
-- Use JSON-RPC 2.0 protocol over Unix domain socket
+- Use JSON-RPC 2.0 protocol over Unix domain socket (primary transport)
 - Use length-prefixed message framing (4-byte big-endian length + payload)
 - Run server on host, client in sandbox container
 - Support async server with multiple concurrent connections
@@ -78,13 +78,23 @@ class RPCError:
 
 ```python
 class RPCServer:
-    def __init__(self, socket_path: Path): ...
+    def __init__(
+        self,
+        socket_path: Path,
+        *,
+        tcp_host: str | None = "127.0.0.1",
+        tcp_port: int | None = 0,
+    ): ...
     def register(self, method: str, handler: RPCHandler) -> None
     async def start(self) -> None
     async def stop(self) -> None
 
     @property
     def socket_path(self) -> Path
+    @property
+    def tcp_host(self) -> str | None
+    @property
+    def tcp_port(self) -> int | None
     @property
     def is_running(self) -> bool
 
@@ -165,6 +175,14 @@ Default socket path: `/run/ash/rpc.sock`
 
 Override via environment: `ASH_RPC_SOCKET`
 
+Optional TCP fallback transport (for environments where bind-mounted Unix sockets
+are not connectable from containers):
+- `ASH_RPC_HOST`
+- `ASH_RPC_PORT`
+
+Host runtime exports container-facing defaults (`ASH_RPC_HOST=host.docker.internal`)
+while binding TCP listener on loopback.
+
 Authentication context token environment: `ASH_CONTEXT_TOKEN`
 
 ## Behaviors
@@ -174,6 +192,7 @@ Authentication context token environment: `ASH_CONTEXT_TOKEN`
 | Server start | Create socket, set 0o600 permissions |
 | Server stop | Close connections, remove socket file |
 | Client connect | Connect to socket, send length-prefixed request |
+| Unix socket connect fails | Retry and fall back to TCP when `ASH_RPC_HOST`/`ASH_RPC_PORT` are configured |
 | Connection refused | Retry up to max_retries with exponential backoff |
 | Method not found | Return -32601 error |
 | Handler exception | Return -32603 internal error |

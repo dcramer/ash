@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -16,10 +17,14 @@ from ash.integrations.runtime import IntegrationContext
 @pytest.mark.asyncio
 async def test_active_rpc_server_starts_and_stops(monkeypatch) -> None:
     events: list[str] = []
+    monkeypatch.delenv("ASH_RPC_HOST", raising=False)
+    monkeypatch.delenv("ASH_RPC_PORT", raising=False)
 
     class _FakeRPCServer:
         def __init__(self, socket_path: Path) -> None:
             self.socket_path = socket_path
+            self.tcp_host = "127.0.0.1"
+            self.tcp_port = 43210
             events.append("init")
 
         async def start(self) -> None:
@@ -45,9 +50,13 @@ async def test_active_rpc_server_starts_and_stops(monkeypatch) -> None:
     ) as server:
         assert server is not None
         assert server.socket_path == Path("rpc.sock")
+        assert os.environ["ASH_RPC_HOST"] == "host.docker.internal"
+        assert os.environ["ASH_RPC_PORT"] == "43210"
         events.append("inside")
 
     assert events == ["init", "register", "start", "inside", "stop"]
+    assert "ASH_RPC_HOST" not in os.environ
+    assert "ASH_RPC_PORT" not in os.environ
 
 
 @pytest.mark.asyncio
@@ -105,6 +114,8 @@ async def test_todo_rpc_methods_not_registered_when_todo_disabled(
         def __init__(self, socket_path: Path) -> None:
             self.socket_path = socket_path
             self.methods: dict[str, Any] = {}
+            self.tcp_host = "127.0.0.1"
+            self.tcp_port = 41111
 
         def register(self, method: str, _handler: Any) -> None:
             calls.append(method)

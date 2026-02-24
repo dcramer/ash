@@ -244,6 +244,14 @@ class SandboxManager:
                 }
                 env["ASH_RPC_SOCKET"] = f"{prefix}/run/{socket_name}"
 
+        # Optional loopback TCP fallback for host RPC connectivity in environments
+        # where bind-mounted Unix sockets are not connectable from containers.
+        rpc_host = (os.environ.get("ASH_RPC_HOST") or "").strip()
+        rpc_port = (os.environ.get("ASH_RPC_PORT") or "").strip()
+        if rpc_host and rpc_port:
+            env["ASH_RPC_HOST"] = rpc_host
+            env["ASH_RPC_PORT"] = rpc_port
+
         if self._config.uv_cache_path:
             self._config.uv_cache_path.mkdir(parents=True, exist_ok=True)
             volumes[str(self._config.uv_cache_path)] = {
@@ -383,7 +391,37 @@ class SandboxManager:
         if work_dir:
             exec_config["workdir"] = work_dir
         if environment:
-            exec_config["environment"] = [f"{k}={v}" for k, v in environment.items()]
+            merged_env: dict[str, str] = {}
+
+            # Fresh inspect is needed because docker-py container objects from
+            # create() may not have fully populated attrs until reloaded.
+            raw_env: Any = None
+            try:
+                inspected = await asyncio.to_thread(
+                    self.client.api.inspect_container, container.id
+                )
+                if isinstance(inspected, dict):
+                    config = inspected.get("Config", {})
+                    if isinstance(config, dict):
+                        raw_env = config.get("Env")
+            except Exception:
+                logger.debug("sandbox_exec_inspect_env_failed", exc_info=True)
+
+            if raw_env is None:
+                attrs = container.attrs
+                if isinstance(attrs, dict):
+                    config = attrs.get("Config", {})
+                    raw_env = config.get("Env") if isinstance(config, dict) else None
+
+            if isinstance(raw_env, list):
+                for item in raw_env:
+                    if not isinstance(item, str) or "=" not in item:
+                        continue
+                    key, value = item.split("=", 1)
+                    if key:
+                        merged_env[key] = value
+            merged_env.update(environment)
+            exec_config["environment"] = [f"{k}={v}" for k, v in merged_env.items()]
 
         exec_instance = await asyncio.to_thread(
             self.client.api.exec_create, container.id, **exec_config

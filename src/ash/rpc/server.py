@@ -92,22 +92,30 @@ def _apply_verified_context_params(
 
 
 class RPCServer:
-    """Unix domain socket RPC server using JSON-RPC 2.0."""
+    """RPC server using Unix domain socket + optional loopback TCP transport."""
 
     def __init__(
         self,
         socket_path: Path,
         *,
         context_token_service: ContextTokenService | None = None,
+        tcp_host: str | None = "127.0.0.1",
+        tcp_port: int | None = 0,
     ):
         """Initialize RPC server.
 
         Args:
             socket_path: Path to the Unix domain socket.
             context_token_service: Optional token verifier override.
+            tcp_host: Optional loopback TCP host for sandbox fallback transport.
+            tcp_port: Optional loopback TCP port (0 = ephemeral).
         """
         self._socket_path = socket_path
         self._server: asyncio.Server | None = None
+        self._tcp_server: asyncio.Server | None = None
+        self._tcp_host = tcp_host
+        self._tcp_port = tcp_port
+        self._resolved_tcp_port: int | None = None
         self._methods: dict[str, RPCHandler] = {}
         self._running = False
         self._context_token_service = (
@@ -140,12 +148,37 @@ class RPCServer:
         # Set socket permissions (owner only)
         self._socket_path.chmod(0o600)
 
+        if self._tcp_host is not None and self._tcp_port is not None:
+            self._tcp_server = await asyncio.start_server(
+                self._handle_connection,
+                host=self._tcp_host,
+                port=self._tcp_port,
+            )
+            sockets = self._tcp_server.sockets or []
+            if sockets:
+                sockname = sockets[0].getsockname()
+                if isinstance(sockname, tuple) and len(sockname) >= 2:
+                    self._resolved_tcp_port = int(sockname[1])
+
         self._running = True
-        logger.info("rpc_server_started", extra={"socket.path": str(self._socket_path)})
+        logger.info(
+            "rpc_server_started",
+            extra={
+                "socket.path": str(self._socket_path),
+                "tcp.host": self._tcp_host,
+                "tcp.port": self._resolved_tcp_port,
+            },
+        )
 
     async def stop(self) -> None:
         """Stop the RPC server."""
         self._running = False
+
+        if self._tcp_server:
+            self._tcp_server.close()
+            await self._tcp_server.wait_closed()
+            self._tcp_server = None
+            self._resolved_tcp_port = None
 
         if self._server:
             self._server.close()
@@ -278,6 +311,16 @@ class RPCServer:
     def socket_path(self) -> Path:
         """Get the socket path."""
         return self._socket_path
+
+    @property
+    def tcp_host(self) -> str | None:
+        """Get the configured loopback TCP host."""
+        return self._tcp_host
+
+    @property
+    def tcp_port(self) -> int | None:
+        """Get the bound loopback TCP port, if enabled."""
+        return self._resolved_tcp_port
 
     @property
     def is_running(self) -> bool:

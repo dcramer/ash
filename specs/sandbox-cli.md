@@ -130,7 +130,8 @@ The sandbox receives these from the host via container environment:
 | Variable | Source | Purpose |
 |----------|--------|---------|
 | `ASH_CONTEXT_TOKEN` | Host-signed routing claims | Required RPC auth context |
-| `ASH_RPC_SOCKET` | Host RPC | Unix socket path |
+| `ASH_RPC_SOCKET` | Host RPC | Unix socket path (primary transport) |
+| `ASH_RPC_HOST` / `ASH_RPC_PORT` | Host RPC | Optional TCP fallback endpoint |
 | `ASH_MOUNT_PREFIX` | Config | Path prefix for mounts |
 
 ## Architecture
@@ -144,7 +145,8 @@ Agent → bash tool → ash-sb command → RPC call → Host process → Subsyst
 All `ash-sb` commands are thin wrappers that:
 1. Read routing context from `ASH_CONTEXT_TOKEN` claims
 2. Validate inputs locally (time parsing, cron validation)
-3. Call the host via RPC over Unix socket (with signed `ASH_CONTEXT_TOKEN`)
+3. Call the host via RPC (Unix socket primary, TCP fallback if configured) with
+   signed `ASH_CONTEXT_TOKEN`
 4. Format the RPC response for agent consumption
 
 No business logic lives in the sandbox CLI. It's a presentation layer.
