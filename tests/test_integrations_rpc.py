@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -17,8 +16,6 @@ from ash.integrations.runtime import IntegrationContext
 @pytest.mark.asyncio
 async def test_active_rpc_server_starts_and_stops(monkeypatch) -> None:
     events: list[str] = []
-    monkeypatch.delenv("ASH_RPC_HOST", raising=False)
-    monkeypatch.delenv("ASH_RPC_PORT", raising=False)
 
     class _FakeRPCServer:
         def __init__(self, socket_path: Path) -> None:
@@ -39,7 +36,7 @@ async def test_active_rpc_server_starts_and_stops(monkeypatch) -> None:
             register_rpc_methods=lambda _server, _context: events.append("register")
         ),
     )
-    context = cast(Any, object())
+    context = cast(Any, SimpleNamespace(sandbox_env={}))
 
     monkeypatch.setattr("ash.integrations.rpc.RPCServer", _FakeRPCServer)
 
@@ -50,13 +47,13 @@ async def test_active_rpc_server_starts_and_stops(monkeypatch) -> None:
     ) as server:
         assert server is not None
         assert server.socket_path == Path("rpc.sock")
-        assert os.environ["ASH_RPC_HOST"] == "host.docker.internal"
-        assert os.environ["ASH_RPC_PORT"] == "43210"
+        assert context.sandbox_env["ASH_RPC_HOST"] == "host.docker.internal"
+        assert context.sandbox_env["ASH_RPC_PORT"] == "43210"
         events.append("inside")
 
     assert events == ["init", "register", "start", "inside", "stop"]
-    assert "ASH_RPC_HOST" not in os.environ
-    assert "ASH_RPC_PORT" not in os.environ
+    assert "ASH_RPC_HOST" not in context.sandbox_env
+    assert "ASH_RPC_PORT" not in context.sandbox_env
 
 
 @pytest.mark.asyncio
@@ -71,7 +68,7 @@ async def test_active_rpc_server_noops_when_disabled(monkeypatch) -> None:
             register_rpc_methods=lambda _server, _context: None,
         ),
     )
-    context = cast(Any, object())
+    context = cast(Any, SimpleNamespace(sandbox_env={}))
 
     monkeypatch.setattr("ash.integrations.rpc.RPCServer", _FakeRPCServer)
 
@@ -82,6 +79,39 @@ async def test_active_rpc_server_noops_when_disabled(monkeypatch) -> None:
         enabled=False,
     ) as server:
         assert server is None
+
+
+@pytest.mark.asyncio
+async def test_active_rpc_server_uses_docker_host_alias_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRPCServer:
+        def __init__(self, socket_path: Path) -> None:
+            self.socket_path = socket_path
+            self.tcp_host = "127.0.0.1"
+            self.tcp_port = 40123
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    runtime = cast(
+        Any,
+        SimpleNamespace(register_rpc_methods=lambda _server, _context: None),
+    )
+    context = cast(Any, SimpleNamespace(sandbox_env={}))
+    monkeypatch.setenv("ASH_RPC_DOCKER_HOST_ALIAS", "host.containers.internal")
+    monkeypatch.setattr("ash.integrations.rpc.RPCServer", _FakeRPCServer)
+
+    async with active_rpc_server(
+        runtime=runtime,
+        context=context,
+        socket_path=Path("rpc.sock"),
+    ):
+        assert context.sandbox_env["ASH_RPC_HOST"] == "host.containers.internal"
+        assert context.sandbox_env["ASH_RPC_PORT"] == "40123"
 
 
 @pytest.mark.asyncio

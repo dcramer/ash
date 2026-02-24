@@ -238,6 +238,26 @@ def test_integration_runtime_builds_prompt_and_env_hooks() -> None:
     ]
 
 
+def test_integration_runtime_projects_context_sandbox_env() -> None:
+    runtime = IntegrationRuntime([])
+    context = _context()
+    context.sandbox_env["ASH_RPC_HOST"] = "host.docker.internal"
+    context.sandbox_env["ASH_RPC_PORT"] = "51234"
+    session = SessionState(
+        session_id="s-1",
+        provider="telegram",
+        chat_id="c-1",
+        user_id="u-1",
+    )
+
+    env: dict[str, str] = {}
+    for hook in runtime.sandbox_env_augmenters(context):
+        env = hook(env, session, "user-123")
+
+    assert env["ASH_RPC_HOST"] == "host.docker.internal"
+    assert env["ASH_RPC_PORT"] == "51234"
+
+
 @pytest.mark.asyncio
 async def test_integration_runtime_builds_postprocess_hooks() -> None:
     events: list[tuple[str, str]] = []
@@ -407,7 +427,8 @@ async def test_compose_integrations_runs_setup_and_installs_hooks() -> None:
     assert fake_agent.incoming_hooks is not None
     assert fake_agent.postprocess_hooks is not None
     assert len(fake_agent.prompt_hooks) == 1
-    assert len(fake_agent.env_hooks) == 1
+    # One runtime-projected env hook + one contributor env hook.
+    assert len(fake_agent.env_hooks) == 2
     assert len(fake_agent.incoming_hooks) == 1
     assert len(fake_agent.postprocess_hooks) == 1
 

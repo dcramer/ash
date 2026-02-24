@@ -68,9 +68,8 @@ async def test_create_container_skips_rpc_mount_when_run_dir_missing(
     assert "ASH_RPC_SOCKET" not in env
 
 
-async def test_create_container_propagates_rpc_tcp_fallback_env(
+async def test_create_container_preserves_explicit_environment_values(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True)
@@ -85,15 +84,19 @@ async def test_create_container_propagates_rpc_tcp_fallback_env(
 
     manager._ensure_client = _ensure_client  # type: ignore[method-assign]
 
-    monkeypatch.setenv("ASH_RPC_HOST", "host.docker.internal")
-    monkeypatch.setenv("ASH_RPC_PORT", "50222")
-
-    await manager.create_container()
+    await manager.create_container(
+        environment={
+            "ASH_RPC_HOST": "host.docker.internal",
+            "ASH_RPC_PORT": "50222",
+            "OTHER_VAR": "yes",
+        }
+    )
 
     assert fake_client.containers.last_create_kwargs is not None
     env = fake_client.containers.last_create_kwargs["environment"]
     assert env["ASH_RPC_HOST"] == "host.docker.internal"
     assert env["ASH_RPC_PORT"] == "50222"
+    assert env["OTHER_VAR"] == "yes"
 
 
 class _FakeExecAPI:

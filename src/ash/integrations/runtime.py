@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeVar
 
@@ -38,6 +38,9 @@ class IntegrationContext:
     components: AgentComponents
     mode: IntegrationMode
     sessions_path: Path | None = None
+    # Runtime-owned env projected into sandbox tool execution hooks.
+    # Spec contract: specs/subsystems.md (Integration Hooks), specs/rpc.md.
+    sandbox_env: dict[str, str] = field(default_factory=dict)
 
 
 class IntegrationContributor:
@@ -205,6 +208,17 @@ class IntegrationRuntime:
     def sandbox_env_augmenters(
         self, context: IntegrationContext
     ) -> list[SandboxEnvAugmenter]:
+        def _runtime_env_hook(
+            env: dict[str, str],
+            _session: SessionState,
+            _effective_user_id: str,
+        ) -> dict[str, str]:
+            if not context.sandbox_env:
+                return env
+            merged = dict(env)
+            merged.update(context.sandbox_env)
+            return merged
+
         def _factory(contributor: IntegrationContributor) -> SandboxEnvAugmenter:
             def _hook(
                 env: dict[str, str],
@@ -224,7 +238,9 @@ class IntegrationRuntime:
 
             return _hook
 
-        return self._build_hooks(_factory)
+        hooks = [_runtime_env_hook]
+        hooks.extend(self._build_hooks(_factory))
+        return hooks
 
     def message_postprocess_hooks(
         self, context: IntegrationContext

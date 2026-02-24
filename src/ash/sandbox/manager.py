@@ -244,14 +244,6 @@ class SandboxManager:
                 }
                 env["ASH_RPC_SOCKET"] = f"{prefix}/run/{socket_name}"
 
-        # Optional loopback TCP fallback for host RPC connectivity in environments
-        # where bind-mounted Unix sockets are not connectable from containers.
-        rpc_host = (os.environ.get("ASH_RPC_HOST") or "").strip()
-        rpc_port = (os.environ.get("ASH_RPC_PORT") or "").strip()
-        if rpc_host and rpc_port:
-            env["ASH_RPC_HOST"] = rpc_host
-            env["ASH_RPC_PORT"] = rpc_port
-
         if self._config.uv_cache_path:
             self._config.uv_cache_path.mkdir(parents=True, exist_ok=True)
             volumes[str(self._config.uv_cache_path)] = {

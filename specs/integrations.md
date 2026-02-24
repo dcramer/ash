@@ -51,6 +51,7 @@ class ExampleIntegration(IntegrationContributor):
 8. If an integration introduces graph-backed entities, it owns registration of node collections and edge schemas via graph extension APIs before use.
 9. Integration contributors are trusted first-party runtime capabilities, not third-party plugin points.
 10. Third-party extensions must go through skills/capability surfaces rather than registering integration contributors directly.
+11. Runtime-scoped sandbox env data (for example RPC transport hints) must flow through `IntegrationContext.sandbox_env` and integration env hooks, not process-global environment mutation.
 
 ## Testing Checklist
 

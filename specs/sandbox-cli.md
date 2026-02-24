@@ -134,6 +134,10 @@ The sandbox receives these from the host via container environment:
 | `ASH_RPC_HOST` / `ASH_RPC_PORT` | Host RPC | Optional TCP fallback endpoint |
 | `ASH_MOUNT_PREFIX` | Config | Path prefix for mounts |
 
+Host runtime may set `ASH_RPC_HOST`/`ASH_RPC_PORT` per command when the RPC server
+enables TCP fallback. Host alias defaults to `host.docker.internal` and can be
+overridden on the host with `ASH_RPC_DOCKER_HOST_ALIAS`.
+
 ## Architecture
 
 ```
