@@ -162,8 +162,33 @@ class SandboxBrowserProvider:
         return None
 
     async def warmup(self) -> None:
-        """Boot and verify warm browser runtime ahead of first user action."""
-        await self._ensure_runtime(scope_hash=self._scope_hash(None))
+        """Warmup preflight for scoped dedicated runtime.
+
+        Dedicated runtime containers are keyed by effective user scope, which is
+        unknown at process startup. Warmup therefore validates that the browser
+        image is available but does not start a default container.
+        """
+        inspect_image = await self._execute_host_command(
+            ["docker", "image", "inspect", self._container_image],
+            timeout_seconds=15,
+        )
+        if not inspect_image.success:
+            raise ValueError(
+                "sandbox_browser_launch_failed: missing_browser_image:"
+                f"{self._container_image}"
+            )
+
+    async def shutdown(self) -> None:
+        """Best-effort runtime shutdown for service lifecycle teardown."""
+        async with self._runtime_lock:
+            self._sessions.clear()
+            self._session_targets.clear()
+            runtime = self._runtime
+            self._runtime = None
+            self._active_scope_hash = None
+            if runtime is None:
+                return
+            await self._kill_runtime(runtime)
 
     async def goto(
         self,

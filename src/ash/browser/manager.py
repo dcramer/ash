@@ -92,6 +92,23 @@ class BrowserManager:
             extra={"browser.provider": provider_key},
         )
 
+    async def shutdown(self) -> None:
+        """Best-effort shutdown for provider runtimes during service teardown."""
+        for provider_key, provider in self._providers.items():
+            shutdown = getattr(provider, "shutdown", None)
+            if not callable(shutdown):
+                continue
+            try:
+                await shutdown()
+            except Exception as e:
+                logger.warning(
+                    "browser_runtime_shutdown_failed",
+                    extra={
+                        "browser.provider": provider_key,
+                        "error.message": str(e),
+                    },
+                )
+
     def _action_timeout_seconds(self, action: str) -> float:
         base = self._clamp_timeout_seconds(float(self._config.browser.timeout_seconds))
         if action == "session.start":

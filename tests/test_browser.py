@@ -113,9 +113,13 @@ class _FakeWarmupProvider(_FakeProvider):
 
     def __init__(self) -> None:
         self.warmup_calls = 0
+        self.shutdown_calls = 0
 
     async def warmup(self) -> None:
         self.warmup_calls += 1
+
+    async def shutdown(self) -> None:
+        self.shutdown_calls += 1
 
 
 class _FailingRuntimeProvider(_FakeProvider):
@@ -538,6 +542,17 @@ async def test_browser_manager_warmup_default_provider(tmp_path) -> None:
     )
     await manager.warmup_default_provider()
     assert provider.warmup_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_browser_manager_shutdown_calls_provider_shutdown(tmp_path) -> None:
+    store = BrowserStore(tmp_path / "browser")
+    provider = _FakeWarmupProvider()
+    manager = BrowserManager(
+        config=_config(), store=store, providers={"sandbox": provider}
+    )
+    await manager.shutdown()
+    assert provider.shutdown_calls == 1
 
 
 @pytest.mark.asyncio

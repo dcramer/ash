@@ -182,6 +182,19 @@ async def test_sandbox_provider_times_out_hung_docker_exec() -> None:
         )
 
 
+@pytest.mark.asyncio
+async def test_sandbox_provider_warmup_does_not_start_default_container() -> None:
+    stub = _HostDockerStub()
+    provider = SandboxBrowserProvider()
+    provider._execute_host_command = stub.run  # type: ignore[assignment]
+
+    await provider.warmup()
+
+    assert any(args[:3] == ["docker", "image", "inspect"] for args in stub.calls)
+    assert not any(args[:2] == ["docker", "create"] for args in stub.calls)
+    assert not any(args[:2] == ["docker", "start"] for args in stub.calls)
+
+
 async def _noop_wait(*, runtime: Any) -> None:
     _ = runtime
 

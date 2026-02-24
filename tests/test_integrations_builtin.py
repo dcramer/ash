@@ -167,9 +167,13 @@ async def test_browser_integration_owns_manager_tool_and_warmup(monkeypatch) -> 
     class _FakeManager:
         def __init__(self) -> None:
             self.warmup_calls = 0
+            self.shutdown_calls = 0
 
         async def warmup_default_provider(self) -> None:
             self.warmup_calls += 1
+
+        async def shutdown(self) -> None:
+            self.shutdown_calls += 1
 
     fake_manager = _FakeManager()
     monkeypatch.setattr(
@@ -184,6 +188,8 @@ async def test_browser_integration_owns_manager_tool_and_warmup(monkeypatch) -> 
     await integration.on_startup(context)
     await asyncio.sleep(0)
     assert fake_manager.warmup_calls == 1
+    await integration.on_shutdown(context)
+    assert fake_manager.shutdown_calls == 1
 
 
 @pytest.mark.asyncio

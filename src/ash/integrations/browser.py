@@ -65,14 +65,21 @@ class BrowserIntegration(IntegrationContributor):
         )
 
     async def on_shutdown(self, context: IntegrationContext) -> None:
-        _ = context
         if self._warmup_task is None:
+            pass
+        else:
+            if not self._warmup_task.done():
+                self._warmup_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self._warmup_task
+            self._warmup_task = None
+
+        manager = getattr(context.components, "browser_manager", None)
+        if manager is None:
             return
-        if not self._warmup_task.done():
-            self._warmup_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._warmup_task
-        self._warmup_task = None
+        shutdown = getattr(manager, "shutdown", None)
+        if callable(shutdown):
+            await shutdown()
 
     def augment_prompt_context(
         self,
