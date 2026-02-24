@@ -299,6 +299,16 @@ class SandboxExecutor:
                 )
                 await self._manager.remove_container(container.id, force=True)
                 continue
+            if not self._container_has_expected_rpc_mount(container):
+                logger.info(
+                    "sandbox_container_rpc_mount_mismatch_pruned",
+                    extra={
+                        "container.id": container.id[:12],
+                        "rpc.socket": str(self._config.rpc_socket_path),
+                    },
+                )
+                await self._manager.remove_container(container.id, force=True)
+                continue
             status = await self._manager.get_container_status(container.id)
             if status != "running":
                 await self._manager.start_container(container.id)
@@ -307,6 +317,31 @@ class SandboxExecutor:
 
         self._clear_managed_container_state()
         return None
+
+    def _container_has_expected_rpc_mount(self, container: object) -> bool:
+        rpc_socket_path = self._config.rpc_socket_path
+        if rpc_socket_path is None:
+            return True
+
+        expected_source = str(rpc_socket_path.parent)
+        expected_dest = f"{self._config.mount_prefix}/run"
+
+        attrs = getattr(container, "attrs", None)
+        if not isinstance(attrs, dict):
+            return False
+        mounts = attrs.get("Mounts")
+        if not isinstance(mounts, list):
+            return False
+
+        for mount in mounts:
+            if not isinstance(mount, dict):
+                continue
+            if (
+                str(mount.get("Source", "")) == expected_source
+                and str(mount.get("Destination", "")) == expected_dest
+            ):
+                return True
+        return False
 
     async def __aenter__(self) -> "SandboxExecutor":
         await self.initialize()

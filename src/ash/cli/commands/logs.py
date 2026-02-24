@@ -207,7 +207,8 @@ def query_logs(
         limit: Maximum entries to return.
 
     Returns:
-        List of matching log entries (newest first).
+        List of matching log entries in chronological order (oldest first).
+        When ``limit`` is set, this returns the latest ``limit`` matching entries.
     """
     if not logs_path.exists():
         return []
@@ -222,7 +223,8 @@ def query_logs(
         since_date = since.strftime("%Y-%m-%d")
         log_files = [f for f in log_files if f.stem >= since_date]
 
-    entries: list[dict[str, Any]] = []
+    # Collect newest matches first so we can stop early once we have the latest N.
+    newest_first_entries: list[dict[str, Any]] = []
 
     for log_file in log_files:
         file_entries = _read_log_file(
@@ -233,15 +235,20 @@ def query_logs(
             level_value=level_value,
             component=component,
         )
-        entries.extend(file_entries)
+        # _read_log_file returns file order (oldest -> newest). Reverse so we keep
+        # newest matches first while scanning newest files first.
+        newest_first_entries.extend(reversed(file_entries))
 
         # Stop if we have enough entries
-        if limit and len(entries) >= limit:
+        if limit and len(newest_first_entries) >= limit:
             break
 
-    # Sort by timestamp descending (newest first) and limit
-    entries.sort(key=lambda e: e.get("ts", ""), reverse=True)
-    return entries[:limit]
+    if limit:
+        newest_first_entries = newest_first_entries[:limit]
+
+    # Render in chronological order so the newest line is at the end.
+    newest_first_entries.reverse()
+    return newest_first_entries
 
 
 def _read_log_file(

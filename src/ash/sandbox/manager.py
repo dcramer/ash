@@ -87,8 +87,10 @@ class SandboxConfig:
     # Logs mounting (for agent to inspect server logs)
     logs_path: Path | None = None  # Host path to logs directory
 
-    # RPC socket mounting (for sandbox to communicate with host)
-    rpc_socket_path: Path | None = None  # Host path to RPC socket
+    # RPC runtime mounting (for sandbox to communicate with host over Unix socket)
+    rpc_socket_path: Path | None = (
+        None  # Host path to RPC socket (inside mounted run dir)
+    )
 
     # UV cache mounting (for persistent package cache across sandbox runs)
     uv_cache_path: Path | None = None  # Host path to uv cache directory
@@ -222,12 +224,18 @@ class SandboxManager:
                 "mode": "ro",
             }
 
-        if self._config.rpc_socket_path and self._config.rpc_socket_path.exists():
-            volumes[str(self._config.rpc_socket_path)] = {
-                "bind": f"{prefix}/rpc.sock",
-                "mode": "rw",
-            }
-            env["ASH_RPC_SOCKET"] = f"{prefix}/rpc.sock"
+        if self._config.rpc_socket_path:
+            # Mount the whole run directory instead of a single socket file.
+            # Socket files are frequently unlinked/recreated on server restart;
+            # bind-mounting the parent dir keeps the recreated inode visible.
+            run_dir = self._config.rpc_socket_path.parent
+            socket_name = self._config.rpc_socket_path.name
+            if run_dir.exists():
+                volumes[str(run_dir)] = {
+                    "bind": f"{prefix}/run",
+                    "mode": "rw",
+                }
+                env["ASH_RPC_SOCKET"] = f"{prefix}/run/{socket_name}"
 
         if self._config.uv_cache_path:
             self._config.uv_cache_path.mkdir(parents=True, exist_ok=True)

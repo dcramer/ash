@@ -12,10 +12,11 @@ class _FakeContainer:
         container_id: str,
         image: str,
         status: str = "running",
+        mounts: list[dict[str, str]] | None = None,
     ) -> None:
         self.id = container_id
         self.status = status
-        self.attrs = {"Config": {"Image": image}}
+        self.attrs = {"Config": {"Image": image}, "Mounts": mounts or []}
 
 
 class _FakeManager:
@@ -185,6 +186,40 @@ async def test_reuse_container_prunes_image_mismatch_then_recreates(
     manager._by_name[shared_name] = "stale"
 
     executor = SandboxExecutor()
+    executor._manager = manager
+    executor._initialized = True
+    monkeypatch.setattr(executor, "_managed_container_name", lambda: shared_name)
+
+    result = await executor.execute("echo hi", reuse_container=True)
+    assert result.success is True
+    assert "stale" in manager.removed
+    assert manager.created == ["c1"]
+
+
+async def test_reuse_container_prunes_rpc_mount_mismatch_then_recreates(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _patch_runtime_paths(monkeypatch, tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True)
+
+    manager = _FakeManager()
+    shared_name = "ash-sandbox-deadbeef"
+    manager._containers["stale"] = _FakeContainer(
+        container_id="stale",
+        image="ash-sandbox:latest",
+        status="running",
+        mounts=[
+            {
+                "Source": str(run_dir / "rpc.sock"),
+                "Destination": "/ash/rpc.sock",
+            }
+        ],
+    )
+    manager._by_name[shared_name] = "stale"
+
+    executor = SandboxExecutor()
+    executor._config.rpc_socket_path = run_dir / "rpc.sock"
     executor._manager = manager
     executor._initialized = True
     monkeypatch.setattr(executor, "_managed_container_name", lambda: shared_name)
