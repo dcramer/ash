@@ -4,8 +4,8 @@ Status date: 2026-02-24
 
 ## Goal
 
-Ship `gog` as an external capability provider + skill workflow while still bundling
-an optional `gog` skill for first-party dogfooding.
+Ship `gog` as a bundled capability-provider + skill workflow for first-party
+dogfooding.
 
 ## Architecture Contract
 
@@ -19,11 +19,11 @@ an optional `gog` skill for first-party dogfooding.
 
 - [x] Capability manager + RPC + sandbox CLI contract in place.
 - [x] Bridge envelope contract (`bridge-v1`) with strict validation in place.
-- [x] Signed context token propagation to external providers in place.
+- [x] Signed context token propagation to bridge providers in place.
 - [x] Skill capability preflight + DM/sensitive access policy in place.
 - [x] Bundled opt-in `gog` skill scaffolded (`src/ash/skills/bundled/gog/SKILL.md`).
-- [x] Reference `gogcli` bridge runtime implemented for local dogfood (`scripts/gogcli_bridge.py`).
-- [ ] External `gogcli` package/repo publishing completed (outside this repo).
+- [x] Bundled `gogcli` bridge runtime shipped with Ash
+  (`src/ash/skills/bundled/gog/gogcli_bridge.py`, `gogcli` entrypoint).
 - [ ] Provider persistence for credential/account state finalized.
 - [ ] End-to-end Google OAuth and operation tests completed.
 
@@ -32,33 +32,20 @@ an optional `gog` skill for first-party dogfooding.
 ```toml
 # config.toml
 
-[capabilities.providers.gog]
+[skills.gog]
+enabled = true
+
+[skills.gog.capability_provider]
 enabled = true
 namespace = "gog"
 command = ["gogcli", "bridge"]
 timeout_seconds = 30
 
-[skills.gog]
-enabled = true
-
 [skills.defaults]
 allow_chat_ids = ["<dm-chat-id>"]  # optional global guardrail
 ```
 
-### Local Dogfood Bridge Command (Current Repo)
-
-For local testing before external packaging, point provider command to the
-reference bridge script:
-
-```toml
-[capabilities.providers.gog]
-enabled = true
-namespace = "gog"
-command = ["python", "/path/to/ash/scripts/gogcli_bridge.py", "bridge"]
-timeout_seconds = 30
-```
-
-## External `gogcli` Work Plan
+## Remaining Work Plan
 
 1. Bridge runtime
 - Accept `bridge-v1` envelopes on stdin and return envelopes on stdout.
@@ -89,11 +76,11 @@ timeout_seconds = 30
 
 ## Core Changes Needed?
 
-For the packaging model (single third-party package containing both skill files and
-provider runtime), no additional core architecture changes are required.
+For the bundled-shipping model (skill + provider runtime in Ash), no additional
+core architecture changes are required.
 
 Optional future improvements:
 
-- Add installer UX to scaffold both `[skills.gog]` and
-  `[capabilities.providers.gog]` config together.
+- Add installer UX to scaffold `[skills.gog]` plus
+  `[skills.gog.capability_provider]` defaults.
 - Add provider health diagnostics in `ash doctor` for capability bridges.

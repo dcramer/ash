@@ -13,8 +13,9 @@ Core manager/RPC/CLI implementation is in place; provider backends are increment
 Capabilities provide a secure interface for skills to access sensitive external systems
 (for example email/calendar) without giving skills direct credentials.
 
-This is the core contract for external skill repos (such as `gogcli`) so they can
-share skill code while preserving per-user data and credential isolation.
+This is the core contract for both bundled and externally distributed capability
+providers so skill code can be shared while preserving per-user data and
+credential isolation.
 
 ## Outcomes
 
@@ -111,8 +112,9 @@ Important implications:
 
 ### External Provider Bridge
 
-Capability providers are configured as external bridge commands so integrations
-like `gog` can live in a skill/external repo instead of Ash core code:
+Capability providers are configured as bridge commands.
+
+For bundled `gog` dogfood, configure from the skill section:
 
 ```toml
 [skills.gog]

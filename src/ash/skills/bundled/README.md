@@ -43,9 +43,9 @@ Skill metadata must not define provider/container command wiring.
 `gog` is intentionally a two-part integration:
 
 1. Skill surface: `SKILL.md` instructions and capability requirements.
-2. Provider surface: external `gogcli bridge` runtime implementing capability contract.
+2. Provider surface: bundled `gogcli bridge` runtime implementing capability contract.
 
-This can live in a single third-party repo/package as long as Ash wiring stays split:
+This is shipped together in Ash while keeping wiring split:
 
 - skill enablement + provider defaults: `[skills.gog] enabled = true`
 - optional provider overrides:
@@ -60,5 +60,5 @@ Bundled skills live under this directory:
 src/ash/skills/bundled/<skill-name>/SKILL.md
 ```
 
-Keep bundled skills compatible with external distribution so they can be moved to
-or mirrored from third-party skill sources without semantic changes.
+Keep bundled skills contract-compatible with installed/workspace skills so runtime
+behavior stays consistent across skill sources.
