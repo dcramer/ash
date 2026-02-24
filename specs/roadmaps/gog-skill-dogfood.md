@@ -24,7 +24,8 @@ dogfooding.
 - [x] Bundled opt-in `gog` skill scaffolded (`src/ash/skills/bundled/gog/SKILL.md`).
 - [x] Bundled `gogcli` bridge runtime shipped with Ash
   (`src/ash/skills/bundled/gog/scripts/gogcli_bridge.py`, `gogcli` entrypoint).
-- [ ] Provider persistence for credential/account state finalized.
+- [x] Provider persistence for credential/account state finalized
+  (accounts + auth flows + operation scope state with user/capability isolation).
 - [ ] End-to-end Google OAuth and operation tests completed.
 
 ## Enablement Example

@@ -18,6 +18,12 @@ from ash.context_token import ContextTokenService
 _BRIDGE_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "gogcli_bridge.py"
 
 
+def _load_state(path: Path) -> dict[str, Any]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(raw, dict)
+    return raw
+
+
 def _run_bridge(
     payload: dict[str, Any],
     *,
@@ -77,9 +83,10 @@ def test_bridge_definitions() -> None:
 
 def test_bridge_auth_flow_and_user_scoped_invoke(tmp_path: Path) -> None:
     service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    state_path = tmp_path / "gogcli-state.json"
     env = {
         "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
-        "GOGCLI_STATE_PATH": str(tmp_path / "gogcli-state.json"),
+        "GOGCLI_STATE_PATH": str(state_path),
     }
     user1_token = service.issue(
         effective_user_id="user-1",
@@ -104,6 +111,11 @@ def test_bridge_auth_flow_and_user_scoped_invoke(tmp_path: Path) -> None:
     )
     assert "error" not in begin
     flow_state = begin["result"]["flow_state"]
+    assert flow_state["flow_id"]
+    assert flow_state["nonce"]
+
+    state_after_begin = _load_state(state_path)
+    assert flow_state["flow_id"] in state_after_begin["auth_flows"]
 
     complete = _run_bridge(
         {
@@ -123,6 +135,8 @@ def test_bridge_auth_flow_and_user_scoped_invoke(tmp_path: Path) -> None:
     assert "error" not in complete
     account_ref = complete["result"]["account_ref"]
     assert account_ref == "work"
+    state_after_complete = _load_state(state_path)
+    assert flow_state["flow_id"] not in state_after_complete["auth_flows"]
 
     invoke_user1 = _run_bridge(
         {
@@ -144,6 +158,11 @@ def test_bridge_auth_flow_and_user_scoped_invoke(tmp_path: Path) -> None:
     messages = invoke_user1["result"]["output"]["messages"]
     assert isinstance(messages, list)
     assert len(messages) == 2
+    state_after_invoke = _load_state(state_path)
+    account_key = "user-1:gog.email:work"
+    assert account_key in state_after_invoke["accounts"]
+    scope_key = "user-1:gog.email"
+    assert state_after_invoke["operation_state"][scope_key]["invoke_count"] == 1
 
     user2_token = service.issue(
         effective_user_id="user-2",
@@ -168,6 +187,125 @@ def test_bridge_auth_flow_and_user_scoped_invoke(tmp_path: Path) -> None:
         env=env,
     )
     assert invoke_user2["error"]["code"] == "capability_auth_required"
+
+
+def test_bridge_auth_complete_rejects_reused_flow_state(tmp_path: Path) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(tmp_path / "gogcli-state.json"),
+    }
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+
+    begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_reuse_begin",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.email",
+                "account_hint": "work",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin
+    flow_state = begin["result"]["flow_state"]
+
+    first_complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_reuse_complete_1",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.email",
+                "flow_state": flow_state,
+                "code": "sample-code",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in first_complete
+
+    second_complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_reuse_complete_2",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.email",
+                "flow_state": flow_state,
+                "code": "sample-code",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert second_complete["error"]["code"] == "capability_auth_flow_invalid"
+
+
+def test_bridge_auth_complete_rejects_expired_flow_state(tmp_path: Path) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    state_path = tmp_path / "gogcli-state.json"
+    env = {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(state_path),
+    }
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+
+    begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_expired_begin",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.email",
+                "account_hint": "work",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin
+    flow_state = begin["result"]["flow_state"]
+    flow_id = flow_state["flow_id"]
+
+    state = _load_state(state_path)
+    state["auth_flows"][flow_id]["expires_at"] = 1
+    state_path.write_text(json.dumps(state, ensure_ascii=True), encoding="utf-8")
+
+    complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_expired_complete",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.email",
+                "flow_state": flow_state,
+                "code": "sample-code",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert complete["error"]["code"] == "capability_auth_flow_invalid"
 
 
 def test_bridge_rejects_invalid_context_signature(tmp_path: Path) -> None:

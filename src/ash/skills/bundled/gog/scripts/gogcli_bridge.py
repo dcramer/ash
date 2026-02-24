@@ -29,7 +29,12 @@ TOKEN_ALG = "HS256"  # noqa: S105
 TOKEN_LEEWAY_SECONDS = 30
 ENV_CONTEXT_SECRET = "ASH_CONTEXT_TOKEN_SECRET"  # noqa: S105
 ENV_STATE_PATH = "GOGCLI_STATE_PATH"
+ENV_AUTH_FLOW_TTL_SECONDS = "GOGCLI_AUTH_FLOW_TTL_SECONDS"
 DEFAULT_STATE_PATH = Path.home() / ".ash" / "gogcli" / "state.json"
+STATE_VERSION = 1
+DEFAULT_AUTH_FLOW_TTL_SECONDS = 600
+MIN_AUTH_FLOW_TTL_SECONDS = 30
+MAX_AUTH_FLOW_TTL_SECONDS = 3600
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,20 +187,45 @@ def _state_path() -> Path:
     return DEFAULT_STATE_PATH
 
 
+def _empty_state() -> dict[str, Any]:
+    return {
+        "version": STATE_VERSION,
+        "accounts": {},
+        "auth_flows": {},
+        "operation_state": {},
+    }
+
+
+def _dict_values(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for key, item in value.items():
+        if isinstance(key, str) and isinstance(item, dict):
+            result[key] = dict(item)
+    return result
+
+
 def _read_state() -> dict[str, Any]:
+    empty = _empty_state()
     path = _state_path()
     if not path.exists():
-        return {"accounts": {}}
+        return empty
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"accounts": {}}
+        return empty
     if not isinstance(raw, dict):
-        return {"accounts": {}}
-    accounts = raw.get("accounts")
-    if not isinstance(accounts, dict):
-        return {"accounts": {}}
-    return {"accounts": accounts}
+        return empty
+
+    state = _empty_state()
+    version = raw.get("version")
+    if isinstance(version, int):
+        state["version"] = version
+    state["accounts"] = _dict_values(raw.get("accounts"))
+    state["auth_flows"] = _dict_values(raw.get("auth_flows"))
+    state["operation_state"] = _dict_values(raw.get("operation_state"))
+    return state
 
 
 def _write_state(state: dict[str, Any]) -> None:
@@ -215,6 +245,37 @@ def _write_state(state: dict[str, Any]) -> None:
 
 def _account_key(user_id: str, capability_id: str, account_ref: str) -> str:
     return f"{user_id}:{capability_id}:{account_ref}"
+
+
+def _operation_scope_key(user_id: str, capability_id: str) -> str:
+    return f"{user_id}:{capability_id}"
+
+
+def _auth_flow_ttl_seconds() -> int:
+    value = _optional_text(os.environ.get(ENV_AUTH_FLOW_TTL_SECONDS))
+    if value is None:
+        return DEFAULT_AUTH_FLOW_TTL_SECONDS
+    try:
+        parsed = int(value)
+    except ValueError:
+        return DEFAULT_AUTH_FLOW_TTL_SECONDS
+    return max(MIN_AUTH_FLOW_TTL_SECONDS, min(parsed, MAX_AUTH_FLOW_TTL_SECONDS))
+
+
+def _prune_expired_flows(*, state: dict[str, Any], now_epoch: int) -> bool:
+    auth_flows = _dict_values(state.get("auth_flows"))
+    changed = False
+    for flow_id, flow in list(auth_flows.items()):
+        expires_at = _int_claim(flow, "expires_at")
+        if expires_at is None or expires_at <= now_epoch:
+            auth_flows.pop(flow_id, None)
+            changed = True
+    state["auth_flows"] = auth_flows
+    return changed
+
+
+def _iso8601_utc(epoch_seconds: int) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch_seconds))
 
 
 def _require_namespaced_capability(capability_id: Any) -> str:
@@ -288,27 +349,35 @@ def _handle_auth_begin(params: dict[str, Any]) -> dict[str, Any]:
 
     capability_id = _require_namespaced_capability(params.get("capability_id"))
     account_hint = _optional_text(params.get("account_hint")) or "default"
+    now_epoch = int(time.time())
     nonce = secrets.token_hex(8)
-    flow_state = {
-        "nonce": nonce,
+    flow_id = f"gaf_{secrets.token_hex(12)}"
+    expires_epoch = now_epoch + _auth_flow_ttl_seconds()
+    state = _read_state()
+    _prune_expired_flows(state=state, now_epoch=now_epoch)
+    state["auth_flows"][flow_id] = {
         "user_id": claims.user_id,
         "capability_id": capability_id,
         "account_hint": account_hint,
-        "issued_at": int(time.time()),
+        "nonce": nonce,
+        "issued_at": now_epoch,
+        "expires_at": expires_epoch,
+    }
+    _write_state(state)
+    flow_state = {
+        "flow_id": flow_id,
+        "nonce": nonce,
     }
     auth_url = (
         "https://auth.gog.local/authorize"
         f"?capability={quote_plus(capability_id)}"
         f"&account={quote_plus(account_hint)}"
+        f"&flow_id={quote_plus(flow_id)}"
         f"&nonce={quote_plus(nonce)}"
-    )
-    expires_at = time.strftime(
-        "%Y-%m-%dT%H:%M:%SZ",
-        time.gmtime(int(time.time()) + 600),
     )
     return {
         "auth_url": auth_url,
-        "expires_at": expires_at,
+        "expires_at": _iso8601_utc(expires_epoch),
         "flow_state": flow_state,
     }
 
@@ -325,36 +394,78 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
     flow_state = params.get("flow_state")
     if not isinstance(flow_state, dict):
         raise BridgeError("capability_invalid_input", "flow_state must be an object")
+    flow_id = _required_text(
+        flow_state.get("flow_id"),
+        code="capability_invalid_input",
+        message="flow_state.flow_id is required",
+    )
 
-    flow_user_id = _optional_text(flow_state.get("user_id"))
+    state = _read_state()
+    now_epoch = int(time.time())
+    if _prune_expired_flows(state=state, now_epoch=now_epoch):
+        _write_state(state)
+    stored_flow = state["auth_flows"].get(flow_id)
+    if not isinstance(stored_flow, dict):
+        raise BridgeError(
+            "capability_auth_flow_invalid",
+            "flow_state is invalid or expired",
+        )
+
+    flow_user_id = _optional_text(stored_flow.get("user_id"))
     if flow_user_id != claims.user_id:
         raise BridgeError(
             "capability_auth_flow_invalid",
             "flow_state user does not match caller",
         )
+    flow_capability_id = _optional_text(stored_flow.get("capability_id"))
+    if flow_capability_id != capability_id:
+        raise BridgeError(
+            "capability_auth_flow_invalid",
+            "flow_state capability does not match caller request",
+        )
+    expected_nonce = _optional_text(stored_flow.get("nonce"))
+    nonce = _optional_text(flow_state.get("nonce"))
+    if expected_nonce and nonce != expected_nonce:
+        raise BridgeError(
+            "capability_auth_flow_invalid",
+            "flow_state nonce mismatch",
+        )
 
     account_ref = (
-        _optional_text(flow_state.get("account_hint"))
+        _optional_text(stored_flow.get("account_hint"))
         or _optional_text(params.get("account_hint"))
         or "default"
     )
-    state = _read_state()
     account_key = _account_key(claims.user_id, capability_id, account_ref)
+    existing = state["accounts"].get(account_key)
+    existing_created_at = (
+        _int_claim(existing, "created_at") if isinstance(existing, dict) else None
+    )
+    credential_key = (
+        _optional_text(existing.get("credential_key"))
+        if isinstance(existing, dict)
+        else None
+    )
+    if credential_key is None:
+        credential_key = f"cred_{secrets.token_hex(8)}"
     state["accounts"][account_key] = {
-        "created_at": int(time.time()),
+        "created_at": existing_created_at or now_epoch,
+        "updated_at": now_epoch,
         "provider": claims.provider,
         "chat_type": claims.chat_type,
-        "credential_key": f"cred_{secrets.token_hex(8)}",
+        "credential_key": credential_key,
     }
+    state["auth_flows"].pop(flow_id, None)
     _write_state(state)
     return {
         "account_ref": account_ref,
         "credential_material": {
-            "credential_key": state["accounts"][account_key]["credential_key"],
+            "credential_key": credential_key,
         },
         "metadata": {
             "provider": "google",
             "capability_id": capability_id,
+            "linked_at": _iso8601_utc(now_epoch),
         },
     }
 
@@ -364,10 +475,11 @@ def _require_linked_account(
     user_id: str,
     capability_id: str,
     account_ref: str,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    state = _read_state()
+    state_data = state or _read_state()
     key = _account_key(user_id, capability_id, account_ref)
-    account = state["accounts"].get(key)
+    account = state_data["accounts"].get(key)
     if not isinstance(account, dict):
         raise BridgeError(
             "capability_auth_required",
@@ -405,12 +517,29 @@ def _handle_invoke(params: dict[str, Any]) -> dict[str, Any]:
     )
     input_data = _as_object(params.get("input_data"), field_name="input_data")
 
+    state = _read_state()
+    now_epoch = int(time.time())
+    if _prune_expired_flows(state=state, now_epoch=now_epoch):
+        _write_state(state)
     _ = _require_linked_account(
         user_id=claims.user_id,
         capability_id=capability_id,
         account_ref=account_ref,
+        state=state,
     )
-    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    scope_key = _operation_scope_key(claims.user_id, capability_id)
+    existing_scope = state["operation_state"].get(scope_key)
+    invoke_count = 0
+    if isinstance(existing_scope, dict):
+        invoke_count = _int_claim(existing_scope, "invoke_count") or 0
+    state["operation_state"][scope_key] = {
+        "invoke_count": invoke_count + 1,
+        "last_operation": operation,
+        "last_account_ref": account_ref,
+        "last_invoked_at": now_epoch,
+    }
+    _write_state(state)
+    now_iso = _iso8601_utc(now_epoch)
 
     if capability_id == "gog.email" and operation == "list_messages":
         folder = _optional_text(input_data.get("folder")) or "inbox"
