@@ -24,7 +24,7 @@ It does not own:
 `[browser.sandbox]` supports:
 
 - `runtime_required` (bool): deprecated compatibility flag; sandbox-only runtime is enforced regardless of value.
-- `runtime_warmup_on_start` (bool): warm browser runtime during integration startup.
+- `runtime_warmup_on_start` (bool): run startup warmup hook during integration startup. For scope-keyed dedicated runtime, this performs preflight checks without spawning a default scope container.
 - `runtime_restart_attempts` (int): bounded restart attempts when runtime becomes unhealthy.
 - `container_image` (string): dedicated browser image used by the sandbox provider.
 - `container_name_prefix` (string): prefix for scope-hashed dedicated container names.
@@ -47,6 +47,7 @@ It does not own:
 10. Sandbox browser runtime MUST be dedicated-container only; legacy shared-executor Chromium launch paths are unsupported.
 11. Dedicated browser containers MUST be scope-keyed (effective user scope) so independent scopes do not share a runtime container.
 12. Dedicated runtime command execution MUST traverse an authenticated loopback bridge (bearer token) rather than unauthenticated control surfaces.
+13. Integration shutdown MUST perform best-effort browser runtime teardown so service restarts do not leave dangling dedicated browser containers.
 
 ## Integration Contract
 
