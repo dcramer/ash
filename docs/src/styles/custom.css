@@ -1144,7 +1144,7 @@ body:has(.ash-home) .content-panel:first-of-type {
   position: relative;
   border: 0;
   background: #111111;
-  padding: 2.45rem 1rem 1rem;
+  padding: 4.9rem 2rem 2rem;
   display: grid;
   gap: 0.42rem;
   box-shadow: none;
@@ -1165,16 +1165,16 @@ body:has(.ash-home) .content-panel:first-of-type {
   left: 0;
   right: 0;
   top: 0;
-  height: 2.15rem;
+  height: 2.8rem;
   display: flex;
   align-items: center;
-  padding: 0 0.7rem;
+  padding: 0 1rem;
   font-family: 'Bebas Neue', var(--sl-font);
-  font-size: 1.28rem;
+  font-size: 1.8rem;
   letter-spacing: 0.04em;
   text-transform: none;
   color: #1b1b1b;
-  font-weight: 800;
+  font-weight: 900;
   background:
     linear-gradient(90deg, rgba(176, 255, 31, 0.98), rgba(196, 255, 58, 0.86)),
     #d1ff69;
