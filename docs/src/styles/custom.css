@@ -1331,17 +1331,17 @@ body:has(.ash-home) .content-panel:first-of-type {
 
 .ash-chat-meta {
   margin: 0.08rem auto 0;
-  border: 1.5px solid #565656;
-  background: #e8e8e8;
-  padding: 0.3rem 0.46rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
   font-size: 0.62rem;
   font-weight: 800;
-  color: #2a2a2a;
-  text-transform: lowercase;
+  color: #9b9b9b;
+  text-transform: none;
   letter-spacing: 0.05em;
-  width: fit-content;
-  max-width: calc(100% - 1rem);
-  text-align: center;
+  width: auto;
+  max-width: 100%;
+  text-align: left;
 }
 
 .ash-chat-latest {
@@ -1364,18 +1364,17 @@ body:has(.ash-home) .content-panel:first-of-type {
 }
 
 .ash-band-tag {
-  display: inline-flex;
-  align-items: center;
-  border: 1.5px solid var(--ash-ink);
+  display: block;
+  border: 0;
   border-radius: 0 !important;
-  padding: 0.2rem 0.52rem;
+  padding: 0;
   margin-bottom: 0.45rem !important;
   font-family: 'IBM Plex Mono', var(--sl-font-mono);
   font-size: 0.68rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #565656;
-  background: rgba(176, 255, 31, 0.24);
+  color: #9b9b9b;
+  background: transparent;
 }
 
 .ash-home-band p {
