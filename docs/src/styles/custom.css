@@ -584,9 +584,9 @@ pre code {
 
 .expressive-code .header,
 .expressive-code .frame .header {
-  background: #afff24 !important;
-  border-bottom: 2px solid #11130f !important;
-  color: #11130f !important;
+  background: #6f8f2a !important;
+  border-bottom: 2px solid #1b2310 !important;
+  color: #0d1207 !important;
 }
 
 .expressive-code .header .title,
@@ -599,13 +599,13 @@ pre code {
 }
 
 .expressive-code .header .copy {
-  border-color: #11130f !important;
-  color: #11130f !important;
-  background: #dcff86 !important;
+  border-color: #1b2310 !important;
+  color: #0f1608 !important;
+  background: #98b85a !important;
 }
 
 .expressive-code .header .copy:hover {
-  background: #c9fa53 !important;
+  background: #a8c96a !important;
 }
 
 /* High-contrast, monochrome-first code palette */
@@ -616,19 +616,19 @@ body .expressive-code {
   --ec-gtrFg: #7f8ea6 !important;
   --ec-gtrBrdCol: #2c364a !important;
   --ec-focusBrd: #84c20c !important;
-  --ec-frm-trmTtbBg: #afff24 !important;
+  --ec-frm-trmTtbBg: #6f8f2a !important;
   --ec-frm-trmBg: #05070c !important;
-  --ec-frm-trmTtbFg: #11130f !important;
-  --ec-frm-trmTtbBrdBtmCol: #11130f !important;
-  --ec-frm-trmTtbDotsFg: #2f7a00 !important;
+  --ec-frm-trmTtbFg: #0d1207 !important;
+  --ec-frm-trmTtbBrdBtmCol: #1b2310 !important;
+  --ec-frm-trmTtbDotsFg: #2f5812 !important;
   --ec-frm-trmTtbDotsOpa: 1 !important;
   --ec-frm-inlBtnFg: #1c232f !important;
   --ec-frm-inlBtnBrd: #11130f !important;
 }
 
 .expressive-code .header :is([class*='dot'], [class*='Dot']) {
-  background: #2f7a00 !important;
-  border: 1px solid #1f5300 !important;
+  background: #2f5812 !important;
+  border: 1px solid #20390d !important;
 }
 
 body .expressive-code .ec-line :where(span[style^='--']:not([class])) {
