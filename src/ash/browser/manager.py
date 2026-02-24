@@ -172,7 +172,6 @@ class BrowserManager:
             )
         if (
             provider_key == "sandbox"
-            and self._config.browser.sandbox.runtime_required
             and not self._is_sandbox_runtime()
             and not bool(getattr(provider, "runs_in_sandbox_executor", False))
         ):

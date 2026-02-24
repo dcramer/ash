@@ -226,6 +226,7 @@ class BrowserSandboxConfig(BaseModel):
 
     headless: bool = True
     browser_channel: Literal["chromium"] = "chromium"
+    # Deprecated compatibility flag; sandbox-only execution is always enforced.
     runtime_required: bool = True
     runtime_warmup_on_start: bool = True
     runtime_restart_attempts: int = 1

@@ -340,12 +340,11 @@ def _check_browser_config(config: AshConfig) -> list[DoctorFinding]:
             )
 
     if browser_cfg.provider == "sandbox":
-        runtime_required = browser_cfg.sandbox.runtime_required
         in_sandbox = Path("/.dockerenv").exists() or (
             os.environ.get("ASH_BROWSER_SANDBOX_RUNTIME", "").strip().lower()
             in {"1", "true", "yes", "on"}
         )
-        if runtime_required and not in_sandbox:
+        if not in_sandbox:
             findings.append(
                 DoctorFinding(
                     level="warning",
@@ -354,10 +353,7 @@ def _check_browser_config(config: AshConfig) -> list[DoctorFinding]:
                         "sandbox provider selected but runtime is not detected as "
                         "sandbox/container"
                     ),
-                    repair=(
-                        "Run Ash in sandbox/container runtime or set "
-                        "`[browser.sandbox].runtime_required = false` for local dev"
-                    ),
+                    repair="Run Ash in sandbox/container runtime",
                 )
             )
         if in_sandbox:

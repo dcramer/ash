@@ -27,6 +27,7 @@ from ash.tools.builtin.browser import BrowserTool
 
 class _FakeProvider:
     name = "sandbox"
+    runs_in_sandbox_executor = True
 
     def __init__(self) -> None:
         self.closed_session_ids: list[str | None] = []
@@ -97,9 +98,8 @@ class _FakeKernelProvider(_FakeProvider):
     name = "kernel"
 
 
-class _FakeSandboxExecutorProvider(_FakeProvider):
-    name = "sandbox"
-    runs_in_sandbox_executor = True
+class _FakeHostRuntimeProvider(_FakeProvider):
+    runs_in_sandbox_executor = False
 
 
 class _FakeWarmupProvider(_FakeProvider):
@@ -435,7 +435,7 @@ async def test_browser_manager_requires_sandbox_runtime_when_enabled(
     manager = BrowserManager(
         config=_strict_config(),
         store=store,
-        providers={"sandbox": _FakeProvider()},
+        providers={"sandbox": _FakeHostRuntimeProvider()},
     )
     monkeypatch.setattr(manager, "_is_sandbox_runtime", lambda: False)
 
@@ -456,7 +456,7 @@ async def test_browser_tool_respects_runtime_gate_for_agent_calls(
     manager = BrowserManager(
         config=_strict_config(),
         store=store,
-        providers={"sandbox": _FakeProvider()},
+        providers={"sandbox": _FakeHostRuntimeProvider()},
     )
     monkeypatch.setattr(manager, "_is_sandbox_runtime", lambda: False)
     tool = BrowserTool(manager)
@@ -476,8 +476,8 @@ async def test_browser_manager_allows_executor_offload_when_host_runtime(
     store = BrowserStore(tmp_path / "browser")
     manager = BrowserManager(
         config=_strict_config(),
-        store=store,
-        providers={"sandbox": _FakeSandboxExecutorProvider()},
+        store=store,  # Provider marks sandbox-executor offload as available.
+        providers={"sandbox": _FakeProvider()},
     )
     monkeypatch.setattr(manager, "_is_sandbox_runtime", lambda: False)
 
