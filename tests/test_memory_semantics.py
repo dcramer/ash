@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ash.cli.commands.memory.doctor.normalize_semantics import (
+    _format_change_type,
+    _format_edge_sync,
     memory_doctor_normalize_semantics,
 )
 from ash.graph.graph import KnowledgeGraph
@@ -81,6 +83,21 @@ class TestAssertionPipeline:
         assert assertion.subjects == [person.id]
         assert get_stated_by_person(graph_store.graph, memory.id) == person.id
         assert get_subject_person_ids(graph_store.graph, memory.id) == [person.id]
+
+
+class TestNormalizeSemanticsPreviewFormatting:
+    def test_format_edge_sync_variants(self):
+        assert _format_edge_sync(about_drift=False, stated_by_drift=False) == "none"
+        assert _format_edge_sync(about_drift=True, stated_by_drift=False) == "about"
+        assert _format_edge_sync(about_drift=False, stated_by_drift=True) == "stated_by"
+        assert (
+            _format_edge_sync(about_drift=True, stated_by_drift=True)
+            == "about+stated_by"
+        )
+
+    def test_format_change_type(self):
+        assert _format_change_type(assertion_changed=True) == "rewrite"
+        assert _format_change_type(assertion_changed=False) == "keep"
 
     async def test_process_extracted_facts_writes_self_assertion(
         self, graph_store: Store

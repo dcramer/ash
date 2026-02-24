@@ -35,8 +35,11 @@ async def memory_doctor_normalize_semantics(store: Store, force: bool) -> None:
     memories_to_update: list[MemoryEntry] = []
     subject_person_ids_map: dict[str, list[str]] = {}
     stated_by_updates: dict[str, str | None] = {}
-    preview_rows: list[tuple[str, str, str, str]] = []
+    preview_rows: list[tuple[str, str, str, str, str]] = []
     violation_count = 0
+    assertion_change_count = 0
+    about_drift_count = 0
+    stated_by_drift_count = 0
 
     for memory in memories:
         edge_subjects = get_subject_person_ids(store.graph, memory.id)
@@ -65,6 +68,13 @@ async def memory_doctor_normalize_semantics(store: Store, force: bool) -> None:
         if not (assertion_changed or about_drift or stated_by_drift):
             continue
 
+        if assertion_changed:
+            assertion_change_count += 1
+        if about_drift:
+            about_drift_count += 1
+        if stated_by_drift:
+            stated_by_drift_count += 1
+
         updated = memory.model_copy(deep=True)
         updated.metadata = upsert_assertion_metadata(memory.metadata, assertion)
         memories_to_update.append(updated)
@@ -72,11 +82,14 @@ async def memory_doctor_normalize_semantics(store: Store, force: bool) -> None:
         stated_by_updates[memory.id] = desired_stated_by
 
         if len(preview_rows) < 12:
+            edge_sync = _format_edge_sync(about_drift, stated_by_drift)
+            change_type = _format_change_type(assertion_changed)
             preview_rows.append(
                 (
                     memory.id[:8],
                     assertion.assertion_kind.value,
-                    "yes" if about_drift or stated_by_drift else "no",
+                    change_type,
+                    edge_sync,
                     truncate(memory.content, 56),
                 )
             )
@@ -90,7 +103,8 @@ async def memory_doctor_normalize_semantics(store: Store, force: bool) -> None:
         [
             ("ID", {"style": "dim", "max_width": 8}),
             ("Kind", {"style": "cyan", "max_width": 18}),
-            ("Edge Drift", {"style": "yellow", "max_width": 8}),
+            ("Assertion", {"style": "magenta", "max_width": 10}),
+            ("Edge Sync", {"style": "yellow", "max_width": 18}),
             ("Content", {"style": "white", "max_width": 56}),
         ],
     )
@@ -102,6 +116,12 @@ async def memory_doctor_normalize_semantics(store: Store, force: bool) -> None:
         f"\nWill update {len(memories_to_update)} memories"
         f" ({violation_count} with assertion invariant warnings)"
     )
+    console.print(
+        "[dim]Planned changes:"
+        f" assertion={assertion_change_count},"
+        f" about_edges={about_drift_count},"
+        f" stated_by_edges={stated_by_drift_count}[/dim]"
+    )
 
     if not confirm_or_cancel("Apply semantic normalization?", force):
         return
@@ -112,6 +132,20 @@ async def memory_doctor_normalize_semantics(store: Store, force: bool) -> None:
     await _sync_stated_by_edges(store, stated_by_updates)
 
     success(f"Normalized semantics for {len(memories_to_update)} memories")
+
+
+def _format_edge_sync(about_drift: bool, stated_by_drift: bool) -> str:
+    if about_drift and stated_by_drift:
+        return "about+stated_by"
+    if about_drift:
+        return "about"
+    if stated_by_drift:
+        return "stated_by"
+    return "none"
+
+
+def _format_change_type(assertion_changed: bool) -> str:
+    return "rewrite" if assertion_changed else "keep"
 
 
 async def _get_or_compile_assertion(

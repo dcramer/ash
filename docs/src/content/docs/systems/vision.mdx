@@ -1,21 +1,20 @@
 ---
 title: Vision
-description: Inbound image understanding and context injection
+description: Configure inbound image understanding
 sidebar:
   order: 6
 ---
 
-Ash handles inbound images through a dedicated vision integration hook.
+Ash can analyze inbound images and inject structured image context into the user message before normal text processing.
 
-## How It Works
+## Vision In 30 Seconds
 
-1. Provider (for example Telegram) downloads image bytes into `IncomingMessage.images`.
-2. `ImageIntegration.preprocess_incoming_message` runs before normal session/agent flow.
-3. The image provider (currently OpenAI) analyzes the image.
-4. Ash injects a structured `[IMAGE_CONTEXT]` block into the user message text.
-5. The rest of the pipeline stays text-first and unchanged.
+- Provider receives image bytes (for example from Telegram)
+- Vision integration analyzes images (currently via OpenAI)
+- Ash injects an `[IMAGE_CONTEXT]` block into message text
+- Main conversation pipeline remains text-first
 
-## Minimal Config
+## Quick Start
 
 ```toml
 [image]
@@ -23,10 +22,18 @@ enabled = true
 provider = "openai"
 ```
 
-You also need an OpenAI API key:
+Provide OpenAI credentials via config or environment:
 
-- `[openai].api_key` in config, or
-- `OPENAI_API_KEY` in environment.
+```toml
+[openai]
+api_key = "sk-..."
+```
+
+or
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
 
 ## Recommended Config
 
@@ -38,12 +45,45 @@ max_images_per_message = 1
 max_image_bytes = 8000000
 request_timeout_seconds = 12.0
 include_ocr_text = true
-inject_position = "prepend"
+inject_position = "prepend"      # prepend | append
 no_caption_auto_respond = true
 ```
 
-## Operational Notes
+## Troubleshooting
 
-- If vision is enabled but credentials are missing, image preprocessing is skipped safely.
-- If image data is unusable (missing/oversized), Ash falls back to a clarifying text prompt.
-- Run `ash doctor` to catch common config gaps.
+### Images are ignored
+
+```bash
+uv run ash doctor
+```
+
+Check:
+
+- `[image].enabled = true`
+- OpenAI key is configured
+- inbound message actually contains image content
+
+### Requests time out on larger images
+
+Increase timeout or lower payload size:
+
+```toml
+[image]
+request_timeout_seconds = 20.0
+max_image_bytes = 4000000
+```
+
+### OCR content is noisy
+
+Disable OCR text injection:
+
+```toml
+[image]
+include_ocr_text = false
+```
+
+## Reference (Advanced)
+
+Vision integration hook runs before standard session/agent flow through `ImageIntegration.preprocess_incoming_message`.
+
+If vision prerequisites are missing or the payload is invalid, Ash safely falls back to text-only behavior.
