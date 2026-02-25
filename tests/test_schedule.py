@@ -614,6 +614,56 @@ class TestScheduleListRPC:
         assert len(result) == 0
 
 
+class TestScheduleParseTimeRPC:
+    """Tests for schedule.parse_time RPC method."""
+
+    @pytest.fixture
+    def schedule_parse_time(self, tmp_path: Path):
+        from ash.rpc.server import RPCServer
+
+        server = RPCServer(tmp_path / "test.sock")
+        store = _make_store(tmp_path / "schedule.jsonl")
+
+        from ash.rpc.methods.schedule import register_schedule_methods
+
+        async def _parse_time_with_llm(_time_text: str, _timezone: str):
+            return datetime(2030, 1, 2, 3, 4, tzinfo=UTC)
+
+        register_schedule_methods(
+            server,
+            store,
+            parse_time_with_llm=_parse_time_with_llm,
+        )
+        return server._methods["schedule.parse_time"]
+
+    @pytest.mark.asyncio
+    async def test_parse_time_returns_iso_when_callback_resolves(
+        self, schedule_parse_time
+    ):
+        result = await schedule_parse_time({"time": "tomorrow at 9", "timezone": "UTC"})
+        assert result["trigger_at"] == "2030-01-02T03:04:00Z"
+
+    @pytest.mark.asyncio
+    async def test_parse_time_requires_time(self, schedule_parse_time):
+        with pytest.raises(ValueError, match="time is required"):
+            await schedule_parse_time({})
+
+    @pytest.mark.asyncio
+    async def test_parse_time_returns_null_without_callback(self, tmp_path: Path):
+        from ash.rpc.server import RPCServer
+
+        server = RPCServer(tmp_path / "test.sock")
+        store = _make_store(tmp_path / "schedule.jsonl")
+
+        from ash.rpc.methods.schedule import register_schedule_methods
+
+        register_schedule_methods(server, store)
+        parse_method = server._methods["schedule.parse_time"]
+
+        result = await parse_method({"time": "next week", "timezone": "UTC"})
+        assert result == {"trigger_at": None}
+
+
 class TestScheduleWatcher:
     """Tests for ScheduleWatcher (polling/handler behavior)."""
 

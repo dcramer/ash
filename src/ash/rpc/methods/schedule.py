@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 def register_schedule_methods(
     server: "RPCServer",
     store: ScheduleStore,
+    parse_time_with_llm: Callable[[str, str], Awaitable[datetime | None]] | None = None,
 ) -> None:
     """Register schedule-related RPC methods.
 
@@ -157,10 +159,34 @@ def register_schedule_methods(
             return {"updated": False}
         return {"updated": True, "entry": _entry_to_dict(updated)}
 
+    async def schedule_parse_time(params: dict[str, Any]) -> dict[str, Any]:
+        """Parse a free-form time string with optional LLM fallback.
+
+        Params:
+            time: Free-form time text (required)
+            timezone: IANA timezone for local interpretation (optional, default UTC)
+        """
+        time_text = params.get("time")
+        if not isinstance(time_text, str) or not time_text.strip():
+            raise ValueError("time is required")
+
+        timezone = params.get("timezone", "UTC")
+        if not isinstance(timezone, str) or not timezone.strip():
+            timezone = "UTC"
+
+        if parse_time_with_llm is None:
+            return {"trigger_at": None}
+
+        parsed = await parse_time_with_llm(time_text.strip(), timezone)
+        if parsed is None:
+            return {"trigger_at": None}
+        return {"trigger_at": parsed.isoformat().replace("+00:00", "Z")}
+
     server.register("schedule.create", schedule_create)
     server.register("schedule.list", schedule_list)
     server.register("schedule.cancel", schedule_cancel)
     server.register("schedule.update", schedule_update)
+    server.register("schedule.parse_time", schedule_parse_time)
 
     logger.debug("Registered schedule RPC methods")
 

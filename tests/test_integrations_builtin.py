@@ -121,8 +121,9 @@ async def test_scheduling_integration_owns_lifecycle_and_rpc(monkeypatch) -> Non
 
     rpc_calls: dict[str, Any] = {}
 
-    def _register_schedule(server_obj, store_obj) -> None:
+    def _register_schedule(server_obj, store_obj, parse_time_with_llm=None) -> None:
         rpc_calls["args"] = (server_obj, store_obj)
+        rpc_calls["parse_time_with_llm"] = parse_time_with_llm
 
     async def _sender(
         _chat_id: str, _message: str, *, reply_to: str | None = None
@@ -154,6 +155,7 @@ async def test_scheduling_integration_owns_lifecycle_and_rpc(monkeypatch) -> Non
     integration.register_rpc_methods(server, context)
     assert rpc_calls["args"][0] is server
     assert rpc_calls["args"][1] is integration.store
+    assert callable(rpc_calls["parse_time_with_llm"])
 
     await integration.on_startup(context)
     await integration.on_shutdown(context)
