@@ -117,7 +117,7 @@ def register(app: typer.Typer) -> None:
 def _render_stats() -> None:
     home = get_ash_home()
 
-    console.print(f"[bold]Ash Home[/bold]: [cyan]{home}[/cyan]")
+    typer.echo(f"Ash Home: {home}")
     if not home.exists():
         dim("Home directory does not exist yet.")
         return

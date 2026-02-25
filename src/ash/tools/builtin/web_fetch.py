@@ -428,15 +428,17 @@ class WebFetchTool(Tool):
             )
 
             if result.timed_out:
-                raise TimeoutError(f"Request timed out after {self._timeout}s")
+                return ToolResult.error(
+                    f"Fetch error: Request timed out after {self._timeout}s"
+                )
 
             output = result.stdout.strip() if result.stdout else ""
             if not output:
-                raise ValueError("Empty response from fetch")
+                return ToolResult.error("Fetch error: Empty response from fetch")
 
             data = json.loads(output)
             if "error" in data:
-                raise Exception(data["error"])
+                return ToolResult.error(f"Fetch error: {data['error']}")
 
             if self._cache and "content" in data:
                 self._cache.set(url, data["content"])

@@ -53,8 +53,6 @@ class ServerRunner:
 
         # Track tasks for cleanup
         telegram_task: asyncio.Task | None = None
-        shutdown_event = asyncio.Event()
-
         # Set up signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()
         shutdown_count = 0
@@ -67,7 +65,6 @@ class ServerRunner:
                 # First signal: graceful shutdown
                 logger.info("server_shutting_down")
                 server.should_exit = True
-                shutdown_event.set()
                 # Stop telegram polling before cancelling task
                 provider = self._telegram_provider
                 if provider:
@@ -88,30 +85,27 @@ class ServerRunner:
         if self._telegram_provider:
             # Run both uvicorn and telegram polling
             logger.info("telegram_polling_starting")
+            server_task = asyncio.create_task(server.serve())
 
             async def start_telegram() -> None:
-                # Wait for server to be ready and handler to be created
-                handler = None
-                for _ in range(50):  # Wait up to 5 seconds
+                while not server_task.done():
                     handler = await self._app.state.server.get_telegram_handler()
                     if handler:
-                        break
+                        try:
+                            provider = self._telegram_provider
+                            if provider:
+                                await provider.start(handler.handle_message)
+                        except asyncio.CancelledError:
+                            logger.info("telegram_polling_cancelled")
+                        return
                     await asyncio.sleep(0.1)
 
-                if handler:
-                    try:
-                        provider = self._telegram_provider
-                        if provider:
-                            await provider.start(handler.handle_message)
-                    except asyncio.CancelledError:
-                        logger.info("telegram_polling_cancelled")
-                else:
-                    logger.error("telegram_handler_timeout")
+                logger.error("telegram_handler_unavailable")
 
             telegram_task = asyncio.create_task(start_telegram())
             # return_exceptions=True ensures we wait for server to finish graceful
             # shutdown after telegram is cancelled, avoiding double Ctrl+C
-            await asyncio.gather(server.serve(), telegram_task, return_exceptions=True)
+            await asyncio.gather(server_task, telegram_task, return_exceptions=True)
             return
 
         await server.serve()
