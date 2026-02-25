@@ -25,6 +25,7 @@ from ash.context_token import (
     ENV_SECRET,
     ContextTokenService,
     get_default_context_token_service,
+    issue_host_context_token,
 )
 
 _BRIDGE_PROTOCOL_VERSION = 1
@@ -169,7 +170,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
 
     def _issue_context_token(self, context: CapabilityCallContext) -> str:
         try:
-            return self._context_token_service.issue(
+            return issue_host_context_token(
                 effective_user_id=context.user_id,
                 chat_id=context.chat_id,
                 chat_type=context.chat_type,
@@ -179,6 +180,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
                 source_username=context.source_username,
                 source_display_name=context.source_display_name,
                 ttl_seconds=_BRIDGE_CONTEXT_TOKEN_TTL_SECONDS,
+                context_token_service=self._context_token_service,
             )
         except ValueError as e:
             raise _capability_error(

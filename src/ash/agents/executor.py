@@ -14,7 +14,7 @@ from ash.agents.types import (
     TurnAction,
     TurnResult,
 )
-from ash.context_token import get_default_context_token_service
+from ash.context_token import issue_host_context_token
 from ash.core.session import SessionState
 from ash.llm.types import ToolDefinition
 from ash.tools.base import ToolContext, ToolResult
@@ -72,7 +72,7 @@ def _refresh_context_token_env(
     ).strip()
     timezone = str(metadata.get("timezone") or "UTC").strip() or "UTC"
 
-    context_token = get_default_context_token_service().issue(
+    context_token = issue_host_context_token(
         effective_user_id=effective_user_id,
         chat_id=frame.context.chat_id or session.chat_id or None,
         chat_type=str(metadata.get("chat_type") or "").strip() or None,

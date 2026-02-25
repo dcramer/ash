@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ash.agents.types import ChildActivated
-from ash.context_token import get_default_context_token_service
+from ash.context_token import issue_host_context_token
 from ash.core.compaction import CompactionSettings, compact_messages, should_compact
 from ash.core.context import ContextGatherer
 from ash.core.prompt import (
@@ -124,7 +124,7 @@ def _build_routing_env(
 
     # Host-signed context token for sandbox->host RPC trust boundaries.
     try:
-        context_token = get_default_context_token_service().issue(
+        context_token = issue_host_context_token(
             effective_user_id=(effective_user_id or "unknown"),
             chat_id=session.chat_id,
             chat_type=session.context.chat_type,
