@@ -324,7 +324,9 @@ class TelegramProvider(Provider):
             logger.debug(f"Edit failed: {e}")
             return False
 
-    def _should_process_message(self, message: TelegramMessage) -> ProcessingResult:
+    async def _should_process_message(
+        self, message: TelegramMessage
+    ) -> ProcessingResult:
         """Check if a message should be processed, log and record all incoming messages.
 
         This method:
@@ -430,7 +432,8 @@ class TelegramProvider(Provider):
             from ash.chats import ChatHistoryWriter
 
             writer = ChatHistoryWriter(provider=self.name, chat_id=str(message.chat.id))
-            writer.record_user_message(
+            await asyncio.to_thread(
+                writer.record_user_message,
                 content=text,
                 created_at=message.date,
                 user_id=str(user_id) if user_id else None,
@@ -531,7 +534,7 @@ class TelegramProvider(Provider):
         @self._dp.message(Command("start"))
         async def handle_start(message: TelegramMessage) -> None:
             """Handle /start command."""
-            result = self._should_process_message(message)
+            result = await self._should_process_message(message)
             if not result or result[0] != "active":
                 return
 
@@ -551,7 +554,7 @@ class TelegramProvider(Provider):
         @self._dp.message(Command("help"))
         async def handle_help(message: TelegramMessage) -> None:
             """Handle /help command."""
-            result = self._should_process_message(message)
+            result = await self._should_process_message(message)
             if not result or result[0] != "active":
                 return
 
@@ -568,7 +571,7 @@ class TelegramProvider(Provider):
         @self._dp.message(F.photo)
         async def handle_photo(message: TelegramMessage) -> None:
             """Handle photo messages."""
-            result = self._should_process_message(message)
+            result = await self._should_process_message(message)
             if not result or result[0] != "active":
                 return
             _, user_id, username = result
@@ -627,7 +630,7 @@ class TelegramProvider(Provider):
             if not message.text:
                 return
 
-            result = self._should_process_message(message)
+            result = await self._should_process_message(message)
             if not result:
                 return
 

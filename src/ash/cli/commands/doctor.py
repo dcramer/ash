@@ -23,6 +23,7 @@ from ash.config.paths import (
     get_sessions_path,
 )
 from ash.images.service import _resolve_image_model
+from ash.service.runtime import read_runtime_state
 
 SESSION_VERSION = "2"
 
@@ -223,6 +224,34 @@ def _check_runtime_artifacts() -> list[DoctorFinding]:
                     level="warning",
                     check="run.rpc_socket",
                     detail=f"failed to stat socket path: {sock_path}",
+                )
+            )
+
+    runtime_state = read_runtime_state()
+    if runtime_state is not None:
+        if runtime_state.integrations_degraded:
+            findings.append(
+                DoctorFinding(
+                    level="warning",
+                    check="run.integrations",
+                    detail=(
+                        "runtime reported degraded integrations "
+                        f"(active={runtime_state.integrations_active}/"
+                        f"{runtime_state.integrations_configured})"
+                    ),
+                    repair="Inspect service logs for integration_hook_failed entries",
+                )
+            )
+        else:
+            findings.append(
+                DoctorFinding(
+                    level="ok",
+                    check="run.integrations",
+                    detail=(
+                        "runtime integrations healthy "
+                        f"(active={runtime_state.integrations_active}/"
+                        f"{runtime_state.integrations_configured})"
+                    ),
                 )
             )
 

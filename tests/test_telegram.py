@@ -388,28 +388,31 @@ class TestGroupProcessingMode:
             msg.reply_to_message = None
         return msg
 
-    @patch("ash.chats.ChatHistoryWriter")
-    def test_reply_to_bot_is_active(self, _mock_writer, provider):
+    @pytest.mark.asyncio
+    async def test_reply_to_bot_is_active(self, provider):
         """Reply to bot's message in group → active processing."""
-        msg = self._make_group_message(reply_from_id=999)
-        result = provider._should_process_message(msg)
+        with patch("ash.chats.ChatHistoryWriter"):
+            msg = self._make_group_message(reply_from_id=999)
+            result = await provider._should_process_message(msg)
         assert result is not None
         assert result[0] == "active"
 
-    @patch("ash.chats.ChatHistoryWriter")
-    def test_reply_to_other_user_is_skipped(self, _mock_writer, provider):
+    @pytest.mark.asyncio
+    async def test_reply_to_other_user_is_skipped(self, provider):
         """Reply to another user in group → skipped (no passive handler)."""
-        msg = self._make_group_message(reply_from_id=123)
-        result = provider._should_process_message(msg)
+        with patch("ash.chats.ChatHistoryWriter"):
+            msg = self._make_group_message(reply_from_id=123)
+            result = await provider._should_process_message(msg)
         assert result is None
 
-    @patch("ash.chats.ChatHistoryWriter")
-    def test_mention_plus_reply_to_other_is_active(self, _mock_writer, provider):
+    @pytest.mark.asyncio
+    async def test_mention_plus_reply_to_other_is_active(self, provider):
         """@mention + reply to another user → active (mention takes priority)."""
-        msg = self._make_group_message(
-            text="@testbot what do you think?", reply_from_id=123
-        )
-        result = provider._should_process_message(msg)
+        with patch("ash.chats.ChatHistoryWriter"):
+            msg = self._make_group_message(
+                text="@testbot what do you think?", reply_from_id=123
+            )
+            result = await provider._should_process_message(msg)
         assert result is not None
         assert result[0] == "active"
 

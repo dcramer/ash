@@ -23,7 +23,7 @@ TOKEN_TYPE = "ASH_CONTEXT"  # noqa: S105
 TOKEN_ALG = "HS256"  # noqa: S105
 TOKEN_VERSION = 1
 
-DEFAULT_TTL_SECONDS = 300
+DEFAULT_TTL_SECONDS = 900
 DEFAULT_LEEWAY_SECONDS = 30
 ENV_SECRET = "ASH_CONTEXT_TOKEN_SECRET"  # noqa: S105
 
@@ -245,6 +245,57 @@ class ContextTokenService:
         can set `ASH_CONTEXT_TOKEN_SECRET` and verify context tokens.
         """
         return _b64url_encode(self._secret)
+
+
+def _normalize_optional_claim(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def issue_host_context_token(
+    *,
+    effective_user_id: str,
+    chat_id: str | None = None,
+    chat_type: str | None = None,
+    chat_title: str | None = None,
+    provider: str | None = None,
+    session_key: str | None = None,
+    thread_id: str | None = None,
+    source_username: str | None = None,
+    source_display_name: str | None = None,
+    message_id: str | None = None,
+    current_user_message: str | None = None,
+    timezone: str | None = None,
+    ttl_seconds: int | None = None,
+    context_token_service: ContextTokenService | None = None,
+) -> str:
+    """Issue a host-signed context token from canonicalized claims.
+
+    Central helper used by host orchestration boundaries before sandbox/capability
+    execution. Keep token issuance in one place so behavior stays consistent.
+    """
+    subject = str(effective_user_id).strip()
+    if not subject:
+        raise ValueError("effective_user_id is required")
+
+    service = context_token_service or get_default_context_token_service()
+    return service.issue(
+        effective_user_id=subject,
+        chat_id=_normalize_optional_claim(chat_id),
+        chat_type=_normalize_optional_claim(chat_type),
+        chat_title=_normalize_optional_claim(chat_title),
+        provider=_normalize_optional_claim(provider),
+        session_key=_normalize_optional_claim(session_key),
+        thread_id=_normalize_optional_claim(thread_id),
+        source_username=_normalize_optional_claim(source_username),
+        source_display_name=_normalize_optional_claim(source_display_name),
+        message_id=_normalize_optional_claim(message_id),
+        current_user_message=_normalize_optional_claim(current_user_message),
+        timezone=_normalize_optional_claim(timezone),
+        ttl_seconds=ttl_seconds,
+    )
 
 
 def _int_claim(payload: dict[str, Any], key: str) -> int | None:

@@ -722,6 +722,49 @@ class TestDoctorCommand:
         assert "stale pid file" in result.stdout
         assert "Doctor found non-blocking issues" in result.stdout
 
+    def test_doctor_reports_degraded_integrations_from_runtime_state(
+        self, monkeypatch, tmp_path
+    ):
+        from ash.service.runtime import RuntimeState, write_runtime_state
+
+        ash_home = tmp_path / ".ash"
+        run_dir = ash_home / "run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("graph", "sessions", "chats", "logs", "workspace"):
+            (ash_home / name).mkdir(exist_ok=True)
+
+        monkeypatch.setenv(ENV_VAR, str(ash_home))
+        get_ash_home.cache_clear()
+        try:
+            write_runtime_state(
+                RuntimeState(
+                    started_at="2026-02-25T00:00:00+00:00",
+                    model="gpt-5.2",
+                    sandbox_image="ash-sandbox:latest",
+                    sandbox_network="bridge",
+                    sandbox_runtime="runc",
+                    workspace_path="/workspace",
+                    workspace_access="rw",
+                    source_access="none",
+                    sessions_access="ro",
+                    chats_access="ro",
+                    integrations_configured=5,
+                    integrations_active=4,
+                    integrations_failed_setup=["memory"],
+                    integrations_hook_failures={"memory.on_message_postprocess": 2},
+                    integrations_degraded=True,
+                )
+            )
+            result = run_doctor_checks()
+        finally:
+            monkeypatch.delenv(ENV_VAR, raising=False)
+            get_ash_home.cache_clear()
+
+        assert any(
+            finding.check == "run.integrations" and finding.level == "warning"
+            for finding in result.findings
+        )
+
     def test_doctor_warns_when_image_enabled_without_openai_key(
         self, cli_runner, monkeypatch, tmp_path
     ):

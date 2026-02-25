@@ -6,7 +6,10 @@ import pytest
 
 from ash.agents.base import Agent, AgentConfig, AgentContext
 from ash.agents.executor import AgentExecutor
+from ash.agents.types import StackFrame, TurnAction
 from ash.config.models import AshConfig, ModelConfig
+from ash.context_token import get_default_context_token_service
+from ash.core.session import SessionState
 from ash.llm.types import CompletionResponse, Message, Role, TextContent
 
 
@@ -143,3 +146,64 @@ class TestAgentExecutorModelResolution:
         assert result.is_error
         assert "Invalid model alias" in result.content
         mock_llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_turn_refreshes_context_token_for_stacked_frames() -> None:
+    llm = MagicMock()
+    llm.complete = AsyncMock(
+        return_value=CompletionResponse(
+            message=Message(
+                role=Role.ASSISTANT,
+                content=[TextContent(text="ok")],
+            ),
+            model="gpt-5.2",
+            usage=MagicMock(input_tokens=10, output_tokens=5),
+        )
+    )
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    config = MagicMock(spec=AshConfig)
+    config.tool_output_trust = None
+
+    executor = AgentExecutor(llm, tools, config)
+
+    token_service = get_default_context_token_service()
+    stale_token = token_service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        provider="telegram",
+        ttl_seconds=1,
+    )
+
+    session = SessionState(
+        session_id="sess-1",
+        provider="telegram",
+        chat_id="chat-1",
+        user_id="user-1",
+    )
+    frame = StackFrame(
+        frame_id="frame-1",
+        agent_name="main",
+        agent_type="main",
+        session=session,
+        system_prompt="system",
+        context=AgentContext(
+            session_id="sess-1",
+            user_id="user-1",
+            chat_id="chat-1",
+            provider="telegram",
+        ),
+        environment={"ASH_CONTEXT_TOKEN": stale_token},
+        max_iterations=1,
+    )
+
+    result = await executor.execute_turn(frame, user_message="schedule it at 9am")
+
+    assert result.action == TurnAction.SEND_TEXT
+    assert frame.environment is not None
+    refreshed_token = frame.environment.get("ASH_CONTEXT_TOKEN")
+    assert isinstance(refreshed_token, str)
+    assert refreshed_token != stale_token
+    verified = token_service.verify(refreshed_token)
+    assert verified.effective_user_id == "user-1"

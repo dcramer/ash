@@ -7,7 +7,7 @@ Written to ~/.ash/run/state.json when the service starts, removed on shutdown.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -40,6 +40,11 @@ class RuntimeState:
     source_access: str
     sessions_access: str
     chats_access: str
+    integrations_configured: int = 0
+    integrations_active: int = 0
+    integrations_failed_setup: list[str] = field(default_factory=list)
+    integrations_hook_failures: dict[str, int] = field(default_factory=dict)
+    integrations_degraded: bool = False
 
     def to_json(self) -> str:
         """Serialize to JSON string."""

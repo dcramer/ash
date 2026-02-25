@@ -13,6 +13,7 @@ from ash.integrations.rpc import active_rpc_server
 from ash.integrations.runtime import (
     IntegrationContext,
     IntegrationContributor,
+    IntegrationHealthSnapshot,
     IntegrationRuntime,
 )
 from ash.integrations.runtime_rpc import RuntimeRPCIntegration
@@ -34,5 +35,6 @@ __all__ = [
     "active_rpc_server",
     "IntegrationContext",
     "IntegrationContributor",
+    "IntegrationHealthSnapshot",
     "IntegrationRuntime",
 ]

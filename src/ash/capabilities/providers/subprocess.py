@@ -28,7 +28,7 @@ from ash.context_token import (
 )
 
 _BRIDGE_PROTOCOL_VERSION = 1
-_BRIDGE_CONTEXT_TOKEN_TTL_SECONDS = 300
+_BRIDGE_CONTEXT_TOKEN_TTL_SECONDS = 900
 
 
 class SubprocessCapabilityProvider(CapabilityProvider):

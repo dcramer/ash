@@ -261,13 +261,6 @@ class TelegramMessageHandler:
                     )
                     return
 
-            if await self._session_handler.is_duplicate_message(message):
-                logger.debug(
-                    "duplicate_message_skipped",
-                    extra={"message.id": str(message.id)},
-                )
-                return
-
             if await self._session_handler.should_skip_reply(message):
                 logger.debug(
                     f"Skipping reply {message.id} - target not in conversation"
@@ -278,6 +271,13 @@ class TelegramMessageHandler:
             thread_id = await self._session_handler.resolve_reply_chain_thread(message)
             if thread_id:
                 message.metadata["thread_id"] = thread_id
+
+            if await self._session_handler.is_duplicate_message(message):
+                logger.debug(
+                    "duplicate_message_skipped",
+                    extra={"message.id": str(message.id)},
+                )
+                return
 
             session_key = make_session_key(
                 self._provider.name, message.chat_id, message.user_id, thread_id

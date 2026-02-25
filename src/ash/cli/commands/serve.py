@@ -177,6 +177,33 @@ async def _run_server(
             f"Schedule store: {default_integrations.scheduling.store.graph_dir}"
         )
 
+        integrations_health = integration_runtime.health_snapshot()
+        if integrations_health.is_degraded:
+            logger.warning(
+                "integrations_degraded",
+                extra={
+                    "integrations.configured": integrations_health.configured_count,
+                    "integrations.active": integrations_health.active_count,
+                    "integrations.failed_setup": list(integrations_health.failed_setup),
+                    "integrations.hook_failures": integrations_health.hook_failures,
+                },
+            )
+        else:
+            logger.info(
+                "integrations_ready",
+                extra={
+                    "integrations.configured": integrations_health.configured_count,
+                    "integrations.active": integrations_health.active_count,
+                },
+            )
+
+        runtime_state.integrations_configured = integrations_health.configured_count
+        runtime_state.integrations_active = integrations_health.active_count
+        runtime_state.integrations_failed_setup = list(integrations_health.failed_setup)
+        runtime_state.integrations_hook_failures = integrations_health.hook_failures
+        runtime_state.integrations_degraded = integrations_health.is_degraded
+        write_runtime_state(runtime_state)
+
         try:
             rpc_socket_path = get_rpc_socket_path()
             async with active_rpc_server(

@@ -14,6 +14,7 @@ from ash.agents.types import (
     TurnAction,
     TurnResult,
 )
+from ash.context_token import get_default_context_token_service
 from ash.core.session import SessionState
 from ash.llm.types import ToolDefinition
 from ash.tools.base import ToolContext, ToolResult
@@ -39,6 +40,53 @@ CANCEL_KEYWORDS = {"cancel", "abort", "nevermind", "never mind", "stop", "quit"}
 def is_cancel_message(message: str) -> bool:
     """Check if a message indicates cancellation intent."""
     return message.lower().strip() in CANCEL_KEYWORDS
+
+
+def _refresh_context_token_env(
+    frame: StackFrame,
+    session: SessionState,
+    env: dict[str, str],
+) -> None:
+    """Refresh per-turn context token to avoid stale persisted credentials."""
+    effective_user_id = (frame.context.user_id or session.user_id or "").strip()
+    if not effective_user_id:
+        return
+
+    current_user_text = ""
+    for message in reversed(session.messages):
+        if message.role.value != "user":
+            continue
+        if isinstance(message.content, str):
+            current_user_text = message.content
+            break
+
+    metadata = frame.context.metadata or {}
+    source_username = str(
+        metadata.get("source_username") or metadata.get("username") or ""
+    ).strip()
+    source_display_name = str(
+        metadata.get("source_display_name") or metadata.get("display_name") or ""
+    ).strip()
+    message_id = str(
+        metadata.get("message_id") or metadata.get("current_message_id") or ""
+    ).strip()
+    timezone = str(metadata.get("timezone") or "UTC").strip() or "UTC"
+
+    context_token = get_default_context_token_service().issue(
+        effective_user_id=effective_user_id,
+        chat_id=frame.context.chat_id or session.chat_id or None,
+        chat_type=str(metadata.get("chat_type") or "").strip() or None,
+        chat_title=str(metadata.get("chat_title") or "").strip() or None,
+        provider=frame.context.provider or session.provider or None,
+        session_key=frame.context.session_id,
+        thread_id=frame.context.thread_id or None,
+        source_username=source_username or None,
+        source_display_name=source_display_name or None,
+        message_id=message_id or None,
+        current_user_message=current_user_text,
+        timezone=timezone,
+    )
+    env["ASH_CONTEXT_TOKEN"] = context_token
 
 
 async def run_to_completion(
@@ -879,9 +927,12 @@ class AgentExecutor:
         session = frame.session
         agent_session_id = frame.agent_session_id
         tool_defs = self._get_turn_tool_definitions(frame)
+        turn_env = dict(frame.environment or {})
+        _refresh_context_token_env(frame, session, turn_env)
+        frame.environment = dict(turn_env)
         tool_context = ToolContext.from_agent_context(
             frame.context,
-            env=frame.environment or {},
+            env=turn_env,
             session_manager=session_manager,
         )
 
@@ -1017,6 +1068,9 @@ class AgentExecutor:
                         continue
 
                     try:
+                        per_tool_env = dict(tool_context.env)
+                        _refresh_context_token_env(frame, session, per_tool_env)
+                        frame.environment = dict(per_tool_env)
                         per_tool_context = ToolContext(
                             session_id=tool_context.session_id,
                             user_id=tool_context.user_id,
@@ -1024,7 +1078,7 @@ class AgentExecutor:
                             thread_id=tool_context.thread_id,
                             provider=tool_context.provider,
                             metadata=dict(tool_context.metadata),
-                            env=dict(tool_context.env),
+                            env=per_tool_env,
                             session_manager=session_manager,
                             tool_use_id=tool_use.id,
                         )

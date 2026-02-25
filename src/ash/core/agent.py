@@ -783,7 +783,20 @@ class Agent:
                 await on_tool_start(tool_use.name, tool_use.input)
 
             # Create per-tool context with the tool_use_id for subagent logging
-            per_tool_context = replace(tool_context, tool_use_id=tool_use.id)
+            per_tool_env = dict(tool_context.env)
+            per_tool_env.update(
+                _build_routing_env(
+                    session,
+                    tool_context.user_id,
+                    timezone=self._timezone,
+                    mount_prefix=self._mount_prefix,
+                )
+            )
+            per_tool_context = replace(
+                tool_context,
+                tool_use_id=tool_use.id,
+                env=per_tool_env,
+            )
 
             result = await self._tools.execute(
                 tool_use.name,

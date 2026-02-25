@@ -142,6 +142,22 @@ class TestScheduleCreate:
         assert "requires provider and chat routing context" in result.output
         mock_rpc.assert_not_called()
 
+    def test_create_expired_context_token_shows_reauth_guidance(
+        self, cli_runner, mock_rpc
+    ):
+        """Expired context token errors should include actionable remediation."""
+        future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        mock_rpc.side_effect = RPCError(
+            code=-32000,
+            message="Invalid context token (claims): context token expired",
+        )
+
+        result = cli_runner.invoke(app, ["create", "Test reminder", "--at", future])
+
+        assert result.exit_code == 1
+        assert "ASH_CONTEXT_TOKEN expired" in result.output
+        assert "Refresh/re-auth" in result.output
+
 
 class TestScheduleList:
     """Tests for 'ash schedule list' command."""

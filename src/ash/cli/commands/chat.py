@@ -189,6 +189,19 @@ async def _run_chat(
                 include_todo=ash_config.todo.enabled,
             ).contributors,
         ) as (integration_runtime, integration_context):
+            integrations_health = integration_runtime.health_snapshot()
+            if integrations_health.is_degraded:
+                logger.warning(
+                    "integrations_degraded",
+                    extra={
+                        "integrations.configured": integrations_health.configured_count,
+                        "integrations.active": integrations_health.active_count,
+                        "integrations.failed_setup": list(
+                            integrations_health.failed_setup
+                        ),
+                        "integrations.hook_failures": integrations_health.hook_failures,
+                    },
+                )
             async with active_rpc_server(
                 runtime=integration_runtime,
                 context=integration_context,

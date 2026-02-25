@@ -87,6 +87,18 @@ def _parse_time(time_str: str, timezone: str) -> datetime | None:
     return None
 
 
+def _format_rpc_error(error: RPCError) -> str:
+    """Convert RPC errors to user-actionable CLI output."""
+    message = str(error).strip()
+    lowered = message.lower()
+    if "invalid context token" in lowered and "context token expired" in lowered:
+        return (
+            "Invalid context token: ASH_CONTEXT_TOKEN expired. "
+            "Refresh/re-auth the session that provides ASH_CONTEXT_TOKEN, then try again."
+        )
+    return message
+
+
 def _format_time_local(iso_time: str, timezone: str) -> str:
     """Format an ISO timestamp in the user's local timezone."""
     from zoneinfo import ZoneInfo
@@ -220,7 +232,7 @@ def create(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except RPCError as e:
-        typer.echo(f"Error: {e}", err=True)
+        typer.echo(f"Error: {_format_rpc_error(e)}", err=True)
         raise typer.Exit(1) from None
 
     entry_id = result.get("id", "?")
@@ -272,7 +284,7 @@ def list_tasks(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except RPCError as e:
-        typer.echo(f"Error: {e}", err=True)
+        typer.echo(f"Error: {_format_rpc_error(e)}", err=True)
         raise typer.Exit(1) from None
 
     if not entries:
@@ -328,7 +340,7 @@ def cancel(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except RPCError as e:
-        typer.echo(f"Error: {e}", err=True)
+        typer.echo(f"Error: {_format_rpc_error(e)}", err=True)
         raise typer.Exit(1) from None
 
     if result.get("cancelled"):
@@ -429,7 +441,7 @@ def update(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except RPCError as e:
-        typer.echo(f"Error: {e}", err=True)
+        typer.echo(f"Error: {_format_rpc_error(e)}", err=True)
         raise typer.Exit(1) from None
 
     if result.get("updated"):

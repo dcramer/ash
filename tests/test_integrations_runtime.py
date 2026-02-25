@@ -337,6 +337,7 @@ async def test_integration_runtime_setup_failure_disables_only_failing_contribut
     await runtime.on_startup(context)
     runtime.register_rpc_methods(cast(Any, object()), context)
     await runtime.on_shutdown(context)
+    health = runtime.health_snapshot()
 
     assert [contributor.name for contributor in runtime.active_contributors] == ["ok"]
     assert events == [
@@ -345,6 +346,8 @@ async def test_integration_runtime_setup_failure_disables_only_failing_contribut
         ("rpc", "ok"),
         ("shutdown", "ok"),
     ]
+    assert health.is_degraded is True
+    assert health.failed_setup == ("bad",)
 
 
 @pytest.mark.asyncio
@@ -379,8 +382,11 @@ async def test_integration_runtime_isolates_hook_failures_after_setup() -> None:
     for hook in runtime.message_postprocess_hooks(context):
         await hook("remember this", session, "user-123")
     await runtime.on_shutdown(context)
+    health = runtime.health_snapshot()
 
     assert ("postprocess", "ok") in events
+    assert health.is_degraded is True
+    assert health.hook_failures.get("bad.on_message_postprocess") == 1
 
 
 @pytest.mark.asyncio

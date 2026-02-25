@@ -436,7 +436,8 @@ class SessionHandler:
                 bot_metadata["external_id"] = response_external_id
             if thread_id:
                 bot_metadata["thread_id"] = thread_id
-            chat_writer.record_bot_message(
+            await asyncio.to_thread(
+                chat_writer.record_bot_message,
                 content=assistant_message,
                 metadata=bot_metadata or None,
             )

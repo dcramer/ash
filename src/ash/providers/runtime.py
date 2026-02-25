@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -78,7 +79,8 @@ async def _telegram_persister(
     )
 
     chat_writer = ChatHistoryWriter("telegram", entry.chat_id)
-    chat_writer.record_bot_message(
+    await asyncio.to_thread(
+        chat_writer.record_bot_message,
         content=response_text,
         metadata={"external_id": message_id, "thread_id": thread_id},
     )

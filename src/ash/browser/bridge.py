@@ -22,7 +22,7 @@ from ash.sandbox.executor import ExecutionResult
 BridgeExecutor = Callable[[str, int, dict[str, str]], ExecutionResult]
 _BRIDGE_TOKEN_SUBJECT = "browser-bridge"  # noqa: S105
 _BRIDGE_TOKEN_PROVIDER = "browser-bridge"  # noqa: S105
-_DEFAULT_BRIDGE_TOKEN_TTL_SECONDS = 120
+_DEFAULT_BRIDGE_TOKEN_TTL_SECONDS = 600
 
 
 @dataclass(slots=True)

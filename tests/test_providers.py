@@ -226,6 +226,7 @@ class TestTelegramMessageHandler:
             provider="telegram",
             chat_id="456",
             user_id="789",
+            thread_id="1",
             sessions_path=tmp_path,
         )
         handler._session_handler._session_managers[session_manager.session_key] = (
@@ -462,28 +463,23 @@ class TestTelegramMessageHandler:
         self, handler, mock_provider, mock_agent, incoming_message, tmp_path
     ):
         """Test that duplicate messages are not processed twice."""
-        from ash.sessions import SessionManager
+        with patch("ash.sessions.manager.get_sessions_path", return_value=tmp_path):
+            # Resolve the exact manager instance the handler will use.
+            session_manager = handler._session_handler.get_session_manager(
+                "456", "789", "1"
+            )
 
-        # Set up session manager to use temp path
-        session_manager = SessionManager(
-            provider="telegram",
-            chat_id="456",
-            user_id="789",
-            sessions_path=tmp_path,
-        )
-        handler._session_handler._session_managers[session_manager.session_key] = (
-            session_manager
-        )
+            # Pre-seed the session with a message having the same external_id
+            await session_manager.ensure_session()
+            await session_manager.add_user_message(
+                content="Previous message",
+                token_count=10,
+                metadata={"external_id": "1"},  # Same ID as incoming_message
+            )
+            incoming_message.metadata["thread_id"] = "1"
+            assert await handler._session_handler.is_duplicate_message(incoming_message)
 
-        # Pre-seed the session with a message having the same external_id
-        await session_manager.ensure_session()
-        await session_manager.add_user_message(
-            content="Previous message",
-            token_count=10,
-            metadata={"external_id": "1"},  # Same ID as incoming_message
-        )
-
-        await handler.handle_message(incoming_message)
+            await handler.handle_message(incoming_message)
 
         # Agent should NOT have been called (duplicate detected)
         mock_agent.process_message_streaming.assert_not_called()
