@@ -11,6 +11,7 @@ from ash.core.session import SessionState
 from evals.runner import (
     _record_eval_assistant_message,
     _record_eval_user_message,
+    build_session_state,
     load_eval_suite,
     run_yaml_eval_case,
 )
@@ -20,6 +21,7 @@ from evals.types import (
     EvalSuite,
     EvalTurn,
     JudgeResult,
+    SessionConfig,
     SuiteDefaults,
     ToolInputAssertion,
 )
@@ -129,3 +131,13 @@ async def test_run_yaml_eval_case_preserves_turn_tool_input_assertions(
     assert len(captured_turn_cases) == 2
     assert captured_turn_cases[0].tool_input_assertions
     assert captured_turn_cases[1].tool_input_assertions
+
+
+def test_build_session_state_defaults_eval_provider_to_private_chat_type() -> None:
+    defaults = SuiteDefaults(
+        session=SessionConfig(provider="eval", user_id="u1"),
+    )
+
+    session = build_session_state(SessionConfig(), defaults, case_id="c1")
+
+    assert session.context.chat_type == "private"

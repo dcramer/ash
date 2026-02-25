@@ -459,6 +459,9 @@ def build_session_state(
     username = config.username or default_session.username
     display_name = config.display_name or default_session.display_name
     chat_type = config.chat_type or default_session.chat_type
+    if not chat_type and provider == "eval":
+        # Eval chat context should default to private for provenance-aware filters.
+        chat_type = "private"
     chat_title = config.chat_title or default_session.chat_title
 
     if username:

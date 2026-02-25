@@ -5,6 +5,7 @@ defaults:
   session:
     provider: eval
     user_id: eval-user
+    chat_type: private
 
 cases:
   - id: scheduler_multi_step
