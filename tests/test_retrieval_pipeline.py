@@ -16,6 +16,7 @@ from ash.store.retrieval import (
 )
 from ash.store.store import Store
 from ash.store.types import ChatEntry, SearchResult, Sensitivity
+from ash.store.visibility import passes_sensitivity_policy
 
 
 @pytest.fixture
@@ -65,6 +66,20 @@ class TestRetrievalPipeline:
     @pytest.mark.asyncio
     async def test_primary_search_calls_store_search(self, mock_store):
         """Stage 1 should call store.search with correct parameters."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-1",
+                provider="telegram",
+                provider_id="chat-1",
+                chat_type="group",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-1", "chat-1"))
+        mock_store.graph = graph
+
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -113,6 +128,20 @@ class TestRetrievalPipeline:
     @pytest.mark.asyncio
     async def test_finalize_deduplicates_memories(self, mock_store):
         """Stage 4 should deduplicate memories by ID."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-1",
+                provider="telegram",
+                provider_id="chat-1",
+                chat_type="group",
+            )
+        )
+        graph.add_edge(create_learned_in_edge("mem-1", "chat-1"))
+        mock_store.graph = graph
+
         # Return same memory twice with different similarities
         mock_store.search = AsyncMock(
             return_value=[
@@ -149,6 +178,21 @@ class TestRetrievalPipeline:
     @pytest.mark.asyncio
     async def test_finalize_respects_max_memories(self, mock_store):
         """Stage 4 should limit results to max_memories."""
+        from ash.graph.edges import create_learned_in_edge
+
+        graph = KnowledgeGraph()
+        graph.add_chat(
+            ChatEntry(
+                id="chat-1",
+                provider="telegram",
+                provider_id="chat-1",
+                chat_type="group",
+            )
+        )
+        for i in range(10):
+            graph.add_edge(create_learned_in_edge(f"mem-{i}", "chat-1"))
+        mock_store.graph = graph
+
         mock_store.search = AsyncMock(
             return_value=[
                 SearchResult(
@@ -177,13 +221,9 @@ class TestRetrievalPipeline:
 class TestPrivacyFilter:
     """Tests for privacy filtering in retrieval."""
 
-    @pytest.fixture
-    def pipeline(self, mock_store):
-        return RetrievalPipeline(mock_store)
-
-    def test_public_memory_passes_filter(self, pipeline):
+    def test_public_memory_passes_filter(self):
         """PUBLIC memories should always pass."""
-        result = pipeline._passes_privacy_filter(
+        result = passes_sensitivity_policy(
             sensitivity=Sensitivity.PUBLIC,
             subject_person_ids=["person-1"],
             chat_type="group",
@@ -191,9 +231,9 @@ class TestPrivacyFilter:
         )
         assert result is True
 
-    def test_public_sensitivity_passes_filter(self, pipeline):
+    def test_public_sensitivity_passes_filter(self):
         """PUBLIC sensitivity should pass."""
-        result = pipeline._passes_privacy_filter(
+        result = passes_sensitivity_policy(
             sensitivity=Sensitivity.PUBLIC,
             subject_person_ids=["person-1"],
             chat_type="group",
@@ -201,9 +241,9 @@ class TestPrivacyFilter:
         )
         assert result is True
 
-    def test_personal_memory_passes_for_subject(self, pipeline):
+    def test_personal_memory_passes_for_subject(self):
         """PERSONAL memories should pass for the subject."""
-        result = pipeline._passes_privacy_filter(
+        result = passes_sensitivity_policy(
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["person-1"],
             chat_type="group",
@@ -211,9 +251,9 @@ class TestPrivacyFilter:
         )
         assert result is True
 
-    def test_personal_memory_fails_for_non_subject(self, pipeline):
+    def test_personal_memory_fails_for_non_subject(self):
         """PERSONAL memories should fail for non-subjects."""
-        result = pipeline._passes_privacy_filter(
+        result = passes_sensitivity_policy(
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["person-1"],
             chat_type="group",
@@ -221,9 +261,9 @@ class TestPrivacyFilter:
         )
         assert result is False
 
-    def test_sensitive_memory_passes_in_private_for_subject(self, pipeline):
+    def test_sensitive_memory_passes_in_private_for_subject(self):
         """SENSITIVE memories pass in private chat for subject."""
-        result = pipeline._passes_privacy_filter(
+        result = passes_sensitivity_policy(
             sensitivity=Sensitivity.SENSITIVE,
             subject_person_ids=["person-1"],
             chat_type="private",
@@ -231,9 +271,9 @@ class TestPrivacyFilter:
         )
         assert result is True
 
-    def test_sensitive_memory_fails_in_group(self, pipeline):
+    def test_sensitive_memory_fails_in_group(self):
         """SENSITIVE memories fail in group chat even for subject."""
-        result = pipeline._passes_privacy_filter(
+        result = passes_sensitivity_policy(
             sensitivity=Sensitivity.SENSITIVE,
             subject_person_ids=["person-1"],
             chat_type="group",
@@ -241,9 +281,9 @@ class TestPrivacyFilter:
         )
         assert result is False
 
-    def test_sensitive_memory_fails_for_non_subject_in_private(self, pipeline):
+    def test_sensitive_memory_fails_for_non_subject_in_private(self):
         """SENSITIVE memories fail for non-subject even in private."""
-        result = pipeline._passes_privacy_filter(
+        result = passes_sensitivity_policy(
             sensitivity=Sensitivity.SENSITIVE,
             subject_person_ids=["person-1"],
             chat_type="private",

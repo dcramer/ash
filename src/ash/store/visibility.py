@@ -19,6 +19,20 @@ if TYPE_CHECKING:
     from ash.graph.graph import KnowledgeGraph
 
 
+def has_valid_learned_in_provenance(
+    graph: KnowledgeGraph,
+    memory_id: str,
+) -> bool:
+    """Whether memory has resolvable LEARNED_IN provenance."""
+    source_chat_id = get_learned_in_chat(graph, memory_id)
+    if not source_chat_id:
+        return False
+    source_chat = graph.chats.get(source_chat_id)
+    if not source_chat:
+        return False
+    return source_chat.chat_type in {"private", "group", "supergroup"}
+
+
 def is_private_sourced_outside_current_chat(
     graph: KnowledgeGraph,
     memory_id: str,

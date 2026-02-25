@@ -1,5 +1,6 @@
 """Memory RPC method handlers."""
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -10,6 +11,7 @@ from ash.graph.edges import (
     get_subject_person_ids,
 )
 from ash.store.visibility import (
+    has_valid_learned_in_provenance,
     is_dm_contextually_disclosable,
     is_group_disclosable,
 )
@@ -20,6 +22,8 @@ if TYPE_CHECKING:
     from ash.store.store import Store
 
 logger = logging.getLogger(__name__)
+_EXTRACTION_RETRY_ATTEMPTS = 3
+_EXTRACTION_RETRY_BASE_DELAY_SECONDS = 0.25
 
 
 def register_memory_methods(
@@ -148,6 +152,8 @@ def register_memory_methods(
         graph = memory_manager.graph
         memory = graph.memories.get(memory_id)
         if memory is None:
+            return False
+        if not has_valid_learned_in_provenance(graph, memory_id):
             return False
         subject_person_ids = get_subject_person_ids(graph, memory_id)
         sensitivity = memory.sensitivity
@@ -368,6 +374,7 @@ def register_memory_methods(
             ),
             speaker=source_username,
             sensitivity=(classified.sensitivity if classified else None),
+            disclosure=(classified.disclosure if classified else None),
             portable=(classified.portable if classified else True),
             assertion=assertion,
         )
@@ -399,18 +406,9 @@ def register_memory_methods(
         if stored_ids:
             return {"id": stored_ids[0]}
 
-        # Fallback: store directly if pipeline returned nothing
-        memory = await memory_manager.add_memory(
-            content=content,
-            source=source,
-            owner_user_id=user_id if not shared else None,
-            chat_id=chat_id if shared else None,
-            source_username=source_username,
-            source_display_name=source_display_name,
-            graph_chat_id=graph_chat_id,
-            assertion=assertion,
+        raise ValueError(
+            "memory_add_rejected: no storable memory facts after classification/policy"
         )
-        return {"id": memory.id}
 
     async def _extract_and_store_from_messages(
         *,
@@ -451,12 +449,28 @@ def register_memory_methods(
             display_name=source_display_name,
         )
 
-        facts = await memory_extractor.extract_from_conversation(
-            messages=llm_messages,
-            owner_names=owner_names if owner_names else None,
-            speaker_info=speaker_info,
-            current_datetime=datetime.now(UTC),
-        )
+        facts = []
+        for attempt in range(1, _EXTRACTION_RETRY_ATTEMPTS + 1):
+            try:
+                facts = await memory_extractor.extract_from_conversation(
+                    messages=llm_messages,
+                    owner_names=owner_names if owner_names else None,
+                    speaker_info=speaker_info,
+                    current_datetime=datetime.now(UTC),
+                )
+            except Exception:
+                logger.warning(
+                    "memory_extract_from_messages_attempt_failed",
+                    extra={"attempt": attempt},
+                    exc_info=True,
+                )
+                facts = []
+            if facts:
+                break
+            if attempt < _EXTRACTION_RETRY_ATTEMPTS:
+                await asyncio.sleep(
+                    _EXTRACTION_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                )
 
         if not facts:
             return {"stored": 0}
@@ -566,7 +580,7 @@ def register_memory_methods(
             or params.get("source_user_name")
             or target_raw.get("display_name")
         )
-        source_user_id = target_raw.get("user_id") or params.get("user_id")
+        source_user_id = params.get("user_id")
 
         chat_id = params.get("chat_id")
         chat_type = _resolve_chat_type(params.get("chat_type"), provider, chat_id)

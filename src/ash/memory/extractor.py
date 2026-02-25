@@ -85,6 +85,7 @@ If any answer is no, do not extract.
 - User preferences (likes, dislikes, habits)
 - Facts about people in their life (names, relationships, details)
 - Important dates or events
+- Major personal status changes that matter for future context (for example: divorce, breakup, active job search, interviewing)
 - Explicit requests to remember something
 - Corrections to previously known information
 
@@ -348,6 +349,8 @@ CRITICAL:
 - Example: "User is going in May" is NOT verifiable unless destination/context can be resolved from transcript.
 - Drop meta/system facts even if true ("refactored bot", "updated prompt", "wiped session history").
 - Drop low-value transient status snapshots unless clearly useful for future planning.
+- Keep high-signal personal context such as divorce/breakup, active interviewing, or job-search status when directly supported by transcript.
+- Do not invent missing date parts. If transcript says "March 15" with no year, keep it as "March 15".
 
 Return ONLY valid JSON as an array:
 [
@@ -450,7 +453,7 @@ class MemoryExtractor:
             # but override content and confidence
             data["content"] = content
             data["confidence"] = 1.0
-            return self._parse_fact_item(data)
+            return self._parse_fact_item(data, allow_reject_secret=True)
 
         except Exception:
             logger.warning(
@@ -727,6 +730,10 @@ CRITICAL: Convert ALL relative time references to absolute dates in extracted fa
 - "last week" \u2192 "the week of [actual date range]"
 - "in 2 days" \u2192 "[actual Month Day, Year]"
 
+Do NOT add missing date parts for already-absolute references:
+- If user says "March 15" with no year, keep "March 15" (do not guess year).
+- If user gives a month/day but no time, do not invent a time.
+
 This ensures memories remain meaningful when recalled later.
 """
 
@@ -799,6 +806,7 @@ This ensures memories remain meaningful when recalled later.
         item: dict[str, Any],
         *,
         drop_counts: Counter[str] | None = None,
+        allow_reject_secret: bool = False,
     ) -> ExtractedFact | None:
         """Parse a single fact dict from the LLM response. Returns None if invalid."""
         counters = drop_counts or Counter()
@@ -827,7 +835,7 @@ This ensures memories remain meaningful when recalled later.
                 disclosure = DisclosureClass(disclosure_str)
             except ValueError:
                 disclosure = None
-        if disclosure == DisclosureClass.REJECT_SECRET:
+        if disclosure == DisclosureClass.REJECT_SECRET and not allow_reject_secret:
             counters["secret"] += 1
             logger.debug(
                 "secret_classified_from_extraction",

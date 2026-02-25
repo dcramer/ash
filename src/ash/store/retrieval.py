@@ -26,6 +26,7 @@ from ash.store.types import (
     assertion_metadata_summary,
 )
 from ash.store.visibility import (
+    has_valid_learned_in_provenance,
     is_dm_contextually_disclosable,
     is_group_disclosable,
     is_private_sourced_outside_current_chat,
@@ -411,13 +412,20 @@ class RetrievalPipeline:
         surfaces memories about third parties if the DM partner was
         present when the memory was learned.
         """
+        graph = self._store.graph
+        valid_results = [
+            result
+            for result in results
+            if has_valid_learned_in_provenance(graph, result.id)
+        ]
+
         if context.chat_type == "private":
-            return self._filter_dm_contextual(results, context)
+            return self._filter_dm_contextual(valid_results, context)
 
         if context.chat_type in ("group", "supergroup"):
-            return self._filter_group_privacy(results, context)
+            return self._filter_group_privacy(valid_results, context)
 
-        return results
+        return valid_results
 
     def _filter_dm_contextual(
         self,
@@ -495,21 +503,6 @@ class RetrievalPipeline:
             ):
                 filtered.append(result)
         return filtered
-
-    def _passes_privacy_filter(
-        self,
-        sensitivity: Sensitivity,
-        subject_person_ids: list[str],
-        chat_type: str | None,
-        querying_person_ids: set[str],
-    ) -> bool:
-        """Wrapper for sensitivity policy checks."""
-        return passes_sensitivity_policy(
-            sensitivity=sensitivity,
-            subject_person_ids=subject_person_ids,
-            chat_type=chat_type,
-            querying_person_ids=querying_person_ids,
-        )
 
     async def _make_result(
         self,

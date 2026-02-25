@@ -19,7 +19,13 @@ from ash.memory.embeddings import EmbeddingGenerator
 from ash.memory.extractor import MemoryExtractor
 from ash.rpc.methods.memory import register_memory_methods
 from ash.store.store import Store
-from ash.store.types import ExtractedFact, MemoryType, Sensitivity, get_assertion
+from ash.store.types import (
+    DisclosureClass,
+    ExtractedFact,
+    MemoryType,
+    Sensitivity,
+    get_assertion,
+)
 
 
 class MockRPCServer:
@@ -333,6 +339,34 @@ class TestRPCMemoryAdd:
         assert memory is not None
         assert memory.content == "Some fact to store"
 
+    async def test_add_rejects_secret_classification(
+        self, rpc_server, memory_manager, mock_extractor
+    ):
+        """Classification reject_secret should fail closed and never store."""
+        mock_extractor.classify_fact.return_value = ExtractedFact(
+            content="my api key is sk-test",
+            subjects=[],
+            shared=False,
+            confidence=1.0,
+            memory_type=MemoryType.KNOWLEDGE,
+            sensitivity=Sensitivity.SENSITIVE,
+            disclosure=DisclosureClass.REJECT_SECRET,
+            portable=False,
+            speaker="alice",
+        )
+
+        handler = rpc_server.methods["memory.add"]
+        with pytest.raises(ValueError, match="memory_add_rejected"):
+            await handler(
+                {
+                    "content": "my api key is sk-test",
+                    "user_id": "user-1",
+                }
+            )
+
+        memories = await memory_manager.list_memories(owner_user_id="user-1")
+        assert all("api key" not in m.content.lower() for m in memories)
+
 
 class TestRPCMemoryExtract:
     """Tests for memory.extract handler."""
@@ -470,7 +504,7 @@ class TestRPCMemoryExtract:
         )
 
         assert result["stored"] == 1
-        mock_extractor.extract_from_conversation.assert_awaited_once()
+        assert mock_extractor.extract_from_conversation.await_count == 1
 
         # Verify the memory was stored
         memories = await memory_manager.list_memories(owner_user_id="user-1")
@@ -575,7 +609,7 @@ class TestRPCMemoryExtract:
                 "type": "message",
                 "id": internal_id,
                 "role": "user",
-                "content": "Remember that I prefer text updates",
+                "content": "I prefer text updates",
                 "created_at": datetime.now(UTC).isoformat(),
                 "token_count": 10,
                 "username": "alice",
@@ -607,7 +641,7 @@ class TestRPCMemoryExtract:
         )
 
         assert result["stored"] == 0
-        mock_extractor.extract_from_conversation.assert_awaited_once()
+        assert mock_extractor.extract_from_conversation.await_count == 3
 
     async def test_extract_uses_thread_id_for_thread_scoped_session(
         self, memory_manager, mock_extractor, tmp_path
@@ -638,7 +672,7 @@ class TestRPCMemoryExtract:
                 "type": "message",
                 "id": msg_id,
                 "role": "user",
-                "content": "Remember I need detergent",
+                "content": "I need detergent",
                 "created_at": datetime.now(UTC).isoformat(),
                 "token_count": 10,
                 "username": "alice",
@@ -670,7 +704,7 @@ class TestRPCMemoryExtract:
         )
 
         assert result["stored"] == 0
-        mock_extractor.extract_from_conversation.assert_awaited_once()
+        assert mock_extractor.extract_from_conversation.await_count == 3
 
     async def test_extract_does_not_scan_other_sessions(
         self, memory_manager, mock_extractor, tmp_path
@@ -760,7 +794,7 @@ class TestRPCMemoryExtract:
                 "type": "message",
                 "id": msg_id,
                 "role": "user",
-                "content": "Remember this from explicit key",
+                "content": "This is from explicit key",
                 "created_at": datetime.now(UTC).isoformat(),
                 "token_count": 10,
                 "username": "alice",
@@ -790,7 +824,7 @@ class TestRPCMemoryExtract:
         )
 
         assert result["stored"] == 0
-        mock_extractor.extract_from_conversation.assert_awaited_once()
+        assert mock_extractor.extract_from_conversation.await_count == 3
 
     async def test_extract_from_messages_requires_provider(self, rpc_server):
         """Explicit-message extraction requires provider for chat provenance."""
@@ -847,11 +881,133 @@ class TestRPCMemoryExtract:
         )
 
         assert result["stored"] == 1
-        mock_extractor.extract_from_conversation.assert_awaited_once()
+        assert mock_extractor.extract_from_conversation.await_count == 1
 
         memories = await memory_manager.list_memories(owner_user_id="user-1")
         assert len(memories) >= 1
         assert any("Sarah" in m.content for m in memories)
+
+    async def test_extract_from_messages_retries_on_empty_extraction(
+        self, rpc_server, memory_manager, mock_extractor
+    ):
+        """Extraction should retry briefly before failing closed."""
+        mock_extractor.extract_from_conversation.side_effect = [
+            [],
+            [
+                ExtractedFact(
+                    content="Jamie Park is going through a divorce",
+                    subjects=["Jamie Park"],
+                    shared=False,
+                    confidence=0.95,
+                    memory_type=MemoryType.RELATIONSHIP,
+                    sensitivity=Sensitivity.PERSONAL,
+                    portable=True,
+                    speaker="david",
+                )
+            ],
+        ]
+
+        handler = rpc_server.methods["memory.extract_from_messages"]
+        result = await handler(
+            {
+                "provider": "telegram",
+                "user_id": "user-1",
+                "chat_id": "chat-1",
+                "messages": [
+                    {
+                        "id": "m-1",
+                        "role": "user",
+                        "content": "Remember that Jamie Park is going through a divorce",
+                        "user_id": "user-1",
+                        "username": "david",
+                        "display_name": "David Cramer",
+                    }
+                ],
+            }
+        )
+
+        assert result["stored"] == 1
+        assert mock_extractor.extract_from_conversation.await_count == 2
+
+    async def test_extract_from_messages_fails_closed_when_extraction_empty(
+        self, rpc_server, memory_manager, mock_extractor
+    ):
+        """No extracted facts should result in no-op storage (fail closed)."""
+        mock_extractor.extract_from_conversation.return_value = []
+
+        handler = rpc_server.methods["memory.extract_from_messages"]
+        result = await handler(
+            {
+                "provider": "telegram",
+                "user_id": "user-1",
+                "chat_id": "chat-1",
+                "messages": [
+                    {
+                        "id": "m-2",
+                        "role": "user",
+                        "content": "Remember that Jamie Park is going through a divorce",
+                        "user_id": "user-1",
+                        "username": "david",
+                        "display_name": "David Cramer",
+                    }
+                ],
+            }
+        )
+
+        assert result["stored"] == 0
+        assert mock_extractor.extract_from_conversation.await_count == 3
+        mock_extractor.classify_fact.assert_not_awaited()
+
+        memories = await memory_manager.list_memories(owner_user_id="user-1")
+        assert all(
+            "Jamie Park is going through a divorce" not in m.content for m in memories
+        )
+
+    async def test_extract_from_messages_ignores_nested_message_user_id(
+        self, rpc_server, memory_manager, mock_extractor
+    ):
+        """Nested message user_id should not override trusted RPC user_id."""
+        mock_extractor.extract_from_conversation.return_value = [
+            ExtractedFact(
+                content="Sarah is David's sister",
+                subjects=["Sarah"],
+                shared=False,
+                confidence=0.95,
+                memory_type=MemoryType.RELATIONSHIP,
+                sensitivity=Sensitivity.PUBLIC,
+                portable=True,
+                speaker="david",
+            )
+        ]
+
+        handler = rpc_server.methods["memory.extract_from_messages"]
+        result = await handler(
+            {
+                "provider": "telegram",
+                "user_id": "trusted-user",
+                "chat_id": "chat-1",
+                "messages": [
+                    {
+                        "id": "m-3",
+                        "role": "user",
+                        "content": "Remember that Sarah is my sister",
+                        "user_id": "untrusted-nested-user",
+                        "username": "david",
+                        "display_name": "David Cramer",
+                    }
+                ],
+            }
+        )
+
+        assert result["stored"] == 1
+        trusted_memories = await memory_manager.list_memories(
+            owner_user_id="trusted-user"
+        )
+        untrusted_memories = await memory_manager.list_memories(
+            owner_user_id="untrusted-nested-user"
+        )
+        assert len(trusted_memories) >= 1
+        assert len(untrusted_memories) == 0
 
 
 class TestRPCDMSourceFiltering:
@@ -1296,10 +1452,22 @@ class TestRPCMemoryListTrust:
 
     async def test_list_includes_trust_field(self, rpc_server, memory_manager):
         """memory.list response should include trust classification for each memory."""
-        await memory_manager.add_memory(
+        from ash.graph.edges import create_learned_in_edge
+        from ash.store.types import ChatEntry
+
+        chat = ChatEntry(
+            id="chat-1",
+            provider="telegram",
+            provider_id="chat-1",
+            chat_type="private",
+        )
+        memory_manager.graph.add_chat(chat)
+
+        memory = await memory_manager.add_memory(
             content="A simple fact",
             owner_user_id="user-1",
         )
+        memory_manager.graph.add_edge(create_learned_in_edge(memory.id, chat.id))
 
         handler = rpc_server.methods["memory.list"]
         results = await handler({"user_id": "user-1"})
@@ -1311,7 +1479,20 @@ class TestRPCMemoryListTrust:
 
     async def test_list_trust_reflects_graph_edges(self, rpc_server, memory_manager):
         """Trust should reflect STATED_BY/ABOUT graph edges."""
-        from ash.graph.edges import create_about_edge, create_stated_by_edge
+        from ash.graph.edges import (
+            create_about_edge,
+            create_learned_in_edge,
+            create_stated_by_edge,
+        )
+        from ash.store.types import ChatEntry
+
+        chat = ChatEntry(
+            id="chat-1",
+            provider="telegram",
+            provider_id="chat-1",
+            chat_type="private",
+        )
+        memory_manager.graph.add_chat(chat)
 
         # Create a person
         person = await memory_manager.create_person(
@@ -1324,6 +1505,7 @@ class TestRPCMemoryListTrust:
             owner_user_id="user-1",
             subject_person_ids=[person.id],
         )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem_fact.id, chat.id))
         memory_manager.graph.add_edge(create_stated_by_edge(mem_fact.id, person.id))
         memory_manager.graph.add_edge(create_about_edge(mem_fact.id, person.id))
 
@@ -1338,6 +1520,7 @@ class TestRPCMemoryListTrust:
             owner_user_id="user-1",
             subject_person_ids=[person.id],
         )
+        memory_manager.graph.add_edge(create_learned_in_edge(mem_hearsay.id, chat.id))
         memory_manager.graph.add_edge(create_stated_by_edge(mem_hearsay.id, other.id))
         memory_manager.graph.add_edge(create_about_edge(mem_hearsay.id, person.id))
 

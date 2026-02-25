@@ -387,6 +387,13 @@ async def process_extracted_facts(
     stored_ids: list[str] = []
 
     for fact in facts:
+        if fact.disclosure == DisclosureClass.REJECT_SECRET:
+            logger.info(
+                "fact_rejected_secret",
+                extra={"fact.content": fact.content[:80]},
+            )
+            continue
+
         if fact.confidence < confidence_threshold:
             continue
 
