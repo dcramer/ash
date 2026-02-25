@@ -137,6 +137,20 @@ class PassiveHandler:
         """Check if passive listening is enabled and initialized."""
         return self._passive_decider is not None and self._memory_manager is not None
 
+    def _is_passive_response_allowed_for_chat(self, chat_id: str) -> bool:
+        """Apply chat-level policy for passive response decisions."""
+        passive_config = self._provider.passive_config
+        if not passive_config:
+            return True
+
+        if chat_id in passive_config.response_blocked_chats:
+            return False
+
+        if passive_config.response_allowed_chats:
+            return chat_id in passive_config.response_allowed_chats
+
+        return True
+
     async def handle_passive_message(self, message: IncomingMessage) -> None:
         """Handle a passively observed message (not mentioned or replied to).
 
@@ -164,6 +178,23 @@ class PassiveHandler:
             message.username or message.user_id,
             chat_title or chat_id[:8],
         )
+
+        if not self._is_passive_response_allowed_for_chat(chat_id):
+            if self._passive_extractor:
+                asyncio.create_task(
+                    self._extract_passive_memories(message),
+                    name=f"passive_extract_{message.id}",
+                )
+
+            logger.info(
+                "passive_engagement_skipped",
+                extra={
+                    "decision_path": "response_policy",
+                    "engagement_reason": "response_policy",
+                    "username": message.username or message.user_id,
+                },
+            )
+            return
 
         # Build bot context for identity awareness (needed for name check)
         bot_context = BotContext(

@@ -79,6 +79,13 @@ class PassiveListeningConfig(BaseModel):
     memory_lookup_timeout: float = 2.0  # seconds
     memory_similarity_threshold: float = 0.4
 
+    # Chat-level passive response policy (Telegram group chat IDs as strings)
+    # Empty allowed list means all chats are eligible for passive responses.
+    # Blocked chats always suppress passive responses.
+    # Passive memory extraction still runs for passively observed messages.
+    response_allowed_chats: list[str] = []
+    response_blocked_chats: list[str] = []
+
 
 class TelegramConfig(BaseModel):
     """Configuration for Telegram provider."""

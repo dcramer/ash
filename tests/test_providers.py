@@ -790,6 +790,62 @@ class TestTelegramMessageHandler:
         assert getattr(engaging, "decision_path", None) == "name_mentioned_fast_path"
         assert getattr(engaging, "engagement_reason", None) == "name_mentioned"
 
+    async def test_handle_passive_message_response_policy_skips_response_but_still_extracts(
+        self, mock_provider, mock_agent, caplog
+    ):
+        """Response policy should suppress passive replies while still extracting."""
+        import asyncio
+        import logging
+
+        from ash.config.models import PassiveListeningConfig
+        from ash.providers.base import IncomingMessage
+        from ash.providers.telegram.handlers import TelegramMessageHandler
+
+        mock_provider.passive_config = PassiveListeningConfig(
+            enabled=True,
+            response_allowed_chats=["group_allowed"],
+        )
+        mock_provider.bot_username = "ash_bot"
+
+        handler = TelegramMessageHandler(
+            provider=mock_provider,
+            agent=mock_agent,
+            streaming=False,
+        )
+
+        mock_decider = MagicMock()
+        mock_decider.decide = AsyncMock(return_value=True)
+        handler._passive_handler._passive_decider = mock_decider  # type: ignore[union-attr]
+        handler._passive_handler._memory_manager = MagicMock()  # type: ignore[union-attr]
+        handler._passive_handler._passive_extractor = MagicMock()  # type: ignore[union-attr]
+        handler._passive_handler._extract_passive_memories = AsyncMock()  # type: ignore[method-assign]
+
+        passive_message = IncomingMessage(
+            id="99",
+            chat_id="group_blocked",
+            user_id="user_456",
+            text="normal group chatter",
+            username="otheruser",
+            display_name="Other User",
+        )
+
+        with caplog.at_level(logging.INFO, logger="telegram"):
+            await handler.handle_passive_message(passive_message)
+        await asyncio.sleep(0)
+
+        mock_decider.decide.assert_not_called()
+        handler._passive_handler._extract_passive_memories.assert_awaited_once_with(  # type: ignore[attr-defined]
+            passive_message
+        )
+        mock_agent.process_message.assert_not_called()
+        mock_agent.process_message_streaming.assert_not_called()
+        skipped = next(
+            (r for r in caplog.records if r.msg == "passive_engagement_skipped"), None
+        )
+        assert skipped is not None
+        assert getattr(skipped, "decision_path", None) == "response_policy"
+        assert getattr(skipped, "engagement_reason", None) == "response_policy"
+
     async def test_handle_passive_message_direct_followup_bypasses_throttle_but_uses_decider(
         self, mock_provider, mock_agent, tmp_path, caplog
     ):

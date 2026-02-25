@@ -26,6 +26,8 @@ group_mode = "mention"                 # mention | always
 
 [telegram.passive]
 enabled = false                         # Passive group listening
+response_allowed_chats = []            # Optional passive-response allowlist
+response_blocked_chats = []            # Suppress passive responses in specific chats
 ```
 
 Start runtime:
@@ -88,6 +90,8 @@ Enable it explicitly:
 ```toml
 [telegram.passive]
 enabled = true
+# response_allowed_chats = ["-100123456789"]  # Reply only in these groups
+# response_blocked_chats = ["-100999999999"]  # Never reply in these groups
 ```
 
 ## Reference (Advanced)

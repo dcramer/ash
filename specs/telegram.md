@@ -144,6 +144,11 @@ webhook_path = "/telegram/webhook"
 # Group chat settings
 allowed_groups = []  # Group IDs (empty = allow all with authorized users)
 group_mode = "mention"  # "mention" (default) or "always"
+
+[telegram.passive]
+enabled = false
+response_allowed_chats = []  # Optional allowlist for passive responses
+response_blocked_chats = []  # Always suppress passive responses in these chats
 ```
 
 ## Message UX
@@ -234,6 +239,7 @@ attribution in the user-visible response.
 | Group message (always mode) | Respond to all messages from authorized users |
 | Group message with mention | Strip @botname from text before processing |
 | Group not in allowed_groups | Ignore message silently |
+| Passive message in blocked chat | Skip passive engagement but still run passive memory extraction |
 
 ## Errors
 
