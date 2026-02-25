@@ -73,8 +73,10 @@ class TestGetAllPaths:
         assert "home" in paths
         assert "config" in paths
         assert "graph" in paths
+        assert "vault" in paths
         assert "workspace" in paths
         assert "logs" in paths
 
         assert paths["home"] == tmp_path
         assert paths["config"] == tmp_path / "config.toml"
+        assert paths["vault"] == tmp_path / "vault"

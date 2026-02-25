@@ -14,6 +14,7 @@ from ash.capabilities.providers import (
     SubprocessCapabilityProvider,
 )
 from ash.context_token import ContextTokenService
+from ash.security.vault import FileVault
 
 _BRIDGE_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "gogcli_bridge.py"
 
@@ -84,9 +85,11 @@ def test_bridge_definitions() -> None:
 def test_bridge_auth_flow_and_user_scoped_invoke(tmp_path: Path) -> None:
     service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
     state_path = tmp_path / "gogcli-state.json"
+    vault_path = tmp_path / "vault"
     env = {
         "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
         "GOGCLI_STATE_PATH": str(state_path),
+        "GOGCLI_VAULT_PATH": str(vault_path),
     }
     user1_token = service.issue(
         effective_user_id="user-1",
@@ -137,6 +140,13 @@ def test_bridge_auth_flow_and_user_scoped_invoke(tmp_path: Path) -> None:
     assert account_ref == "work"
     state_after_complete = _load_state(state_path)
     assert flow_state["flow_id"] not in state_after_complete["auth_flows"]
+    account_key = "user-1:gog.email:work"
+    vault_ref = state_after_complete["accounts"][account_key]["vault_ref"]
+    vault_payload = FileVault(vault_path).get_json(vault_ref)
+    assert isinstance(vault_payload, dict)
+    credential_key = str(vault_payload["credential_key"])
+    assert credential_key.startswith("cred_")
+    assert vault_payload["auth_exchange"]["code"] == "sample-code"
 
     invoke_user1 = _run_bridge(
         {
@@ -159,7 +169,6 @@ def test_bridge_auth_flow_and_user_scoped_invoke(tmp_path: Path) -> None:
     assert isinstance(messages, list)
     assert len(messages) == 2
     state_after_invoke = _load_state(state_path)
-    account_key = "user-1:gog.email:work"
     assert account_key in state_after_invoke["accounts"]
     scope_key = "user-1:gog.email"
     assert state_after_invoke["operation_state"][scope_key]["invoke_count"] == 1
@@ -194,6 +203,7 @@ def test_bridge_auth_complete_rejects_reused_flow_state(tmp_path: Path) -> None:
     env = {
         "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
         "GOGCLI_STATE_PATH": str(tmp_path / "gogcli-state.json"),
+        "GOGCLI_VAULT_PATH": str(tmp_path / "vault"),
     }
     user_token = service.issue(
         effective_user_id="user-1",
@@ -260,6 +270,7 @@ def test_bridge_auth_complete_rejects_expired_flow_state(tmp_path: Path) -> None
     env = {
         "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
         "GOGCLI_STATE_PATH": str(state_path),
+        "GOGCLI_VAULT_PATH": str(tmp_path / "vault"),
     }
     user_token = service.issue(
         effective_user_id="user-1",
@@ -308,12 +319,87 @@ def test_bridge_auth_complete_rejects_expired_flow_state(tmp_path: Path) -> None
     assert complete["error"]["code"] == "capability_auth_flow_invalid"
 
 
+def test_bridge_invoke_requires_vault_record(tmp_path: Path) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    state_path = tmp_path / "gogcli-state.json"
+    vault_path = tmp_path / "vault"
+    env = {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(state_path),
+        "GOGCLI_VAULT_PATH": str(vault_path),
+    }
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+
+    begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_vault_begin",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.email",
+                "account_hint": "work",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin
+    flow_state = begin["result"]["flow_state"]
+
+    complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_vault_complete",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.email",
+                "flow_state": flow_state,
+                "code": "sample-code",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in complete
+    account_ref = complete["result"]["account_ref"]
+
+    state = _load_state(state_path)
+    account = state["accounts"]["user-1:gog.email:work"]
+    assert FileVault(vault_path).delete(account["vault_ref"]) is True
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_vault_invoke",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.email",
+                "operation": "list_messages",
+                "input_data": {"limit": 1},
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert invoke["error"]["code"] == "capability_auth_required"
+
+
 def test_bridge_rejects_invalid_context_signature(tmp_path: Path) -> None:
     signer = ContextTokenService(secret=b"bridge-signing-secret-32-bytes...")
     verifier = ContextTokenService(secret=b"bridge-verifier-secret-32-bytes..")
     env = {
         "ASH_CONTEXT_TOKEN_SECRET": verifier.export_verifier_secret(),
         "GOGCLI_STATE_PATH": str(tmp_path / "gogcli-state.json"),
+        "GOGCLI_VAULT_PATH": str(tmp_path / "vault"),
     }
     bad_token = signer.issue(
         effective_user_id="user-1",
@@ -343,6 +429,7 @@ async def test_subprocess_provider_round_trip_with_bridge(tmp_path: Path) -> Non
     service = ContextTokenService(secret=b"provider-roundtrip-secret-32-bytes")
     env = {
         "GOGCLI_STATE_PATH": str(tmp_path / "gogcli-state.json"),
+        "GOGCLI_VAULT_PATH": str(tmp_path / "vault"),
     }
 
     with pytest.MonkeyPatch.context() as mp:

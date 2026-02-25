@@ -183,7 +183,6 @@ def build_sandbox_manager_config(
     import ash.skills
     from ash.config.paths import (
         get_chats_path,
-        get_graph_dir,
         get_logs_path,
         get_rpc_socket_path,
         get_source_path,
@@ -194,7 +193,6 @@ def build_sandbox_manager_config(
 
     sessions_path = get_sessions_path()
     chats_path = get_chats_path()
-    graph_dir = get_graph_dir()
     logs_path = get_logs_path()
     rpc_socket_path = get_rpc_socket_path()
     uv_cache_path = get_uv_cache_path()
@@ -209,7 +207,6 @@ def build_sandbox_manager_config(
             network_mode=default_network_mode,
             sessions_path=sessions_path,
             chats_path=chats_path,
-            graph_dir=graph_dir,
             logs_path=logs_path,
             rpc_socket_path=rpc_socket_path,
             uv_cache_path=uv_cache_path,
@@ -233,7 +230,6 @@ def build_sandbox_manager_config(
         sessions_path=sessions_path,
         sessions_access=config.sessions_access,
         chats_path=chats_path,
-        graph_dir=graph_dir,
         logs_path=logs_path,
         rpc_socket_path=rpc_socket_path,
         uv_cache_path=uv_cache_path,

@@ -30,6 +30,8 @@ Security invariants:
   caller-provided `user_id`/`chat_id`.
 - Sensitive capabilities are DM-only by policy (`private` chat type).
 - Account/credential state is user-scoped by verified identity.
+- OAuth exchange artifacts and credential material are stored in host vault
+  records (state keeps only vault references).
 - Provider responses must not include raw OAuth artifacts.
 
 ## Enablement

@@ -56,6 +56,7 @@ per-user credential isolation rules.
 - Capability auth flow handles are short-lived, unguessable, and bound to the requesting user scope.
 - Capability execution emits structured audit events without logging raw bearer tokens.
 - Capability responses must never include raw credential artifacts (access tokens, refresh tokens, cookie jars, client secrets).
+- Provider-side credential artifacts must be persisted via a dedicated vault abstraction (not graph collections or sandbox-readable mounts).
 
 ### SHOULD
 

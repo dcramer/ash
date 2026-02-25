@@ -22,6 +22,9 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 from urllib.parse import quote_plus
 
+from ash.config.paths import get_vault_path
+from ash.security.vault import FileVault, VaultError
+
 BRIDGE_VERSION = 1
 BRIDGE_NAMESPACE = "gog"
 TOKEN_TYPE = "ASH_CONTEXT"  # noqa: S105
@@ -30,7 +33,9 @@ TOKEN_LEEWAY_SECONDS = 30
 ENV_CONTEXT_SECRET = "ASH_CONTEXT_TOKEN_SECRET"  # noqa: S105
 ENV_STATE_PATH = "GOGCLI_STATE_PATH"
 ENV_AUTH_FLOW_TTL_SECONDS = "GOGCLI_AUTH_FLOW_TTL_SECONDS"
+ENV_VAULT_PATH = "GOGCLI_VAULT_PATH"
 DEFAULT_STATE_PATH = Path.home() / ".ash" / "gogcli" / "state.json"
+VAULT_NAMESPACE = "gog.credentials"
 STATE_VERSION = 1
 DEFAULT_AUTH_FLOW_TTL_SECONDS = 600
 MIN_AUTH_FLOW_TTL_SECONDS = 30
@@ -185,6 +190,17 @@ def _state_path() -> Path:
     if configured:
         return Path(configured).expanduser()
     return DEFAULT_STATE_PATH
+
+
+def _vault_path() -> Path:
+    configured = _optional_text(os.environ.get(ENV_VAULT_PATH))
+    if configured is not None:
+        return Path(configured).expanduser()
+    return get_vault_path()
+
+
+def _vault() -> FileVault:
+    return FileVault(_vault_path())
 
 
 def _empty_state() -> dict[str, Any]:
@@ -436,6 +452,8 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
         or _optional_text(params.get("account_hint"))
         or "default"
     )
+    callback_url = _optional_text(params.get("callback_url"))
+    code = _optional_text(params.get("code"))
     account_key = _account_key(claims.user_id, capability_id, account_ref)
     existing = state["accounts"].get(account_key)
     existing_created_at = (
@@ -448,12 +466,41 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
     )
     if credential_key is None:
         credential_key = f"cred_{secrets.token_hex(8)}"
+    vault_ref = (
+        _optional_text(existing.get("vault_ref"))
+        if isinstance(existing, dict)
+        else None
+    )
+    try:
+        vault = _vault()
+        vault_ref = vault.put_json(
+            namespace=VAULT_NAMESPACE,
+            key=account_key,
+            payload={
+                "credential_key": credential_key,
+                "provider": "google",
+                "capability_id": capability_id,
+                "user_id": claims.user_id,
+                "account_ref": account_ref,
+                "linked_at": now_epoch,
+                "auth_exchange": {
+                    "code": code,
+                    "callback_url": callback_url,
+                },
+            },
+        )
+    except VaultError:
+        raise BridgeError(
+            "capability_backend_unavailable",
+            "vault write failed during auth completion",
+        ) from None
     state["accounts"][account_key] = {
         "created_at": existing_created_at or now_epoch,
         "updated_at": now_epoch,
         "provider": claims.provider,
         "chat_type": claims.chat_type,
         "credential_key": credential_key,
+        "vault_ref": vault_ref,
     }
     state["auth_flows"].pop(flow_id, None)
     _write_state(state)
@@ -485,7 +532,28 @@ def _require_linked_account(
             "capability_auth_required",
             "account is not linked for caller scope",
         )
-    return account
+    vault_ref = _optional_text(account.get("vault_ref"))
+    if vault_ref:
+        try:
+            if _vault().get_json(vault_ref) is None:
+                raise BridgeError(
+                    "capability_auth_required",
+                    "account credentials are unavailable for caller scope",
+                )
+        except VaultError:
+            raise BridgeError(
+                "capability_backend_unavailable",
+                "vault read failed for linked account",
+            ) from None
+        return account
+
+    # Backward compatibility for older pre-vault local state.
+    if _optional_text(account.get("credential_key")):
+        return account
+    raise BridgeError(
+        "capability_auth_required",
+        "account is not linked for caller scope",
+    )
 
 
 def _as_object(value: Any, *, field_name: str) -> dict[str, Any]:

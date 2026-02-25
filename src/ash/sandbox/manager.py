@@ -81,9 +81,6 @@ class SandboxConfig:
     # Chats mounting (for agent to read chat state/participants)
     chats_path: Path | None = None  # Host path to chats directory
 
-    # Graph storage mounting (read-only state visibility for sandbox tools)
-    graph_dir: Path | None = None  # Host path to ~/.ash/graph
-
     # Logs mounting (for agent to inspect server logs)
     logs_path: Path | None = None  # Host path to logs directory
 
@@ -216,12 +213,6 @@ class SandboxManager:
         if self._config.chats_path and self._config.chats_path.exists():
             volumes[str(self._config.chats_path)] = {
                 "bind": f"{prefix}/chats",
-                "mode": "ro",
-            }
-
-        if self._config.graph_dir and self._config.graph_dir.exists():
-            volumes[str(self._config.graph_dir)] = {
-                "bind": f"{prefix}/graph",
                 "mode": "ro",
             }
 

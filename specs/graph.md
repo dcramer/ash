@@ -218,6 +218,21 @@ Cross-context memory retrieval respects sensitivity levels:
 
 The `portable` flag controls whether a memory can appear outside its original context. Non-portable memories are excluded from cross-context retrieval.
 
+## Security Boundary
+
+Graph files are host-owned state, not a sandbox trust surface.
+
+- Sandbox graph data is not mounted into sandbox containers (no runtime config
+  override).
+- Agent/skill access to graph-backed behavior should go through host APIs
+  (`ash-sb` commands + RPC methods), where token-derived identity and policy are
+  enforced.
+- Direct filesystem reads of graph files bypass sensitivity/scope filtering and
+  identity checks, so they are not an approved access path for untrusted code.
+- Sensitive credential artifacts (OAuth access/refresh tokens, one-time exchange
+  codes, API secrets) must not be stored in graph collections; they belong in a
+  dedicated vault abstraction.
+
 ## Module Structure
 
 ```
