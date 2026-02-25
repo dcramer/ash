@@ -513,6 +513,7 @@ class Agent:
         gathered = await context_gatherer.gather(
             user_id=effective_user_id,
             user_message=user_message,
+            provider=session.provider,
             chat_id=session.chat_id,
             chat_type=ctx.chat_type,
             sender_username=ctx.username,

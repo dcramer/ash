@@ -71,6 +71,7 @@ class ContextGatherer:
         self,
         user_id: str | None,
         user_message: str,
+        provider: str | None = None,
         chat_id: str | None = None,
         chat_type: str | None = None,
         sender_username: str | None = None,
@@ -80,6 +81,7 @@ class ContextGatherer:
         Args:
             user_id: The effective user ID for the message.
             user_message: The user's message text.
+            provider: Provider name for loading planner chat context.
             chat_id: Optional chat ID for scoping.
             chat_type: Type of chat ("group", "supergroup", "private").
             sender_username: Username of the message sender.
@@ -95,6 +97,7 @@ class ContextGatherer:
         memory_context = await self._retrieve_memories(
             user_id=user_id,
             user_message=user_message,
+            provider=provider,
             chat_id=chat_id,
             chat_type=chat_type,
             sender_username=sender_username,
@@ -118,6 +121,7 @@ class ContextGatherer:
         self,
         user_id: str | None,
         user_message: str,
+        provider: str | None = None,
         chat_id: str | None = None,
         chat_type: str | None = None,
         sender_username: str | None = None,
@@ -141,6 +145,8 @@ class ContextGatherer:
             )
             query_plan = await self._build_query_plan(
                 user_message=user_message,
+                provider=provider,
+                chat_id=chat_id,
                 chat_type=chat_type,
                 sender_username=sender_username,
             )
@@ -158,6 +164,7 @@ class ContextGatherer:
                     "memory_retrieval",
                     extra={
                         "memory.query": query_plan.query,
+                        "memory.lookup_queries": list(query_plan.supplemental_queries),
                         "memory.count": len(memory_context.memories),
                         "memory.ids": [m.id for m in memory_context.memories],
                         "duration_ms": duration_ms,
@@ -176,6 +183,7 @@ class ContextGatherer:
                     "memory_retrieval",
                     extra={
                         "memory.query": query_plan.query,
+                        "memory.lookup_queries": list(query_plan.supplemental_queries),
                         "memory.count": 0,
                         "duration_ms": duration_ms,
                     },
@@ -209,6 +217,8 @@ class ContextGatherer:
         self,
         *,
         user_message: str,
+        provider: str | None,
+        chat_id: str | None,
         chat_type: str | None,
         sender_username: str | None,
     ) -> PlannedMemoryQuery:
@@ -220,14 +230,50 @@ class ContextGatherer:
             return base_query
 
         try:
+            recent_messages = self._recent_messages_for_query_planner(
+                provider=provider,
+                chat_id=chat_id,
+                user_message=user_message,
+            )
             return await self._query_planner.plan(
                 user_message=user_message,
                 chat_type=chat_type,
                 sender_username=sender_username,
+                recent_messages=recent_messages,
             )
         except Exception:
             logger.warning("memory_query_planning_failed", exc_info=True)
             return base_query
+
+    def _recent_messages_for_query_planner(
+        self,
+        *,
+        provider: str | None,
+        chat_id: str | None,
+        user_message: str,
+    ) -> tuple[str, ...]:
+        """Load lightweight recent chat context for query planning."""
+        if not provider or not chat_id:
+            return ()
+        try:
+            from ash.chats.history import read_recent_chat_history
+
+            entries = read_recent_chat_history(provider, chat_id, limit=8)
+        except Exception:
+            return ()
+
+        context: list[str] = []
+        for entry in entries:
+            content = entry.content.strip()
+            if not content:
+                continue
+            if entry.role == "user" and content == user_message.strip():
+                continue
+            label = entry.role
+            if entry.username:
+                label = f"{entry.role}:{entry.username}"
+            context.append(f"{label}: {content}")
+        return tuple(context[-6:])
 
     async def _retrieve_for_query(
         self,

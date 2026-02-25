@@ -244,7 +244,9 @@ class TestContextGatherer:
         planner = MagicMock()
         planner.plan = AsyncMock(
             return_value=PlannedMemoryQuery(
-                query="planned lookup query", max_results=25
+                query="planned lookup query",
+                max_results=25,
+                supplemental_queries=("user city",),
             )
         )
         result_context = RetrievedContext(
@@ -272,7 +274,65 @@ class TestContextGatherer:
         record = next((r for r in caplog.records if r.msg == "memory_retrieval"), None)
         assert record is not None
         assert record.__dict__["memory.query"] == "planned lookup query"
+        assert record.__dict__["memory.lookup_queries"] == ["user city"]
         assert record.__dict__["memory.ids"] == ["mem-123"]
+
+    @pytest.mark.asyncio
+    async def test_planner_receives_recent_chat_context(self, monkeypatch):
+        """Planner should receive recent chat messages for better lookup planning."""
+        planner = MagicMock()
+        planner.plan = AsyncMock(
+            return_value=PlannedMemoryQuery(query="weather", max_results=25)
+        )
+        mock_store = MagicMock()
+        mock_store.get_context_for_message = AsyncMock(
+            return_value=RetrievedContext(memories=[])
+        )
+        mock_store.list_people = AsyncMock(return_value=[])
+        mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
+
+        from datetime import UTC, datetime
+
+        from ash.chats.history import HistoryEntry
+
+        def _fake_recent(*_args, **_kwargs):
+            return [
+                HistoryEntry(
+                    id="1",
+                    role="user",
+                    content="we're traveling this week",
+                    created_at=datetime.now(UTC),
+                    username="alice",
+                ),
+                HistoryEntry(
+                    id="2",
+                    role="assistant",
+                    content="noted, where are you based?",
+                    created_at=datetime.now(UTC),
+                ),
+            ]
+
+        monkeypatch.setattr(
+            "ash.chats.history.read_recent_chat_history",
+            _fake_recent,
+        )
+
+        gatherer = ContextGatherer(store=mock_store, query_planner=planner)
+        await gatherer.gather(
+            user_id="user-1",
+            user_message="what's the weather",
+            provider="telegram",
+            chat_id="chat-1",
+            sender_username="alice",
+        )
+
+        planner.plan.assert_awaited_once()
+        kwargs = planner.plan.await_args.kwargs
+        assert kwargs["recent_messages"] == (
+            "user:alice: we're traveling this week",
+            "assistant: noted, where are you based?",
+        )
 
     @pytest.mark.asyncio
     async def test_planner_failure_falls_back_to_base_query(self):

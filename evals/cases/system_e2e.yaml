@@ -86,3 +86,26 @@ cases:
       - smoke
       - telegram
       - provenance
+
+  - id: memory_weather_location_recall
+    description: Underspecified weather ask should use remembered location context
+    setup:
+      - memories:
+          - content: "Alice's home city is San Francisco."
+            memory_type: knowledge
+            sensitivity: public
+            portable: true
+    turns:
+      - prompt: "I asked 'what's the weather'. Do not fetch live weather. Just tell me which city you'd use based on memory, then ask if I want you to fetch current conditions."
+        expected_behavior: |
+          The assistant should recover remembered location context and use it to
+          ground the response, without requiring immediate city/zip clarification.
+        criteria:
+          - Uses remembered location context from memory (San Francisco)
+          - Does not claim it fetched current weather
+          - Asks for confirmation or permission before any live fetch
+    tags:
+      - e2e
+      - smoke
+      - memory
+      - planner

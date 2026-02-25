@@ -2,7 +2,7 @@ from evals.judge import (
     check_disallowed_tool_result_substrings,
     check_tool_input_assertions,
 )
-from evals.types import EvalCase
+from evals.types import EvalCase, ToolInputAssertion
 
 
 def test_disallowed_tool_result_substrings_passes_when_absent() -> None:
@@ -40,11 +40,11 @@ def test_tool_input_assertions_pass() -> None:
         id="c2",
         prompt="p",
         tool_input_assertions=[
-            {
-                "tool": "bash",
-                "input_contains": ["ash-sb schedule create", "--cron"],
-                "min_calls": 1,
-            }
+            ToolInputAssertion(
+                tool="bash",
+                input_contains=["ash-sb schedule create", "--cron"],
+                min_calls=1,
+            )
         ],
     )
     result = check_tool_input_assertions(
@@ -66,11 +66,11 @@ def test_tool_input_assertions_fail_on_missing_substring() -> None:
         id="c3",
         prompt="p",
         tool_input_assertions=[
-            {
-                "tool": "bash",
-                "input_contains": ["--cron"],
-                "min_calls": 1,
-            }
+            ToolInputAssertion(
+                tool="bash",
+                input_contains=["--cron"],
+                min_calls=1,
+            )
         ],
     )
     result = check_tool_input_assertions(

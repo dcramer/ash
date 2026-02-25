@@ -34,6 +34,7 @@ class MemoryQueryPlanner:
         user_message: str,
         chat_type: str | None,
         sender_username: str | None,
+        recent_messages: tuple[str, ...] = (),
     ) -> PlannedMemoryQuery:
         raise NotImplementedError
 
@@ -60,11 +61,13 @@ class LLMQueryPlanner(MemoryQueryPlanner):
         user_message: str,
         chat_type: str | None,
         sender_username: str | None,
+        recent_messages: tuple[str, ...] = (),
     ) -> PlannedMemoryQuery:
         planner_input = {
             "message": user_message,
             "chat_type": chat_type or "unknown",
             "sender_username": sender_username,
+            "recent_messages": list(recent_messages),
         }
 
         response = await self._llm.complete(
@@ -73,11 +76,21 @@ class LLMQueryPlanner(MemoryQueryPlanner):
             ],
             model=self._model,
             system=(
-                "Plan memory retrieval for the user message. Return ONLY JSON with this shape: "
+                "You are a memory retrieval planner. "
+                "Given the latest user message and recent chat context, decide what memories "
+                "should be looked up to answer the user's actual inquiry well. "
+                "Return ONLY JSON with this shape: "
                 '{"query": string, "lookup_queries": string[]}. '
-                "Use lookup_queries for inferred missing context needed to answer well "
-                "(for example profile/preferences/location/timezone), without changing intent. "
-                "Keep lookup_queries short and focused."
+                "Rules: "
+                "1) query should capture the user's direct request. "
+                "2) lookup_queries should be additional memory lookups for missing background "
+                "facts needed to answer well. "
+                "3) Use recent_messages to resolve pronouns/references before choosing lookups. "
+                "4) When the request is underspecified, include lookup_queries that recover "
+                "relevant user context (for example location, timezone, preferences, ongoing plans, "
+                "or people context). "
+                "5) Keep lookup_queries concise and non-duplicative. "
+                "6) Do not include explanations or markdown."
             ),
             max_tokens=200,
             temperature=0,

@@ -64,6 +64,29 @@ async def test_llm_query_planner_includes_lookup_queries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_llm_query_planner_includes_recent_messages_in_prompt_input() -> None:
+    llm = _FakeLLM('{"query":"weather","lookup_queries":["user home location"]}')
+    planner = LLMQueryPlanner(
+        llm=cast(LLMProvider, llm),
+        model="gpt-5-mini",
+        retrieval_limit=25,
+    )
+
+    await planner.plan(
+        user_message="what's the weather",
+        chat_type="group",
+        sender_username="dcramer",
+        recent_messages=("user:alice: i moved to denver",),
+    )
+
+    await_args = llm.complete.await_args
+    assert await_args is not None
+    kwargs = await_args.kwargs
+    payload = kwargs["messages"][0].content
+    assert '"recent_messages": ["user:alice: i moved to denver"]' in payload
+
+
+@pytest.mark.asyncio
 async def test_llm_query_planner_falls_back_to_user_query_on_invalid_json() -> None:
     llm = _FakeLLM("not-json")
     planner = LLMQueryPlanner(
