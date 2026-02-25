@@ -6,8 +6,11 @@ Spec contract: specs/subsystems.md (Integration Hooks).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from ash.core.prompt import PromptContext
+from ash.core.prompt_keys import CORE_PRINCIPLES_RULES_KEY, TOOL_ROUTING_RULES_KEY
+from ash.core.session import SessionState
 from ash.integrations.runtime import IntegrationContext, IntegrationContributor
 
 if TYPE_CHECKING:
@@ -71,6 +74,48 @@ class SchedulingIntegration(IntegrationContributor):
             return
         register_schedule_methods(server, self._store)
 
+    def augment_prompt_context(
+        self,
+        prompt_context: PromptContext,
+        session: SessionState,
+        context: IntegrationContext,
+    ) -> PromptContext:
+        _ = context
+        if session.context.is_scheduled_task:
+            return prompt_context
+
+        self._append_instruction(
+            prompt_context.extra_context,
+            TOOL_ROUTING_RULES_KEY,
+            "Use `ash-sb schedule create 'msg' --at <time>` for one-time reminders/tasks.",
+        )
+        self._append_instruction(
+            prompt_context.extra_context,
+            TOOL_ROUTING_RULES_KEY,
+            "Use `ash-sb schedule create 'msg' --cron '<expr>'` for recurring monitoring/checks.",
+        )
+        self._append_instruction(
+            prompt_context.extra_context,
+            TOOL_ROUTING_RULES_KEY,
+            "Use `ash-sb schedule list` to inspect scheduled tasks and `ash-sb schedule cancel --id <id>` to stop one.",
+        )
+        self._append_instruction(
+            prompt_context.extra_context,
+            CORE_PRINCIPLES_RULES_KEY,
+            "For continuous monitoring workflows, prefer recurring cron checks; use self-rescheduling only when cadence must change dynamically.",
+        )
+        self._append_instruction(
+            prompt_context.extra_context,
+            CORE_PRINCIPLES_RULES_KEY,
+            "Times default to the user's local timezone. Use `--tz` only when the user specifies a different timezone, including explicit UTC requests.",
+        )
+        self._append_instruction(
+            prompt_context.extra_context,
+            CORE_PRINCIPLES_RULES_KEY,
+            "Write scheduled task messages as self-contained future instructions and only claim scheduling success after command success output.",
+        )
+        return prompt_context
+
     async def on_startup(self, context: IntegrationContext) -> None:
         if self._watcher is not None:
             await self._watcher.start()
@@ -78,3 +123,18 @@ class SchedulingIntegration(IntegrationContributor):
     async def on_shutdown(self, context: IntegrationContext) -> None:
         if self._watcher is not None:
             await self._watcher.stop()
+
+    @staticmethod
+    def _append_instruction(
+        extra_context: dict[str, Any],
+        key: str,
+        line: str,
+    ) -> None:
+        value = extra_context.get(key)
+        if isinstance(value, list):
+            rules = value
+        else:
+            rules = []
+            extra_context[key] = rules
+        if line not in rules:
+            rules.append(line)

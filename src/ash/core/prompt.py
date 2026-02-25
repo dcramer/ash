@@ -584,17 +584,6 @@ class SystemPromptBuilder:
             "- `ash-sb memory delete <id>` - Delete a memory by ID",
         ]
 
-        # Only include scheduling commands for regular (non-scheduled) sessions
-        if not context.get_is_scheduled_task():
-            lines.extend(
-                [
-                    "- `ash-sb schedule create 'msg' --at <time>` - Set reminder/task",
-                    "- `ash-sb schedule create 'msg' --cron '<expr>'` - Recurring task",
-                    "- `ash-sb schedule list` - List scheduled tasks",
-                    "- `ash-sb schedule cancel --id <id>` - Cancel a scheduled task",
-                ]
-            )
-
         lines.extend(
             [
                 "- `ash-sb logs` - View recent logs",
@@ -613,35 +602,7 @@ class SystemPromptBuilder:
             ]
         )
 
-        # Only include reminder guidance for regular sessions
-        if not context.get_is_scheduled_task():
-            lines.extend(
-                [
-                    "",
-                    "### Scheduling",
-                    "",
-                    "Times default to the user's local timezone. Never convert to UTC.",
-                    "If the user specifies a different timezone, use `--tz` to override:",
-                    "- If user asks for UTC specifically, pass `--tz UTC` and use the intended UTC time directly.",
-                    "- Do not silently map UTC requests to local-time cron without explicit confirmation.",
-                    "",
-                    "One-time: `ash-sb schedule create 'check build' --at 'in 2 hours'`",
-                    "Recurring: `ash-sb schedule create 'standup' --cron '0 9 * * 1-5'`",
-                    "With timezone: `ash-sb schedule create 'standup' --cron '0 10 * * 1-5' --tz America/New_York`",
-                    "UTC example: `ash-sb schedule create 'review tasks' --cron '0 8 * * *' --tz UTC`",
-                    "",
-                    "Write task messages as self-contained instructions for a future agent with no conversation history.",
-                    "- BAD: 'remind me about buses'",
-                    "- GOOD: 'check bus arrivals for route 40 at 3rd & Pike and report them'",
-                    "",
-                    "Confirm scheduled times in the user's local timezone.",
-                    "When the user gives a relative time phrase (e.g. 'this Saturday', 'tomorrow morning'), mirror that phrasing in confirmation instead of inventing a new explicit date unless the user asked for a specific date.",
-                    "If a user specifies a timezone and asks for multiple reminders in one request, apply that timezone consistently to each reminder unless they explicitly override per reminder.",
-                    "If a schedule command fails (non-zero exit code, Usage, or Error output), fix and retry before responding.",
-                    "Never claim a reminder was created unless the command succeeded.",
-                ]
-            )
-        else:
+        if context.get_is_scheduled_task():
             lines.extend(
                 [
                     "",

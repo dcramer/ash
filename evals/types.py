@@ -131,6 +131,25 @@ class Assertions(BaseModel):
     people: list[PersonAssertion] = Field(default_factory=list)
 
 
+class ToolInputAssertion(BaseModel):
+    """Deterministic assertions over captured tool call inputs."""
+
+    tool: str = Field(description="Tool name to match, e.g. 'bash'")
+    input_contains: list[str] = Field(
+        default_factory=list,
+        description="Substrings that must appear in at least one matched input",
+    )
+    input_not_contains: list[str] = Field(
+        default_factory=list,
+        description="Substrings that must not appear in any matched input",
+    )
+    min_calls: int = Field(
+        default=1,
+        ge=0,
+        description="Minimum number of matching tool calls required",
+    )
+
+
 class SuiteDefaults(BaseModel):
     """Default configuration for all cases in a suite."""
 
@@ -170,6 +189,10 @@ class EvalCase(BaseModel):
     disallowed_tool_result_substrings: list[str] = Field(
         default_factory=list,
         description="Tool result substrings that MUST NOT appear (auto-fail if seen)",
+    )
+    tool_input_assertions: list[ToolInputAssertion] = Field(
+        default_factory=list,
+        description="Deterministic assertions on captured tool inputs",
     )
     phase_constraints: dict[str, PhaseConstraint] | None = Field(
         default=None,

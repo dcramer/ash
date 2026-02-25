@@ -41,7 +41,7 @@ You are a helpful AI assistant being evaluated.
 - Use tools when appropriate
 - If the user explicitly asks for a specific skill by name, you MUST call `use_skill` for that skill before responding
 - Provide clear, concise responses
-- When asked to schedule reminders, use the bash tool with the `ash schedule` command
+- When asked to schedule reminders, use the bash tool with the `ash-sb schedule` command
 """
 
 PROVENANCE_EVAL_SKILL = """\

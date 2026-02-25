@@ -108,6 +108,17 @@ Keep SKILL.md under 200 lines. Move details to `references/`.
 - Determinism: if behavior will be repeatedly re-implemented, create a script instead of repeating ad-hoc instructions.
 - Tool minimalism: include only required tools in `allowed_tools`.
 
+## Scheduler Design Pattern
+
+When generating skills that monitor conditions over time, make the scheduling strategy explicit:
+
+- Prefer recurring cron checks for regular polling:
+  - Use `ash-sb schedule create '...' --cron '<expr>'`.
+  - Keep each run idempotent and include dedupe logic (avoid repeated alerts for the same state).
+- Use self-rescheduling only when cadence must change dynamically (for example pregame vs in-game vs postgame).
+- Always include stop/cleanup behavior in instructions (cancel or stop scheduling when work is complete).
+- Do not rely on one-shot-only scheduling for continuous monitoring workflows.
+
 ## Validation
 
 Always validate before reporting success:

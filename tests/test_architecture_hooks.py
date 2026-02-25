@@ -225,6 +225,19 @@ def test_browser_prompt_guidance_is_integration_owned() -> None:
     assert "CORE_PRINCIPLES_RULES_KEY" in integration_text
 
 
+def test_scheduling_prompt_guidance_is_integration_owned() -> None:
+    prompt_text = (ROOT / "src/ash/core/prompt.py").read_text(encoding="utf-8")
+    assert "### Scheduling" not in prompt_text
+    assert "One-time: `ash-sb schedule create" not in prompt_text
+    assert "UTC example: `ash-sb schedule create" not in prompt_text
+
+    integration_text = (ROOT / "src/ash/integrations/scheduling.py").read_text(
+        encoding="utf-8"
+    )
+    assert "TOOL_ROUTING_RULES_KEY" in integration_text
+    assert "CORE_PRINCIPLES_RULES_KEY" in integration_text
+
+
 def test_ensure_self_person_wiring_avoids_core_agent() -> None:
     files = _python_files_under("src/ash")
 

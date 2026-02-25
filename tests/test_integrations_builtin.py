@@ -162,6 +162,45 @@ async def test_scheduling_integration_owns_lifecycle_and_rpc(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_scheduling_integration_owns_prompt_routing_guidance() -> None:
+    context = _context()
+    integration = SchedulingIntegration(Path("graph"))
+
+    session = SessionState(
+        session_id="s-1",
+        provider="telegram",
+        chat_id="c-1",
+        user_id="u-1",
+    )
+    prompt_context = integration.augment_prompt_context(
+        PromptContext(),
+        session,
+        context,
+    )
+    routing = prompt_context.extra_context.get("tool_routing_rules")
+    principles = prompt_context.extra_context.get("core_principles_rules")
+    assert isinstance(routing, list)
+    assert isinstance(principles, list)
+    assert any("ash-sb schedule create" in line for line in routing)
+    assert any("continuous monitoring workflows" in line for line in principles)
+
+    # Scheduled-task execution context should not receive scheduling setup guidance.
+    scheduled_session = SessionState(
+        session_id="s-2",
+        provider="telegram",
+        chat_id="c-1",
+        user_id="u-1",
+    )
+    scheduled_session.context.is_scheduled_task = True
+    scheduled_prompt = integration.augment_prompt_context(
+        PromptContext(),
+        scheduled_session,
+        context,
+    )
+    assert scheduled_prompt.extra_context == {}
+
+
+@pytest.mark.asyncio
 async def test_browser_integration_owns_manager_tool_and_warmup(monkeypatch) -> None:
     context = _context()
     integration = BrowserIntegration()

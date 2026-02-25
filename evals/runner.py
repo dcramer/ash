@@ -16,6 +16,7 @@ from evals.judge import (
     LLMJudge,
     check_disallowed_tool_result_substrings,
     check_forbidden_tools,
+    check_tool_input_assertions,
 )
 from evals.types import (
     Assertions,
@@ -316,6 +317,14 @@ async def run_eval_case(
                 response_text=rendered_response_text,
                 tool_calls=effective_tool_calls,
                 judge_result=disallowed_result,
+            )
+        input_assertion_result = check_tool_input_assertions(case, effective_tool_calls)
+        if input_assertion_result:
+            return EvalResult(
+                case=case,
+                response_text=rendered_response_text,
+                tool_calls=effective_tool_calls,
+                judge_result=input_assertion_result,
             )
 
         # Judge the response with LLM
@@ -908,6 +917,14 @@ async def _execute_and_judge(
                 response_text=rendered_response_text,
                 tool_calls=effective_tool_calls,
                 judge_result=disallowed_result,
+            )
+        input_assertion_result = check_tool_input_assertions(case, effective_tool_calls)
+        if input_assertion_result:
+            return EvalResult(
+                case=case,
+                response_text=rendered_response_text,
+                tool_calls=effective_tool_calls,
+                judge_result=input_assertion_result,
             )
 
         # LLM judge

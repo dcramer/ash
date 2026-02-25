@@ -133,6 +133,57 @@ def check_disallowed_tool_result_substrings(
     return None
 
 
+def check_tool_input_assertions(
+    case: EvalCase,
+    tool_calls: list[dict[str, Any]],
+) -> JudgeResult | None:
+    """Return immediate failure if tool input assertions are violated."""
+    if not case.tool_input_assertions:
+        return None
+
+    violations: list[str] = []
+
+    for assertion in case.tool_input_assertions:
+        matched_calls = [tc for tc in tool_calls if tc.get("name") == assertion.tool]
+        if len(matched_calls) < assertion.min_calls:
+            violations.append(
+                f"{assertion.tool}: expected at least {assertion.min_calls} call(s), got {len(matched_calls)}"
+            )
+            continue
+
+        serialized_inputs: list[str] = []
+        for tc in matched_calls:
+            input_payload = tc.get("input")
+            serialized_inputs.append(
+                json.dumps(input_payload, default=str, sort_keys=True)
+            )
+
+        for needle in assertion.input_contains:
+            if not needle:
+                continue
+            if not any(needle in payload for payload in serialized_inputs):
+                violations.append(
+                    f"{assertion.tool}: missing required input substring {needle!r}"
+                )
+
+        for needle in assertion.input_not_contains:
+            if not needle:
+                continue
+            if any(needle in payload for payload in serialized_inputs):
+                violations.append(
+                    f"{assertion.tool}: found forbidden input substring {needle!r}"
+                )
+
+    if violations:
+        return JudgeResult(
+            passed=False,
+            score=0.0,
+            reasoning="Tool input assertion failures: " + "; ".join(violations),
+            criteria_scores={"tool_input_assertions": 0.0},
+        )
+    return None
+
+
 class Judge(ABC):
     """Abstract base class for judges."""
 
