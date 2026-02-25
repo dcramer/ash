@@ -603,82 +603,91 @@ class TestPrivacyFilter:
     accepting pre-resolved person IDs instead of doing sync lookups).
 
     Bug 2: Inconsistent filter logic between MemoryEntry and SearchResult
-    paths (now unified into single _passes_privacy_filter method on
-    RetrievalPipeline).
+    paths (now unified into shared visibility policy helpers).
     """
 
-    @pytest.fixture
-    def pipeline(self, graph_store: Store):
-        from ash.store.retrieval import RetrievalPipeline
-
-        return RetrievalPipeline(graph_store)
-
-    def test_public_always_passes(self, pipeline):
+    def test_public_always_passes(self):
         """PUBLIC memories pass regardless of context."""
-        assert pipeline._passes_privacy_filter(
+        from ash.store.visibility import passes_sensitivity_policy
+
+        assert passes_sensitivity_policy(
             sensitivity=Sensitivity.PUBLIC,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids=set(),
         )
 
-    def test_public_sensitivity_treated_as_public(self, pipeline):
+    def test_public_sensitivity_treated_as_public(self):
         """PUBLIC sensitivity passes."""
-        assert pipeline._passes_privacy_filter(
+        from ash.store.visibility import passes_sensitivity_policy
+
+        assert passes_sensitivity_policy(
             sensitivity=Sensitivity.PUBLIC,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids=set(),
         )
 
-    def test_personal_shown_to_subject(self, pipeline):
+    def test_personal_shown_to_subject(self):
         """PERSONAL memories shown when querying user is the subject."""
-        assert pipeline._passes_privacy_filter(
+        from ash.store.visibility import passes_sensitivity_policy
+
+        assert passes_sensitivity_policy(
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids={"person-1"},
         )
 
-    def test_personal_hidden_from_non_subject(self, pipeline):
+    def test_personal_hidden_from_non_subject(self):
         """PERSONAL memories hidden when querying user is NOT the subject."""
-        assert not pipeline._passes_privacy_filter(
+        from ash.store.visibility import passes_sensitivity_policy
+
+        assert not passes_sensitivity_policy(
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids={"person-2"},
         )
 
-    def test_personal_hidden_when_no_person_ids(self, pipeline):
+    def test_personal_hidden_when_no_person_ids(self):
         """PERSONAL memories hidden when no person IDs resolved."""
-        assert not pipeline._passes_privacy_filter(
+        from ash.store.visibility import passes_sensitivity_policy
+
+        assert not passes_sensitivity_policy(
             sensitivity=Sensitivity.PERSONAL,
             subject_person_ids=["person-1"],
             chat_type="private",
             querying_person_ids=set(),
         )
 
-    def test_sensitive_shown_in_private_to_subject(self, pipeline):
+    def test_sensitive_shown_in_private_to_subject(self):
         """SENSITIVE memories shown only in private chat to subject."""
-        assert pipeline._passes_privacy_filter(
+        from ash.store.visibility import passes_sensitivity_policy
+
+        assert passes_sensitivity_policy(
             sensitivity=Sensitivity.SENSITIVE,
             subject_person_ids=["person-1"],
             chat_type="private",
             querying_person_ids={"person-1"},
         )
 
-    def test_sensitive_hidden_in_group_even_for_subject(self, pipeline):
+    def test_sensitive_hidden_in_group_even_for_subject(self):
         """SENSITIVE memories hidden in group chat even for subject."""
-        assert not pipeline._passes_privacy_filter(
+        from ash.store.visibility import passes_sensitivity_policy
+
+        assert not passes_sensitivity_policy(
             sensitivity=Sensitivity.SENSITIVE,
             subject_person_ids=["person-1"],
             chat_type="group",
             querying_person_ids={"person-1"},
         )
 
-    def test_sensitive_hidden_in_private_from_non_subject(self, pipeline):
+    def test_sensitive_hidden_in_private_from_non_subject(self):
         """SENSITIVE memories hidden in private chat from non-subject."""
-        assert not pipeline._passes_privacy_filter(
+        from ash.store.visibility import passes_sensitivity_policy
+
+        assert not passes_sensitivity_policy(
             sensitivity=Sensitivity.SENSITIVE,
             subject_person_ids=["person-1"],
             chat_type="private",
