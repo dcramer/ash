@@ -1,9 +1,7 @@
-schema_version: "2.0"
 name: Scheduler Behavior
 description: Multi-step scheduling scenario testing creation, timezone, recurring, listing, and cancellation
 
 defaults:
-  agent: default
   session:
     provider: eval
     user_id: eval-user

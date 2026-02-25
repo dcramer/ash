@@ -1,4 +1,3 @@
-schema_version: "2.0"
 name: Identity Resolution
 description: Tests person recognition and identity resolution across sessions and users
 
@@ -16,9 +15,6 @@ setup:
   - chat_id: eval-group-123
     chat_type: supergroup
     chat_title: "Eval Test Group"
-    user_id: user-david
-    username: dcramer
-    display_name: "David Cramer"
     messages:
       - "My wife Sukhpreet loves hiking, we went on a great trail last weekend."
     drain_extraction: true
@@ -69,14 +65,10 @@ cases:
 
   - id: identity_the_prefix_resolution
     description: Resolve "the boss" via relationship prefix stripping
-    skip_suite_setup: true
     setup:
       - chat_id: eval-group-123
         chat_type: supergroup
         chat_title: "Eval Test Group"
-        user_id: user-david
-        username: dcramer
-        display_name: "David Cramer"
         messages:
           - "My boss Marcus is intense about deadlines, we had a long sprint review today."
         drain_extraction: true

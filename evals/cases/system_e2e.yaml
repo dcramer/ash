@@ -1,4 +1,3 @@
-schema_version: "2.0"
 name: System End-to-End Smoke
 description: Single cheap E2E case covering remember, scheduling, and recall in one thread
 

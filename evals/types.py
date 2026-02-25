@@ -3,24 +3,13 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class PhaseConstraint(BaseModel):
-    """Constraints for a specific phase in multi-turn evals."""
+class EvalSchemaModel(BaseModel):
+    """Base model for eval YAML schema with strict key validation."""
 
-    expected_tools: list[str] = Field(
-        default_factory=list,
-        description="Tools that SHOULD be called in this phase",
-    )
-    forbidden_tools: list[str] = Field(
-        default_factory=list,
-        description="Tools that MUST NOT be called in this phase",
-    )
-    must_checkpoint: bool = Field(
-        default=False,
-        description="Whether this phase must end with an interrupt/checkpoint",
-    )
+    model_config = ConfigDict(extra="forbid")
 
 
 @dataclass
@@ -55,7 +44,7 @@ class EvalConfig:
 # --- v2.0 YAML schema models ---
 
 
-class SessionConfig(BaseModel):
+class SessionConfig(EvalSchemaModel):
     """Session configuration for eval cases.
 
     session_id is always auto-generated — never specify it manually.
@@ -70,7 +59,7 @@ class SessionConfig(BaseModel):
     chat_title: str | None = None
 
 
-class SetupStep(BaseModel):
+class SetupStep(EvalSchemaModel):
     """A setup step that seeds messages into an agent before the eval prompt.
 
     session_id is always auto-generated — never specify it manually.
@@ -91,7 +80,7 @@ class SetupStep(BaseModel):
     drain_extraction: bool = False
 
 
-class SeedMemory(BaseModel):
+class SeedMemory(EvalSchemaModel):
     """Memory fixture seeded directly into store for deterministic eval setup."""
 
     content: str
@@ -103,7 +92,7 @@ class SeedMemory(BaseModel):
     conversation_private: bool = False
 
 
-class EvalTurn(BaseModel):
+class EvalTurn(EvalSchemaModel):
     """A single turn in a multi-turn eval case."""
 
     prompt: str
@@ -111,27 +100,27 @@ class EvalTurn(BaseModel):
     criteria: list[str] = Field(default_factory=list)
 
 
-class MemoryAssertion(BaseModel):
+class MemoryAssertion(EvalSchemaModel):
     """Structural assertion about stored memories."""
 
     content_contains: list[str] = Field(default_factory=list)
     memory_type: str | None = None
 
 
-class PersonAssertion(BaseModel):
+class PersonAssertion(EvalSchemaModel):
     """Structural assertion about stored person records."""
 
     name_contains: str
 
 
-class Assertions(BaseModel):
+class Assertions(EvalSchemaModel):
     """Structural assertions to check after eval execution."""
 
     memories: list[MemoryAssertion] = Field(default_factory=list)
     people: list[PersonAssertion] = Field(default_factory=list)
 
 
-class ToolInputAssertion(BaseModel):
+class ToolInputAssertion(EvalSchemaModel):
     """Deterministic assertions over captured tool call inputs."""
 
     tool: str = Field(description="Tool name to match, e.g. 'bash'")
@@ -150,7 +139,7 @@ class ToolInputAssertion(BaseModel):
     )
 
 
-class SuiteDefaults(BaseModel):
+class SuiteDefaults(EvalSchemaModel):
     """Default configuration for all cases in a suite."""
 
     agent: str = "default"
@@ -158,7 +147,7 @@ class SuiteDefaults(BaseModel):
     session: SessionConfig = Field(default_factory=SessionConfig)
 
 
-class EvalCase(BaseModel):
+class EvalCase(EvalSchemaModel):
     """A single evaluation case."""
 
     id: str = Field(description="Unique identifier for the case")
@@ -194,16 +183,6 @@ class EvalCase(BaseModel):
         default_factory=list,
         description="Deterministic assertions on captured tool inputs",
     )
-    phase_constraints: dict[str, PhaseConstraint] | None = Field(
-        default=None,
-        description="Per-phase tool constraints for multi-turn evals",
-    )
-    input_data: dict[str, str] | None = Field(
-        default=None,
-        description="Optional input data to pass to the agent context",
-    )
-
-    # v2.0 fields
     session: SessionConfig | None = Field(
         default=None,
         description="Per-case session config (merges with suite defaults)",
@@ -230,20 +209,16 @@ class EvalCase(BaseModel):
     )
 
 
-class EvalSuite(BaseModel):
+class EvalSuite(EvalSchemaModel):
     """A suite of evaluation cases."""
 
     schema_version: str = Field(
-        default="1.0",
+        default="2.0",
         description="Schema version for forward compatibility",
     )
     name: str = Field(description="Name of the eval suite")
     description: str = Field(
         default="", description="Description of what this suite tests"
-    )
-    accuracy_threshold: float | None = Field(
-        default=None,
-        description="Suite-specific accuracy threshold (overrides default)",
     )
     cases: list[EvalCase] = Field(
         default_factory=list, description="List of eval cases"

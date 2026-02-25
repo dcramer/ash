@@ -1,10 +1,7 @@
-schema_version: "2.0"
 name: Passive Engagement
 description: Tests follow-up behavior after direct bot engagement in a group chat
 
 defaults:
-  agent: default
-  drain_extraction: false
   session:
     provider: telegram
     chat_id: eval-group-passive

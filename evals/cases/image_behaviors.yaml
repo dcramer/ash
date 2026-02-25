@@ -1,10 +1,7 @@
-schema_version: "2.0"
 name: Image Behaviors
 description: Single cheap eval validating assistant behavior when image context is injected
 
 defaults:
-  agent: default
-  drain_extraction: false
   session:
     provider: telegram
     chat_id: eval-image-behaviors

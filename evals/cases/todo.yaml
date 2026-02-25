@@ -1,9 +1,7 @@
-schema_version: "2.0"
 name: Todo Subsystem Behavior
 description: Multi-turn todo flow covering create, complete, and list semantics
 
 defaults:
-  agent: default
   session:
     provider: telegram
     chat_id: eval-todo
