@@ -22,6 +22,7 @@ class PlannedMemoryQuery:
 
     query: str
     max_results: int
+    supplemental_queries: tuple[str, ...] = ()
 
 
 class MemoryQueryPlanner:
@@ -46,10 +47,12 @@ class LLMQueryPlanner(MemoryQueryPlanner):
         llm: LLMProvider,
         model: str,
         retrieval_limit: int,
+        max_lookup_queries: int = 2,
     ) -> None:
         self._llm = llm
         self._model = model
         self._retrieval_limit = max(1, retrieval_limit)
+        self._max_lookup_queries = max(0, max_lookup_queries)
 
     async def plan(
         self,
@@ -70,9 +73,11 @@ class LLMQueryPlanner(MemoryQueryPlanner):
             ],
             model=self._model,
             system=(
-                "Rewrite the user message into ONE memory retrieval query that maximizes recall "
-                "for relevant user context (location/preferences/people/tasks/recent context) "
-                'without changing intent. Return ONLY JSON: {"query": string}.'
+                "Plan memory retrieval for the user message. Return ONLY JSON with this shape: "
+                '{"query": string, "lookup_queries": string[]}. '
+                "Use lookup_queries for inferred missing context needed to answer well "
+                "(for example profile/preferences/location/timezone), without changing intent. "
+                "Keep lookup_queries short and focused."
             ),
             max_tokens=200,
             temperature=0,
@@ -84,10 +89,16 @@ class LLMQueryPlanner(MemoryQueryPlanner):
         query = raw_query.strip() if isinstance(raw_query, str) else ""
         if not query:
             query = user_message
+        supplemental_queries = _parse_lookup_queries(
+            payload.get("lookup_queries"),
+            primary_query=query,
+            limit=self._max_lookup_queries,
+        )
 
         return PlannedMemoryQuery(
             query=query,
             max_results=self._retrieval_limit,
+            supplemental_queries=supplemental_queries,
         )
 
 
@@ -109,6 +120,35 @@ def _parse_json_object(text: str) -> dict[str, object]:
             return cast(dict[str, object], data)
 
     return {}
+
+
+def _parse_lookup_queries(
+    value: object,
+    *,
+    primary_query: str,
+    limit: int,
+) -> tuple[str, ...]:
+    if limit <= 0:
+        return ()
+    if not isinstance(value, list):
+        return ()
+
+    deduped: list[str] = []
+    seen = {primary_query.casefold()}
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        candidate = item.strip()
+        if not candidate:
+            continue
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+        if len(deduped) >= limit:
+            break
+    return tuple(deduped)
 
 
 def resolve_query_planner_runtime(

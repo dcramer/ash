@@ -38,6 +38,29 @@ async def test_llm_query_planner_rewrites_single_query() -> None:
 
     assert query.query == "location home city weather context"
     assert query.max_results == 25
+    assert query.supplemental_queries == ()
+
+
+@pytest.mark.asyncio
+async def test_llm_query_planner_includes_lookup_queries() -> None:
+    llm = _FakeLLM(
+        '{"query":"weather now","lookup_queries":["where user lives","user city","where user lives"]}'
+    )
+    planner = LLMQueryPlanner(
+        llm=cast(LLMProvider, llm),
+        model="gpt-5-mini",
+        retrieval_limit=25,
+        max_lookup_queries=2,
+    )
+
+    query = await planner.plan(
+        user_message="what's the weather like",
+        chat_type="group",
+        sender_username="dcramer",
+    )
+
+    assert query.query == "weather now"
+    assert query.supplemental_queries == ("where user lives", "user city")
 
 
 @pytest.mark.asyncio

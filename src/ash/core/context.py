@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ash.memory.query_planner import PlannedMemoryQuery
-from ash.store.types import RetrievedContext
+from ash.store.types import RetrievedContext, SearchResult
 
 if TYPE_CHECKING:
     from ash.memory.query_planner import MemoryQueryPlanner
@@ -235,28 +235,60 @@ class ContextGatherer:
     ) -> RetrievedContext | None:
         assert self._store is not None
 
-        try:
-            context = await self._store.get_context_for_message(
-                user_id=user_id,
-                user_message=query_plan.query,
-                chat_id=chat_id,
-                max_memories=max(1, query_plan.max_results),
-                chat_type=chat_type,
-                participant_person_ids=participant_person_ids,
-            )
-        except Exception as error:
-            logger.warning(
-                "memory_query_retrieval_failed",
-                extra={"error.message": str(error)},
-            )
+        contexts: list[RetrievedContext] = []
+        for planned_query in self._planned_queries(query_plan):
+            try:
+                context = await self._store.get_context_for_message(
+                    user_id=user_id,
+                    user_message=planned_query,
+                    chat_id=chat_id,
+                    max_memories=max(1, query_plan.max_results),
+                    chat_type=chat_type,
+                    participant_person_ids=participant_person_ids,
+                )
+            except Exception as error:
+                logger.warning(
+                    "memory_query_retrieval_failed",
+                    extra={"error.message": str(error), "query": planned_query},
+                )
+                continue
+            contexts.append(context)
+
+        if not contexts:
             return None
 
+        context = self._merge_contexts(contexts)
         sorted_memories = sorted(
             context.memories,
             key=lambda memory: memory.similarity,
             reverse=True,
         )
         return RetrievedContext(memories=sorted_memories[: self._max_total_memories])
+
+    def _planned_queries(self, query_plan: PlannedMemoryQuery) -> tuple[str, ...]:
+        queries = [query_plan.query]
+        queries.extend(query_plan.supplemental_queries)
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for query in queries:
+            candidate = query.strip()
+            if not candidate:
+                continue
+            key = candidate.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(candidate)
+        return tuple(deduped)
+
+    def _merge_contexts(self, contexts: list[RetrievedContext]) -> RetrievedContext:
+        by_id: dict[str, SearchResult] = {}
+        for context in contexts:
+            for memory in context.memories:
+                existing = by_id.get(memory.id)
+                if existing is None or memory.similarity > existing.similarity:
+                    by_id[memory.id] = memory
+        return RetrievedContext(memories=list(by_id.values()))
 
     async def _list_known_people(
         self,

@@ -257,3 +257,106 @@ class TestContextGatherer:
         )
 
         assert mock_store.get_context_for_message.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_planner_lookup_queries_merge_and_dedup_results(self):
+        """Planner supplemental queries should be retrieved and merged."""
+        planner = MagicMock()
+        planner.plan = AsyncMock(
+            return_value=PlannedMemoryQuery(
+                query="weather",
+                max_results=25,
+                supplemental_queries=("where user lives", "user city"),
+            )
+        )
+        mock_store = MagicMock()
+        mock_store.get_context_for_message = AsyncMock(
+            side_effect=[
+                RetrievedContext(
+                    memories=[
+                        SearchResult(
+                            id="mem-weather",
+                            content="General weather preference",
+                            similarity=0.4,
+                            metadata={},
+                            source_type="memory",
+                        ),
+                        SearchResult(
+                            id="mem-location",
+                            content="User lives in San Francisco",
+                            similarity=0.7,
+                            metadata={},
+                            source_type="memory",
+                        ),
+                    ]
+                ),
+                RetrievedContext(
+                    memories=[
+                        SearchResult(
+                            id="mem-location",
+                            content="User lives in San Francisco",
+                            similarity=0.95,
+                            metadata={},
+                            source_type="memory",
+                        )
+                    ]
+                ),
+                RetrievedContext(memories=[]),
+            ]
+        )
+        mock_store.list_people = AsyncMock(return_value=[])
+        mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
+
+        gatherer = ContextGatherer(store=mock_store, query_planner=planner)
+        result = await gatherer.gather(user_id="user-1", user_message="weather?")
+
+        assert result.memory is not None
+        assert [m.id for m in result.memory.memories] == [
+            "mem-location",
+            "mem-weather",
+        ]
+        first = mock_store.get_context_for_message.await_args_list[0]
+        second = mock_store.get_context_for_message.await_args_list[1]
+        third = mock_store.get_context_for_message.await_args_list[2]
+        assert first.kwargs["user_message"] == "weather"
+        assert second.kwargs["user_message"] == "where user lives"
+        assert third.kwargs["user_message"] == "user city"
+
+    @pytest.mark.asyncio
+    async def test_planner_lookup_query_failure_is_partial(self):
+        """A failing supplemental retrieval should not discard successful ones."""
+        planner = MagicMock()
+        planner.plan = AsyncMock(
+            return_value=PlannedMemoryQuery(
+                query="weather",
+                max_results=25,
+                supplemental_queries=("where user lives",),
+            )
+        )
+        mock_store = MagicMock()
+        mock_store.get_context_for_message = AsyncMock(
+            side_effect=[
+                RetrievedContext(
+                    memories=[
+                        SearchResult(
+                            id="mem-location",
+                            content="User lives in San Francisco",
+                            similarity=0.9,
+                            metadata={},
+                            source_type="memory",
+                        )
+                    ]
+                ),
+                RuntimeError("transient retrieval failure"),
+            ]
+        )
+        mock_store.list_people = AsyncMock(return_value=[])
+        mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
+
+        gatherer = ContextGatherer(store=mock_store, query_planner=planner)
+        result = await gatherer.gather(user_id="user-1", user_message="weather?")
+
+        assert result.memory is not None
+        assert [m.id for m in result.memory.memories] == ["mem-location"]
