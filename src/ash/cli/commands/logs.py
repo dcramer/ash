@@ -402,9 +402,10 @@ def _summarize_ids(value: Any) -> str | None:
     if not isinstance(value, list):
         return None
     if not value:
-        return "0 ids"
-    preview = ", ".join(_short_value(str(v)) for v in value[:3])
-    suffix = ", ..." if len(value) > 3 else ""
+        return "0 ids[]"
+    preview_count = 5
+    preview = ", ".join(str(v) for v in value[:preview_count])
+    suffix = ", ..." if len(value) > preview_count else ""
     return f"{len(value)} ids[{preview}{suffix}]"
 
 

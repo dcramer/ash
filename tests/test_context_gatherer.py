@@ -239,6 +239,42 @@ class TestContextGatherer:
         planner.plan.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_memory_retrieval_log_includes_query_and_ids(self, caplog):
+        """Retrieval log should include resolved query text and memory IDs."""
+        planner = MagicMock()
+        planner.plan = AsyncMock(
+            return_value=PlannedMemoryQuery(
+                query="planned lookup query", max_results=25
+            )
+        )
+        result_context = RetrievedContext(
+            memories=[
+                SearchResult(
+                    id="mem-123",
+                    content="User lives in SF",
+                    similarity=0.95,
+                    metadata={},
+                    source_type="memory",
+                )
+            ]
+        )
+        mock_store = MagicMock()
+        mock_store.get_context_for_message = AsyncMock(return_value=result_context)
+        mock_store.list_people = AsyncMock(return_value=[])
+        mock_store.find_person_ids_for_username = AsyncMock(return_value=set())
+        mock_store.get_person = AsyncMock(return_value=None)
+
+        gatherer = ContextGatherer(store=mock_store, query_planner=planner)
+
+        with caplog.at_level("INFO", logger="ash.core.context"):
+            await gatherer.gather(user_id="user-1", user_message="weather?")
+
+        record = next((r for r in caplog.records if r.msg == "memory_retrieval"), None)
+        assert record is not None
+        assert record.__dict__["memory.query"] == "planned lookup query"
+        assert record.__dict__["memory.ids"] == ["mem-123"]
+
+    @pytest.mark.asyncio
     async def test_planner_failure_falls_back_to_base_query(self):
         """Planner failure should not block normal retrieval."""
         planner = MagicMock()

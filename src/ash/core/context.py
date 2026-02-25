@@ -157,6 +157,7 @@ class ContextGatherer:
                 logger.info(
                     "memory_retrieval",
                     extra={
+                        "memory.query": query_plan.query,
                         "memory.count": len(memory_context.memories),
                         "memory.ids": [m.id for m in memory_context.memories],
                         "duration_ms": duration_ms,
@@ -173,7 +174,11 @@ class ContextGatherer:
             else:
                 logger.info(
                     "memory_retrieval",
-                    extra={"memory.count": 0, "duration_ms": duration_ms},
+                    extra={
+                        "memory.query": query_plan.query,
+                        "memory.count": 0,
+                        "duration_ms": duration_ms,
+                    },
                 )
 
             return memory_context

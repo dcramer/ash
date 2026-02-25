@@ -513,9 +513,21 @@ class ComponentFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key.startswith("_") or key in self._STANDARD_ATTRS:
                 continue
-            if isinstance(value, dict | list):
+            if isinstance(value, dict):
                 continue
-            display = str(value)
+            if isinstance(value, list):
+                if key.endswith(".ids"):
+                    if not value:
+                        display = "0 ids[]"
+                    else:
+                        preview_count = 5
+                        preview = ", ".join(str(v) for v in value[:preview_count])
+                        suffix = ", ..." if len(value) > preview_count else ""
+                        display = f"{len(value)} ids[{preview}{suffix}]"
+                else:
+                    continue
+            else:
+                display = str(value)
             max_len = self._EXTRA_MAX_LEN_BY_KEY.get(key, self._DEFAULT_EXTRA_MAX_LEN)
             if key.endswith(".preview"):
                 max_len = max(max_len, 300)

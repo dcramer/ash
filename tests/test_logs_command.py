@@ -96,7 +96,7 @@ def test_format_extras_summarizes_id_lists() -> None:
             "memory.ids": ["abc123456", "def234567", "ghi345678", "jkl456789"],
         }
     )
-    assert "memory.ids=4 ids[abc12345, def23456, ghi34567, ...]" in extras
+    assert "memory.ids=4 ids[abc123456, def234567, ghi345678, jkl456789]" in extras
 
 
 def test_format_extras_summarizes_tool_arguments_without_newlines() -> None:
