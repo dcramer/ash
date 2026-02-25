@@ -55,7 +55,7 @@ cases:
   - id: browser_action_honest_outcome
     description: Assistant should attempt a browser task and report real tool outcome
     turns:
-      - prompt: "Use the browser tool to open https://example.com and tell me the page title."
+      - prompt: "Please open https://example.com and tell me the page title."
         expected_behavior: |
           The assistant should make a browser attempt and report the actual outcome
           without guessing or fabricating success.
@@ -73,7 +73,7 @@ cases:
     expected_tools:
       - use_skill
     turns:
-      - prompt: "First call use_skill with skill='daily-brief' and message='run the brief now'. Then return the brief in one short sentence."
+      - prompt: "Run /daily-brief and give me a one-sentence summary."
         expected_behavior: |
           The assistant should invoke the eval dummy skill and include concise inline
           provenance in the final user-visible response.
@@ -88,22 +88,39 @@ cases:
       - provenance
 
   - id: memory_weather_location_recall
-    description: Underspecified weather ask should use remembered location context
+    description: Weather skill should require city and rely on memory-recovered location for underspecified asks
+    expected_tools:
+      - use_skill
+    forbidden_tools:
+      - web_search
+      - web_fetch
     setup:
-      - memories:
+      - messages:
+          - "If a user asks about weather, use the fake-weather skill for deterministic local weather lookups."
+        memories:
           - content: "Alice's home city is San Francisco."
             memory_type: knowledge
             sensitivity: public
             portable: true
+    tool_input_assertions:
+      - tool: use_skill
+        input_contains:
+          - "\"skill\": \"fake-weather\""
+        min_calls: 1
+      - tool: bash
+        input_contains:
+          - "/workspace/evals/fixtures/fake_weather.py"
+          - "--city"
+        min_calls: 1
     turns:
-      - prompt: "I asked 'what's the weather'. Do not fetch live weather. Just tell me which city you'd use based on memory, then ask if I want you to fetch current conditions."
+      - prompt: "what's the weather?"
         expected_behavior: |
-          The assistant should recover remembered location context and use it to
-          ground the response, without requiring immediate city/zip clarification.
+          The assistant should invoke the fake-weather skill and provide a weather
+          result grounded in remembered location context.
         criteria:
           - Uses remembered location context from memory (San Francisco)
-          - Does not claim it fetched current weather
-          - Asks for confirmation or permission before any live fetch
+          - Reports weather result with condition and temperature
+          - Does not ask for city/zip in the first response
     tags:
       - e2e
       - smoke

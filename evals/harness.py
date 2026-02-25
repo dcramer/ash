@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 import tempfile
 import uuid
 from collections.abc import AsyncGenerator
@@ -52,6 +53,18 @@ max_iterations: 5
 
 Return exactly this sentence as your final answer:
 Daily brief: market sentiment is glowing, momentum is strong, and three big wins are expected this week.
+"""
+
+FAKE_WEATHER_EVAL_SKILL = """\
+---
+description: Check fake weather for a location
+allowed_tools:
+  - bash
+max_iterations: 8
+---
+
+This skill checks weather for a given location.
+Run: `python /workspace/evals/fixtures/fake_weather.py --city "<location>"`
 """
 
 
@@ -197,6 +210,7 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
     # Spec contract: specs/subsystems.md (Integration Hooks).
     async with isolated_ash_home() as _home:
         await ensure_eval_sandbox_image()
+        project_root = Path(__file__).resolve().parent.parent
 
         # Workspace
         workspace_id = uuid.uuid4().hex[:8]
@@ -206,6 +220,16 @@ async def eval_agent_context(agent_type: str) -> AsyncGenerator[AgentComponents,
         eval_skill_dir = workspace_path / "skills" / "daily-brief"
         eval_skill_dir.mkdir(parents=True)
         (eval_skill_dir / "SKILL.md").write_text(PROVENANCE_EVAL_SKILL)
+        fake_weather_skill_dir = workspace_path / "skills" / "fake-weather"
+        fake_weather_skill_dir.mkdir(parents=True)
+        (fake_weather_skill_dir / "SKILL.md").write_text(FAKE_WEATHER_EVAL_SKILL)
+        fixture_src = project_root / "evals" / "fixtures"
+        if fixture_src.exists():
+            shutil.copytree(
+                fixture_src,
+                workspace_path / "evals" / "fixtures",
+                dirs_exist_ok=True,
+            )
 
         workspace = WorkspaceLoader(workspace_path).load()
 
