@@ -36,6 +36,8 @@ Security invariants:
 
 ## Enablement
 
+Add this to `config.toml`:
+
 ```toml
 [skills.gog]
 enabled = true
@@ -49,6 +51,51 @@ timeout_seconds = 30
 
 `[skills.gog]` enables the bundled skill.
 `[skills.gog.capability_provider]` wires the bundled bridge command.
+
+Optional chat allowlist guardrails:
+
+```toml
+[skills.defaults]
+allow_chat_ids = ["<dm-chat-id>"]
+
+# or per-skill override:
+[skills.gog]
+enabled = true
+allow_chat_ids = ["<dm-chat-id>"]
+```
+
+## Runtime Paths
+
+By default, the bridge stores:
+
+- provider state at `~/.ash/gogcli/state.json`
+- credential artifacts in the host vault at `~/.ash/vault`
+
+For isolated local testing, override before launching Ash:
+
+```bash
+export GOGCLI_STATE_PATH=/tmp/ash-gog/state.json
+export GOGCLI_VAULT_PATH=/tmp/ash-gog/vault
+```
+
+## Testing
+
+Contract/integration tests (no external Google dependency):
+
+```bash
+uv run pytest tests/test_gogcli_bridge.py tests/test_gog_capability_e2e.py
+```
+
+Interactive local check:
+
+1. Enable `[skills.gog]` + `[skills.gog.capability_provider]` in `config.toml`.
+2. Start chat (`ash chat`) in a private context.
+3. Ask the agent to run `ash-sb capability list` and verify `gog.email` / `gog.calendar`.
+4. Ask it to run auth begin/complete and a sample invoke via `ash-sb capability ...`.
+
+Current behavior note: the bundled bridge is a dogfood/reference provider. It
+validates auth/isolation contracts and returns deterministic sample outputs for
+email/calendar operations.
 
 ## Notes
 
