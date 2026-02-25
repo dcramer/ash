@@ -47,6 +47,41 @@ Example: {{"abc123": "preference", "def456": "identity"}}
 
 If all memories are correctly classified, return: {{}}"""
 
+_RELATIONSHIP_HINTS = (
+    "wife",
+    "husband",
+    "partner",
+    "girlfriend",
+    "boyfriend",
+    "fiance",
+    "fiancée",
+    "mom",
+    "mother",
+    "dad",
+    "father",
+    "sister",
+    "brother",
+    "son",
+    "daughter",
+    "roommate",
+    "boss",
+    "manager",
+    "coworker",
+    "co-worker",
+    "colleague",
+    "friend",
+    "married",
+    "dating",
+    "engaged",
+    "divorced",
+)
+
+
+def _is_relationship_reclassification_safe(content: str) -> bool:
+    """Require explicit relationship language before classifying as relationship."""
+    lowered = content.lower()
+    return any(hint in lowered for hint in _RELATIONSHIP_HINTS)
+
 
 async def memory_doctor_reclassify(
     store: Store, config: AshConfig, force: bool
@@ -104,6 +139,14 @@ async def memory_doctor_reclassify(
                     try:
                         new_type = MemoryType(new_type_str)
                     except ValueError:
+                        continue
+                    if (
+                        new_type == MemoryType.RELATIONSHIP
+                        and not _is_relationship_reclassification_safe(memory.content)
+                    ):
+                        dim(
+                            f"Skipped weak relationship reclassification for {memory.id[:8]}"
+                        )
                         continue
                     if new_type != memory.memory_type:
                         changes.append(

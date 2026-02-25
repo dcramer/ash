@@ -3,6 +3,9 @@
 from ash.cli.commands.memory.doctor._helpers import (
     is_trivial_rewrite as _is_trivial_rewrite,
 )
+from ash.cli.commands.memory.doctor.quality import (
+    _is_unstable_subject_swap as _is_unstable_subject_swap,
+)
 
 
 class TestIsTrivialRewrite:
@@ -67,4 +70,26 @@ class TestIsTrivialRewrite:
         """Softening/censoring language is a substantive change, not trivial."""
         assert (
             _is_trivial_rewrite("Has shitty tests", "Has poor quality tests") is False
+        )
+
+
+class TestUnstableSubjectSwap:
+    def test_detects_primary_subject_flip(self):
+        assert (
+            _is_unstable_subject_swap(
+                "David Cramer owns a Rolex Daytona that was gifted by Sukhpreet.",
+                "Sukhpreet Sembhi owns a Rolex Daytona that was gifted by David.",
+                ["David Cramer", "Sukhpreet Sembhi"],
+            )
+            is True
+        )
+
+    def test_allows_user_to_named_subject_rewrite(self):
+        assert (
+            _is_unstable_subject_swap(
+                "User lives in San Francisco.",
+                "David Cramer lives in San Francisco.",
+                ["David Cramer"],
+            )
+            is False
         )

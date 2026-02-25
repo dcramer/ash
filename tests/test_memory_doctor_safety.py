@@ -9,6 +9,7 @@ from ash.cli.commands.memory.doctor.backfill_subjects import (
 from ash.cli.commands.memory.doctor.contradictions import memory_doctor_contradictions
 from ash.cli.commands.memory.doctor.dedup import memory_doctor_dedup
 from ash.cli.commands.memory.doctor.quality import memory_doctor_quality
+from ash.cli.commands.memory.doctor.reclassify import memory_doctor_reclassify
 from ash.graph.edges import (
     create_supersedes_edge,
     get_subject_person_ids,
@@ -128,6 +129,67 @@ async def test_doctor_quality_rewrites_reindex(
         graph_store.graph.memories[memory.id].content == "David's birthday is August 12"
     )
     graph_store._save_vector_index.assert_awaited_once()
+
+
+async def test_doctor_quality_skips_unstable_subject_swap_rewrite(
+    graph_store, minimal_config, monkeypatch
+):
+    """Quality doctor should skip rewrites that flip primary subject names."""
+    david = await graph_store.create_person(created_by="user-1", name="David Cramer")
+    sukhpreet = await graph_store.create_person(
+        created_by="user-1", name="Sukhpreet Sembhi"
+    )
+    memory = await graph_store.add_memory(
+        content="David Cramer owns a Rolex Daytona from 2025 that was gifted by Sukhpreet.",
+        owner_user_id="user-1",
+        subject_person_ids=[david.id, sukhpreet.id],
+    )
+
+    import ash.cli.commands.memory.doctor.quality as quality_mod
+
+    async def fake_llm_complete(*_args, **_kwargs):
+        return {
+            memory.id[:8]: {
+                "action": "REWRITE",
+                "content": "Sukhpreet Sembhi owns a Rolex Daytona from 2025 that was gifted by David Cramer.",
+            }
+        }
+
+    monkeypatch.setattr(
+        quality_mod, "create_llm", lambda _config: (MagicMock(), "mock-model")
+    )
+    monkeypatch.setattr(quality_mod, "llm_complete", fake_llm_complete)
+
+    await memory_doctor_quality(graph_store, minimal_config, force=True)
+
+    assert graph_store.graph.memories[memory.id].content.startswith("David Cramer owns")
+
+
+async def test_doctor_reclassify_blocks_weak_relationship_label(
+    graph_store, minimal_config, monkeypatch
+):
+    """Reclassify should reject relationship labels without relationship language."""
+    from ash.store.types import MemoryType
+
+    memory = await graph_store.add_memory(
+        content="David Cramer owns a Rolex Daytona 'panda' from 2025 that was gifted by Sukhpreet.",
+        owner_user_id="user-1",
+        memory_type=MemoryType.KNOWLEDGE,
+    )
+
+    import ash.cli.commands.memory.doctor.reclassify as reclassify_mod
+
+    async def fake_llm_complete(*_args, **_kwargs):
+        return {memory.id[:8]: "relationship"}
+
+    monkeypatch.setattr(
+        reclassify_mod, "create_llm", lambda _config: (MagicMock(), "mock-model")
+    )
+    monkeypatch.setattr(reclassify_mod, "llm_complete", fake_llm_complete)
+
+    await memory_doctor_reclassify(graph_store, minimal_config, force=True)
+
+    assert graph_store.graph.memories[memory.id].memory_type == MemoryType.KNOWLEDGE
 
 
 async def test_validate_supersession_pair_rejects_scope_mismatch(graph_store):

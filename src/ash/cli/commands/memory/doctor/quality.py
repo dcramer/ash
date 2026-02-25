@@ -103,6 +103,36 @@ async def _resolve_subject_names(
     return result
 
 
+def _first_subject_mention(text: str, names: list[str]) -> str | None:
+    """Return the earliest subject name mentioned in text."""
+    text_l = text.lower()
+    first_name: str | None = None
+    first_idx: int | None = None
+
+    for name in names:
+        idx = text_l.find(name.lower())
+        if idx == -1:
+            continue
+        if first_idx is None or idx < first_idx:
+            first_idx = idx
+            first_name = name
+
+    return first_name
+
+
+def _is_unstable_subject_swap(old: str, new: str, names: list[str]) -> bool:
+    """Detect rewrites that flip the primary subject name and cause churn."""
+    if not names:
+        return False
+
+    old_primary = _first_subject_mention(old, names)
+    new_primary = _first_subject_mention(new, names)
+    if not old_primary or not new_primary:
+        return False
+
+    return old_primary.lower() != new_primary.lower()
+
+
 def _format_memory_line(m: MemoryEntry, subject_names: dict[str, list[str]]) -> str:
     """Format a single memory line for the quality prompt, including subject names."""
     line = f"- {m.id[:8]}: {m.content[:200]}"
@@ -166,7 +196,12 @@ async def memory_doctor_quality(store: Store, config: AshConfig, force: bool) ->
                         new_content = action_data.get("content", "")
                         if not new_content:
                             continue
-                        if has_placeholder(new_content):
+                        names = subject_names.get(mem.id, [])
+                        if _is_unstable_subject_swap(mem.content, new_content, names):
+                            dim(
+                                f"Skipped unstable subject swap rewrite for {mem.id[:8]}"
+                            )
+                        elif has_placeholder(new_content):
                             dim(f"Skipped rewrite with placeholder for {mem.id[:8]}")
                         elif is_trivial_rewrite(mem.content, new_content):
                             dim(f"Skipped trivial rewrite for {mem.id[:8]}")
