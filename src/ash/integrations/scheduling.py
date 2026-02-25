@@ -129,6 +129,16 @@ class SchedulingIntegration(IntegrationContributor):
         self._append_instruction(
             prompt_context.extra_context,
             CORE_PRINCIPLES_RULES_KEY,
+            "If the user specifies a time with an explicit timezone (for example, '10am ET'), preserve that wall-clock time in that timezone. Example: `10am ET` with `--tz America/New_York` uses `--cron '0 10 ...'` (not a converted hour).",
+        )
+        self._append_instruction(
+            prompt_context.extra_context,
+            CORE_PRINCIPLES_RULES_KEY,
+            "When a single request includes times in different timezones, create each schedule with its own `--tz` matching the user-specified timezone for that item.",
+        )
+        self._append_instruction(
+            prompt_context.extra_context,
+            CORE_PRINCIPLES_RULES_KEY,
             "Write scheduled task messages as self-contained future instructions and only claim scheduling success after command success output.",
         )
         return prompt_context

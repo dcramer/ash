@@ -185,6 +185,7 @@ async def test_scheduling_integration_owns_prompt_routing_guidance() -> None:
     assert isinstance(principles, list)
     assert any("ash-sb schedule create" in line for line in routing)
     assert any("continuous monitoring workflows" in line for line in principles)
+    assert any("preserve that wall-clock time" in line for line in principles)
 
     # Scheduled-task execution context should not receive scheduling setup guidance.
     scheduled_session = SessionState(
