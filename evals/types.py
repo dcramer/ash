@@ -84,7 +84,23 @@ class SetupStep(BaseModel):
     chat_type: str | None = None
     chat_title: str | None = None
     messages: list[str] = Field(default_factory=list)
+    memories: list["SeedMemory"] = Field(
+        default_factory=list,
+        description="Deterministic memories to seed before prompts",
+    )
     drain_extraction: bool = False
+
+
+class SeedMemory(BaseModel):
+    """Memory fixture seeded directly into store for deterministic eval setup."""
+
+    content: str
+    subjects: list[str] = Field(default_factory=list)
+    memory_type: str = "knowledge"
+    sensitivity: str = "public"
+    portable: bool = True
+    shared: bool = False
+    conversation_private: bool = False
 
 
 class EvalTurn(BaseModel):

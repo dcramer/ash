@@ -23,6 +23,7 @@ from evals.types import (
     EvalConfig,
     EvalSuite,
     JudgeResult,
+    SeedMemory,
     SessionConfig,
     SetupStep,
     SuiteDefaults,
@@ -552,6 +553,79 @@ async def run_setup_steps(
         defaults: Suite defaults for session config.
     """
     agent = components.agent
+
+    async def _seed_memories(
+        *,
+        step: SetupStep,
+        user_id: str,
+        provider: str,
+        chat_id: str | None,
+        chat_type: str | None,
+        memories: list[SeedMemory],
+    ) -> None:
+        if not memories or not components.memory_manager:
+            return
+
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import (
+            DisclosureClass,
+            ExtractedFact,
+            MemoryType,
+            Sensitivity,
+        )
+
+        store = components.memory_manager
+        graph_chat_id: str | None = None
+        if provider and chat_id:
+            chat_entry = store.graph.find_chat_by_provider(provider, chat_id)
+            graph_chat_id = chat_entry.id if chat_entry else None
+
+        facts: list[ExtractedFact] = []
+        for seeded in memories:
+            try:
+                memory_type = MemoryType(seeded.memory_type)
+            except ValueError:
+                memory_type = MemoryType.KNOWLEDGE
+            try:
+                sensitivity = Sensitivity(seeded.sensitivity)
+            except ValueError:
+                sensitivity = Sensitivity.PUBLIC
+
+            disclosure = (
+                DisclosureClass.PRIVATE_TO_CONVERSATION
+                if seeded.conversation_private
+                else DisclosureClass.PUBLIC
+            )
+
+            facts.append(
+                ExtractedFact(
+                    content=seeded.content,
+                    subjects=seeded.subjects,
+                    shared=seeded.shared,
+                    confidence=1.0,
+                    memory_type=memory_type,
+                    speaker=step.username,
+                    sensitivity=sensitivity,
+                    disclosure=disclosure,
+                    portable=seeded.portable,
+                )
+            )
+
+        owner_names = [n for n in [step.username, step.display_name] if n]
+        await process_extracted_facts(
+            facts=facts,
+            store=store,
+            user_id=user_id,
+            chat_id=chat_id,
+            speaker_username=step.username,
+            speaker_display_name=step.display_name,
+            owner_names=owner_names,
+            source="eval_seed",
+            confidence_threshold=0.0,
+            graph_chat_id=graph_chat_id,
+            chat_type=chat_type,
+        )
+
     for step in steps:
         session = _build_setup_session(step, defaults)
         user_id = step.user_id or defaults.session.user_id or "eval-user"
@@ -568,6 +642,15 @@ async def run_setup_steps(
                 )
             except Exception:
                 logger.debug("eval_chat_upsert_failed", exc_info=True)
+
+        await _seed_memories(
+            step=step,
+            user_id=user_id,
+            provider=session.provider,
+            chat_id=session.chat_id,
+            chat_type=session.context.chat_type,
+            memories=step.memories,
+        )
 
         for message in step.messages:
             await agent.send_message(
