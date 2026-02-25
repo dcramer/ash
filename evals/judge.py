@@ -184,6 +184,39 @@ def check_tool_input_assertions(
     return None
 
 
+def check_skill_handoff_completion(
+    tool_calls: list[dict[str, Any]],
+) -> JudgeResult | None:
+    """Ensure use_skill calls produced tool results (parent handoff completed).
+
+    Interactive skill execution should always unwind by returning a tool_result
+    to the parent tool_use. Missing results indicate a broken handoff path.
+    """
+    skill_calls = [tc for tc in tool_calls if tc.get("name") == "use_skill"]
+    if not skill_calls:
+        return None
+
+    missing_results: list[str] = []
+    for tc in skill_calls:
+        # A result key (including empty/error content) indicates handoff occurred.
+        if "result" not in tc:
+            call_id = tc.get("id") or "unknown"
+            missing_results.append(str(call_id))
+
+    if not missing_results:
+        return None
+
+    return JudgeResult(
+        passed=False,
+        score=0.0,
+        reasoning=(
+            "Skill handoff incomplete: use_skill call(s) missing tool results "
+            f"(ids: {', '.join(missing_results)})."
+        ),
+        criteria_scores={"skill_handoff_completion": 0.0},
+    )
+
+
 class Judge(ABC):
     """Abstract base class for judges."""
 

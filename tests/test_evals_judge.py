@@ -1,5 +1,6 @@
 from evals.judge import (
     check_disallowed_tool_result_substrings,
+    check_skill_handoff_completion,
     check_tool_input_assertions,
 )
 from evals.types import EvalCase, ToolInputAssertion
@@ -87,3 +88,24 @@ def test_tool_input_assertions_fail_on_missing_substring() -> None:
     assert result is not None
     assert result.passed is False
     assert "Tool input assertion failures" in result.reasoning
+
+
+def test_skill_handoff_completion_passes_when_no_skill_calls() -> None:
+    result = check_skill_handoff_completion([{"name": "bash", "id": "t1"}])
+    assert result is None
+
+
+def test_skill_handoff_completion_passes_with_skill_result() -> None:
+    result = check_skill_handoff_completion(
+        [{"name": "use_skill", "id": "t1", "result": "ok", "is_error": False}]
+    )
+    assert result is None
+
+
+def test_skill_handoff_completion_fails_when_result_missing() -> None:
+    result = check_skill_handoff_completion(
+        [{"name": "use_skill", "id": "skill-1", "input": {"skill": "daily-brief"}}]
+    )
+    assert result is not None
+    assert result.passed is False
+    assert "Skill handoff incomplete" in result.reasoning

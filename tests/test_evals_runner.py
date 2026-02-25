@@ -12,6 +12,7 @@ from evals.runner import (
     _record_eval_assistant_message,
     _record_eval_user_message,
     build_session_state,
+    extract_tool_calls_from_session,
     load_eval_suite,
     run_yaml_eval_case,
 )
@@ -141,3 +142,40 @@ def test_build_session_state_defaults_eval_provider_to_private_chat_type() -> No
     session = build_session_state(SessionConfig(), defaults, case_id="c1")
 
     assert session.context.chat_type == "private"
+
+
+def test_extract_tool_calls_from_session_includes_tool_results() -> None:
+    session_json = """
+{
+  "messages": [
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_1",
+          "name": "use_skill",
+          "input": {"skill": "daily-brief", "message": "run"}
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_1",
+          "content": "Daily brief ready",
+          "is_error": false
+        }
+      ]
+    }
+  ]
+}
+"""
+    calls = extract_tool_calls_from_session(session_json)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "use_skill"
+    assert calls[0]["id"] == "toolu_1"
+    assert calls[0]["result"] == "Daily brief ready"
+    assert calls[0]["is_error"] is False

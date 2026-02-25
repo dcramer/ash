@@ -57,6 +57,21 @@ class TestSkillAgent:
 
         assert agent.config.allowed_tools == ["bash", "web_search"]
 
+    def test_system_prompt_instructs_complete_for_final_output(self):
+        """Skill wrapper should require complete() for final handoff."""
+        skill = SkillDefinition(
+            name="test",
+            description="Test",
+            instructions="Do something",
+        )
+        agent = SkillAgent(skill)
+        context = AgentContext()
+
+        prompt = agent.build_system_prompt(context)
+
+        assert "call `complete`" in prompt
+        assert "control returns to the parent agent" in prompt
+
 
 class TestUseSkillToolValidation:
     """Tests for UseSkillTool input validation."""

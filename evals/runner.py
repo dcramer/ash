@@ -16,6 +16,7 @@ from evals.judge import (
     LLMJudge,
     check_disallowed_tool_result_substrings,
     check_forbidden_tools,
+    check_skill_handoff_completion,
     check_tool_input_assertions,
 )
 from evals.types import (
@@ -331,6 +332,14 @@ async def run_eval_case(
                 response_text=rendered_response_text,
                 tool_calls=effective_tool_calls,
                 judge_result=input_assertion_result,
+            )
+        skill_handoff_result = check_skill_handoff_completion(effective_tool_calls)
+        if skill_handoff_result:
+            return EvalResult(
+                case=case,
+                response_text=rendered_response_text,
+                tool_calls=effective_tool_calls,
+                judge_result=skill_handoff_result,
             )
 
         # Judge the response with LLM
@@ -936,6 +945,14 @@ async def _execute_and_judge(
                 tool_calls=effective_tool_calls,
                 judge_result=input_assertion_result,
             )
+        skill_handoff_result = check_skill_handoff_completion(effective_tool_calls)
+        if skill_handoff_result:
+            return EvalResult(
+                case=case,
+                response_text=rendered_response_text,
+                tool_calls=effective_tool_calls,
+                judge_result=skill_handoff_result,
+            )
 
         # LLM judge
         judge = LLMJudge(judge_llm, config)
@@ -1057,25 +1074,40 @@ def extract_tool_calls_from_session(session_json: str) -> list[dict[str, Any]]:
     import json
 
     data = json.loads(session_json)
-    tool_calls: list[dict[str, Any]] = []
+    ordered_calls: list[dict[str, Any]] = []
+    tool_results_by_id: dict[str, tuple[str, bool]] = {}
 
     for message in data.get("messages", []):
-        if message.get("role") != "assistant":
-            continue
-
         content = message.get("content", [])
         if isinstance(content, str):
             continue
 
         for block in content:
             if block.get("type") == "tool_use":
-                tool_calls.append(
+                ordered_calls.append(
                     {
                         "name": block.get("name", ""),
                         "input": block.get("input", {}),
                         "id": block.get("id", ""),
                     }
                 )
+            elif block.get("type") == "tool_result":
+                tool_use_id = block.get("tool_use_id")
+                if tool_use_id:
+                    tool_results_by_id[str(tool_use_id)] = (
+                        str(block.get("content", "")),
+                        bool(block.get("is_error", False)),
+                    )
+
+    tool_calls: list[dict[str, Any]] = []
+    for call in ordered_calls:
+        call_id = str(call.get("id", ""))
+        merged = dict(call)
+        if call_id in tool_results_by_id:
+            result, is_error = tool_results_by_id[call_id]
+            merged["result"] = result
+            merged["is_error"] = is_error
+        tool_calls.append(merged)
 
     return tool_calls
 
