@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 
@@ -38,7 +39,15 @@ def test_context_token_round_trip() -> None:
 def test_context_token_rejects_signature_tampering() -> None:
     service = ContextTokenService(secret=b"test-secret-key-32-bytes-minimum")
     token = service.issue(effective_user_id="user-1")
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    encoded_header, encoded_payload, encoded_signature = token.split(".")
+    payload = json.loads(base64.urlsafe_b64decode(encoded_payload + "=="))
+    payload["sub"] = "user-2"
+    tampered_payload = (
+        base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode())
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    tampered = f"{encoded_header}.{tampered_payload}.{encoded_signature}"
 
     with pytest.raises(ContextTokenError) as exc_info:
         service.verify(tampered)
