@@ -111,10 +111,13 @@ class BrowserTool(Tool):
         action = str(input_data.get("action") or "").strip()
         if not action:
             return ToolResult.error("missing required field: action")
+        effective_user_id = (context.user_id or "").strip()
+        if not effective_user_id:
+            return ToolResult.error("browser requires authenticated user context")
 
         result = await self._manager.execute_action(
             action=action,
-            effective_user_id=context.user_id or "unknown",
+            effective_user_id=effective_user_id,
             provider_name=(
                 str(input_data["provider"]) if input_data.get("provider") else None
             ),

@@ -47,7 +47,8 @@ It does not own:
 10. Sandbox browser runtime MUST be dedicated-container only; legacy shared-executor Chromium launch paths are unsupported.
 11. Dedicated browser containers MUST be scope-keyed (effective user scope) so independent scopes do not share a runtime container.
 12. Dedicated runtime command execution MUST traverse an authenticated loopback bridge using short-lived signed tokens with scope/target claims (not static bearer secrets).
-13. Integration shutdown MUST perform best-effort browser runtime teardown so service restarts do not leave dangling dedicated browser containers.
+13. Long-lived dedicated runtimes MUST mint bridge tokens per request (or equivalent bounded rotation) so token expiry does not break healthy sessions.
+14. Integration shutdown MUST perform best-effort browser runtime teardown so service restarts do not leave dangling dedicated browser containers.
 
 ## Integration Contract
 

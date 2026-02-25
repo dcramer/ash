@@ -1225,12 +1225,23 @@ asyncio.run(main())
         timeout_seconds: int,
         environment: dict[str, str] | None = None,
     ) -> ExecutionResult:
-        if not runtime.bridge_base_url or not runtime.bridge_token:
+        if not runtime.bridge_base_url:
+            raise ValueError("sandbox_browser_runtime_unavailable: bridge_missing")
+        token = runtime.bridge_token
+        active_bridge = self._bridge
+        if (
+            active_bridge is not None
+            and runtime.bridge_base_url == active_bridge.base_url
+        ):
+            # Keep long-lived runtimes reliable by issuing a fresh signed token
+            # per request, rather than reusing a single startup token.
+            token = active_bridge.issue_token()
+        if not token:
             raise ValueError("sandbox_browser_runtime_unavailable: bridge_missing")
         return await asyncio.to_thread(
             request_bridge_exec,
             base_url=runtime.bridge_base_url,
-            token=runtime.bridge_token,
+            token=token,
             command=command,
             timeout_seconds=max(1, timeout_seconds),
             environment=environment or {},

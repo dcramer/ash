@@ -13,7 +13,7 @@ def register_browser_methods(server: RPCServer, manager: BrowserManager) -> None
     """Register browser RPC methods."""
 
     async def _execute(action: str, params: dict[str, Any]) -> dict[str, Any]:
-        effective_user_id = str(params.get("user_id") or "unknown")
+        effective_user_id = _required_user_id(params)
         result = await manager.execute_action(
             action=action,
             effective_user_id=effective_user_id,
@@ -75,3 +75,11 @@ def register_browser_methods(server: RPCServer, manager: BrowserManager) -> None
     server.register("browser.page.type", browser_page_type)
     server.register("browser.page.wait_for", browser_page_wait_for)
     server.register("browser.page.screenshot", browser_page_screenshot)
+
+
+def _required_user_id(params: dict[str, Any]) -> str:
+    value = params.get("user_id")
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        raise ValueError("user_id is required")
+    return text

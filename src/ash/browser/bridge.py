@@ -33,6 +33,10 @@ class BrowserExecBridge:
     base_url: str
     _server: ThreadingHTTPServer
     _thread: threading.Thread
+    _token_service: ContextTokenService
+    _scope: str
+    _target: str
+    _token_ttl_seconds: int
 
     @classmethod
     def start(
@@ -51,12 +55,13 @@ class BrowserExecBridge:
         scope = scope_key.strip() or "default"
         target_name = target.strip() or "default"
         auth_service = token_service or get_default_context_token_service()
+        ttl = max(10, int(token_ttl_seconds))
         bridge_token = auth_service.issue(
             effective_user_id=_BRIDGE_TOKEN_SUBJECT,
             provider=_BRIDGE_TOKEN_PROVIDER,
             session_key=scope,
             thread_id=target_name,
-            ttl_seconds=max(10, int(token_ttl_seconds)),
+            ttl_seconds=ttl,
         )
 
         class _BridgeServer(ThreadingHTTPServer):
@@ -189,12 +194,29 @@ class BrowserExecBridge:
             base_url=f"http://127.0.0.1:{port}",
             _server=server,
             _thread=thread,
+            _token_service=auth_service,
+            _scope=scope,
+            _target=target_name,
+            _token_ttl_seconds=ttl,
         )
 
     def stop(self) -> None:
         self._server.shutdown()
         self._server.server_close()
         self._thread.join(timeout=2.0)
+
+    def issue_token(self, *, ttl_seconds: int | None = None) -> str:
+        """Issue a fresh short-lived signed token for bridge requests."""
+        ttl = (
+            self._token_ttl_seconds if ttl_seconds is None else max(1, int(ttl_seconds))
+        )
+        return self._token_service.issue(
+            effective_user_id=_BRIDGE_TOKEN_SUBJECT,
+            provider=_BRIDGE_TOKEN_PROVIDER,
+            session_key=self._scope,
+            thread_id=self._target,
+            ttl_seconds=ttl,
+        )
 
 
 def request_bridge_exec(
