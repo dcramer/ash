@@ -28,6 +28,11 @@ from ash.providers.base import (
     OutgoingMessage,
     Provider,
 )
+from ash.providers.telegram.formatting import (
+    render_text_for_parse_mode,
+    rendered_text_length,
+    truncate_for_rendered_limit,
+)
 
 # Type alias for message processing result
 ProcessingResult = tuple[Literal["active", "passive"], int, str | None] | None
@@ -44,13 +49,13 @@ LOG_PREVIEW_MAX_LEN = 180
 def _get_parse_mode(mode: str | None) -> ParseMode:
     """Convert a parse mode string to ParseMode enum."""
     if not mode:
-        return ParseMode.MARKDOWN
+        return ParseMode.MARKDOWN_V2
     normalized = mode.upper().replace("-", "_")
     try:
         return ParseMode[normalized]
     except KeyError:
         logger.warning("unknown_parse_mode", extra={"telegram.parse_mode": mode})
-        return ParseMode.MARKDOWN
+        return ParseMode.MARKDOWN_V2
 
 
 def _truncate(text: str, max_len: int = LOG_PREVIEW_MAX_LEN) -> str:
@@ -124,18 +129,27 @@ def _find_split_point(text: str, max_length: int) -> int:
     return max_length
 
 
-def split_message(text: str, max_length: int = MAX_SEND_LENGTH) -> list[str]:
+def split_message(
+    text: str,
+    *,
+    parse_mode: ParseMode | None,
+    max_length: int = MAX_SEND_LENGTH,
+) -> list[str]:
     """Split text into chunks at paragraph/heading boundaries."""
-    if len(text) <= max_length:
+    if rendered_text_length(text, parse_mode) <= max_length:
         return [text]
 
     chunks: list[str] = []
     remaining = text
     while remaining:
-        if len(remaining) <= max_length:
+        if rendered_text_length(remaining, parse_mode) <= max_length:
             chunks.append(remaining)
             break
-        split_at = _find_split_point(remaining, max_length)
+        fitting_prefix = truncate_for_rendered_limit(
+            remaining, parse_mode=parse_mode, max_length=max_length
+        )
+        split_window = max(1, len(fitting_prefix))
+        split_at = _find_split_point(remaining, split_window)
         chunks.append(remaining[:split_at].rstrip())
         remaining = remaining[split_at:].lstrip()
     return chunks
@@ -160,7 +174,7 @@ class TelegramProvider(Provider):
 
         self._bot = Bot(
             token=bot_token,
-            default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
+            default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN_V2),
         )
         self._dp = Dispatcher()
         self._handler: MessageHandler | None = None
@@ -254,13 +268,14 @@ class TelegramProvider(Provider):
         chat_id: int,
         text: str,
         reply_to: int | None = None,
-        parse_mode: ParseMode | None = ParseMode.MARKDOWN,
+        parse_mode: ParseMode | None = ParseMode.MARKDOWN_V2,
     ) -> TelegramMessage:
         """Send a message with automatic plain-text fallback on parse errors."""
+        rendered_text = render_text_for_parse_mode(text, parse_mode)
         try:
             return await self._bot.send_message(
                 chat_id=chat_id,
-                text=text,
+                text=rendered_text,
                 reply_to_message_id=reply_to,
                 parse_mode=parse_mode,
             )
@@ -278,7 +293,7 @@ class TelegramProvider(Provider):
                 logger.debug(f"Reply target not found, sending without reply: {e}")
                 return await self._bot.send_message(
                     chat_id=chat_id,
-                    text=text,
+                    text=rendered_text,
                     parse_mode=parse_mode,
                 )
             raise
@@ -288,14 +303,15 @@ class TelegramProvider(Provider):
         chat_id: int,
         message_id: int,
         text: str,
-        parse_mode: ParseMode | None = ParseMode.MARKDOWN,
+        parse_mode: ParseMode | None = ParseMode.MARKDOWN_V2,
     ) -> bool:
         """Edit a message with automatic plain-text fallback on parse errors."""
+        rendered_text = render_text_for_parse_mode(text, parse_mode)
         try:
             await self._bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
-                text=text,
+                text=rendered_text,
                 parse_mode=parse_mode,
             )
             return True
@@ -736,7 +752,8 @@ class TelegramProvider(Provider):
         if message.image_path:
             return await self._send_image(message)
 
-        chunks = split_message(message.text)
+        parse_mode = _get_parse_mode(message.parse_mode)
+        chunks = split_message(message.text, parse_mode=parse_mode)
         if len(chunks) == 1:
             return await self._send_single(message)
 
@@ -763,15 +780,18 @@ class TelegramProvider(Provider):
 
         # Telegram captions are limited. Send overflow as a follow-up text message.
         caption = message.text or ""
-        caption_head = caption[:MAX_CAPTION_LENGTH]
-        caption_tail = caption[MAX_CAPTION_LENGTH:]
+        caption_head = truncate_for_rendered_limit(
+            caption, parse_mode=parse_mode, max_length=MAX_CAPTION_LENGTH
+        )
+        caption_tail = caption[len(caption_head) :]
+        rendered_caption_head = render_text_for_parse_mode(caption_head, parse_mode)
 
         sent = await self._bot.send_photo(
             chat_id=int(message.chat_id),
             photo=FSInputFile(image_path),
-            caption=caption_head or None,
+            caption=rendered_caption_head or None,
             reply_to_message_id=reply_to,
-            parse_mode=parse_mode if caption_head else None,
+            parse_mode=parse_mode if rendered_caption_head else None,
             reply_markup=message.reply_markup,
         )
 
@@ -791,11 +811,12 @@ class TelegramProvider(Provider):
         """Send a single message via Telegram."""
         parse_mode = _get_parse_mode(message.parse_mode)
         reply_to = _coerce_reply_to_message_id(message.reply_to_message_id)
+        rendered_text = render_text_for_parse_mode(message.text, parse_mode)
 
         try:
             sent = await self._bot.send_message(
                 chat_id=int(message.chat_id),
-                text=message.text,
+                text=rendered_text,
                 reply_to_message_id=reply_to,
                 parse_mode=parse_mode,
                 reply_markup=message.reply_markup,
@@ -817,7 +838,7 @@ class TelegramProvider(Provider):
                 logger.debug(f"Reply target not found, sending without reply: {e}")
                 sent = await self._bot.send_message(
                     chat_id=int(message.chat_id),
-                    text=message.text,
+                    text=rendered_text,
                     parse_mode=parse_mode,
                     reply_markup=message.reply_markup,
                 )
@@ -869,7 +890,7 @@ class TelegramProvider(Provider):
 
             # Send first message once we have content
             if message_id is None and content.strip():
-                parse_mode = ParseMode.MARKDOWN if use_markdown else None
+                parse_mode = ParseMode.MARKDOWN_V2 if use_markdown else None
                 try:
                     sent = await self._send_with_fallback(
                         chat_id_int, content, reply_to_int, parse_mode
@@ -883,7 +904,7 @@ class TelegramProvider(Provider):
 
             elif message_id and now - last_edit >= EDIT_INTERVAL:
                 # Rate-limited edits during streaming
-                parse_mode = ParseMode.MARKDOWN if use_markdown else None
+                parse_mode = ParseMode.MARKDOWN_V2 if use_markdown else None
                 success = await self._edit_with_fallback(
                     chat_id_int, int(message_id), content, parse_mode
                 )
@@ -895,7 +916,7 @@ class TelegramProvider(Provider):
 
         # Final edit with complete content
         if message_id and content:
-            parse_mode = ParseMode.MARKDOWN if use_markdown else None
+            parse_mode = ParseMode.MARKDOWN_V2 if use_markdown else None
             await self._edit_with_fallback(
                 chat_id_int, int(message_id), content, parse_mode
             )

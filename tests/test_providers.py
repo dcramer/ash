@@ -1,11 +1,15 @@
 """Tests for provider implementations."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 
 from ash.providers.base import IncomingMessage, OutgoingMessage
+from ash.providers.telegram.formatting import rendered_text_length
 from ash.providers.telegram.handlers import TelegramMessageHandler
 from ash.providers.telegram.provider import TelegramProvider
 
@@ -84,6 +88,72 @@ class TestTelegramProvider:
         assert msg_id == "123"
         call_kwargs = provider._bot.send_message.call_args.kwargs
         assert call_kwargs["reply_to_message_id"] is None
+
+    async def test_send_defaults_to_markdown_v2_and_escapes_text(self, provider):
+        provider._bot.send_message.return_value = MagicMock(message_id=456)
+        text = (
+            "source: https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json"
+        )
+
+        msg_id = await provider.send(OutgoingMessage(chat_id="123", text=text))
+
+        assert msg_id == "456"
+        call_kwargs = provider._bot.send_message.call_args.kwargs
+        assert call_kwargs["parse_mode"] == ParseMode.MARKDOWN_V2
+        assert (
+            call_kwargs["text"]
+            == "source: https://cdn\\.nba\\.com/static/json/staticData/scheduleLeagueV2\\_1\\.json"
+        )
+
+    async def test_send_parse_error_falls_back_to_plain_text_unescaped(self, provider):
+        text = (
+            "source: https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json"
+        )
+        provider._bot.send_message.side_effect = [
+            TelegramBadRequest(cast(Any, MagicMock()), "can't parse entities"),
+            MagicMock(message_id=789),
+        ]
+
+        msg_id = await provider.send(OutgoingMessage(chat_id="123", text=text))
+
+        assert msg_id == "789"
+        first_call = provider._bot.send_message.call_args_list[0].kwargs
+        second_call = provider._bot.send_message.call_args_list[1].kwargs
+        assert first_call["parse_mode"] == ParseMode.MARKDOWN_V2
+        assert first_call["text"] != text
+        assert second_call["parse_mode"] is None
+        assert second_call["text"] == text
+
+    async def test_send_splits_by_rendered_markdown_v2_length(self, provider):
+        provider._bot.send_message.return_value = MagicMock(message_id=999)
+        text = "." * 3900
+
+        await provider.send(OutgoingMessage(chat_id="123", text=text))
+
+        assert provider._bot.send_message.call_count > 1
+        for call in provider._bot.send_message.call_args_list:
+            kwargs = call.kwargs
+            assert kwargs["parse_mode"] == ParseMode.MARKDOWN_V2
+            assert len(kwargs["text"]) <= 4000
+
+    async def test_send_image_caption_uses_rendered_length_limit(self, provider):
+        provider._bot.send_photo.return_value = MagicMock(message_id=321)
+        provider._bot.send_message.return_value = MagicMock(message_id=322)
+        caption = "." * 900
+
+        with patch("ash.providers.telegram.provider.FSInputFile"):
+            await provider.send(
+                OutgoingMessage(
+                    chat_id="123",
+                    text=caption,
+                    image_path="artifacts/screen.png",
+                )
+            )
+
+        photo_kwargs = provider._bot.send_photo.call_args.kwargs
+        assert photo_kwargs["parse_mode"] == ParseMode.MARKDOWN_V2
+        assert rendered_text_length(photo_kwargs["caption"], None) <= 1024
+        assert provider._bot.send_message.call_count == 1
 
 
 class TestTelegramMessageHandler:

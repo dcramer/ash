@@ -10,8 +10,10 @@ Tests key behaviors from specs/telegram.md:
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiogram.enums import ParseMode
 
 from ash.providers.base import OutgoingMessage
+from ash.providers.telegram.formatting import rendered_text_length
 from ash.providers.telegram.handlers import (
     ProgressMessageTool,
     ToolTracker,
@@ -524,6 +526,12 @@ class TestToolTracker:
         sent = mock_provider.send.call_args[0][0]
         assert sent.image_path == "/workspace/screenshot.png"
         assert sent.text == "screenshot attached"
+
+    def test_display_truncation_uses_rendered_markdown_v2_length(self, tracker):
+        tracker.progress_messages = ["." * 3000, "." * 3000]
+        display = tracker._build_display_message()
+
+        assert rendered_text_length(display, ParseMode.MARKDOWN_V2) <= 4096
 
 
 class TestProgressResponseMerge:

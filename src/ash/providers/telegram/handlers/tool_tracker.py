@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from aiogram.enums import ParseMode
+
 from ash.providers.base import OutgoingMessage
+from ash.providers.telegram.formatting import rendered_text_length
 from ash.providers.telegram.handlers.provenance import ProvenanceState
 from ash.providers.telegram.handlers.utils import (
     MAX_MESSAGE_LENGTH,
-    escape_markdown_v2,
     format_tool_brief,
 )
 from ash.tools.base import ToolResult
@@ -107,7 +109,8 @@ class ProgressMessageTool:
         }
 
 
-THINKING_STATUS = "_Thinking\\.\\.\\._"
+THINKING_STATUS = "Thinking..."
+THINKING_PARSE_MODE = ParseMode.MARKDOWN_V2
 
 
 class ToolTracker:
@@ -152,8 +155,7 @@ class ToolTracker:
         parts: list[str] = []
 
         if self.progress_messages:
-            escaped = [escape_markdown_v2(m) for m in self.progress_messages]
-            parts.extend(escaped)
+            parts.extend(self.progress_messages)
 
         if include_thinking:
             if parts:
@@ -163,19 +165,22 @@ class ToolTracker:
         message = "\n".join(parts)
 
         # If under limit, return as-is
-        if len(message) <= MAX_MESSAGE_LENGTH:
+        if rendered_text_length(message, THINKING_PARSE_MODE) <= MAX_MESSAGE_LENGTH:
             return message
 
         # Truncate oldest progress messages until it fits
         truncated_progress = self.progress_messages.copy()
-        truncation_notice = escape_markdown_v2("[...earlier messages truncated...]")
+        truncation_notice = "[...earlier messages truncated...]"
 
-        while truncated_progress and len(message) > MAX_MESSAGE_LENGTH:
+        while (
+            truncated_progress
+            and rendered_text_length(message, THINKING_PARSE_MODE) > MAX_MESSAGE_LENGTH
+        ):
             truncated_progress.pop(0)
             parts = []
             if truncated_progress:
                 parts.append(truncation_notice)
-                parts.extend(escape_markdown_v2(m) for m in truncated_progress)
+                parts.extend(truncated_progress)
             if include_thinking:
                 if parts:
                     parts.append("")

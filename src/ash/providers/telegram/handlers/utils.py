@@ -5,6 +5,8 @@ Formatting, escaping, and helper functions for Telegram message handling.
 
 from typing import TYPE_CHECKING, Any
 
+from ash.providers.telegram.formatting import escape_markdown_v2 as _escape_markdown_v2
+
 if TYPE_CHECKING:
     from ash.agents import AgentRegistry
     from ash.config import AshConfig
@@ -17,31 +19,8 @@ MIN_EDIT_INTERVAL = 1.0  # Minimum time between edits
 
 
 def escape_markdown_v2(text: str) -> str:
-    """Escape special characters for Telegram MarkdownV2 format.
-
-    Telegram supports two markdown modes: MARKDOWN (legacy) and MARKDOWN_V2.
-    MarkdownV2 requires ALL special characters to be escaped with backslash,
-    even inside regular text. This is different from standard markdown.
-
-    Special characters that MUST be escaped in MarkdownV2:
-        _ * [ ] ( ) ~ ` > # + - = | { } . !
-
-    Example:
-        escape_markdown_v2("Hello...") → "Hello\\.\\.\\."
-        escape_markdown_v2("(test)") → "\\(test\\)"
-
-    When to use:
-        - Always escape user-provided text before including in MarkdownV2 messages
-        - Status/thinking messages use MarkdownV2 for consistent formatting
-        - Final responses use regular MARKDOWN (more forgiving, less escaping)
-
-    Note:
-        In Python string literals, backslashes must be doubled.
-        So "_Thinking\\\\.\\\\.\\\\._" becomes "_Thinking\\.\\.\\._" at runtime,
-        which Telegram interprets as italic "Thinking...".
-    """
-    special_chars = r"_*[]()~`>#+-=|{}.!"
-    return "".join(f"\\{c}" if c in special_chars else c for c in text)
+    """Escape special characters for Telegram MarkdownV2 format."""
+    return _escape_markdown_v2(text)
 
 
 def truncate_str(s: str, max_len: int) -> str:
