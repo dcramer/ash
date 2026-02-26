@@ -11,7 +11,10 @@ import json
 import os
 import secrets
 import shlex
+import shutil
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from ash.capabilities.providers.base import (
@@ -47,7 +50,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
         if not normalized_namespace:
             raise ValueError("provider namespace is required")
         self._namespace = normalized_namespace
-        self._command = _normalize_command(command)
+        self._command = _resolve_command(_normalize_command(command))
         self._timeout_seconds = max(1.0, float(timeout_seconds))
         self._context_token_service = (
             context_token_service or get_default_context_token_service()
@@ -189,13 +192,19 @@ class SubprocessCapabilityProvider(CapabilityProvider):
             ) from None
 
     async def _execute_command(self, payload: dict[str, Any]) -> dict[str, Any]:
-        proc = await asyncio.create_subprocess_exec(
-            *self._command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=self._bridge_environment(),
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *self._command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self._bridge_environment(),
+            )
+        except FileNotFoundError:
+            raise _capability_error(
+                "capability_backend_unavailable",
+                f"bridge command not found: {self._command[0]}",
+            ) from None
         input_bytes = json.dumps(payload, ensure_ascii=True).encode("utf-8")
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -311,6 +320,23 @@ def _normalize_command(command: list[str] | str) -> list[str]:
         raise ValueError("provider command must be a string or list of strings")
     if not parts:
         raise ValueError("provider command is required")
+    return parts
+
+
+def _resolve_command(parts: list[str]) -> list[str]:
+    executable = parts[0]
+    if Path(executable).is_absolute() or os.path.sep in executable:
+        return parts
+
+    found = shutil.which(executable)
+    if found:
+        return [found, *parts[1:]]
+
+    python_bin_dir = Path(sys.executable).resolve().parent
+    candidate = python_bin_dir / executable
+    if candidate.exists() and os.access(candidate, os.X_OK):
+        return [str(candidate), *parts[1:]]
+
     return parts
 
 

@@ -351,3 +351,50 @@ def test_subprocess_provider_bridge_env_exports_context_token_secret() -> None:
     assert secret_text
     decoded = _decode_b64url(secret_text)
     assert len(decoded) >= 16
+
+
+def test_subprocess_provider_resolves_command_from_python_bin(
+    monkeypatch, tmp_path
+) -> None:
+    fake_bin = tmp_path / "venv" / "bin"
+    fake_bin.mkdir(parents=True)
+    fake_python = fake_bin / "python"
+    fake_python.write_text("", encoding="utf-8")
+    fake_gogcli = fake_bin / "gogcli"
+    fake_gogcli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "ash.capabilities.providers.subprocess.sys.executable", str(fake_python)
+    )
+    monkeypatch.setattr(
+        "ash.capabilities.providers.subprocess.shutil.which", lambda _cmd: None
+    )
+    monkeypatch.setattr(
+        "ash.capabilities.providers.subprocess.os.access", lambda *_args: True
+    )
+
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+    assert provider._command[0] == str(fake_gogcli)
+
+
+@pytest.mark.asyncio
+async def test_subprocess_provider_missing_binary_surfaces_capability_error(
+    monkeypatch,
+) -> None:
+    async def _missing_exec(*_args, **_kwargs):
+        raise FileNotFoundError("missing")
+
+    monkeypatch.setattr(
+        "ash.capabilities.providers.subprocess.asyncio.create_subprocess_exec",
+        _missing_exec,
+    )
+
+    provider = SubprocessCapabilityProvider(
+        namespace="gog",
+        command=["definitely-missing-cmd", "rpc"],
+    )
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await provider.definitions()
+    assert exc_info.value.code == "capability_backend_unavailable"
+    assert "bridge command not found" in str(exc_info.value)

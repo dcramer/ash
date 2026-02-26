@@ -467,9 +467,9 @@ async def test_capabilities_integration_passes_providers_to_manager_factory(
     integration = CapabilitiesIntegration()
     await integration.setup(context)
 
-    assert captured["providers"] == [provider]
+    assert captured["providers"] is None
     assert getattr(context.components, "capability_manager", None) is not None
-    assert captured.get("late_registers") is None
+    assert captured.get("late_registers") == [provider]
 
 
 @pytest.mark.asyncio
@@ -493,6 +493,34 @@ async def test_capabilities_integration_registers_providers_on_existing_manager(
     integration = CapabilitiesIntegration()
     await integration.setup(context)
     assert manager.providers == [provider]
+
+
+@pytest.mark.asyncio
+async def test_capabilities_integration_continues_when_provider_registration_fails(
+    monkeypatch,
+) -> None:
+    context = _context()
+    provider = object()
+    context.components.capability_providers = [provider]
+    calls: dict[str, Any] = {}
+
+    class _FakeManager:
+        async def register_provider(self, registered_provider: Any) -> None:
+            calls["provider"] = registered_provider
+            raise RuntimeError("provider failed")
+
+    async def _create_manager(*, providers=None):
+        calls["providers"] = providers
+        return _FakeManager()
+
+    monkeypatch.setattr("ash.capabilities.create_capability_manager", _create_manager)
+
+    integration = CapabilitiesIntegration()
+    await integration.setup(context)
+
+    assert calls["providers"] is None
+    assert calls["provider"] is provider
+    assert getattr(context.components, "capability_manager", None) is not None
 
 
 @pytest.mark.asyncio

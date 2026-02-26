@@ -34,11 +34,20 @@ class CapabilitiesIntegration(IntegrationContributor):
         providers = list(getattr(components, "capability_providers", None) or [])
         providers.extend(_build_configured_capability_providers(context.config))
         if manager is None:
-            manager = await create_capability_manager(providers=providers)
+            manager = await create_capability_manager()
             components.capability_manager = manager
-        else:
-            for provider in providers:
+
+        for provider in providers:
+            try:
                 await manager.register_provider(provider)
+            except Exception as e:
+                logger.warning(
+                    "capability_provider_register_failed",
+                    extra={
+                        "provider.namespace": getattr(provider, "namespace", "unknown"),
+                        "error.message": str(e),
+                    },
+                )
 
         tool_registry = getattr(components, "tool_registry", None)
         if tool_registry is not None and hasattr(tool_registry, "has"):
