@@ -377,6 +377,31 @@ def test_subprocess_provider_resolves_command_from_python_bin(
     assert provider._command[0] == str(fake_gogcli)
 
 
+def test_subprocess_provider_prefers_python_bin_over_path(
+    monkeypatch, tmp_path
+) -> None:
+    fake_bin = tmp_path / "venv" / "bin"
+    fake_bin.mkdir(parents=True)
+    fake_python = fake_bin / "python"
+    fake_python.write_text("", encoding="utf-8")
+    fake_gogcli = fake_bin / "gogcli"
+    fake_gogcli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "ash.capabilities.providers.subprocess.sys.executable", str(fake_python)
+    )
+    monkeypatch.setattr(
+        "ash.capabilities.providers.subprocess.os.access", lambda *_args: True
+    )
+    monkeypatch.setattr(
+        "ash.capabilities.providers.subprocess.shutil.which",
+        lambda _cmd: "/usr/local/bin/gogcli",
+    )
+
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+    assert provider._command[0] == str(fake_gogcli)
+
+
 @pytest.mark.asyncio
 async def test_subprocess_provider_missing_binary_surfaces_capability_error(
     monkeypatch,

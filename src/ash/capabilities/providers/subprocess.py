@@ -328,14 +328,20 @@ def _resolve_command(parts: list[str]) -> list[str]:
     if Path(executable).is_absolute() or os.path.sep in executable:
         return parts
 
+    # Prefer the active Python runtime's script directory first so bridge
+    # resolution is stable across service managers with reduced PATH.
+    python_bin_dir = Path(sys.executable).resolve().parent
+    candidates = [python_bin_dir / executable]
+    virtual_env = str(os.environ.get("VIRTUAL_ENV") or "").strip()
+    if virtual_env:
+        candidates.append(Path(virtual_env).resolve() / "bin" / executable)
+    for candidate in candidates:
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return [str(candidate), *parts[1:]]
+
     found = shutil.which(executable)
     if found:
         return [found, *parts[1:]]
-
-    python_bin_dir = Path(sys.executable).resolve().parent
-    candidate = python_bin_dir / executable
-    if candidate.exists() and os.access(candidate, os.X_OK):
-        return [str(candidate), *parts[1:]]
 
     return parts
 
