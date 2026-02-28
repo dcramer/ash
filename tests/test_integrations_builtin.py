@@ -300,29 +300,29 @@ async def test_todo_integration_registers_todo_rpc_methods(monkeypatch) -> None:
     assert calls["args"][2] is not None
 
 
-@pytest.mark.asyncio
-async def test_todo_integration_owns_prompt_routing_guidance(monkeypatch) -> None:
+def test_todo_integration_augments_skill_instructions_when_scheduling_enabled() -> None:
     context = _context()
-    integration = TodoIntegration(graph_dir=Path("graph"))
+    integration = TodoIntegration(graph_dir=Path("graph"), schedule_enabled=True)
 
-    monkeypatch.setattr(
-        "ash.integrations.todo.create_todo_manager",
-        lambda *args, **kwargs: asyncio.sleep(0, result=cast(Any, object())),
-    )
+    lines = integration.augment_skill_instructions("todo", context)
+    assert len(lines) > 0
+    assert any("remind" in line.lower() for line in lines)
 
-    await integration.setup(context)
-    session = SessionState(
-        session_id="s-1",
-        provider="telegram",
-        chat_id="c-1",
-        user_id="u-1",
-    )
-    prompt_context = integration.augment_prompt_context(
-        PromptContext(), session, context
-    )
-    routing = prompt_context.extra_context.get("tool_routing_rules")
-    assert isinstance(routing, list)
-    assert any("ash-sb todo add" in line for line in routing)
+
+def test_todo_integration_no_skill_instructions_when_scheduling_disabled() -> None:
+    context = _context()
+    integration = TodoIntegration(graph_dir=Path("graph"), schedule_enabled=False)
+
+    lines = integration.augment_skill_instructions("todo", context)
+    assert lines == []
+
+
+def test_todo_integration_no_skill_instructions_for_wrong_skill() -> None:
+    context = _context()
+    integration = TodoIntegration(graph_dir=Path("graph"), schedule_enabled=True)
+
+    lines = integration.augment_skill_instructions("research", context)
+    assert lines == []
 
 
 @pytest.mark.asyncio

@@ -96,8 +96,10 @@ class SandboxConfig:
     source_path: Path | None = None  # Host path to Ash source code
     source_access: Literal["none", "ro"] = "none"  # Never rw - always read-only
 
-    # Bundled skills directory (read-only, for bundled skills with references)
+    # Skills directories (read-only, for skills with co-located reference files)
     bundled_skills_path: Path | None = None  # Host path to bundled skills dir
+    # Integration skill dirs — each entry is a contributor dir containing {skill}/SKILL.md
+    integration_skills_paths: list[Path] = field(default_factory=list)
 
     # Mount prefix for sandbox paths (sessions, chats, logs, etc.)
     mount_prefix: str = "/ash"
@@ -260,6 +262,34 @@ class SandboxManager:
                 "bind": f"{prefix}/skills",
                 "mode": "ro",
             }
+
+        # Integration skill mounts — each contributor dir maps to
+        # /ash/integrations/{contributor}/skills (spec-ref: specs/integrations.md)
+        for contrib_path in self._config.integration_skills_paths:
+            if contrib_path.exists():
+                volumes[str(contrib_path)] = {
+                    "bind": f"{prefix}/integrations/{contrib_path.name}/skills",
+                    "mode": "ro",
+                }
+
+        # Build ASH_SKILL_DIRS so ash-sb can discover all skill directories
+        skill_dirs: list[str] = []
+        if (
+            self._config.workspace_path
+            and self._config.workspace_access != "none"
+            and self._config.workspace_path.exists()
+        ):
+            skill_dirs.append(f"{self._config.work_dir}/skills")
+        if (
+            self._config.bundled_skills_path
+            and self._config.bundled_skills_path.exists()
+        ):
+            skill_dirs.append(f"{prefix}/skills")
+        for contrib_path in self._config.integration_skills_paths:
+            if contrib_path.exists():
+                skill_dirs.append(f"{prefix}/integrations/{contrib_path.name}/skills")
+        if skill_dirs:
+            env["ASH_SKILL_DIRS"] = ":".join(skill_dirs)
 
         env["ASH_MOUNT_PREFIX"] = prefix
 

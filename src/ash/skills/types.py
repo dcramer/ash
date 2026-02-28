@@ -11,12 +11,14 @@ class SkillSourceType(Enum):
 
     Loading precedence (later overrides earlier):
     1. bundled - Built-in skills (lowest priority)
-    2. installed - Externally installed (github repos, local symlinks)
-    3. user - User skills (~/.ash/skills/)
-    4. workspace - Workspace skills (highest priority)
+    2. integration - Integration-provided skills
+    3. installed - Externally installed (github repos, local symlinks)
+    4. user - User skills (~/.ash/skills/)
+    5. workspace - Workspace skills (highest priority)
     """
 
     BUNDLED = "bundled"
+    INTEGRATION = "integration"
     INSTALLED = "installed"
     USER = "user"
     WORKSPACE = "workspace"
@@ -71,3 +73,24 @@ class SkillDefinition:
     # Optional metadata fields
     license: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def compute_sandbox_skill_dir(
+    skill: SkillDefinition, mount_prefix: str = "/ash"
+) -> str | None:
+    """Derive the sandbox container path for a skill's directory.
+
+    Computed from source_type + skill_path at prompt-build time — no absolute
+    paths are stored on the data model.  Returns None for sources that are not
+    mounted inside the sandbox (installed, user).
+    """
+    if skill.source_type == SkillSourceType.BUNDLED:
+        return f"{mount_prefix}/skills/{skill.name}"
+    if skill.source_type == SkillSourceType.INTEGRATION:
+        if skill.skill_path is not None:
+            contributor = skill.skill_path.parent.name
+            return f"{mount_prefix}/integrations/{contributor}/skills/{skill.name}"
+        return None
+    if skill.source_type == SkillSourceType.WORKSPACE:
+        return f"/workspace/skills/{skill.name}"
+    return None

@@ -23,6 +23,9 @@ class ExampleIntegration(IntegrationContributor):
     def augment_prompt_context(self, prompt_context, session, context):
         return prompt_context
 
+    def augment_skill_instructions(self, skill_name, context):
+        return []
+
     def augment_sandbox_env(self, env, session, effective_user_id, context):
         return env
 
@@ -52,6 +55,43 @@ class ExampleIntegration(IntegrationContributor):
 9. Integration contributors are trusted first-party runtime capabilities, not third-party plugin points.
 10. Third-party extensions must go through skills/capability surfaces rather than registering integration contributors directly.
 11. Runtime-scoped sandbox env data (for example RPC transport hints) must flow through `IntegrationContext.sandbox_env` and integration env hooks, not process-global environment mutation.
+
+## Integration-Provided Skills
+
+Integrations can provide skills from a co-located `skills/` directory at
+`src/ash/integrations/skills/{contributor_name}/{skill_name}/SKILL.md`.
+
+These are loaded during `SkillRegistry.discover()` at integration precedence
+(above bundled, below installed/user/workspace) and gated on the same
+`include_bundled` flag as built-in skills.
+
+Layout:
+```
+src/ash/integrations/skills/
+  todo/           # contributor (matches integration name)
+    todo/         # skill name
+      SKILL.md
+  browser/
+    screenshot/
+      SKILL.md
+```
+
+Each contributor directory is iterated in sorted order. Skill files follow
+the standard `SKILL.md` frontmatter format used by all other skill sources.
+
+### Container Mount Paths
+
+Skills are mounted read-only in the sandbox container at predictable paths:
+
+```
+/ash/skills/{skill_name}/                                    # bundled (ro)
+/ash/integrations/{contributor}/skills/{skill_name}/          # integration (ro)
+/workspace/skills/{skill_name}/                              # workspace (rw)
+```
+
+The system prompt includes the sandbox path for each skill so the agent can
+locate co-located files. The `ASH_SKILL_DIRS` env var (colon-separated) lists
+all mounted skill directories for `ash-sb skill list` discovery.
 
 ## Testing Checklist
 

@@ -99,6 +99,67 @@ async def test_create_container_preserves_explicit_environment_values(
     assert env["OTHER_VAR"] == "yes"
 
 
+async def test_create_container_mounts_integration_skills_at_correct_path(
+    tmp_path: Path,
+) -> None:
+    """Integration skill dirs mount at /ash/integrations/{contributor}/skills."""
+    contrib_dir = tmp_path / "todo"
+    contrib_dir.mkdir()
+
+    manager = SandboxManager(
+        config=SandboxConfig(integration_skills_paths=[contrib_dir])
+    )
+    fake_client = _FakeDockerClient()
+    manager._client = cast(Any, fake_client)
+
+    async def _ensure_client():
+        return fake_client
+
+    manager._ensure_client = _ensure_client  # type: ignore[method-assign]
+
+    await manager.create_container()
+
+    assert fake_client.containers.last_create_kwargs is not None
+    volumes = fake_client.containers.last_create_kwargs["volumes"]
+    assert str(contrib_dir) in volumes
+    assert volumes[str(contrib_dir)]["bind"] == "/ash/integrations/todo/skills"
+    assert volumes[str(contrib_dir)]["mode"] == "ro"
+
+
+async def test_create_container_sets_ash_skill_dirs_env(tmp_path: Path) -> None:
+    """ASH_SKILL_DIRS env var lists all mounted skill directories."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    bundled = tmp_path / "bundled"
+    bundled.mkdir()
+    contrib = tmp_path / "todo"
+    contrib.mkdir()
+
+    manager = SandboxManager(
+        config=SandboxConfig(
+            workspace_path=workspace,
+            bundled_skills_path=bundled,
+            integration_skills_paths=[contrib],
+        )
+    )
+    fake_client = _FakeDockerClient()
+    manager._client = cast(Any, fake_client)
+
+    async def _ensure_client():
+        return fake_client
+
+    manager._ensure_client = _ensure_client  # type: ignore[method-assign]
+
+    await manager.create_container()
+
+    assert fake_client.containers.last_create_kwargs is not None
+    env = fake_client.containers.last_create_kwargs["environment"]
+    skill_dirs = env["ASH_SKILL_DIRS"].split(":")
+    assert "/workspace/skills" in skill_dirs
+    assert "/ash/skills" in skill_dirs
+    assert "/ash/integrations/todo/skills" in skill_dirs
+
+
 class _FakeExecAPI:
     def __init__(self) -> None:
         self.last_exec_create_kwargs: dict[str, Any] | None = None

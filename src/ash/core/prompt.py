@@ -13,6 +13,7 @@ from ash.core.prompt_keys import (
     RESERVED_PROMPT_EXTENSION_KEYS,
     TOOL_ROUTING_RULES_KEY,
 )
+from ash.skills.types import compute_sandbox_skill_dir as _sandbox_skill_dir
 
 
 class PromptMode(str, Enum):
@@ -429,7 +430,11 @@ class SystemPromptBuilder:
         ]
 
         for skill in sorted(available_skills, key=lambda s: s.name):
-            lines.append(f"- **{skill.name}**: {skill.description}")
+            sb_dir = _sandbox_skill_dir(skill, self._config.sandbox.mount_prefix)
+            if sb_dir:
+                lines.append(f"- **{skill.name}**: {skill.description} (`{sb_dir}/`)")
+            else:
+                lines.append(f"- **{skill.name}**: {skill.description}")
 
         lines.append("")
 
@@ -560,13 +565,13 @@ class SystemPromptBuilder:
             f"Working directory: /workspace. Network: {network_status}.",
             "Commands execute in a sandboxed environment.",
             "For security, several mounted paths are read-only; write only under `/workspace`.",
+            "Use `/workspace` freely for your own files — notes, scratch work, intermediate results, or anything you want to persist within the session.",
             "",
             "### Mounted Directories",
             "",
             "- `/workspace` - User's workspace (read-write)",
             f"- `{prefix}/sessions` - Conversation history (read-only)",
             f"- `{prefix}/chats` - Chat participant info (read-only)",
-            f"- `{prefix}/skills` - Bundled skill references (read-only)",
             f"- `{prefix}/logs` - Runtime logs (read-only)",
             f"- `{prefix}/source` - Ash source code, when mounted (read-only)",
             "",

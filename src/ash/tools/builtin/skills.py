@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from ash.agents.base import Agent
 from ash.agents.types import AgentConfig, AgentContext, ChildActivated, StackFrame
+from ash.core.types import SkillInstructionAugmenter
 from ash.skills.types import SkillDefinition
 from ash.tools.base import Tool, ToolContext, ToolResult, format_subagent_result
 
@@ -79,15 +80,21 @@ class SkillAgent(Agent):
         self,
         skill: SkillDefinition,
         model_override: str | None = None,
+        instruction_augmenter: "SkillInstructionAugmenter | None" = None,
+        sandbox_skill_dir: str | None = None,
     ) -> None:
         """Initialize skill agent.
 
         Args:
             skill: Skill definition to wrap.
             model_override: Optional model alias to override skill's default.
+            instruction_augmenter: Optional callback returning extra instruction lines.
+            sandbox_skill_dir: Sandbox container path to this skill's directory.
         """
         self._skill = skill
         self._model_override = model_override
+        self._instruction_augmenter = instruction_augmenter
+        self._sandbox_skill_dir = sandbox_skill_dir
 
     @property
     def config(self) -> AgentConfig:
@@ -125,6 +132,21 @@ class SkillAgent(Agent):
 
         # Add skill instructions
         prompt += self._skill.instructions
+
+        # Tell the skill agent where its co-located files live in the sandbox
+        if self._sandbox_skill_dir:
+            prompt += "\n\n## Skill Directory\n\n"
+            prompt += f"Your skill files are at `{self._sandbox_skill_dir}/`. "
+            prompt += (
+                "Relative paths in your instructions resolve against this directory."
+            )
+
+        # Inject integration-provided additional context
+        if self._instruction_augmenter:
+            extra_lines = self._instruction_augmenter(self._skill.name)
+            if extra_lines:
+                prompt += "\n\n## Additional Context\n\n"
+                prompt += "\n".join(extra_lines)
 
         # Inject user-provided context if available
         user_context = context.input_data.get("context", "")
@@ -179,6 +201,7 @@ class UseSkillTool(Tool):
         self._voice = voice
         self._subagent_context = subagent_context
         self._capability_manager: Any | None = None
+        self._skill_instruction_augmenter: SkillInstructionAugmenter | None = None
 
     def set_shared_prompt(self, prompt: str | None) -> None:
         """Update shared prompt context used for skill execution."""
@@ -187,6 +210,12 @@ class UseSkillTool(Tool):
     def set_capability_manager(self, manager: Any | None) -> None:
         """Attach host capability manager for skill capability preflight checks."""
         self._capability_manager = manager
+
+    def set_skill_instruction_augmenter(
+        self, augmenter: SkillInstructionAugmenter | None
+    ) -> None:
+        """Attach integration skill instruction augmenter for skill execution."""
+        self._skill_instruction_augmenter = augmenter
 
     @property
     def name(self) -> str:
@@ -418,7 +447,18 @@ class UseSkillTool(Tool):
             base_env=inherited_env,
         )
         model_override = skill_config.model if skill_config else None
-        agent = SkillAgent(skill, model_override=model_override)
+
+        # Compute sandbox container path for this skill's directory
+        from ash.skills.types import compute_sandbox_skill_dir
+
+        sb_dir = compute_sandbox_skill_dir(skill, self._config.sandbox.mount_prefix)
+
+        agent = SkillAgent(
+            skill,
+            model_override=model_override,
+            instruction_augmenter=self._skill_instruction_augmenter,
+            sandbox_skill_dir=sb_dir,
+        )
 
         if context:
             agent_context = AgentContext.from_tool_context(

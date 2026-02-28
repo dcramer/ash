@@ -841,9 +841,47 @@ class TestSystemPromptBuilder:
         assert "sandboxed environment" in prompt
         assert "read-only" in prompt
         assert "/workspace" in prompt
-        assert "/ash/skills" in prompt
+        assert "/ash/logs" in prompt
+        # Bundled skill directories are no longer listed as a generic mount;
+        # they appear per-skill in the Available Skills section instead.
+        assert "Bundled skill references" not in prompt
         # Todo prompt guidance is integration-owned, not hardcoded in core prompt.
         assert "ash-sb todo" not in prompt
+
+    def test_build_skills_section_includes_sandbox_paths(self, workspace, config):
+        """Skill listing in prompt includes sandbox directory for mounted skills."""
+        from ash.skills.types import SkillDefinition, SkillSourceType
+
+        skill_registry = SkillRegistry()
+        skill_registry.register(
+            SkillDefinition(
+                name="bundled-skill",
+                description="A bundled skill",
+                instructions="Do bundled things",
+                source_type=SkillSourceType.BUNDLED,
+            )
+        )
+        skill_registry.register(
+            SkillDefinition(
+                name="user-skill",
+                description="A user skill",
+                instructions="Do user things",
+                source_type=SkillSourceType.USER,
+            )
+        )
+        builder = SystemPromptBuilder(
+            workspace=workspace,
+            tool_registry=ToolRegistry(),
+            skill_registry=skill_registry,
+            config=config,
+        )
+        prompt = builder.build()
+
+        # Bundled skill shows sandbox path
+        assert "(`/ash/skills/bundled-skill/`)" in prompt
+        # User skill has no sandbox mount — no path shown
+        assert "user-skill**: A user skill" in prompt
+        assert "/user-skill/" not in prompt
 
     def test_build_with_runtime_info(self, prompt_builder):
         """Runtime info excludes host system details (os, arch, python)."""

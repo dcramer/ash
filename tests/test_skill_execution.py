@@ -12,6 +12,15 @@ from ash.tools.base import ToolContext
 from ash.tools.builtin.skills import SkillAgent, UseSkillTool
 
 
+def _mock_config(**overrides) -> MagicMock:
+    """Create a MagicMock config with sandbox.mount_prefix accessible."""
+    config = MagicMock(spec=AshConfig)
+    config.sandbox = SimpleNamespace(mount_prefix="/ash")
+    for k, v in overrides.items():
+        setattr(config, k, v)
+    return config
+
+
 class TestSkillAgent:
     """Tests for SkillAgent behavior."""
 
@@ -71,6 +80,93 @@ class TestSkillAgent:
 
         assert "call `complete`" in prompt
         assert "control returns to the parent agent" in prompt
+
+    def test_augmenter_lines_appended_to_system_prompt(self):
+        """Instruction augmenter lines should appear in system prompt."""
+        skill = SkillDefinition(
+            name="todo",
+            description="Todo",
+            instructions="Base instructions",
+        )
+
+        def augmenter(skill_name: str) -> list[str]:
+            if skill_name == "todo":
+                return ["Scheduling is enabled.", "Offer reminders."]
+            return []
+
+        agent = SkillAgent(skill, instruction_augmenter=augmenter)
+        context = AgentContext(input_data={"context": ""})
+
+        prompt = agent.build_system_prompt(context)
+
+        assert "## Additional Context" in prompt
+        assert "Scheduling is enabled." in prompt
+        assert "Offer reminders." in prompt
+        # Augmented lines should come after base instructions
+        assert prompt.index("Base instructions") < prompt.index(
+            "Scheduling is enabled."
+        )
+
+    def test_no_additional_context_section_when_augmenter_returns_empty(self):
+        """No Additional Context header when augmenter returns empty list."""
+        skill = SkillDefinition(
+            name="research",
+            description="Research",
+            instructions="Research instructions",
+        )
+
+        def augmenter(skill_name: str) -> list[str]:
+            return []
+
+        agent = SkillAgent(skill, instruction_augmenter=augmenter)
+        context = AgentContext(input_data={"context": ""})
+
+        prompt = agent.build_system_prompt(context)
+
+        assert "## Additional Context" not in prompt
+
+    def test_no_additional_context_section_without_augmenter(self):
+        """No Additional Context header when no augmenter is set."""
+        skill = SkillDefinition(
+            name="test",
+            description="Test",
+            instructions="Base instructions",
+        )
+        agent = SkillAgent(skill)
+        context = AgentContext(input_data={"context": ""})
+
+        prompt = agent.build_system_prompt(context)
+
+        assert "## Additional Context" not in prompt
+
+    def test_sandbox_skill_dir_injected_when_set(self):
+        """Skill agent prompt should include skill directory when set."""
+        skill = SkillDefinition(
+            name="debug-self",
+            description="Debug",
+            instructions="Debug instructions",
+        )
+        agent = SkillAgent(skill, sandbox_skill_dir="/ash/skills/debug-self")
+        context = AgentContext(input_data={"context": ""})
+
+        prompt = agent.build_system_prompt(context)
+
+        assert "## Skill Directory" in prompt
+        assert "`/ash/skills/debug-self/`" in prompt
+
+    def test_sandbox_skill_dir_omitted_when_none(self):
+        """Skill agent prompt should not include skill directory when None."""
+        skill = SkillDefinition(
+            name="test",
+            description="Test",
+            instructions="Test instructions",
+        )
+        agent = SkillAgent(skill, sandbox_skill_dir=None)
+        context = AgentContext(input_data={"context": ""})
+
+        prompt = agent.build_system_prompt(context)
+
+        assert "## Skill Directory" not in prompt
 
 
 class TestUseSkillToolValidation:
@@ -188,10 +284,9 @@ class TestUseSkillToolExecution:
 
         executor = MagicMock()
 
-        config = MagicMock(spec=AshConfig)
-        config.skills = {}
-        config.agents = {}
-        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
+        config = _mock_config(
+            skills={}, agents={}, skill_defaults=SimpleNamespace(allow_chat_ids=[])
+        )
 
         return UseSkillTool(registry, executor, config)
 
@@ -327,10 +422,9 @@ class TestSkillAccessControls:
         registry.has.return_value = True
         registry.get.return_value = skill
         executor = MagicMock()
-        config = MagicMock(spec=AshConfig)
-        config.skills = {}
-        config.agents = {}
-        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
+        config = _mock_config(
+            skills={}, agents={}, skill_defaults=SimpleNamespace(allow_chat_ids=[])
+        )
         return UseSkillTool(registry, executor, config)
 
     @pytest.mark.asyncio
@@ -373,10 +467,9 @@ class TestSkillCapabilityRequirements:
         registry.has.return_value = True
         registry.get.return_value = skill
         executor = MagicMock()
-        config = MagicMock(spec=AshConfig)
-        config.skills = {}
-        config.agents = {}
-        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
+        config = _mock_config(
+            skills={}, agents={}, skill_defaults=SimpleNamespace(allow_chat_ids=[])
+        )
         return UseSkillTool(registry, executor, config)
 
     @pytest.mark.asyncio

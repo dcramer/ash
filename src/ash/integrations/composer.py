@@ -65,6 +65,23 @@ def _update_subagent_shared_prompt(
             updater(shared_prompt)
 
 
+def _wire_skill_instruction_augmenter(
+    *,
+    components: AgentComponents,
+    runtime: IntegrationRuntime,
+    context: IntegrationContext,
+) -> None:
+    tool_registry = getattr(components, "tool_registry", None)
+    if tool_registry is None:
+        return
+    if not (hasattr(tool_registry, "has") and tool_registry.has("use_skill")):
+        return
+    tool = tool_registry.get("use_skill")
+    setter = getattr(tool, "set_skill_instruction_augmenter", None)
+    if callable(setter):
+        setter(runtime.skill_instruction_augmenter(context))
+
+
 async def compose_integrations(
     *,
     config: AshConfig,
@@ -90,6 +107,11 @@ async def compose_integrations(
     )
     _update_subagent_shared_prompt(
         config=config,
+        components=components,
+        runtime=runtime,
+        context=context,
+    )
+    _wire_skill_instruction_augmenter(
         components=components,
         runtime=runtime,
         context=context,

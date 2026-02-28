@@ -51,6 +51,7 @@ MessagePostprocessHook = Callable[
     [str, "SessionState", str],
     Awaitable[None],
 ]
+SkillInstructionAugmenter = Callable[[str], list[str]]
 
 MAX_TOOL_ITERATIONS = 25
 

@@ -133,7 +133,9 @@ Default listing:
 Owned by `TodoIntegration` hooks:
 - `setup`
 - `register_rpc_methods`
-- `augment_prompt_context`
+- `augment_skill_instructions` — injects scheduling reminder guidance into the bundled `todo` skill when scheduling is enabled
+
+Todo CLI guidance and output formatting are provided by the integration-provided `todo` skill (`src/ash/integrations/skills/todo/todo/SKILL.md`), loaded on-demand when the skill is invoked.
 
 Core runtime entrypoints MUST NOT add ad-hoc todo feature branches.
 

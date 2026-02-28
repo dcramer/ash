@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from ash.skills import SkillRegistry
+from ash.skills.types import SkillSourceType
 
 # =============================================================================
 # SkillRegistry Tests
@@ -985,3 +986,211 @@ Disabled.
         assert registry.has("opt-enabled")
         assert not registry.has("opt-disabled")
         assert not registry.has("disabled")
+
+
+# =============================================================================
+# Integration-Provided Skills Tests
+# =============================================================================
+
+
+class TestSkillRegistryIntegrationSkills:
+    """Tests for integration-provided skills via integrations/skills/ directories."""
+
+    def _make_integration_skill(
+        self, base_dir: Path, contributor: str, name: str
+    ) -> Path:
+        """Helper to create an integration skill in the expected layout."""
+        skill_dir = base_dir / contributor / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_file = skill_dir / "SKILL.md"
+        skill_file.write_text(
+            f"""---
+description: Integration skill {name} from {contributor}
+---
+
+Instructions for {name}.
+"""
+        )
+        return skill_file
+
+    def test_integration_skills_loaded_during_discover(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Integration skills are discovered from integrations/skills/."""
+        integration_skills_dir = tmp_path / "integration_skills"
+        self._make_integration_skill(integration_skills_dir, "todo", "todo")
+
+        # Monkeypatch _load_integration_skills to use our tmp dir
+        from ash.skills.registry import SkillRegistry
+
+        def patched_load(self_reg):
+            for contributor_dir in sorted(integration_skills_dir.iterdir()):
+                if contributor_dir.is_dir():
+                    self_reg._load_from_directory(
+                        contributor_dir,
+                        source_type=SkillSourceType.INTEGRATION,
+                    )
+
+        monkeypatch.setattr(SkillRegistry, "_load_integration_skills", patched_load)
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=True)
+
+        assert registry.has("todo")
+        skill = registry.get("todo")
+        assert skill.source_type == SkillSourceType.INTEGRATION
+
+    def test_workspace_skills_override_integration_skills(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Workspace skills take precedence over integration skills."""
+        from ash.skills.registry import SkillRegistry
+
+        # Integration skill
+        integration_skills_dir = tmp_path / "integration_skills"
+        self._make_integration_skill(integration_skills_dir, "todo", "todo")
+
+        def patched_load(self_reg):
+            for contributor_dir in sorted(integration_skills_dir.iterdir()):
+                if contributor_dir.is_dir():
+                    self_reg._load_from_directory(
+                        contributor_dir,
+                        source_type=SkillSourceType.INTEGRATION,
+                    )
+
+        monkeypatch.setattr(SkillRegistry, "_load_integration_skills", patched_load)
+
+        # Workspace skill with same name
+        ws_skill_dir = tmp_path / "skills" / "todo"
+        ws_skill_dir.mkdir(parents=True)
+        (ws_skill_dir / "SKILL.md").write_text(
+            """---
+description: Workspace override for todo
+---
+
+Workspace todo instructions.
+"""
+        )
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=True)
+
+        skill = registry.get("todo")
+        assert skill.source_type == SkillSourceType.WORKSPACE
+        assert skill.description == "Workspace override for todo"
+
+    def test_include_bundled_false_excludes_integration_skills(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """include_bundled=False skips integration skills too."""
+        from ash.skills.registry import SkillRegistry
+
+        integration_skills_dir = tmp_path / "integration_skills"
+        self._make_integration_skill(integration_skills_dir, "todo", "todo")
+
+        load_called = []
+
+        def patched_load(self_reg):
+            load_called.append(True)
+
+        monkeypatch.setattr(SkillRegistry, "_load_integration_skills", patched_load)
+
+        registry = SkillRegistry()
+        registry.discover(tmp_path, include_bundled=False)
+
+        assert len(load_called) == 0
+        assert not registry.has("todo")
+
+
+# =============================================================================
+# Sandbox Skill Dir Computation Tests
+# =============================================================================
+
+
+class TestComputeSandboxSkillDir:
+    """Tests for compute_sandbox_skill_dir()."""
+
+    def test_bundled_skill_returns_ash_skills_path(self):
+        from ash.skills.types import SkillDefinition, compute_sandbox_skill_dir
+
+        skill = SkillDefinition(
+            name="debug-self",
+            description="Debug",
+            instructions="Debug instructions",
+            source_type=SkillSourceType.BUNDLED,
+        )
+        assert compute_sandbox_skill_dir(skill) == "/ash/skills/debug-self"
+
+    def test_integration_skill_returns_integrations_path(self, tmp_path: Path):
+        from ash.skills.types import SkillDefinition, compute_sandbox_skill_dir
+
+        skill_path = tmp_path / "todo" / "todo"
+        skill_path.mkdir(parents=True)
+
+        skill = SkillDefinition(
+            name="todo",
+            description="Todo",
+            instructions="Todo instructions",
+            source_type=SkillSourceType.INTEGRATION,
+            skill_path=skill_path,
+        )
+        assert compute_sandbox_skill_dir(skill) == "/ash/integrations/todo/skills/todo"
+
+    def test_workspace_skill_returns_workspace_path(self):
+        from ash.skills.types import SkillDefinition, compute_sandbox_skill_dir
+
+        skill = SkillDefinition(
+            name="my-skill",
+            description="Custom",
+            instructions="Custom instructions",
+            source_type=SkillSourceType.WORKSPACE,
+        )
+        assert compute_sandbox_skill_dir(skill) == "/workspace/skills/my-skill"
+
+    def test_user_skill_returns_none(self):
+        from ash.skills.types import SkillDefinition, compute_sandbox_skill_dir
+
+        skill = SkillDefinition(
+            name="user-skill",
+            description="User",
+            instructions="User instructions",
+            source_type=SkillSourceType.USER,
+        )
+        assert compute_sandbox_skill_dir(skill) is None
+
+    def test_installed_skill_returns_none(self):
+        from ash.skills.types import SkillDefinition, compute_sandbox_skill_dir
+
+        skill = SkillDefinition(
+            name="installed-skill",
+            description="Installed",
+            instructions="Installed instructions",
+            source_type=SkillSourceType.INSTALLED,
+        )
+        assert compute_sandbox_skill_dir(skill) is None
+
+    def test_custom_mount_prefix(self):
+        from ash.skills.types import SkillDefinition, compute_sandbox_skill_dir
+
+        skill = SkillDefinition(
+            name="debug-self",
+            description="Debug",
+            instructions="Debug instructions",
+            source_type=SkillSourceType.BUNDLED,
+        )
+        assert (
+            compute_sandbox_skill_dir(skill, mount_prefix="/custom")
+            == "/custom/skills/debug-self"
+        )
+
+    def test_integration_skill_without_path_returns_none(self):
+        from ash.skills.types import SkillDefinition, compute_sandbox_skill_dir
+
+        skill = SkillDefinition(
+            name="orphan",
+            description="No path",
+            instructions="Instructions",
+            source_type=SkillSourceType.INTEGRATION,
+            skill_path=None,
+        )
+        assert compute_sandbox_skill_dir(skill) is None

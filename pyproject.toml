@@ -97,6 +97,9 @@ dev = [
 sentry = [
     "sentry-sdk[fastapi]>=2.0.0",
 ]
+test = [
+    "time-machine>=3.2.0",
+]
 
 # ============== HATCH BUILD ==============
 

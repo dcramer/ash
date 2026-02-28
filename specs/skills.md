@@ -34,7 +34,12 @@ skills consume those capabilities through stable public surfaces.
 
 ### MUST
 
-- Load workspace skills from `workspace/skills/`
+- Load skills from all sources in precedence order (later overrides earlier):
+  1. Bundled — built-in skills (lowest priority)
+  2. Integration — integration-provided skills (see `specs/integrations.md`)
+  3. Installed — externally installed from repos/local paths
+  4. User — `~/.ash/skills/`
+  5. Workspace — project-specific `workspace/skills/` (highest priority)
 - Load bundled skills from packaged source directories using the same parser and validation rules as other skill sources
 - Support directory format: `skills/<name>/SKILL.md` (preferred)
 - Support flat markdown: `skills/<name>.md` (convenience)
@@ -52,7 +57,7 @@ skills consume those capabilities through stable public surfaces.
 
 ### SHOULD
 
-- List available skills in system prompt (name + description only)
+- List available skills in system prompt (name + description + sandbox path when mounted)
 - Log skill invocations with iteration count
 - Support `enabled` flag in config to disable skills
 

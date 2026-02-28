@@ -2,9 +2,10 @@
 
 Loading precedence (later sources override earlier):
 1. Bundled - Built-in skills (lowest priority)
-2. Installed - Externally installed from repos/local paths
-3. User - User skills (~/.ash/skills/)
-4. Workspace - Project-specific skills (highest priority)
+2. Integration - Integration-provided skills (from integrations/skills/)
+3. Installed - Externally installed from repos/local paths
+4. User - User skills (~/.ash/skills/)
+5. Workspace - Project-specific skills (highest priority)
 """
 
 from __future__ import annotations
@@ -146,9 +147,10 @@ class SkillRegistry:
 
     Skills are loaded in order of precedence:
     1. Bundled (lowest) - built-in skills
-    2. Installed - from [[skills.sources]] in config
-    3. User - ~/.ash/skills/
-    4. Workspace (highest) - workspace/skills/
+    2. Integration - integration-provided skills (integrations/skills/)
+    3. Installed - from [[skills.sources]] in config
+    4. User - ~/.ash/skills/
+    5. Workspace (highest) - workspace/skills/
     """
 
     def __init__(self, skill_config: dict[str, SkillConfig] | None = None) -> None:
@@ -176,11 +178,15 @@ class SkillRegistry:
         if include_bundled:
             self._load_bundled_skills()
 
-        # 2. Installed skills (from external sources)
+        # 2. Integration-provided skills (same trust level as bundled)
+        if include_bundled:
+            self._load_integration_skills()
+
+        # 3. Installed skills (from external sources)
         if include_installed:
             self._load_installed_skills()
 
-        # 3. User skills (~/.ash/skills/)
+        # 4. User skills (~/.ash/skills/)
         if include_user:
             user_skills_dir = get_user_skills_path()
             if user_skills_dir.exists():
@@ -189,7 +195,7 @@ class SkillRegistry:
                     source_type=SkillSourceType.USER,
                 )
 
-        # 4. Workspace skills (highest priority)
+        # 5. Workspace skills (highest priority)
         skills_dir = workspace_path / "skills"
         if skills_dir.exists():
             self._load_from_directory(
@@ -207,6 +213,24 @@ class SkillRegistry:
                 bundled_dir,
                 source_type=SkillSourceType.BUNDLED,
             )
+
+    def _load_integration_skills(self) -> None:
+        """Load skills provided by integrations.
+
+        Integration skills live in src/ash/integrations/skills/{contributor}/
+        and follow the same {skill_name}/SKILL.md layout as other skill sources.
+        """
+        # spec-ref: specs/integrations.md — Integration-Provided Skills
+        integration_skills_dir = Path(__file__).parents[1] / "integrations" / "skills"
+        if not integration_skills_dir.exists():
+            return
+
+        for contributor_dir in sorted(integration_skills_dir.iterdir()):
+            if contributor_dir.is_dir():
+                self._load_from_directory(
+                    contributor_dir,
+                    source_type=SkillSourceType.INTEGRATION,
+                )
 
     def _load_installed_skills(self) -> None:
         """Load skills from installed sources (repos and local paths)."""

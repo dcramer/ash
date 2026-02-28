@@ -180,6 +180,7 @@ def build_sandbox_manager_config(
     workspace_path: Path | None,
     default_network_mode: Literal["none", "bridge"] = "none",
 ) -> "SandboxManagerConfig":
+    import ash.integrations
     import ash.skills
     from ash.config.paths import (
         get_chats_path,
@@ -200,6 +201,15 @@ def build_sandbox_manager_config(
     bundled_skills_path = (
         Path(_skills_init).parent / "bundled" if _skills_init else None
     )
+    # spec-ref: specs/integrations.md — Integration-Provided Skills
+    integration_skills_paths: list[Path] = []
+    _integrations_init = ash.integrations.__file__
+    if _integrations_init:
+        _integration_skills_root = Path(_integrations_init).parent / "skills"
+        if _integration_skills_root.is_dir():
+            integration_skills_paths = sorted(
+                p for p in _integration_skills_root.iterdir() if p.is_dir()
+            )
 
     if config is None:
         return SandboxManagerConfig(
@@ -211,6 +221,7 @@ def build_sandbox_manager_config(
             rpc_socket_path=rpc_socket_path,
             uv_cache_path=uv_cache_path,
             bundled_skills_path=bundled_skills_path,
+            integration_skills_paths=integration_skills_paths,
         )
 
     # Only resolve source path if access is enabled (avoids filesystem walks)
@@ -236,5 +247,6 @@ def build_sandbox_manager_config(
         source_path=source_path,
         source_access=config.source_access,
         bundled_skills_path=bundled_skills_path,
+        integration_skills_paths=integration_skills_paths,
         mount_prefix=config.mount_prefix,
     )

@@ -25,8 +25,8 @@ def test_skill_writer_has_ask_only_if_non_obvious_policy() -> None:
 def test_skill_writer_uses_references_conditionally() -> None:
     text = _load_skill_writer_text()
     assert "Load references only as needed" in text
-    assert "/ash/skills/skill-writer/references/skills-spec.md" in text
-    assert "/ash/skills/skill-writer/references/example-skill.md" in text
+    assert "references/skills-spec.md" in text
+    assert "references/example-skill.md" in text
 
 
 def test_skill_writer_quality_gates_present() -> None:

@@ -15,6 +15,7 @@ from ash.core.types import (
     IncomingMessagePreprocessor,
     PromptContextAugmenter,
     SandboxEnvAugmenter,
+    SkillInstructionAugmenter,
 )
 
 if TYPE_CHECKING:
@@ -109,6 +110,14 @@ class IntegrationContributor:
     ) -> IncomingMessage:
         """Preprocess provider incoming messages before session processing."""
         return message
+
+    def augment_skill_instructions(
+        self,
+        skill_name: str,
+        context: IntegrationContext,
+    ) -> list[str]:
+        """Return additional instruction lines to append when a skill is invoked."""
+        return []
 
     async def on_message_postprocess(
         self,
@@ -234,6 +243,27 @@ class IntegrationRuntime:
             return _hook
 
         return self._build_hooks(_factory)
+
+    def skill_instruction_augmenter(
+        self, context: IntegrationContext
+    ) -> SkillInstructionAugmenter:
+        """Return a closure that collects skill instruction augmentations from contributors."""
+
+        def _augmenter(skill_name: str) -> list[str]:
+            lines: list[str] = []
+            for contributor in self._active_contributors:
+                try:
+                    lines.extend(
+                        contributor.augment_skill_instructions(skill_name, context)
+                    )
+                except Exception:
+                    self._log_hook_failure(
+                        hook_name="augment_skill_instructions",
+                        contributor=contributor,
+                    )
+            return lines
+
+        return _augmenter
 
     def sandbox_env_augmenters(
         self, context: IntegrationContext

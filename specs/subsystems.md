@@ -185,6 +185,7 @@ Integration contributors SHOULD expose one or more of:
 - `on_startup` / `on_shutdown`: runtime lifecycle hooks.
 - `preprocess_incoming_message`: transform inbound provider message before session/agent processing.
 - `augment_prompt_context`: contribute structured context data.
+- `augment_skill_instructions`: append extra instruction lines when a bundled skill is invoked.
 - `register_sandbox_cli`: expose sandbox CLI surface.
 - `register_rpc_methods`: register RPC handlers.
 - `on_message_postprocess`: run post-turn integration work.

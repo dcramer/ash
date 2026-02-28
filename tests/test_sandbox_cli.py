@@ -398,7 +398,17 @@ class TestNaturalLanguageTime:
         self, cli_runner_with_tz, _mock_create_rpc, time_input, message
     ):
         """Test creating tasks with various clock time formats."""
-        result = cli_runner_with_tz.invoke(app, ["create", message, "--at", time_input])
+        import time_machine
+
+        # Freeze at 1am Pacific so all bare clock times (9am, noon, 3pm,
+        # midnight) are in the future relative to the frozen local time.
+        with time_machine.travel(
+            datetime(2026, 6, 15, 8, 0, tzinfo=UTC),  # 2026-06-15 01:00 PDT
+            tick=False,
+        ):
+            result = cli_runner_with_tz.invoke(
+                app, ["create", message, "--at", time_input]
+            )
 
         assert result.exit_code == 0
         assert "Scheduled reminder" in result.stdout

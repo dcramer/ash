@@ -6,15 +6,9 @@ Spec contract: specs/subsystems.md (Integration Hooks), specs/todos.md.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from ash.core.prompt_keys import TOOL_ROUTING_RULES_KEY
 from ash.integrations.runtime import IntegrationContext, IntegrationContributor
 from ash.todos import TodoManager, create_todo_manager
-
-if TYPE_CHECKING:
-    from ash.core.prompt import PromptContext
-    from ash.core.session import SessionState
 
 
 class TodoIntegration(IntegrationContributor):
@@ -54,20 +48,16 @@ class TodoIntegration(IntegrationContributor):
         )
         register_todo_methods(server, self._manager, schedule_store=schedule_store)
 
-    def augment_prompt_context(
+    def augment_skill_instructions(
         self,
-        prompt_context: PromptContext,
-        session: SessionState,
+        skill_name: str,
         context: IntegrationContext,
-    ) -> PromptContext:
-        _ = session
-        _ = context
-        lines = prompt_context.extra_context.setdefault(TOOL_ROUTING_RULES_KEY, [])
-        if isinstance(lines, list):
-            lines.append(
-                "- For canonical todo list operations, use `ash-sb todo` instead of memory writes (`ash-sb todo add`, `ash-sb todo list`, `ash-sb todo done`)."
-            )
-            lines.append(
-                "- When reporting todos to users, summarize the task text naturally and avoid exposing internal todo IDs unless the user asks for IDs or a follow-up mutation requires one."
-            )
-        return prompt_context
+    ) -> list[str]:
+        if skill_name != "todo":
+            return []
+        if not self._schedule_enabled:
+            return []
+        return [
+            "Scheduling is enabled. You can use `ash-sb todo remind` and `ash-sb todo unremind` to manage reminders on todos.",
+            "When a user mentions a reminder or due date with a time component, offer to set a reminder as well.",
+        ]

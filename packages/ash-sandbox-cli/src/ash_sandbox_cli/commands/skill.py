@@ -14,6 +14,42 @@ app = typer.Typer(
 WORKSPACE_SKILLS = Path("/workspace/skills")
 
 
+def _scan_skills_dir(skills_dir: Path) -> list[tuple[str, str]]:
+    """Scan a single directory for skill definitions.
+
+    Returns list of (name, description) tuples.
+    """
+    results: list[tuple[str, str]] = []
+    if not skills_dir.exists():
+        return results
+
+    for skill_dir in sorted(skills_dir.iterdir()):
+        if not skill_dir.is_dir():
+            continue
+
+        skill_file = skill_dir / "SKILL.md"
+        if not skill_file.exists():
+            continue
+
+        try:
+            content = skill_file.read_text()
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 2:
+                    frontmatter = yaml.safe_load(parts[1])
+                    if isinstance(frontmatter, dict):
+                        desc = frontmatter.get("description", "(no description)")
+                        results.append((skill_dir.name, desc))
+                        continue
+        except Exception:  # noqa: BLE001
+            results.append((skill_dir.name, "(unable to read)"))
+            continue
+
+        results.append((skill_dir.name, "(unable to read)"))
+
+    return results
+
+
 @app.command()
 def validate(path: Path) -> None:
     """Validate a SKILL.md file format.
@@ -102,39 +138,18 @@ def validate(path: Path) -> None:
 
 @app.command("list")
 def list_skills() -> None:
-    """List skills in the workspace."""
-    if not WORKSPACE_SKILLS.exists():
-        typer.echo("No skills directory found at /workspace/skills/")
-        return
+    """List skills from all mounted skill directories."""
+    import os
 
-    skills = []
-    for skill_dir in sorted(WORKSPACE_SKILLS.iterdir()):
-        if not skill_dir.is_dir():
-            continue
+    raw = os.environ.get("ASH_SKILL_DIRS", "")
+    scan_dirs = [Path(p) for p in raw.split(":") if p] if raw else [WORKSPACE_SKILLS]
 
-        skill_file = skill_dir / "SKILL.md"
-        if not skill_file.exists():
-            continue
-
-        # Try to read description
-        try:
-            content = skill_file.read_text()
-            if content.startswith("---"):
-                parts = content.split("---", 2)
-                if len(parts) >= 2:
-                    frontmatter = yaml.safe_load(parts[1])
-                    if isinstance(frontmatter, dict):
-                        desc = frontmatter.get("description", "(no description)")
-                        skills.append((skill_dir.name, desc))
-                        continue
-        except Exception:  # noqa: BLE001
-            skills.append((skill_dir.name, "(unable to read)"))
-            continue
-
-        skills.append((skill_dir.name, "(unable to read)"))
+    skills: list[tuple[str, str]] = []
+    for d in scan_dirs:
+        skills.extend(_scan_skills_dir(d))
 
     if not skills:
-        typer.echo("No skills found in /workspace/skills/")
+        typer.echo("No skills found")
         return
 
     typer.echo("Available skills:")
