@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import shlex
+import sys
 from pathlib import Path
 from typing import Any, Literal
 
@@ -777,7 +778,15 @@ def _apply_google_skill_provider_preset(data: dict[str, Any]) -> None:
 
     provider_gog.setdefault("enabled", True)
     provider_gog.setdefault("namespace", "gog")
-    provider_gog.setdefault("command", ["gogcli", "bridge"])
+    provider_gog.setdefault(
+        "command",
+        [
+            sys.executable,
+            "-m",
+            "ash.skills.bundled.gog.scripts.gogcli_bridge",
+            "bridge",
+        ],
+    )
     provider_gog.setdefault("timeout_seconds", 30.0)
     providers["gog"] = provider_gog
     capabilities["providers"] = providers

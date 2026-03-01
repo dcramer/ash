@@ -341,12 +341,12 @@ class UseSkillTool(Tool):
 
         return None
 
-    async def _validate_required_capabilities(
+    async def _validate_required_capabilities_hard(
         self,
         skill: SkillDefinition,
         context: ToolContext | None,
     ) -> str | None:
-        """Return an error if skill-declared capabilities are unavailable."""
+        """Return an error for hard failures (missing user context / manager)."""
         required = sorted({item.strip() for item in skill.capabilities if item.strip()})
         if not required:
             return None
@@ -364,6 +364,27 @@ class UseSkillTool(Tool):
                 "is not available."
             )
 
+        return None
+
+    async def _check_capability_availability(
+        self,
+        skill: SkillDefinition,
+        context: ToolContext | None,
+    ) -> str | None:
+        """Return a warning if declared capabilities are unavailable.
+
+        This is advisory — skills with declared capabilities include their
+        own verification step and can guide the user through setup when
+        capabilities are unavailable (e.g. auth flow).
+        """
+        required = sorted({item.strip() for item in skill.capabilities if item.strip()})
+        if not required or context is None or not context.user_id:
+            return None
+
+        manager = self._capability_manager
+        if manager is None:
+            return None
+
         chat_type_raw = context.metadata.get("chat_type")
         chat_type = str(chat_type_raw).strip() if chat_type_raw else None
         try:
@@ -374,7 +395,7 @@ class UseSkillTool(Tool):
             )
         except Exception as e:
             code = getattr(e, "code", "capability_backend_unavailable")
-            return f"Capability preflight failed ({code}): {e}"
+            return f"Capability preflight warning ({code}): {e}"
 
         visible_ids = {str(item.get("id")) for item in visible if item.get("id")}
         missing = [
@@ -386,8 +407,7 @@ class UseSkillTool(Tool):
             return None
 
         return (
-            f"Skill '{skill.name}' requires unavailable capabilities in this context: "
-            f"{', '.join(missing)}"
+            f"Skill '{skill.name}' has unavailable capabilities: {', '.join(missing)}"
         )
 
     async def execute(
@@ -425,9 +445,20 @@ class UseSkillTool(Tool):
         if access_error:
             return ToolResult.error(access_error)
 
-        capability_error = await self._validate_required_capabilities(skill, context)
-        if capability_error:
-            return ToolResult.error(capability_error)
+        capability_hard_error = await self._validate_required_capabilities_hard(
+            skill, context
+        )
+        if capability_hard_error:
+            return ToolResult.error(capability_hard_error)
+
+        # Advisory check — don't block; skills handle their own capability
+        # verification and can guide the user through setup/auth flows.
+        capability_warning = await self._check_capability_availability(skill, context)
+        if capability_warning:
+            logger.warning(
+                "skill_capability_preflight_warning",
+                extra={"skill": skill.name, "detail": capability_warning},
+            )
 
         if skill.env:
             config_env = skill_config.get_env_vars() if skill_config else {}

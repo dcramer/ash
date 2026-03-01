@@ -483,7 +483,11 @@ class TestSkillCapabilityRequirements:
         assert "requires verified user context" in result.content
 
     @pytest.mark.asyncio
-    async def test_skill_with_capabilities_fails_when_unavailable(self, tool):
+    async def test_skill_with_unavailable_capabilities_still_runs(self, tool):
+        """Unavailable capabilities are advisory — the skill runs and handles
+        missing capabilities itself (e.g. guiding the user through auth setup)."""
+        from ash.agents.types import ChildActivated
+
         class _Manager:
             async def list_capabilities(
                 self,
@@ -496,18 +500,15 @@ class TestSkillCapabilityRequirements:
                 return []
 
         tool.set_capability_manager(_Manager())
-        result = await tool.execute(
-            {"skill": "mail", "message": "check inbox"},
-            context=ToolContext(
-                user_id="u-1",
-                chat_id="dm-1",
-                metadata={"chat_type": "private"},
-            ),
-        )
-
-        assert result.is_error
-        assert "requires unavailable capabilities" in result.content
-        assert "gog.email" in result.content
+        with pytest.raises(ChildActivated):
+            await tool.execute(
+                {"skill": "mail", "message": "check inbox"},
+                context=ToolContext(
+                    user_id="u-1",
+                    chat_id="dm-1",
+                    metadata={"chat_type": "private"},
+                ),
+            )
 
     @pytest.mark.asyncio
     async def test_skill_with_capabilities_runs_when_available(self, tool):

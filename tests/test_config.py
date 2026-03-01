@@ -639,7 +639,14 @@ class TestSkillAutoSyncConfig:
         provider = config.capabilities.providers["gog"]
         assert provider.enabled is True
         assert provider.namespace == "gog"
-        assert provider.command == ["gogcli", "bridge"]
+        import sys
+
+        assert provider.command == [
+            sys.executable,
+            "-m",
+            "ash.skills.bundled.gog.scripts.gogcli_bridge",
+            "bridge",
+        ]
         assert provider.timeout_seconds == 30.0
 
     def test_skill_google_provider_settings_override_provider_config(self):
