@@ -414,7 +414,7 @@ class SystemPromptBuilder:
             "",
             "When a request matches a skill, invoke it with `use_skill` instead of doing that work yourself.",
             "Use normal direct replies when no skill is a clear fit.",
-            "If the user asks you to create or update a skill and `skill-writer` is available, invoke it instead of claiming you cannot make skills.",
+            "If the user asks you to **write**, **create**, or **build** a new skill and `skill-writer` is available, invoke it. Do not route to skill-writer when the user wants to set up, configure, enable, or use an existing skill — invoke that skill directly instead.",
             "Only inspect a skill's instructions when you decide to use that skill.",
             "",
             "You may also invoke skills proactively — for example, use debug-self when you encounter tool errors or unexpected behavior, even if the user didn't ask you to debug.",

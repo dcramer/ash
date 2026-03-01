@@ -1,5 +1,5 @@
 ---
-description: "Send, read, search, or draft emails and manage calendar events via Gmail and Google Calendar. Use whenever the user mentions email, inbox, sending a message, checking their calendar, scheduling a meeting, or managing events."
+description: "Set up, configure, or use Gmail and Google Calendar. Handles initial setup, authentication, sending/reading/searching emails, and managing calendar events. Use whenever the user mentions setting up Google, email, inbox, sending a message, checking their calendar, scheduling a meeting, or managing events."
 opt_in: true
 sensitive: true
 access:
