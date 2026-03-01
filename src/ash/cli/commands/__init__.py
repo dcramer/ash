@@ -17,6 +17,7 @@ from ash.cli.commands import (
     sessions,
     skill,
     stats,
+    todo,
     upgrade,
 )
 
@@ -37,5 +38,6 @@ __all__ = [
     "sessions",
     "skill",
     "stats",
+    "todo",
     "upgrade",
 ]

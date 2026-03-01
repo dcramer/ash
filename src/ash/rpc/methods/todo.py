@@ -129,10 +129,8 @@ def register_todo_methods(
             raise ValueError("must specify exactly one of reminder_at or reminder_cron")
 
         timezone = params.get("timezone", "UTC")
-        if linked and schedule_store.get_entry(linked):
-            previous_schedule = schedule_store.get_entry(linked)
-            if previous_schedule is None:
-                raise ValueError("linked reminder disappeared during update")
+        previous_schedule = schedule_store.get_entry(linked) if linked else None
+        if linked and previous_schedule is not None:
             previous_snapshot = _clone_schedule_entry(previous_schedule)
             try:
                 updated_schedule = schedule_store.update_entry(
@@ -144,10 +142,9 @@ def register_todo_methods(
                 )
                 if updated_schedule is None:
                     raise ValueError("failed to update linked reminder")
-                schedule_entry_id = linked
                 updated_todo, replayed = await manager.link_reminder(
                     todo_id=todo_id,
-                    schedule_entry_id=schedule_entry_id,
+                    schedule_entry_id=linked,
                     user_id=user_id,
                     chat_id=chat_id,
                     expected_revision=expected_revision,

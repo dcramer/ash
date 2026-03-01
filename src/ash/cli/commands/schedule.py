@@ -6,7 +6,7 @@ from typing import Annotated
 import click
 import typer
 
-from ash.cli.console import console, dim, error, success, warning
+from ash.cli.console import console, error, success, warning
 
 
 def _format_countdown(next_fire: datetime | None) -> str:
@@ -207,7 +207,7 @@ def _schedule_list(graph_dir) -> None:
         )
 
     console.print(table)
-    console.print(f"\n{dim(f'Total: {len(entries)} task(s)')}")
+    console.print(f"\n[dim]Total: {len(entries)} task(s)[/dim]")
 
 
 def _schedule_cancel(graph_dir, entry_id: str) -> None:
