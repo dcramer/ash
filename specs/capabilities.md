@@ -64,6 +64,8 @@ per-user credential isolation rules.
 - Capability-sidecar/runtime bridges reuse authenticated loopback bearer-token patterns.
 - Capability stores separate credential material from operation data/artifacts.
 - Flow completion should support callback URL ingestion and manual code fallback.
+- Headless deployments should use Device Authorization Grant (RFC 8628) for auth flows.
+  See `specs/capability-auth.md` for the device code flow spec.
 
 ### MAY
 
@@ -133,7 +135,8 @@ Optional `skills.gog.capability_provider` values override command/namespace/time
 Explicit `[capabilities.providers.gog]` remains available for host-level overrides.
 
 The host invokes the bridge with JSON over stdin/stdout for `definitions`,
-`auth_begin`, `auth_complete`, and `invoke`.
+`auth_begin`, `auth_complete`, `auth_poll`, and `invoke`.
+(`auth_poll` is defined in `specs/capability-auth.md`.)
 
 Skill metadata declares required capability IDs only; it does not select the
 provider command/container/runtime.
@@ -244,6 +247,7 @@ class CapabilityProvider(Protocol):
     async def definitions(self) -> list[CapabilityDefinition]: ...
     async def auth_begin(...) -> CapabilityAuthBeginResult: ...
     async def auth_complete(...) -> CapabilityAuthCompleteResult: ...
+    async def auth_poll(...) -> CapabilityAuthPollResult: ...  # specs/capability-auth.md
     async def invoke(...) -> dict[str, Any]: ...
 ```
 
@@ -316,6 +320,7 @@ Response:
 #### `capability.auth.begin`
 
 Starts auth for a capability/account and returns an auth flow handle.
+For device code flow extensions (`flow_type`, `user_code`, `auth_poll`), see `specs/capability-auth.md`.
 
 Request params:
 
@@ -360,12 +365,18 @@ Response:
 }
 ```
 
+#### `capability.auth.poll`
+
+Polls a pending device code auth flow. See `specs/capability-auth.md` for full contract.
+
 ### Sandbox CLI Contract (`ash-sb capability`)
 
 - `ash-sb capability list`
 - `ash-sb capability invoke --capability <id> --operation <name> --input-json <json>`
 - `ash-sb capability auth begin --capability <id> [--account <hint>]`
 - `ash-sb capability auth complete --flow-id <id> (--callback-url <url> | --code <code>)`
+- `ash-sb capability auth poll --flow-id <id> [--timeout <secs>] [--interval <secs>]`
+  (See `specs/capability-auth.md`.)
 
 All commands must use the same `ASH_CONTEXT_TOKEN` trust chain as other sandbox CLI
 commands. No direct credential env vars are a supported auth path.
@@ -411,6 +422,8 @@ See `specs/browser.md` for runtime bridge invariants.
 | Access denied by chat policy | `capability_access_denied` |
 | Auth required but missing | `capability_auth_required` |
 | Auth flow expired/invalid | `capability_auth_flow_invalid` |
+| Device auth flow expired | `capability_auth_flow_expired` |
+| Device auth flow denied by user | `capability_auth_flow_denied` |
 | Invalid input schema | `capability_invalid_input` |
 | Upstream/provider unavailable | `capability_backend_unavailable` |
 
