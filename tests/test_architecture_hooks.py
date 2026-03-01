@@ -225,17 +225,27 @@ def test_browser_prompt_guidance_is_integration_owned() -> None:
     assert "CORE_PRINCIPLES_RULES_KEY" in integration_text
 
 
-def test_scheduling_prompt_guidance_is_integration_owned() -> None:
+def test_scheduling_prompt_guidance_is_skill_owned() -> None:
+    """Scheduling guidance lives in the bundled skill, not in prompt context."""
     prompt_text = (ROOT / "src/ash/core/prompt.py").read_text(encoding="utf-8")
     assert "### Scheduling" not in prompt_text
     assert "One-time: `ash-sb schedule create" not in prompt_text
     assert "UTC example: `ash-sb schedule create" not in prompt_text
 
+    # Integration should NOT inject prompt context rules — guidance is in the skill.
     integration_text = (ROOT / "src/ash/integrations/scheduling.py").read_text(
         encoding="utf-8"
     )
-    assert "TOOL_ROUTING_RULES_KEY" in integration_text
-    assert "CORE_PRINCIPLES_RULES_KEY" in integration_text
+    assert "TOOL_ROUTING_RULES_KEY" not in integration_text
+    assert "CORE_PRINCIPLES_RULES_KEY" not in integration_text
+
+    # Bundled skill must exist with scheduling command guidance.
+    skill_path = ROOT / "src/ash/integrations/skills/scheduling/schedule/SKILL.md"
+    assert skill_path.exists(), "Bundled scheduling skill must exist"
+    skill_text = skill_path.read_text(encoding="utf-8")
+    assert "ash-sb schedule create" in skill_text
+    assert "ash-sb schedule list" in skill_text
+    assert "ash-sb schedule cancel" in skill_text
 
 
 def test_ensure_self_person_wiring_avoids_core_agent() -> None:

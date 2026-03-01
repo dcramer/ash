@@ -163,44 +163,21 @@ async def test_scheduling_integration_owns_lifecycle_and_rpc(monkeypatch) -> Non
     assert _FakeWatcher.stopped is True
 
 
-@pytest.mark.asyncio
-async def test_scheduling_integration_owns_prompt_routing_guidance() -> None:
+def test_scheduling_integration_uses_skill_not_prompt_context() -> None:
     context = _context()
     integration = SchedulingIntegration(Path("graph"))
 
-    session = SessionState(
-        session_id="s-1",
-        provider="telegram",
-        chat_id="c-1",
-        user_id="u-1",
-    )
-    prompt_context = integration.augment_prompt_context(
-        PromptContext(),
-        session,
-        context,
-    )
-    routing = prompt_context.extra_context.get("tool_routing_rules")
-    principles = prompt_context.extra_context.get("core_principles_rules")
-    assert isinstance(routing, list)
-    assert isinstance(principles, list)
-    assert any("ash-sb schedule create" in line for line in routing)
-    assert any("continuous monitoring workflows" in line for line in principles)
-    assert any("preserve that wall-clock time" in line for line in principles)
+    # Scheduling guidance lives in the bundled skill, not in prompt context.
+    # Confirm augment_prompt_context is NOT overridden (only inherited no-op).
+    from ash.integrations.runtime import IntegrationContributor
 
-    # Scheduled-task execution context should not receive scheduling setup guidance.
-    scheduled_session = SessionState(
-        session_id="s-2",
-        provider="telegram",
-        chat_id="c-1",
-        user_id="u-1",
-    )
-    scheduled_session.context.is_scheduled_task = True
-    scheduled_prompt = integration.augment_prompt_context(
-        PromptContext(),
-        scheduled_session,
-        context,
-    )
-    assert scheduled_prompt.extra_context == {}
+    assert "augment_prompt_context" not in SchedulingIntegration.__dict__
+    assert hasattr(IntegrationContributor, "augment_prompt_context")
+
+    # augment_skill_instructions returns empty for non-schedule skills.
+    assert integration.augment_skill_instructions("todo", context) == []
+    # Returns empty for the schedule skill (no conditional extras currently).
+    assert integration.augment_skill_instructions("schedule", context) == []
 
 
 @pytest.mark.asyncio

@@ -12,9 +12,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
-from ash.core.prompt import PromptContext
-from ash.core.prompt_keys import CORE_PRINCIPLES_RULES_KEY, TOOL_ROUTING_RULES_KEY
-from ash.core.session import SessionState
 from ash.integrations.runtime import IntegrationContext, IntegrationContributor
 from ash.llm.types import Message, Role
 
@@ -91,57 +88,14 @@ class SchedulingIntegration(IntegrationContributor):
             parse_time_with_llm=parse_time_with_llm,
         )
 
-    def augment_prompt_context(
+    def augment_skill_instructions(
         self,
-        prompt_context: PromptContext,
-        session: SessionState,
+        skill_name: str,
         context: IntegrationContext,
-    ) -> PromptContext:
-        _ = context
-        if session.context.is_scheduled_task:
-            return prompt_context
-
-        self._append_instruction(
-            prompt_context.extra_context,
-            TOOL_ROUTING_RULES_KEY,
-            "Use `ash-sb schedule create 'msg' --at <time>` for one-time reminders/tasks.",
-        )
-        self._append_instruction(
-            prompt_context.extra_context,
-            TOOL_ROUTING_RULES_KEY,
-            "Use `ash-sb schedule create 'msg' --cron '<expr>'` for recurring monitoring/checks.",
-        )
-        self._append_instruction(
-            prompt_context.extra_context,
-            TOOL_ROUTING_RULES_KEY,
-            "Use `ash-sb schedule list` to inspect scheduled tasks and `ash-sb schedule cancel --id <id>` to stop one.",
-        )
-        self._append_instruction(
-            prompt_context.extra_context,
-            CORE_PRINCIPLES_RULES_KEY,
-            "For continuous monitoring workflows, prefer recurring cron checks; use self-rescheduling only when cadence must change dynamically.",
-        )
-        self._append_instruction(
-            prompt_context.extra_context,
-            CORE_PRINCIPLES_RULES_KEY,
-            "Times default to the user's local timezone. Use `--tz` only when the user specifies a different timezone, including explicit UTC requests.",
-        )
-        self._append_instruction(
-            prompt_context.extra_context,
-            CORE_PRINCIPLES_RULES_KEY,
-            "If the user specifies a time with an explicit timezone (for example, '10am ET'), preserve that wall-clock time in that timezone. Example: `10am ET` with `--tz America/New_York` uses `--cron '0 10 ...'` (not a converted hour).",
-        )
-        self._append_instruction(
-            prompt_context.extra_context,
-            CORE_PRINCIPLES_RULES_KEY,
-            "When a single request includes times in different timezones, create each schedule with its own `--tz` matching the user-specified timezone for that item.",
-        )
-        self._append_instruction(
-            prompt_context.extra_context,
-            CORE_PRINCIPLES_RULES_KEY,
-            "Write scheduled task messages as self-contained future instructions and only claim scheduling success after command success output.",
-        )
-        return prompt_context
+    ) -> list[str]:
+        if skill_name != "schedule":
+            return []
+        return []
 
     async def on_startup(self, context: IntegrationContext) -> None:
         if self._watcher is not None:
@@ -150,21 +104,6 @@ class SchedulingIntegration(IntegrationContributor):
     async def on_shutdown(self, context: IntegrationContext) -> None:
         if self._watcher is not None:
             await self._watcher.stop()
-
-    @staticmethod
-    def _append_instruction(
-        extra_context: dict[str, Any],
-        key: str,
-        line: str,
-    ) -> None:
-        value = extra_context.get(key)
-        if isinstance(value, list):
-            rules = value
-        else:
-            rules = []
-            extra_context[key] = rules
-        if line not in rules:
-            rules.append(line)
 
     async def _parse_time_with_llm(
         self,
