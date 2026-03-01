@@ -102,7 +102,7 @@ class AgentConfig:
         - send_message if enable_progress_updates is True
         """
         tools = list(self.allowed_tools)
-        if self.enable_progress_updates and "send_message" not in tools:
+        if tools and self.enable_progress_updates and "send_message" not in tools:
             tools.append("send_message")
         return tools
 
