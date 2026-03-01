@@ -32,41 +32,79 @@ Manage Gmail and Google Calendar through host-managed capabilities.
 
 On every invocation, follow these steps in order:
 
-### 1. Verify capabilities
+### 1. Check capability status
 
 ```bash
 ash-sb capability list
 ```
 
-If `gog.email` or `gog.calendar` is missing, tell the user that the google skill needs to be enabled in their Ash config (`[skills.google] enabled = true`) and stop.
+Expected output:
 
-### 2. Verify authentication
-
-Try a lightweight read operation to check if auth is in place:
-
-```bash
-ash-sb capability invoke -c gog.email -o list_messages --input-json '{"limit":1}'
+```
+Capabilities:
+- gog.email: Gmail integration
+  Available: yes
+  Authenticated: no
+  Operations: list_messages, get_message, send_message, ...
+- gog.calendar: Google Calendar integration
+  Available: yes
+  Authenticated: yes
+  Operations: list_events, create_event, ...
+Total: 2 capability(ies)
 ```
 
-If the output contains `capability_auth_required`, the user needs to authenticate.
-Walk them through setup:
+- If a needed capability is missing entirely, tell the user the google skill needs to be enabled in their Ash config (`[skills.google] enabled = true`) and stop.
+- If `Authenticated: no` for any needed capability, go to step 2.
+- If `Authenticated: yes` for all needed capabilities, skip to step 3.
 
-1. Begin auth (use `--account work` or `--account personal` if the user specifies):
-   ```bash
-   ash-sb capability auth begin -c gog.email
-   ```
-2. Show the user the `auth_url` from the output and ask them to open it and complete consent.
-3. Once the user provides the callback URL or authorization code, complete auth:
-   ```bash
-   ash-sb capability auth complete --flow-id <FLOW_ID> --code <CODE>
-   ```
-   Or with callback URL:
-   ```bash
-   ash-sb capability auth complete --flow-id <FLOW_ID> --callback-url <URL>
-   ```
-4. Confirm success, then proceed to the original operation.
+### 2. Authenticate
 
-If both `gog.email` and `gog.calendar` are needed, authenticate each separately.
+Run this step for each capability where `Authenticated: no`. If the user's request is setup-only (e.g. "set up my email"), stop after authentication is complete — do not invoke any operations.
+
+**2a. Begin auth flow**
+
+Use `--account work` or `--account personal` if the user specifies an account preference:
+
+```bash
+ash-sb capability auth begin -c gog.email
+```
+
+Expected output:
+
+```
+Started capability auth flow (flow_id=abc123)
+  Capability: gog.email
+  Auth URL: https://accounts.google.com/o/oauth2/...
+  Expires: 2026-03-01T12:30:00Z
+```
+
+**2b. Present URL to user**
+
+Show the `Auth URL` from the output and ask the user to open it, complete the Google consent screen, and provide either the authorization code or the callback URL.
+
+**2c. Complete auth flow**
+
+Once the user provides a code or callback URL:
+
+```bash
+ash-sb capability auth complete --flow-id abc123 --code <CODE>
+```
+
+Or with callback URL:
+
+```bash
+ash-sb capability auth complete --flow-id abc123 --callback-url <URL>
+```
+
+Expected output:
+
+```
+Capability auth completed (flow_id=abc123, account_ref=user@gmail.com)
+```
+
+**2d. Repeat for additional capabilities**
+
+If multiple capabilities need auth (e.g. both `gog.email` and `gog.calendar`), repeat steps 2a–2c for each one. Each capability requires its own auth flow.
 
 ### 3. Perform operation
 
@@ -105,6 +143,16 @@ Sent: "Re: Quarterly review" to alice@example.com
 
 ```
 Created: Team lunch — Friday 12pm–1pm
+```
+
+**Setup/auth completion:**
+
+```
+Google email is now connected (user@gmail.com). You're all set — let me know when you want to check your inbox or send a message.
+```
+
+```
+Google email and calendar are now connected. You're all set to use both.
 ```
 
 **Formatting rules:**
