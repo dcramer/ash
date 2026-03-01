@@ -756,9 +756,9 @@ class TelegramMessageHandler:
                 case TurnAction.COMPLETE:
                     completed = stack.pop()
                     logger.info(
-                        "stack_frame_completed",
+                        "child_completed",
                         extra={
-                            "agent_name": completed.agent_name,
+                            "child_agent": completed.agent_name,
                             "remaining_depth": stack.depth,
                         },
                     )

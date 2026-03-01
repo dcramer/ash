@@ -10,7 +10,7 @@ Manage the user's todo list using the `ash-sb todo` CLI.
 | Command | Description |
 |---------|-------------|
 | `ash-sb todo add "text" [--due DATETIME] [--shared]` | Create a new todo |
-| `ash-sb todo list [--all] [--include-done] [--include-deleted]` | List todos |
+| `ash-sb todo list [--include-done] [--include-deleted] [--all]` | List todos (open only by default) |
 | `ash-sb todo edit --id ID [--text TEXT] [--due DATETIME]` | Edit an existing todo |
 | `ash-sb todo done --id ID` | Mark a todo as complete |
 | `ash-sb todo undone --id ID` | Reopen a completed todo |
@@ -20,7 +20,7 @@ Manage the user's todo list using the `ash-sb todo` CLI.
 
 ## Workflow
 
-1. If the user asks to see, list, or check their todos → run `ash-sb todo list` (or `--all` if they want everything)
+1. If the user asks to see, list, or check their todos → run `ash-sb todo list` (shows open items only). Only add `--all` or `--include-done` if the user explicitly asks to see completed items.
 2. If the user says items are done or finished → run `ash-sb todo list` first to get IDs, then `ash-sb todo done --id <ID>` for each
 3. If the user wants to add tasks → run `ash-sb todo add "text"` for each item
 4. If an ID is needed for a mutation but not known → list todos first to find it
@@ -29,12 +29,11 @@ Manage the user's todo list using the `ash-sb todo` CLI.
 
 Format your `complete()` output exactly as shown below. This is critical — the parent agent relays your output directly.
 
-**Listing todos:**
+**Listing todos** (default — open items only):
 
 ```
 - [ ] Buy groceries (due tomorrow)
 - [ ] Schedule dentist appointment
-- [x] Send invoice to client
 ```
 
 **After mutations (add/done/edit/delete):**
