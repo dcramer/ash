@@ -42,32 +42,39 @@ If `gog.email` or `gog.calendar` is missing, tell the user that the google skill
 
 ### 2. Verify authentication
 
+Try a lightweight read operation to check if auth is in place:
+
 ```bash
-ash-sb capability auth status --capability gog.email
+ash-sb capability invoke -c gog.email -o list_messages --input-json '{"limit":1}'
 ```
 
-If not authenticated, walk the user through setup:
+If the output contains `capability_auth_required`, the user needs to authenticate.
+Walk them through setup:
 
-1. Begin auth:
+1. Begin auth (use `--account work` or `--account personal` if the user specifies):
    ```bash
-   ash-sb capability auth begin --capability gog.email --account work
+   ash-sb capability auth begin -c gog.email
    ```
-2. Show the user the `auth_url` and ask them to open it and complete consent.
-3. Once the user provides the callback URL or code, complete auth:
+2. Show the user the `auth_url` from the output and ask them to open it and complete consent.
+3. Once the user provides the callback URL or authorization code, complete auth:
    ```bash
-   ash-sb capability auth complete --flow-id <flow_id> --code <code>
+   ash-sb capability auth complete --flow-id <FLOW_ID> --code <CODE>
    ```
-4. Confirm success, then proceed to the operation.
+   Or with callback URL:
+   ```bash
+   ash-sb capability auth complete --flow-id <FLOW_ID> --callback-url <URL>
+   ```
+4. Confirm success, then proceed to the original operation.
 
-Use account hints (`work` / `personal`) only when the user specifies or context is clear.
+If both `gog.email` and `gog.calendar` are needed, authenticate each separately.
 
 ### 3. Perform operation
 
 Run capability operations with explicit capability IDs and JSON input:
 
 ```bash
-ash-sb capability invoke --capability gog.email --operation list_messages --input-json '{"folder":"inbox","limit":20}'
-ash-sb capability invoke --capability gog.calendar --operation list_events --input-json '{"calendar":"primary","window":"7d"}'
+ash-sb capability invoke -c gog.email -o list_messages --input-json '{"folder":"inbox","limit":20}'
+ash-sb capability invoke -c gog.calendar -o list_events --input-json '{"calendar":"primary","window":"7d"}'
 ```
 
 Confirm key details before mutating operations (sending emails, creating/updating events).
