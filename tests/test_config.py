@@ -628,26 +628,26 @@ class TestSkillAutoSyncConfig:
         )
         assert cfg.get_env_vars() == {"API_KEY": "secret"}
 
-    def test_skill_gog_enabled_applies_provider_defaults(self):
+    def test_skill_google_enabled_applies_provider_defaults(self):
         config = AshConfig.model_validate(
             {
                 "models": {"default": {"provider": "openai", "model": "test"}},
-                "skills": {"gog": {"enabled": True}},
+                "skills": {"google": {"enabled": True}},
             }
         )
-        assert config.skills["gog"].enabled is True
+        assert config.skills["google"].enabled is True
         provider = config.capabilities.providers["gog"]
         assert provider.enabled is True
         assert provider.namespace == "gog"
         assert provider.command == ["gogcli", "bridge"]
         assert provider.timeout_seconds == 30.0
 
-    def test_skill_gog_provider_settings_override_provider_config(self):
+    def test_skill_google_provider_settings_override_provider_config(self):
         config = AshConfig.model_validate(
             {
                 "models": {"default": {"provider": "openai", "model": "test"}},
                 "skills": {
-                    "gog": {
+                    "google": {
                         "enabled": True,
                         "capability_provider": {
                             "enabled": True,

@@ -602,7 +602,7 @@ class AshConfig(BaseModel):
             # Remaining entries are per-skill configs
             data["skills"] = skills_data
 
-        _apply_gog_skill_provider_preset(data)
+        _apply_google_skill_provider_preset(data)
         return data
 
     @model_validator(mode="after")
@@ -747,15 +747,15 @@ class AshConfig(BaseModel):
         }
 
 
-def _apply_gog_skill_provider_preset(data: dict[str, Any]) -> None:
-    """Apply default provider wiring when bundled gog skill is enabled."""
+def _apply_google_skill_provider_preset(data: dict[str, Any]) -> None:
+    """Apply default provider wiring when bundled google skill is enabled."""
     skills = data.get("skills")
     if not isinstance(skills, dict):
         return
-    gog_skill = skills.get("gog")
-    if not isinstance(gog_skill, dict):
+    google_skill = skills.get("google")
+    if not isinstance(google_skill, dict):
         return
-    if gog_skill.get("enabled") is not True:
+    if google_skill.get("enabled") is not True:
         return
 
     # Wire default external provider bridge command by default.
@@ -769,7 +769,7 @@ def _apply_gog_skill_provider_preset(data: dict[str, Any]) -> None:
     if not isinstance(provider_gog, dict):
         provider_gog = {}
 
-    provider_from_skill = gog_skill.get("capability_provider")
+    provider_from_skill = google_skill.get("capability_provider")
     if isinstance(provider_from_skill, dict):
         for field in ("enabled", "namespace", "command", "timeout_seconds"):
             if field in provider_from_skill:
