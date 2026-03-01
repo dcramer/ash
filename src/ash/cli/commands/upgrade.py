@@ -21,6 +21,8 @@ def register(app: typer.Typer) -> None:
         console.print("[bold]Upgrading Ash...[/bold]\n")
 
         _migrate_schedule_into_graph()
+        _migrate_todo_scope_ids()
+        _migrate_schedule_scope_edges()
 
         # Build sandbox
         info("Building sandbox...")
@@ -35,6 +37,174 @@ def register(app: typer.Typer) -> None:
             warning("Sandbox build failed (retry with 'ash sandbox build')")
 
         console.print("\n[bold green]Upgrade complete![/bold green]")
+
+
+def _migrate_todo_scope_ids() -> None:
+    """Resolve TodoEntry provider IDs to graph node UUIDs and ensure scope edges."""
+    import asyncio
+
+    from ash.config.paths import get_graph_dir
+    from ash.graph.edges import (
+        TODO_OWNED_BY,
+        TODO_REMINDER_SCHEDULED_AS,
+        TODO_SHARED_IN,
+        create_todo_owned_by_edge,
+        create_todo_shared_in_edge,
+        resolve_chat_node_id,
+        resolve_user_node_id,
+    )
+    from ash.graph.persistence import GraphPersistence, hydrate_graph
+    from ash.todos.types import TodoEntry, register_todo_graph_schema
+
+    graph_dir = get_graph_dir()
+    todos_file = graph_dir / "todos.jsonl"
+    if not todos_file.exists():
+        dim("No todo data found (skipping todo scope migration)")
+        return
+
+    register_todo_graph_schema()
+
+    async def _run() -> None:
+        persistence = GraphPersistence(graph_dir)
+        raw_data = await persistence.load_raw()
+        graph = hydrate_graph(raw_data)
+
+        todos = {
+            k: v
+            for k, v in graph.get_node_collection("todo").items()
+            if isinstance(v, TodoEntry)
+        }
+        if not todos:
+            return
+
+        edges_dirty = False
+        nodes_dirty = False
+        for todo in todos.values():
+            # Migrate TodoEntry fields: resolve provider IDs to graph node UUIDs.
+            if todo.owner_user_id and todo.owner_user_id not in graph.users:
+                resolved = resolve_user_node_id(graph, todo.owner_user_id)
+                if resolved:
+                    todo.owner_user_id = resolved
+                    nodes_dirty = True
+            if todo.chat_id and todo.chat_id not in graph.chats:
+                resolved = resolve_chat_node_id(graph, todo.chat_id)
+                if resolved:
+                    todo.chat_id = resolved
+                    nodes_dirty = True
+
+            # Ensure scope edges exist and point at graph node UUIDs.
+            owner_edges = graph.get_outgoing(todo.id, edge_type=TODO_OWNED_BY)
+            chat_edges = graph.get_outgoing(todo.id, edge_type=TODO_SHARED_IN)
+            reminder_edges = graph.get_outgoing(
+                todo.id, edge_type=TODO_REMINDER_SCHEDULED_AS
+            )
+            if todo.owner_user_id and not owner_edges:
+                graph.add_edge(create_todo_owned_by_edge(todo.id, todo.owner_user_id))
+                edges_dirty = True
+            elif owner_edges:
+                for edge in owner_edges:
+                    if edge.target_id not in graph.users:
+                        resolved = resolve_user_node_id(graph, edge.target_id)
+                        if resolved and resolved != edge.target_id:
+                            graph.remove_edge(edge.id)
+                            graph.add_edge(create_todo_owned_by_edge(todo.id, resolved))
+                            edges_dirty = True
+            if todo.chat_id and not chat_edges:
+                graph.add_edge(create_todo_shared_in_edge(todo.id, todo.chat_id))
+                edges_dirty = True
+            elif chat_edges:
+                for edge in chat_edges:
+                    if edge.target_id not in graph.chats:
+                        resolved = resolve_chat_node_id(graph, edge.target_id)
+                        if resolved and resolved != edge.target_id:
+                            graph.remove_edge(edge.id)
+                            graph.add_edge(
+                                create_todo_shared_in_edge(todo.id, resolved)
+                            )
+                            edges_dirty = True
+            if todo.linked_schedule_entry_id and not reminder_edges:
+                from ash.graph.edges import create_todo_reminder_scheduled_as_edge
+
+                graph.add_edge(
+                    create_todo_reminder_scheduled_as_edge(
+                        todo.id, todo.linked_schedule_entry_id
+                    )
+                )
+                edges_dirty = True
+
+        if not edges_dirty and not nodes_dirty:
+            dim("Todo scope IDs already migrated")
+            return
+
+        if nodes_dirty:
+            persistence.mark_dirty("todos")
+        if edges_dirty:
+            persistence.mark_dirty("edges")
+        await persistence.flush(graph)
+        success("Todo scope IDs migrated to graph node UUIDs")
+
+    asyncio.run(_run())
+
+
+def _migrate_schedule_scope_edges() -> None:
+    """Resolve schedule edge targets from provider IDs to graph node UUIDs."""
+    from ash.config.paths import get_graph_dir
+    from ash.graph.edges import (
+        SCHEDULE_FOR_CHAT,
+        SCHEDULE_FOR_USER,
+        create_schedule_for_chat_edge,
+        create_schedule_for_user_edge,
+        resolve_chat_node_id,
+        resolve_user_node_id,
+    )
+    from ash.graph.persistence import GraphPersistence, hydrate_graph
+    from ash.scheduling.types import ScheduleEntry, register_schedule_graph_schema
+
+    graph_dir = get_graph_dir()
+    schedules_file = graph_dir / "schedules.jsonl"
+    if not schedules_file.exists():
+        dim("No schedule data found (skipping schedule edge migration)")
+        return
+
+    register_schedule_graph_schema()
+    persistence = GraphPersistence(graph_dir)
+    raw_data = persistence.load_raw_sync()
+    graph = hydrate_graph(raw_data)
+
+    entries = {
+        k: v
+        for k, v in graph.get_node_collection("schedule_entry").items()
+        if isinstance(v, ScheduleEntry)
+    }
+    if not entries:
+        return
+
+    migrated = False
+    for entry in entries.values():
+        if not entry.id:
+            continue
+        for edge in list(graph.get_outgoing(entry.id, edge_type=SCHEDULE_FOR_USER)):
+            if edge.target_id not in graph.users:
+                resolved = resolve_user_node_id(graph, edge.target_id)
+                if resolved and resolved != edge.target_id:
+                    graph.remove_edge(edge.id)
+                    graph.add_edge(create_schedule_for_user_edge(entry.id, resolved))
+                    migrated = True
+        for edge in list(graph.get_outgoing(entry.id, edge_type=SCHEDULE_FOR_CHAT)):
+            if edge.target_id not in graph.chats:
+                resolved = resolve_chat_node_id(graph, edge.target_id)
+                if resolved and resolved != edge.target_id:
+                    graph.remove_edge(edge.id)
+                    graph.add_edge(create_schedule_for_chat_edge(entry.id, resolved))
+                    migrated = True
+
+    if not migrated:
+        dim("Schedule scope edges already migrated")
+        return
+
+    persistence.mark_dirty("edges")
+    persistence.flush_sync(graph)
+    success("Schedule scope edges migrated to graph node UUIDs")
 
 
 def _migrate_schedule_into_graph() -> None:

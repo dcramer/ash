@@ -6,6 +6,7 @@ Spec contract: specs/todos.md.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from builtins import list as builtin_list
 from datetime import UTC, datetime
@@ -20,6 +21,8 @@ from ash.graph.edges import (
     create_todo_owned_by_edge,
     create_todo_reminder_scheduled_as_edge,
     create_todo_shared_in_edge,
+    resolve_chat_node_id,
+    resolve_user_node_id,
 )
 from ash.todos.types import (
     TodoEntry,
@@ -27,6 +30,8 @@ from ash.todos.types import (
     TodoStatus,
     register_todo_graph_schema,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TodoManager:
@@ -66,11 +71,21 @@ class TodoManager:
             if not chat_id:
                 raise ValueError("chat_id is required for shared todos")
             owner_user_id = None
-            scoped_chat_id = chat_id
+            resolved_chat = resolve_chat_node_id(self._graph, chat_id)
+            if resolved_chat is None:
+                logger.warning(
+                    "unresolved_chat_node_id", extra={"provider_id": chat_id}
+                )
+            scoped_chat_id = resolved_chat or chat_id
         else:
             if not user_id:
                 raise ValueError("user_id is required for personal todos")
-            owner_user_id = user_id
+            resolved_user = resolve_user_node_id(self._graph, user_id)
+            if resolved_user is None:
+                logger.warning(
+                    "unresolved_user_node_id", extra={"provider_id": user_id}
+                )
+            owner_user_id = resolved_user or user_id
             scoped_chat_id = None
 
         async with self._lock:
@@ -518,31 +533,7 @@ async def create_todo_manager(
             if graph.get_node(event.id) is None:
                 graph.add_node("todo_event", event)
 
-    manager = TodoManager(graph=graph, persistence=persistence)
-
-    # Ensure legacy records have scope edges for graph-native auth/visibility.
-    edges_added = False
-    for todo in manager._todos().values():
-        owner_edges = graph.get_outgoing(todo.id, edge_type=TODO_OWNED_BY)
-        chat_edges = graph.get_outgoing(todo.id, edge_type=TODO_SHARED_IN)
-        reminder_edges = graph.get_outgoing(
-            todo.id, edge_type=TODO_REMINDER_SCHEDULED_AS
-        )
-        if todo.owner_user_id and not owner_edges:
-            manager._apply_scope_edges(todo)
-            edges_added = True
-        if todo.chat_id and not chat_edges:
-            manager._apply_scope_edges(todo)
-            edges_added = True
-        if todo.linked_schedule_entry_id and not reminder_edges:
-            manager._sync_reminder_edge(todo)
-            edges_added = True
-
-    if edges_added:
-        persistence.mark_dirty("edges")
-        await persistence.flush(graph)
-
-    return manager
+    return TodoManager(graph=graph, persistence=persistence)
 
 
 def _require_todo(todos: dict[str, TodoEntry], todo_id: str) -> TodoEntry:
@@ -584,11 +575,23 @@ def _is_visible(
 ) -> bool:
     owner_edges = graph.get_outgoing(todo.id, edge_type=TODO_OWNED_BY)
     if owner_edges:
-        return user_id is not None and any(e.target_id == user_id for e in owner_edges)
+        if user_id is None:
+            return False
+        resolved = resolve_user_node_id(graph, user_id)
+        if resolved:
+            return any(e.target_id == resolved for e in owner_edges)
+        # Fallback: direct comparison when user_id isn't in the graph.
+        return any(e.target_id == user_id for e in owner_edges)
 
     chat_edges = graph.get_outgoing(todo.id, edge_type=TODO_SHARED_IN)
     if chat_edges:
-        return chat_id is not None and any(e.target_id == chat_id for e in chat_edges)
+        if chat_id is None:
+            return False
+        resolved = resolve_chat_node_id(graph, chat_id)
+        if resolved:
+            return any(e.target_id == resolved for e in chat_edges)
+        # Fallback: direct comparison when chat_id isn't in the graph.
+        return any(e.target_id == chat_id for e in chat_edges)
 
     return False
 

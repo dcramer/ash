@@ -39,6 +39,12 @@ Todos MUST be stored in `ash.graph` as registered node collections, not ad-hoc s
 - `TODO_SHARED_IN`: `todo -> chat`
 - `TODO_REMINDER_SCHEDULED_AS`: `todo -> schedule_entry`
 
+Edge targets MUST be graph node UUIDs (not raw provider IDs). Use
+`resolve_user_node_id` / `resolve_chat_node_id` from `ash.graph.edges` to
+bridge a provider-specific identifier to the canonical node ID before creating
+or comparing edges. Legacy edges that store provider IDs are migrated to graph
+node UUIDs at startup.
+
 Todo visibility/authorization semantics MUST be representable from these edges.
 
 ## Data Types
@@ -50,14 +56,14 @@ Todo visibility/authorization semantics MUST be representable from these edges.
 | `id` | string | Stable 8-char hex ID |
 | `content` | string | Todo text |
 | `status` | `open` \| `done` | Canonical state |
-| `owner_user_id` | string \| null | Optional denormalized owner hint (authoritative link is `TODO_OWNED_BY`) |
-| `chat_id` | string \| null | Optional denormalized scope hint (authoritative link is `TODO_SHARED_IN`) |
+| `owner_user_id` | string \| null | Graph node UUID of the owning user (resolved from provider ID at creation). Authoritative traversal link is `TODO_OWNED_BY` edge. |
+| `chat_id` | string \| null | Graph node UUID of the scoped chat (resolved from provider ID at creation). Authoritative traversal link is `TODO_SHARED_IN` edge. |
 | `created_at` | ISO datetime | Creation time |
 | `updated_at` | ISO datetime | Last mutation time |
 | `completed_at` | ISO datetime \| null | Completion time |
 | `due_at` | ISO datetime \| null | Optional due time |
 | `deleted_at` | ISO datetime \| null | Soft-delete marker |
-| `linked_schedule_entry_id` | string \| null | Optional denormalized reminder hint (authoritative link is `TODO_REMINDER_SCHEDULED_AS`) |
+| `linked_schedule_entry_id` | string \| null | Schedule entry ID for linked reminder (authoritative link is `TODO_REMINDER_SCHEDULED_AS` edge) |
 | `revision` | integer | Optimistic concurrency revision |
 
 ### `TodoEvent`

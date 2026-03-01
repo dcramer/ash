@@ -60,11 +60,27 @@ async def memory_show(store: Store, memory_id: str) -> None:
 
     table.add_row("Source Method", memory.source or "-")
 
-    # Scope
+    # Scope — resolve graph node IDs to display names where possible.
     if memory.owner_user_id:
-        table.add_row("Scope", f"Personal ({memory.owner_user_id})")
+        from ash.graph.edges import resolve_user_node_id
+
+        resolved_uid = resolve_user_node_id(store.graph, memory.owner_user_id)
+        user_node = store.graph.users.get(resolved_uid) if resolved_uid else None
+        if user_node:
+            label = user_node.display_name or user_node.username or memory.owner_user_id
+        else:
+            label = memory.owner_user_id
+        table.add_row("Scope", f"Personal ({label})")
     elif memory.chat_id:
-        table.add_row("Scope", f"Group ({memory.chat_id})")
+        from ash.graph.edges import resolve_chat_node_id
+
+        resolved_cid = resolve_chat_node_id(store.graph, memory.chat_id)
+        chat_node = store.graph.chats.get(resolved_cid) if resolved_cid else None
+        if chat_node and chat_node.title:
+            label = chat_node.title
+        else:
+            label = memory.chat_id
+        table.add_row("Scope", f"Group ({label})")
     else:
         table.add_row("Scope", "Global")
 

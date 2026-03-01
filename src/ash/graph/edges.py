@@ -4,6 +4,10 @@ All graph relationships are represented as edges. This module provides:
 - Constants for edge type names
 - Factory functions for creating edges with proper type annotations
 - Query helpers for common edge-based lookups
+
+Resolution convention: Edge targets MUST be graph node UUIDs, not raw provider IDs.
+Use ``resolve_user_node_id`` / ``resolve_chat_node_id`` to bridge a provider-specific
+identifier to the canonical graph node before creating or comparing edges.
 """
 
 from __future__ import annotations
@@ -401,3 +405,36 @@ def create_schedule_for_user_edge(
         target_id=user_id,
         created_at=datetime.now(UTC),
     )
+
+
+# -- Provider-id resolution helpers --
+
+
+def resolve_user_node_id(graph: KnowledgeGraph, provider_or_node_id: str) -> str | None:
+    """Resolve a provider user_id or graph node ID to the canonical User node ID.
+
+    Accepts either a graph node UUID (returned as-is) or a raw provider_id
+    (scanned across all UserEntry nodes).  Returns ``None`` when neither
+    matches.
+    """
+    if provider_or_node_id in graph.users:
+        return provider_or_node_id
+    for user in graph.users.values():
+        if user.provider_id == provider_or_node_id:
+            return user.id
+    return None
+
+
+def resolve_chat_node_id(graph: KnowledgeGraph, provider_or_node_id: str) -> str | None:
+    """Resolve a provider chat_id or graph node ID to the canonical Chat node ID.
+
+    Accepts either a graph node UUID (returned as-is) or a raw provider_id
+    (scanned across all ChatEntry nodes).  Returns ``None`` when neither
+    matches.
+    """
+    if provider_or_node_id in graph.chats:
+        return provider_or_node_id
+    for chat in graph.chats.values():
+        if chat.provider_id == provider_or_node_id:
+            return chat.id
+    return None

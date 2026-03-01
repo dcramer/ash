@@ -156,7 +156,12 @@ def register_todo_methods(
                 raise
         else:
             provider = params.get("provider")
-            reminder_chat_id = chat_id or todo.chat_id
+            # chat_id from caller context is a provider ID (suitable for routing).
+            # todo.chat_id is a graph UUID after resolution — reverse-resolve it.
+            reminder_chat_id = chat_id
+            if not reminder_chat_id and todo.chat_id:
+                chat_node = manager.graph.chats.get(todo.chat_id)
+                reminder_chat_id = chat_node.provider_id if chat_node else None
             if not provider or not reminder_chat_id:
                 raise ValueError("provider and chat_id are required for reminders")
             schedule_entry_id = uuid.uuid4().hex[:8]

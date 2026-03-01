@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import fcntl
-import logging
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -16,11 +15,11 @@ from ash.graph.edges import (
     SCHEDULE_FOR_USER,
     create_schedule_for_chat_edge,
     create_schedule_for_user_edge,
+    resolve_chat_node_id,
+    resolve_user_node_id,
 )
 from ash.graph.persistence import GraphPersistence, hydrate_graph
 from ash.scheduling.types import ScheduleEntry, register_schedule_graph_schema
-
-logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
@@ -212,9 +211,11 @@ class ScheduleStore:
         for edge in list(graph.get_outgoing(entry.id, edge_type=SCHEDULE_FOR_USER)):
             graph.remove_edge(edge.id)
         if entry.chat_id:
-            graph.add_edge(create_schedule_for_chat_edge(entry.id, entry.chat_id))
+            target = resolve_chat_node_id(graph, entry.chat_id) or entry.chat_id
+            graph.add_edge(create_schedule_for_chat_edge(entry.id, target))
         if entry.user_id:
-            graph.add_edge(create_schedule_for_user_edge(entry.id, entry.user_id))
+            target = resolve_user_node_id(graph, entry.user_id) or entry.user_id
+            graph.add_edge(create_schedule_for_user_edge(entry.id, target))
 
     def _persist_graph(self, graph, *, dirty: set[str]) -> None:
         self._persistence.mark_dirty(*dirty)

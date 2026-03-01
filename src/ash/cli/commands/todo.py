@@ -175,24 +175,30 @@ async def _todo_list(
     from ash.todos.types import TodoStatus
 
     manager = await _create_manager()
-    all_todos = list(manager._todos().values())
+    graph = manager.graph
 
-    if user_id is not None:
-        all_todos = [t for t in all_todos if t.owner_user_id == user_id]
-    if chat_id is not None:
-        all_todos = [t for t in all_todos if t.chat_id == chat_id]
-
-    if not (show_all or show_deleted):
-        all_todos = [t for t in all_todos if t.deleted_at is None]
-    if not (show_all or show_done):
-        all_todos = [t for t in all_todos if t.status == TodoStatus.OPEN]
-
-    all_todos.sort(
-        key=lambda t: (
-            0 if t.status == TodoStatus.OPEN else 1,
-            -t.created_at.timestamp(),
+    if user_id is not None or chat_id is not None:
+        # Use edge-aware list when scope filters are provided.
+        all_todos = await manager.list(
+            user_id=user_id,
+            chat_id=chat_id,
+            include_done=show_all or show_done,
+            include_deleted=show_all or show_deleted,
         )
-    )
+    else:
+        all_todos = list(manager._todos().values())
+
+        if not (show_all or show_deleted):
+            all_todos = [t for t in all_todos if t.deleted_at is None]
+        if not (show_all or show_done):
+            all_todos = [t for t in all_todos if t.status == TodoStatus.OPEN]
+
+        all_todos.sort(
+            key=lambda t: (
+                0 if t.status == TodoStatus.OPEN else 1,
+                -t.created_at.timestamp(),
+            )
+        )
 
     if not all_todos:
         warning("No todos found")
@@ -224,17 +230,38 @@ async def _todo_list(
         else:
             due = "[dim]-[/dim]"
 
-        if todo.owner_user_id:
-            owner = todo.owner_user_id
-        elif todo.chat_id:
-            owner = f"chat:{todo.chat_id[:10]}"
-        else:
-            owner = "[dim]-[/dim]"
+        owner = _resolve_owner_display(graph, todo)
 
         table.add_row(todo.id, status, task, due, owner)
 
     console.print(table)
     console.print(f"\n[dim]Total: {len(all_todos)} todo(s)[/dim]")
+
+
+def _resolve_owner_display(graph, todo) -> str:
+    """Resolve display name for a todo's owner via graph edge traversal."""
+    from ash.graph.edges import TODO_OWNED_BY, TODO_SHARED_IN
+
+    owner_edges = graph.get_outgoing(todo.id, edge_type=TODO_OWNED_BY)
+    if owner_edges:
+        user_node = graph.users.get(owner_edges[0].target_id)
+        if user_node:
+            return (
+                user_node.display_name
+                or user_node.username
+                or todo.owner_user_id
+                or owner_edges[0].target_id
+            )
+        return todo.owner_user_id or owner_edges[0].target_id
+
+    chat_edges = graph.get_outgoing(todo.id, edge_type=TODO_SHARED_IN)
+    if chat_edges:
+        chat_node = graph.chats.get(chat_edges[0].target_id)
+        if chat_node and chat_node.title:
+            return f"chat:{chat_node.title}"
+        return f"chat:{todo.chat_id[:10] if todo.chat_id else chat_edges[0].target_id[:10]}"
+
+    return "[dim]-[/dim]"
 
 
 async def _todo_add(

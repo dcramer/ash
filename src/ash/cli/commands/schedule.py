@@ -144,6 +144,8 @@ def _schedule_list(graph_dir) -> None:
     """List all scheduled tasks."""
     from ash.cli.console import create_table
     from ash.config import get_default_config, load_config
+    from ash.graph.edges import resolve_chat_node_id
+    from ash.graph.persistence import GraphPersistence, hydrate_graph
     from ash.scheduling import ScheduleStore
 
     try:
@@ -156,6 +158,11 @@ def _schedule_list(graph_dir) -> None:
     if not entries:
         warning("No scheduled tasks found")
         return
+
+    # Load graph for chat name resolution.
+    persistence = GraphPersistence(graph_dir)
+    raw_data = persistence.load_raw_sync()
+    graph = hydrate_graph(raw_data)
 
     table = create_table(
         "Scheduled Tasks",
@@ -175,13 +182,20 @@ def _schedule_list(graph_dir) -> None:
             entry.message[:40] + "..." if len(entry.message) > 40 else entry.message
         )
 
-        # Display chat_title or truncated chat_id
+        # Display chat_title, or resolve via graph, or truncated chat_id.
         if entry.chat_title:
             chat = entry.chat_title
         elif entry.chat_id:
-            chat = (
-                entry.chat_id[:10] + "..." if len(entry.chat_id) > 10 else entry.chat_id
-            )
+            chat_node_id = resolve_chat_node_id(graph, entry.chat_id)
+            chat_node = graph.chats.get(chat_node_id) if chat_node_id else None
+            if chat_node and chat_node.title:
+                chat = chat_node.title
+            else:
+                chat = (
+                    entry.chat_id[:10] + "..."
+                    if len(entry.chat_id) > 10
+                    else entry.chat_id
+                )
         else:
             chat = "[dim]none[/dim]"
 

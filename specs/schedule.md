@@ -24,8 +24,16 @@ Registered schedule edges:
 - `SCHEDULE_FOR_CHAT`: `schedule_entry -> chat`
 - `SCHEDULE_FOR_USER`: `schedule_entry -> user`
 
-Relationship semantics (ownership/scope) are edge-canonical; node fields like
-`chat_id` and `user_id` are non-authoritative denormalized context.
+Edge targets MUST be graph node UUIDs (not raw provider IDs). Use
+`resolve_user_node_id` / `resolve_chat_node_id` from `ash.graph.edges` to
+bridge a provider-specific identifier to the canonical node ID before creating
+edges. Legacy edges with provider_id targets are migrated to graph node UUIDs
+at next write via `_migrate_legacy_edges`.
+
+`ScheduleEntry.user_id` and `ScheduleEntry.chat_id` store **provider IDs**
+(needed for message routing to the correct chat/user). Edges store graph node
+UUIDs for scope traversal. This intentional split means edges are authoritative
+for ownership/scope queries, while node fields are authoritative for routing.
 
 Legacy migration:
 - Import migration from `~/.ash/schedule.jsonl` into graph storage is upgrade-owned (`ash upgrade`).
