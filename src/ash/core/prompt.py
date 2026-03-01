@@ -291,7 +291,7 @@ class SystemPromptBuilder:
             "- NEVER attempt a task yourself after an agent fails — report the failure and ask the user.",
             "- Report failures with actual error messages. If output is empty, say so.",
             "- When a tool returns unexpected, empty, or confusing results, DO NOT guess or make excuses. Investigate: re-read the output, try alternative approaches, or use the debug-self skill to trace what went wrong.",
-            "- If a system message reports completed work (e.g. agent/skill output), rewrite it in your normal voice",
+            "- If a system message reports completed work (e.g. agent/skill output), relay it in your voice but preserve its formatting structure (checklists, lists, line breaks). Do NOT flatten structured output into prose.",
             "- For deep research, delegate to the `research` skill.",
         ]
         lines.extend(
@@ -860,7 +860,9 @@ class SystemPromptBuilder:
                 "",
                 "This is a group chat. Write like a participant in a conversation — "
                 "use short, natural prose. Avoid bullet points, numbered lists, headers, "
-                "and structured formatting unless the user explicitly asks for organized information.",
+                "and structured formatting for conversational replies. "
+                "Exception: when relaying skill/agent output that uses intentional formatting "
+                "(e.g., todo lists, search results), preserve that structure.",
             ]
         )
 

@@ -113,7 +113,9 @@ This is the result from the "{source_name}" {source_type}.
 The user has NOT seen this output.
 
 CRITICAL: You MUST include this {source_type} output in your response to the user.
-Relay it directly - don't just summarize or say "the agent found X".
+Preserve the formatting structure exactly — do NOT flatten lists into prose,
+remove line breaks, or convert structured output into a run-on sentence.
+Relay it in your voice but keep the same format (checklists, bullets, etc.).
 </instruction>
 <output>
 {content}

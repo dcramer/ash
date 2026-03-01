@@ -1,5 +1,5 @@
 ---
-description: Manage todos using the ash-sb todo CLI
+description: "Add, complete, list, edit, or delete todo items. Use whenever the user mentions tasks being done, asks what's left, wants to add/remove tasks, or references their todo list."
 max_iterations: 10
 ---
 

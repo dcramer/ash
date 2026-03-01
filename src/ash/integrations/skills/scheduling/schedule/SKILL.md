@@ -1,5 +1,5 @@
 ---
-description: Create and manage scheduled tasks, reminders, and recurring checks
+description: "Create, list, update, or cancel scheduled tasks and reminders. Use whenever the user asks to be reminded, wants something to happen at a specific time, sets up recurring checks, or asks about upcoming scheduled items."
 max_iterations: 10
 ---
 
