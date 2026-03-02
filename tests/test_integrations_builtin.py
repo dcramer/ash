@@ -372,9 +372,11 @@ async def test_capabilities_integration_registers_configured_provider(
             namespace: str,
             command: list[str] | str,
             timeout_seconds: float = 30.0,
+            env: dict[str, str] | None = None,
         ) -> None:
             _ = command
             _ = timeout_seconds
+            _ = env
             self.namespace = namespace
 
         async def definitions(self) -> list[CapabilityDefinition]:

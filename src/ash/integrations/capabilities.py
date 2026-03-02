@@ -126,4 +126,5 @@ def _create_capability_provider(
         namespace=config.namespace or provider_name,
         command=config.command,
         timeout_seconds=config.timeout_seconds,
+        env=config.env or None,
     )

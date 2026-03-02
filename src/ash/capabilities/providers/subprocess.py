@@ -46,6 +46,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
         command: list[str] | str,
         timeout_seconds: float = 30.0,
         context_token_service: ContextTokenService | None = None,
+        env: dict[str, str] | None = None,
     ) -> None:
         normalized_namespace = str(namespace).strip()
         if not normalized_namespace:
@@ -56,6 +57,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
         self._context_token_service = (
             context_token_service or get_default_context_token_service()
         )
+        self._extra_env: dict[str, str] = dict(env) if env else {}
 
     @property
     def namespace(self) -> str:
@@ -300,6 +302,8 @@ class SubprocessCapabilityProvider(CapabilityProvider):
 
     def _bridge_environment(self) -> dict[str, str]:
         env = dict(os.environ)
+        if self._extra_env:
+            env.update(self._extra_env)
         env[ENV_SECRET] = self._context_token_service.export_verifier_secret()
         return env
 

@@ -42,8 +42,8 @@ MAX_AUTH_FLOW_TTL_SECONDS = 3600
 ENV_GOOGLE_CLIENT_ID = "GOOGLE_CLIENT_ID"
 ENV_GOOGLE_CLIENT_SECRET = "GOOGLE_CLIENT_SECRET"  # noqa: S105
 
-GOOGLE_DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
-GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105
+ENV_GOOGLE_OAUTH_BASE_URL = "GOOGLE_OAUTH_BASE_URL"
+DEFAULT_GOOGLE_OAUTH_BASE_URL = "https://oauth2.googleapis.com"
 DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 
 CAPABILITY_SCOPES: dict[str, str] = {
@@ -324,6 +324,19 @@ def _require_namespaced_capability(capability_id: Any) -> str:
     return capability
 
 
+def _google_oauth_base_url() -> str:
+    value = _optional_text(os.environ.get(ENV_GOOGLE_OAUTH_BASE_URL))
+    return value or DEFAULT_GOOGLE_OAUTH_BASE_URL
+
+
+def _google_device_code_url() -> str:
+    return f"{_google_oauth_base_url()}/device/code"
+
+
+def _google_token_url() -> str:
+    return f"{_google_oauth_base_url()}/token"
+
+
 def _google_client_id() -> str:
     value = _optional_text(os.environ.get(ENV_GOOGLE_CLIENT_ID))
     if not value:
@@ -434,73 +447,45 @@ def _handle_auth_begin(params: dict[str, Any]) -> dict[str, Any]:
     flow_id = f"gaf_{secrets.token_hex(12)}"
     expires_epoch = now_epoch + _auth_flow_ttl_seconds()
 
-    # Use device code flow when Google OAuth credentials are configured,
-    # otherwise fall back to legacy authorization_code placeholder flow.
-    client_id = _optional_text(os.environ.get(ENV_GOOGLE_CLIENT_ID))
-    client_secret = _optional_text(os.environ.get(ENV_GOOGLE_CLIENT_SECRET))
+    # Require Google OAuth credentials — fail loudly when not configured.
+    client_id = _google_client_id()
+    _google_client_secret()  # validate presence early
     scope = CAPABILITY_SCOPES.get(capability_id)
-
-    if client_id and client_secret and scope:
-        # Device code flow (RFC 8628)
-        device_resp = _http_post_form(
-            GOOGLE_DEVICE_CODE_URL,
-            {"client_id": client_id, "scope": scope},
+    if not scope:
+        raise BridgeError(
+            "capability_invalid_input",
+            f"no OAuth scopes configured for {capability_id}",
         )
-        device_error = _optional_text(device_resp.get("error"))
-        if device_error:
-            error_desc = (
-                _optional_text(device_resp.get("error_description")) or device_error
-            )
-            raise BridgeError(
-                "capability_backend_unavailable",
-                f"Google device code request failed: {error_desc}",
-            )
 
-        device_code = _optional_text(device_resp.get("device_code"))
-        user_code = _optional_text(device_resp.get("user_code"))
-        verification_url = _optional_text(device_resp.get("verification_url"))
-        google_interval = _int_claim(device_resp, "interval") or 5
-        google_expires_in = _int_claim(device_resp, "expires_in")
+    # Device code flow (RFC 8628)
+    device_resp = _http_post_form(
+        _google_device_code_url(),
+        {"client_id": client_id, "scope": scope},
+    )
+    device_error = _optional_text(device_resp.get("error"))
+    if device_error:
+        error_desc = (
+            _optional_text(device_resp.get("error_description")) or device_error
+        )
+        raise BridgeError(
+            "capability_backend_unavailable",
+            f"Google device code request failed: {error_desc}",
+        )
 
-        if not device_code or not user_code or not verification_url:
-            raise BridgeError(
-                "capability_backend_unavailable",
-                "Google device code response missing required fields",
-            )
+    device_code = _optional_text(device_resp.get("device_code"))
+    user_code = _optional_text(device_resp.get("user_code"))
+    verification_url = _optional_text(device_resp.get("verification_url"))
+    google_interval = _int_claim(device_resp, "interval") or 5
+    google_expires_in = _int_claim(device_resp, "expires_in")
 
-        if google_expires_in and google_expires_in < (expires_epoch - now_epoch):
-            expires_epoch = now_epoch + google_expires_in
+    if not device_code or not user_code or not verification_url:
+        raise BridgeError(
+            "capability_backend_unavailable",
+            "Google device code response missing required fields",
+        )
 
-        state = _read_state()
-        _prune_expired_flows(state=state, now_epoch=now_epoch)
-        state["auth_flows"][flow_id] = {
-            "user_id": claims.user_id,
-            "capability_id": capability_id,
-            "account_hint": account_hint,
-            "nonce": nonce,
-            "issued_at": now_epoch,
-            "expires_at": expires_epoch,
-            "device_code": device_code,
-            "poll_interval": google_interval,
-        }
-        _write_state(state)
-
-        flow_state = {
-            "flow_id": flow_id,
-            "nonce": nonce,
-            "device_code": device_code,
-        }
-        return {
-            "auth_url": verification_url,
-            "expires_at": _iso8601_utc(expires_epoch),
-            "flow_state": flow_state,
-            "flow_type": "device_code",
-            "user_code": user_code,
-            "poll_interval_seconds": google_interval,
-        }
-
-    # Legacy authorization_code placeholder flow (no Google credentials configured)
-    from urllib.parse import quote_plus
+    if google_expires_in and google_expires_in < (expires_epoch - now_epoch):
+        expires_epoch = now_epoch + google_expires_in
 
     state = _read_state()
     _prune_expired_flows(state=state, now_epoch=now_epoch)
@@ -511,23 +496,23 @@ def _handle_auth_begin(params: dict[str, Any]) -> dict[str, Any]:
         "nonce": nonce,
         "issued_at": now_epoch,
         "expires_at": expires_epoch,
+        "device_code": device_code,
+        "poll_interval": google_interval,
     }
     _write_state(state)
+
     flow_state = {
         "flow_id": flow_id,
         "nonce": nonce,
+        "device_code": device_code,
     }
-    auth_url = (
-        "https://auth.gog.local/authorize"
-        f"?capability={quote_plus(capability_id)}"
-        f"&account={quote_plus(account_hint)}"
-        f"&flow_id={quote_plus(flow_id)}"
-        f"&nonce={quote_plus(nonce)}"
-    )
     return {
-        "auth_url": auth_url,
+        "auth_url": verification_url,
         "expires_at": _iso8601_utc(expires_epoch),
         "flow_state": flow_state,
+        "flow_type": "device_code",
+        "user_code": user_code,
+        "poll_interval_seconds": google_interval,
     }
 
 
@@ -589,7 +574,7 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
     client_secret = _google_client_secret()
 
     token_resp = _http_post_form(
-        GOOGLE_TOKEN_URL,
+        _google_token_url(),
         {
             "client_id": client_id,
             "client_secret": client_secret,
@@ -897,7 +882,7 @@ def _refresh_token_if_needed(*, account_key: str, vault_ref: str | None) -> None
     except BridgeError:
         return
     token_resp = _http_post_form(
-        GOOGLE_TOKEN_URL,
+        _google_token_url(),
         {
             "client_id": client_id,
             "client_secret": client_secret,

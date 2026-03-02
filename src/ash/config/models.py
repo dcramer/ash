@@ -246,6 +246,7 @@ class CapabilityProviderConfig(BaseModel):
     namespace: str | None = None
     command: list[str]
     timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
+    env: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -788,6 +789,17 @@ def _apply_google_skill_provider_preset(data: dict[str, Any]) -> None:
         ],
     )
     provider_gog.setdefault("timeout_seconds", 30.0)
+
+    # Wire Google OAuth credentials from skill config into provider env
+    # so the bridge subprocess receives them.
+    provider_env = provider_gog.setdefault("env", {})
+    google_client_id = google_skill.get("google_client_id")
+    google_client_secret = google_skill.get("google_client_secret")
+    if isinstance(google_client_id, str) and google_client_id.strip():
+        provider_env.setdefault("GOOGLE_CLIENT_ID", google_client_id.strip())
+    if isinstance(google_client_secret, str) and google_client_secret.strip():
+        provider_env.setdefault("GOOGLE_CLIENT_SECRET", google_client_secret.strip())
+
     providers["gog"] = provider_gog
     capabilities["providers"] = providers
     data["capabilities"] = capabilities

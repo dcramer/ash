@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs
 
 import pytest
 
@@ -12,8 +16,6 @@ from ash.context_token import ContextTokenService
 from ash.rpc.methods.capability import register_capability_methods
 from ash.rpc.server import RPCServer
 from ash.security.vault import FileVault
-
-_BRIDGE_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "gogcli_bridge.py"
 
 
 def _token(
@@ -51,10 +53,116 @@ async def _rpc(
     return await server._process_request(json.dumps(payload).encode("utf-8"))
 
 
+# ---------------------------------------------------------------------------
+# Fake Google OAuth server for device code flow
+# ---------------------------------------------------------------------------
+
+_FAKE_USER_CODE = "ABCD-EFGH"
+_FAKE_VERIFICATION_URL = "https://www.google.com/device"
+_FAKE_ACCESS_TOKEN = "ya29.fake-access-token"  # noqa: S105
+_FAKE_REFRESH_TOKEN = "1//fake-refresh-token"  # noqa: S105
+
+# Shared mutable state for the fake server.
+_device_code_counter = 0
+_poll_counts: dict[str, int] = {}
+
+
+class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
+    """Handles device code and token endpoints with canned responses."""
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        pass  # suppress noisy request logging
+
+    def do_POST(self) -> None:  # noqa: N802
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length).decode("utf-8")
+        params = parse_qs(body)
+
+        if self.path == "/device/code":
+            self._handle_device_code(params)
+        elif self.path == "/token":
+            self._handle_token(params)
+        else:
+            self._json_response(404, {"error": "not_found"})
+
+    def _handle_device_code(self, params: dict[str, list[str]]) -> None:
+        global _device_code_counter  # noqa: PLW0603
+        _device_code_counter += 1
+        device_code = f"fake-device-code-{_device_code_counter}"
+        self._json_response(
+            200,
+            {
+                "device_code": device_code,
+                "user_code": _FAKE_USER_CODE,
+                "verification_url": _FAKE_VERIFICATION_URL,
+                "expires_in": 1800,
+                "interval": 1,
+            },
+        )
+
+    def _handle_token(self, params: dict[str, list[str]]) -> None:
+        grant_type = (params.get("grant_type") or [""])[0]
+        device_code = (params.get("device_code") or [""])[0]
+
+        if grant_type == "urn:ietf:params:oauth:grant-type:device_code":
+            # First poll per device code returns pending, second returns tokens.
+            count = _poll_counts.get(device_code, 0)
+            _poll_counts[device_code] = count + 1
+            if count == 0:
+                self._json_response(
+                    428,
+                    {"error": "authorization_pending"},
+                )
+            else:
+                self._json_response(
+                    200,
+                    {
+                        "access_token": _FAKE_ACCESS_TOKEN,
+                        "refresh_token": _FAKE_REFRESH_TOKEN,
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                    },
+                )
+        elif grant_type == "refresh_token":
+            self._json_response(
+                200,
+                {
+                    "access_token": _FAKE_ACCESS_TOKEN,
+                    "token_type": "Bearer",
+                    "expires_in": 3600,
+                },
+            )
+        else:
+            self._json_response(400, {"error": "unsupported_grant_type"})
+
+    def _json_response(self, status: int, body: dict[str, Any]) -> None:
+        payload = json.dumps(body).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+@pytest.fixture()
+def fake_google_oauth():
+    """Start a local HTTP server mimicking Google OAuth endpoints."""
+    global _device_code_counter  # noqa: PLW0603
+    _device_code_counter = 0
+    _poll_counts.clear()
+    server = HTTPServer(("127.0.0.1", 0), _FakeGoogleOAuthHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{port}"
+    server.shutdown()
+
+
 @pytest.mark.asyncio
 async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    fake_google_oauth: str,
 ) -> None:
     state_path = tmp_path / "gogcli-state.json"
     vault_path = tmp_path / "vault"
@@ -65,8 +173,18 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     manager = CapabilityManager(auth_flow_ttl_seconds=300)
     provider = SubprocessCapabilityProvider(
         namespace="gog",
-        command=[sys.executable, str(_BRIDGE_SCRIPT), "bridge"],
+        command=[
+            sys.executable,
+            "-m",
+            "ash.skills.bundled.gog.scripts.gogcli_bridge",
+            "bridge",
+        ],
         context_token_service=service,
+        env={
+            "GOOGLE_CLIENT_ID": "fake-client-id",
+            "GOOGLE_CLIENT_SECRET": "fake-client-secret",
+            "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        },
     )
     await manager.register_provider(provider)
 
@@ -92,6 +210,7 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
         chat_id="dm-user-2",
     )
 
+    # ---- List capabilities (private vs group) ----
     list_private = await _rpc(
         server,
         request_id=1,
@@ -119,6 +238,7 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert group_caps["gog.email"]["available"] is False
     assert group_caps["gog.calendar"]["available"] is False
 
+    # ---- Auth begin (device code flow) for email ----
     begin_email = await _rpc(
         server,
         request_id=3,
@@ -131,25 +251,43 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     )
     assert begin_email.error is None
     assert isinstance(begin_email.result, dict)
+    assert begin_email.result["flow_type"] == "device_code"
+    assert begin_email.result["user_code"] == _FAKE_USER_CODE
+    assert begin_email.result["auth_url"] == _FAKE_VERIFICATION_URL
     email_flow_id = str(begin_email.result["flow_id"])
 
-    complete_email = await _rpc(
+    # ---- Auth poll (first poll = pending) ----
+    poll_pending = await _rpc(
         server,
         request_id=4,
-        method="capability.auth.complete",
+        method="capability.auth.poll",
         params={
             "context_token": user1_private,
             "flow_id": email_flow_id,
-            "code": "sample-email-code",
         },
     )
-    assert complete_email.error is None
-    assert isinstance(complete_email.result, dict)
-    assert complete_email.result["ok"] is True
+    assert poll_pending.error is None
+    assert isinstance(poll_pending.result, dict)
+    assert poll_pending.result["status"] == "pending"
 
-    invoke_email = await _rpc(
+    # ---- Auth poll (second poll = complete) ----
+    poll_complete = await _rpc(
         server,
         request_id=5,
+        method="capability.auth.poll",
+        params={
+            "context_token": user1_private,
+            "flow_id": email_flow_id,
+        },
+    )
+    assert poll_complete.error is None
+    assert isinstance(poll_complete.result, dict)
+    assert poll_complete.result["ok"] is True
+
+    # ---- Invoke email list_messages ----
+    invoke_email = await _rpc(
+        server,
+        request_id=6,
         method="capability.invoke",
         params={
             "context_token": user1_private,
@@ -167,9 +305,10 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert "refresh_token" not in serialized_email_output
     assert "client_secret" not in serialized_email_output
 
+    # ---- Auth begin + poll for calendar ----
     begin_calendar = await _rpc(
         server,
-        request_id=6,
+        request_id=7,
         method="capability.auth.begin",
         params={
             "context_token": user1_private,
@@ -179,25 +318,38 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     )
     assert begin_calendar.error is None
     assert isinstance(begin_calendar.result, dict)
+    assert begin_calendar.result["flow_type"] == "device_code"
     calendar_flow_id = str(begin_calendar.result["flow_id"])
 
-    complete_calendar = await _rpc(
+    # First poll = pending
+    await _rpc(
         server,
-        request_id=7,
-        method="capability.auth.complete",
+        request_id=8,
+        method="capability.auth.poll",
         params={
             "context_token": user1_private,
             "flow_id": calendar_flow_id,
-            "code": "sample-calendar-code",
         },
     )
-    assert complete_calendar.error is None
-    assert isinstance(complete_calendar.result, dict)
-    assert complete_calendar.result["ok"] is True
 
+    # Second poll = complete
+    poll_calendar_complete = await _rpc(
+        server,
+        request_id=9,
+        method="capability.auth.poll",
+        params={
+            "context_token": user1_private,
+            "flow_id": calendar_flow_id,
+        },
+    )
+    assert poll_calendar_complete.error is None
+    assert isinstance(poll_calendar_complete.result, dict)
+    assert poll_calendar_complete.result["ok"] is True
+
+    # ---- Invoke calendar list_events ----
     invoke_calendar = await _rpc(
         server,
-        request_id=8,
+        request_id=10,
         method="capability.invoke",
         params={
             "context_token": user1_private,
@@ -211,9 +363,10 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     calendar_output = invoke_calendar.result["output"]
     assert calendar_output["count"] == 1
 
+    # ---- Policy: group chat blocked ----
     group_blocked = await _rpc(
         server,
-        request_id=9,
+        request_id=11,
         method="capability.invoke",
         params={
             "context_token": user1_group,
@@ -225,9 +378,10 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert group_blocked.error is not None
     assert "capability_access_denied" in group_blocked.error.message
 
+    # ---- Policy: user2 not authed ----
     user2_blocked = await _rpc(
         server,
-        request_id=10,
+        request_id=12,
         method="capability.invoke",
         params={
             "context_token": user2_private,
@@ -239,9 +393,11 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert user2_blocked.error is not None
     assert "capability_auth_required" in user2_blocked.error.message
 
+    # ---- Verify state does not leak secrets ----
     state_text = state_path.read_text(encoding="utf-8")
-    assert "sample-email-code" not in state_text
-    assert "sample-calendar-code" not in state_text
+    assert _FAKE_ACCESS_TOKEN not in state_text
+    assert _FAKE_REFRESH_TOKEN not in state_text
+    assert "fake-client-secret" not in state_text
 
     state_payload = json.loads(state_text)
     email_account = state_payload["accounts"]["user-1:gog.email:work"]
@@ -252,5 +408,5 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     calendar_vault_payload = vault.get_json(calendar_account["vault_ref"])
     assert isinstance(email_vault_payload, dict)
     assert isinstance(calendar_vault_payload, dict)
-    assert email_vault_payload["auth_exchange"]["code"] == "sample-email-code"
-    assert calendar_vault_payload["auth_exchange"]["code"] == "sample-calendar-code"
+    assert email_vault_payload["access_token"] == _FAKE_ACCESS_TOKEN
+    assert calendar_vault_payload["access_token"] == _FAKE_ACCESS_TOKEN
