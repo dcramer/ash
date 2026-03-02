@@ -174,6 +174,7 @@ class SearchMixin:
         owner_user_id: str | None = None,
         chat_id: str | None = None,
         learned_in_chat_id: str | None = None,
+        query_embedding: list[float] | None = None,
     ) -> list[SearchResult]:
         # Pre-compute learned-in filter set
         learned_in_ids: set[str] | None = None
@@ -182,9 +183,10 @@ class SearchMixin:
                 self._graph, learned_in_chat_id
             )
 
-        # Vector search
+        # Vector search (use pre-computed embedding if provided)
         try:
-            query_embedding = await self._embeddings.embed(query)
+            if query_embedding is None:
+                query_embedding = await self._embeddings.embed(query)
         except Exception:
             logger.warning("query_embedding_failed", exc_info=True)
             return []
@@ -273,6 +275,7 @@ class SearchMixin:
         max_memories: int = 10,
         chat_type: str | None = None,
         participant_person_ids: dict[str, set[str]] | None = None,
+        query_embedding: list[float] | None = None,
     ) -> RetrievedContext:
         """Get context for a message using the retrieval pipeline."""
         pipeline = RetrievalPipeline(self)
@@ -283,5 +286,6 @@ class SearchMixin:
             max_memories=max_memories,
             chat_type=chat_type,
             participant_person_ids=participant_person_ids or {},
+            query_embedding=query_embedding,
         )
         return await pipeline.retrieve(context)

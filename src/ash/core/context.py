@@ -6,6 +6,7 @@ class that handles memory lookup, participant resolution, and context assembly.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -285,25 +286,50 @@ class ContextGatherer:
         query_plan: PlannedMemoryQuery,
     ) -> RetrievedContext | None:
         assert self._store is not None
+        store = self._store
 
-        contexts: list[RetrievedContext] = []
-        for planned_query in self._planned_queries(query_plan):
+        planned_queries = self._planned_queries(query_plan)
+        if not planned_queries:
+            return None
+
+        # Batch-embed all queries in a single API call
+        embeddings: list[list[float] | None]
+        try:
+            raw = await store._embeddings.embed_batch(list(planned_queries))
+            embeddings = list(raw)
+        except Exception:
+            logger.warning("batch_embedding_failed", exc_info=True)
+            embeddings = [None] * len(planned_queries)
+
+        max_memories = max(1, query_plan.max_results)
+
+        async def _retrieve_single(
+            query: str, embedding: list[float] | None
+        ) -> RetrievedContext | None:
             try:
-                context = await self._store.get_context_for_message(
+                return await store.get_context_for_message(
                     user_id=user_id,
-                    user_message=planned_query,
+                    user_message=query,
                     chat_id=chat_id,
-                    max_memories=max(1, query_plan.max_results),
+                    max_memories=max_memories,
                     chat_type=chat_type,
                     participant_person_ids=participant_person_ids,
+                    query_embedding=embedding,
                 )
             except Exception as error:
                 logger.warning(
                     "memory_query_retrieval_failed",
-                    extra={"error.message": str(error), "query": planned_query},
+                    extra={"error.message": str(error), "query": query},
                 )
-                continue
-            contexts.append(context)
+                return None
+
+        results = await asyncio.gather(
+            *(
+                _retrieve_single(query, emb)
+                for query, emb in zip(planned_queries, embeddings, strict=True)
+            )
+        )
+        contexts = [r for r in results if r is not None]
 
         if not contexts:
             return None

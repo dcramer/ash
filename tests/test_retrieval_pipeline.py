@@ -107,6 +107,7 @@ class TestRetrievalPipeline:
             limit=10,
             owner_user_id="user-1",
             chat_id="chat-1",
+            query_embedding=None,
         )
         assert len(result.memories) == 1
 

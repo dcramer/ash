@@ -57,6 +57,9 @@ class RetrievalContext:
     chat_type: str | None = None
     participant_person_ids: dict[str, set[str]] = field(default_factory=dict)
     graph_chat_id: str | None = None  # Graph chat node ID for contextual disclosure
+    query_embedding: list[float] | None = (
+        None  # Pre-computed embedding to skip embed call
+    )
 
 
 class RetrievalPipeline:
@@ -96,6 +99,7 @@ class RetrievalPipeline:
                 limit=context.max_memories,
                 owner_user_id=context.user_id,
                 chat_id=context.chat_id,
+                query_embedding=context.query_embedding,
             )
         except Exception:
             logger.error("primary_search_failed", exc_info=True)
