@@ -43,6 +43,7 @@ class CapabilityAuthFlow:
     account_hint: str | None
     expires_at: datetime
     flow_state: dict[str, Any] = field(default_factory=dict)
+    flow_type: str = "authorization_code"
 
 
 @dataclass(slots=True)

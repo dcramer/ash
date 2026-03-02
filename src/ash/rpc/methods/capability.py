@@ -112,10 +112,29 @@ def register_capability_methods(
             raise ValueError(f"{e.code}: {e}") from e
         return {"ok": bool(result.get("ok")), "account_ref": result["account_ref"]}
 
+    async def capability_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
+        flow_id = _required_text(params, "flow_id")
+        user_id = _required_text(params, "user_id")
+        try:
+            return await manager.auth_poll(
+                flow_id=flow_id,
+                user_id=user_id,
+                chat_id=_optional_text(params, "chat_id"),
+                chat_type=_optional_text(params, "chat_type"),
+                provider=_optional_text(params, "provider"),
+                thread_id=_optional_text(params, "thread_id"),
+                session_key=_optional_text(params, "session_key"),
+                source_username=_optional_text(params, "source_username"),
+                source_display_name=_optional_text(params, "source_display_name"),
+            )
+        except CapabilityError as e:
+            raise ValueError(f"{e.code}: {e}") from e
+
     server.register("capability.list", capability_list)
     server.register("capability.invoke", capability_invoke)
     server.register("capability.auth.begin", capability_auth_begin)
     server.register("capability.auth.complete", capability_auth_complete)
+    server.register("capability.auth.poll", capability_auth_poll)
 
     logger.debug("Registered capability RPC methods")
 

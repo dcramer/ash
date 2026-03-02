@@ -9,6 +9,7 @@ import pytest
 from ash.capabilities import (
     CapabilityAuthBeginResult,
     CapabilityAuthCompleteResult,
+    CapabilityAuthPollResult,
     CapabilityCallContext,
     CapabilityDefinition,
     CapabilityManager,
@@ -90,6 +91,15 @@ class _ContextCaptureProvider:
         _ = idempotency_key
         self.invoke_context = context
         return {"status": "ok"}
+
+    async def auth_poll(
+        self,
+        *,
+        capability_id: str,
+        flow_state: dict[str, Any],
+        context: CapabilityCallContext,
+    ) -> CapabilityAuthPollResult:
+        return CapabilityAuthPollResult(status="pending", retry_after_seconds=5)
 
 
 @pytest.mark.asyncio

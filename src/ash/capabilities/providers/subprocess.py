@@ -20,6 +20,7 @@ from typing import Any
 from ash.capabilities.providers.base import (
     CapabilityAuthBeginResult,
     CapabilityAuthCompleteResult,
+    CapabilityAuthPollResult,
     CapabilityCallContext,
     CapabilityProvider,
 )
@@ -90,10 +91,63 @@ class SubprocessCapabilityProvider(CapabilityProvider):
             code="capability_invalid_output",
             message="bridge auth_begin must return auth_url",
         )
+        flow_type = str(result.get("flow_type") or "authorization_code").strip()
+        raw_user_code = result.get("user_code")
+        user_code = str(raw_user_code).strip() if raw_user_code is not None else None
+        raw_poll_interval = result.get("poll_interval_seconds")
+        poll_interval: int | None = None
+        if raw_poll_interval is not None:
+            try:
+                poll_interval = int(raw_poll_interval)
+            except (TypeError, ValueError):
+                pass
         return CapabilityAuthBeginResult(
             auth_url=auth_url,
             expires_at=_parse_optional_datetime(result.get("expires_at")),
             flow_state=_as_object(result.get("flow_state"), default={}),
+            flow_type=flow_type,
+            user_code=user_code,
+            poll_interval_seconds=poll_interval,
+        )
+
+    async def auth_poll(
+        self,
+        *,
+        capability_id: str,
+        flow_state: dict[str, Any],
+        context: CapabilityCallContext,
+    ) -> CapabilityAuthPollResult:
+        result = await self._call_bridge(
+            "auth_poll",
+            {
+                "capability_id": capability_id,
+                "flow_state": dict(flow_state),
+                "context_token": self._issue_context_token(context),
+            },
+        )
+        status = _required_text(
+            value=result.get("status"),
+            code="capability_invalid_output",
+            message="bridge auth_poll must return status",
+        )
+        raw_retry = result.get("retry_after_seconds")
+        retry_after: int | None = None
+        if raw_retry is not None:
+            try:
+                retry_after = int(raw_retry)
+            except (TypeError, ValueError):
+                pass
+        account_ref = result.get("account_ref")
+        if account_ref is not None:
+            account_ref = str(account_ref).strip() or None
+        return CapabilityAuthPollResult(
+            status=status,
+            retry_after_seconds=retry_after,
+            account_ref=account_ref,
+            credential_material=_as_object(
+                result.get("credential_material"), default={}
+            ),
+            metadata=_as_object(result.get("metadata"), default={}),
         )
 
     async def auth_complete(

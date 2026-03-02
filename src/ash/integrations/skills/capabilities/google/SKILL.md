@@ -74,32 +74,32 @@ Expected output:
 ```
 Started capability auth flow (flow_id=abc123)
   Capability: gog.email
-  Auth URL: https://accounts.google.com/o/oauth2/...
+  Auth URL: https://www.google.com/device
+  Flow type: device_code
+  User code: ABCD-EFGH
+  Poll interval: 5s
   Expires: 2026-03-01T12:30:00Z
 ```
 
-**2b. Present URL to user**
+**2b. Present URL and code to user**
 
-Show the `Auth URL` from the output and ask the user to open it, complete the Google consent screen, and provide either the authorization code or the callback URL.
+Check the `Flow type` in the output:
 
-**2c. Complete auth flow**
+- If `device_code`: show the `Auth URL` and `User code` from the output. Tell the user to open the URL and enter the code. Then proceed to step 2c to poll for completion.
+- If `authorization_code`: show the `Auth URL` from the output and ask the user to complete the Google consent screen and provide either the authorization code or the callback URL. Then use `ash-sb capability auth complete --flow-id <id> --code <CODE>`.
 
-Once the user provides a code or callback URL:
+**2c. Poll for completion (device code flow)**
 
-```bash
-ash-sb capability auth complete --flow-id abc123 --code <CODE>
-```
-
-Or with callback URL:
+After showing the user the URL and code, poll for completion:
 
 ```bash
-ash-sb capability auth complete --flow-id abc123 --callback-url <URL>
+ash-sb capability auth poll --flow-id abc123 --timeout 300
 ```
 
-Expected output:
+This blocks until the user completes authorization or the timeout expires. Expected output on success:
 
 ```
-Capability auth completed (flow_id=abc123, account_ref=user@gmail.com)
+Capability auth completed (flow_id=abc123, account_ref=default)
 ```
 
 **2d. Repeat for additional capabilities**

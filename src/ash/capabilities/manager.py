@@ -14,6 +14,7 @@ from typing import Any
 from ash.capabilities.providers import (
     CapabilityAuthBeginResult,
     CapabilityAuthCompleteResult,
+    CapabilityAuthPollResult,
     CapabilityCallContext,
     CapabilityProvider,
 )
@@ -271,6 +272,7 @@ class CapabilityManager:
         expires_at = begin_result.expires_at or (
             datetime.now(UTC) + timedelta(seconds=self._auth_flow_ttl_seconds)
         )
+        flow_type = begin_result.flow_type or "authorization_code"
         async with self._lock:
             self._auth_flows[flow_id] = CapabilityAuthFlow(
                 flow_id=flow_id,
@@ -279,13 +281,20 @@ class CapabilityManager:
                 account_hint=normalized_account_hint,
                 expires_at=expires_at,
                 flow_state=dict(begin_result.flow_state),
+                flow_type=flow_type,
             )
 
-        return {
+        result: dict[str, Any] = {
             "flow_id": flow_id,
             "auth_url": begin_result.auth_url,
             "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+            "flow_type": flow_type,
         }
+        if begin_result.user_code is not None:
+            result["user_code"] = begin_result.user_code
+        if begin_result.poll_interval_seconds is not None:
+            result["poll_interval_seconds"] = begin_result.poll_interval_seconds
+        return result
 
     async def auth_complete(
         self,
@@ -385,6 +394,96 @@ class CapabilityManager:
             del self._auth_flows[normalized_flow_id]
 
         return {"ok": True, "account_ref": account_ref}
+
+    async def auth_poll(
+        self,
+        *,
+        flow_id: str,
+        user_id: str,
+        chat_id: str | None = None,
+        chat_type: str | None = None,
+        provider: str | None = None,
+        thread_id: str | None = None,
+        session_key: str | None = None,
+        source_username: str | None = None,
+        source_display_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Poll a pending device code auth flow."""
+        normalized_user_id = _required_text(
+            value=user_id,
+            code="capability_invalid_input",
+            message="user_id is required",
+        )
+        normalized_flow_id = _required_text(
+            value=flow_id,
+            code="capability_invalid_input",
+            message="flow_id is required",
+        )
+
+        async with self._lock:
+            self._prune_expired_flows_locked()
+            flow = self._auth_flows.get(normalized_flow_id)
+            if flow is None:
+                raise CapabilityError(
+                    "capability_auth_flow_invalid",
+                    f"auth flow is invalid or expired: {normalized_flow_id}",
+                )
+            if flow.user_id != normalized_user_id:
+                raise CapabilityError(
+                    "capability_auth_flow_invalid",
+                    "auth flow does not belong to caller",
+                )
+            if flow.flow_type != "device_code":
+                raise CapabilityError(
+                    "capability_invalid_input",
+                    "auth_poll is only supported for device_code flows",
+                )
+            _, provider_impl = self._get_definition_and_provider_locked(
+                flow.capability_id
+            )
+
+        call_context = CapabilityCallContext(
+            user_id=normalized_user_id,
+            chat_id=_optional_text(chat_id),
+            chat_type=_optional_text(chat_type),
+            provider=_optional_text(provider),
+            thread_id=_optional_text(thread_id),
+            session_key=_optional_text(session_key),
+            source_username=_optional_text(source_username),
+            source_display_name=_optional_text(source_display_name),
+        )
+        poll_result = await self._provider_auth_poll(
+            provider_impl,
+            capability_id=flow.capability_id,
+            flow_state=dict(flow.flow_state),
+            context=call_context,
+        )
+
+        if poll_result.status == "complete":
+            account_ref = _required_text(
+                value=poll_result.account_ref,
+                code="capability_invalid_output",
+                message="auth poll completion must return account_ref",
+            )
+            now = datetime.now(UTC)
+            async with self._lock:
+                self._accounts[(flow.user_id, flow.capability_id, account_ref)] = (
+                    CapabilityAccount(
+                        capability_id=flow.capability_id,
+                        user_id=flow.user_id,
+                        account_ref=account_ref,
+                        created_at=now,
+                        credential_material=dict(poll_result.credential_material),
+                        metadata=dict(poll_result.metadata),
+                    )
+                )
+                del self._auth_flows[normalized_flow_id]
+            return {"ok": True, "account_ref": account_ref}
+
+        return {
+            "status": "pending",
+            "retry_after_seconds": poll_result.retry_after_seconds,
+        }
 
     async def invoke(
         self,
@@ -543,6 +642,28 @@ class CapabilityManager:
             auth_url=auth_url,
             expires_at=result.expires_at,
             flow_state=dict(result.flow_state),
+            flow_type=result.flow_type or "authorization_code",
+            user_code=result.user_code,
+            poll_interval_seconds=result.poll_interval_seconds,
+        )
+
+    async def _provider_auth_poll(
+        self,
+        provider_impl: CapabilityProvider | None,
+        *,
+        capability_id: str,
+        flow_state: dict[str, Any],
+        context: CapabilityCallContext,
+    ) -> CapabilityAuthPollResult:
+        if provider_impl is None:
+            raise CapabilityError(
+                "capability_invalid_input",
+                "auth_poll requires a provider-backed capability",
+            )
+        return await provider_impl.auth_poll(
+            capability_id=capability_id,
+            flow_state=flow_state,
+            context=context,
         )
 
     async def _provider_auth_complete(

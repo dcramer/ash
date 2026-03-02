@@ -9,6 +9,7 @@ import pytest
 from ash.capabilities import (
     CapabilityAuthBeginResult,
     CapabilityAuthCompleteResult,
+    CapabilityAuthPollResult,
     CapabilityCallContext,
     CapabilityDefinition,
     CapabilityError,
@@ -116,6 +117,15 @@ class _RecordingProvider:
             "idempotency_key": idempotency_key,
             "context_user": context.user_id,
         }
+
+    async def auth_poll(
+        self,
+        *,
+        capability_id: str,
+        flow_state: dict[str, Any],
+        context: CapabilityCallContext,
+    ) -> CapabilityAuthPollResult:
+        return CapabilityAuthPollResult(status="pending", retry_after_seconds=5)
 
 
 class _PartiallyInvalidProvider(_RecordingProvider):
