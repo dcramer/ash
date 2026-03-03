@@ -294,10 +294,15 @@ Without `--timeout`, performs a single poll and returns immediately.
 
 ## Google OAuth Specifics
 
-- **Client type**: "TVs and Limited Input devices" in Google Cloud Console.
-- **Scopes**: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`.
-- **Device code endpoint**: `POST https://oauth2.googleapis.com/device/code`.
-- **Token endpoint**: `POST https://oauth2.googleapis.com/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code`.
+- **Client type**: "Desktop" type in Google Cloud Console (supports authorization code flow with loopback redirect for all scopes).
+- **Flow selection**: The bridge selects flow type per capability based on scope compatibility:
+  - **Device code flow** (RFC 8628): Only for scopes in Google's device code allowlist (`email`, `openid`, `profile`, `drive.appdata`, `drive.file`, `youtube`, `youtube.readonly`).
+  - **Authorization code flow** (loopback redirect): For all other scopes, including Calendar (`calendar`) and Gmail (`gmail.readonly`, `gmail.send`). User gets a URL, opens it in their browser, approves, and pastes the redirect URL containing the auth code.
+- **Scopes**: `gmail.readonly`, `gmail.send`, `calendar` — all use authorization code flow since none are in the device code allowlist.
+- **Device code endpoint**: `POST https://oauth2.googleapis.com/device/code` (only for device-code-compatible scopes).
+- **Authorization endpoint**: `GET https://accounts.google.com/o/oauth2/v2/auth` (for authorization code flow).
+- **Token endpoint**: `POST https://oauth2.googleapis.com/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code` or `grant_type=authorization_code`.
+- **Redirect URI**: `http://localhost` — standard loopback redirect for headless/CLI tools. After consent, Google redirects to localhost (nothing listening), but the URL bar contains `?code=AUTH_CODE` for the user to copy.
 - **Token refresh**: bridge refreshes expired access tokens before invoke operations.
 - **Storage**: access_token + refresh_token in vault via `FileVault.put_json`, keyed by `(user_id, capability_id, account_ref)`.
 - **Config**: `google_client_id` / `google_client_secret` in `[skills.google]`, passed to bridge via env vars.

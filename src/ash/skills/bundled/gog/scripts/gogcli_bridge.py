@@ -46,15 +46,31 @@ ENV_GOOGLE_OAUTH_BASE_URL = "GOOGLE_OAUTH_BASE_URL"
 DEFAULT_GOOGLE_OAUTH_BASE_URL = "https://oauth2.googleapis.com"
 DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 
+# Google authorization endpoint (different host from token endpoint)
+DEFAULT_GOOGLE_AUTH_BASE_URL = "https://accounts.google.com"
+ENV_GOOGLE_AUTH_BASE_URL = "GOOGLE_AUTH_BASE_URL"
+
+# Scopes supported by device code flow (from Google docs)
+DEVICE_CODE_ALLOWED_SCOPES: frozenset[str] = frozenset(
+    {
+        "email",
+        "openid",
+        "profile",
+        "https://www.googleapis.com/auth/drive.appdata",
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/youtube",
+        "https://www.googleapis.com/auth/youtube.readonly",
+    }
+)
+
+AUTH_CODE_REDIRECT_URI = "http://localhost"
+
 CAPABILITY_SCOPES: dict[str, str] = {
     "gog.email": (
         "https://www.googleapis.com/auth/gmail.readonly"
         " https://www.googleapis.com/auth/gmail.send"
     ),
-    "gog.calendar": (
-        "https://www.googleapis.com/auth/calendar.readonly"
-        " https://www.googleapis.com/auth/calendar.events"
-    ),
+    "gog.calendar": "https://www.googleapis.com/auth/calendar",
 }
 
 
@@ -337,6 +353,16 @@ def _google_token_url() -> str:
     return f"{_google_oauth_base_url()}/token"
 
 
+def _scopes_support_device_code(scope_string: str) -> bool:
+    return all(s in DEVICE_CODE_ALLOWED_SCOPES for s in scope_string.split())
+
+
+def _google_authorization_url() -> str:
+    value = _optional_text(os.environ.get(ENV_GOOGLE_AUTH_BASE_URL))
+    base = value or DEFAULT_GOOGLE_AUTH_BASE_URL
+    return f"{base}/o/oauth2/v2/auth"
+
+
 def _google_client_id() -> str:
     value = _optional_text(os.environ.get(ENV_GOOGLE_CLIENT_ID))
     if not value:
@@ -457,35 +483,83 @@ def _handle_auth_begin(params: dict[str, Any]) -> dict[str, Any]:
             f"no OAuth scopes configured for {capability_id}",
         )
 
-    # Device code flow (RFC 8628)
-    device_resp = _http_post_form(
-        _google_device_code_url(),
-        {"client_id": client_id, "scope": scope},
-    )
-    device_error = _optional_text(device_resp.get("error"))
-    if device_error:
-        error_desc = (
-            _optional_text(device_resp.get("error_description")) or device_error
+    if _scopes_support_device_code(scope):
+        # Device code flow (RFC 8628)
+        device_resp = _http_post_form(
+            _google_device_code_url(),
+            {"client_id": client_id, "scope": scope},
         )
-        raise BridgeError(
-            "capability_backend_unavailable",
-            f"Google device code request failed: {error_desc}",
-        )
+        device_error = _optional_text(device_resp.get("error"))
+        if device_error:
+            error_desc = (
+                _optional_text(device_resp.get("error_description")) or device_error
+            )
+            raise BridgeError(
+                "capability_backend_unavailable",
+                f"Google device code request failed: {error_desc}",
+            )
 
-    device_code = _optional_text(device_resp.get("device_code"))
-    user_code = _optional_text(device_resp.get("user_code"))
-    verification_url = _optional_text(device_resp.get("verification_url"))
-    google_interval = _int_claim(device_resp, "interval") or 5
-    google_expires_in = _int_claim(device_resp, "expires_in")
+        device_code = _optional_text(device_resp.get("device_code"))
+        user_code = _optional_text(device_resp.get("user_code"))
+        verification_url = _optional_text(device_resp.get("verification_url"))
+        google_interval = _int_claim(device_resp, "interval") or 5
+        google_expires_in = _int_claim(device_resp, "expires_in")
 
-    if not device_code or not user_code or not verification_url:
-        raise BridgeError(
-            "capability_backend_unavailable",
-            "Google device code response missing required fields",
-        )
+        if not device_code or not user_code or not verification_url:
+            raise BridgeError(
+                "capability_backend_unavailable",
+                "Google device code response missing required fields",
+            )
 
-    if google_expires_in and google_expires_in < (expires_epoch - now_epoch):
-        expires_epoch = now_epoch + google_expires_in
+        if google_expires_in and google_expires_in < (expires_epoch - now_epoch):
+            expires_epoch = now_epoch + google_expires_in
+
+        state = _read_state()
+        _prune_expired_flows(state=state, now_epoch=now_epoch)
+        state["auth_flows"][flow_id] = {
+            "user_id": claims.user_id,
+            "capability_id": capability_id,
+            "account_hint": account_hint,
+            "nonce": nonce,
+            "issued_at": now_epoch,
+            "expires_at": expires_epoch,
+            "device_code": device_code,
+            "poll_interval": google_interval,
+            "flow_type": "device_code",
+        }
+        _write_state(state)
+
+        flow_state = {
+            "flow_id": flow_id,
+            "nonce": nonce,
+            "device_code": device_code,
+        }
+        return {
+            "auth_url": verification_url,
+            "expires_at": _iso8601_utc(expires_epoch),
+            "flow_state": flow_state,
+            "flow_type": "device_code",
+            "user_code": user_code,
+            "poll_interval_seconds": google_interval,
+        }
+
+    # Authorization code flow (loopback redirect)
+    from urllib.parse import urlencode
+
+    # state_param is included in the auth URL for Google's CSRF protection.
+    # The bridge cannot validate it on completion because the user pastes only
+    # the auth code, not the full redirect URL.  Stored for audit/debugging.
+    state_param = secrets.token_hex(16)
+    auth_params = {
+        "client_id": client_id,
+        "redirect_uri": AUTH_CODE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": scope,
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state_param,
+    }
+    auth_url = f"{_google_authorization_url()}?{urlencode(auth_params)}"
 
     state = _read_state()
     _prune_expired_flows(state=state, now_epoch=now_epoch)
@@ -496,23 +570,21 @@ def _handle_auth_begin(params: dict[str, Any]) -> dict[str, Any]:
         "nonce": nonce,
         "issued_at": now_epoch,
         "expires_at": expires_epoch,
-        "device_code": device_code,
-        "poll_interval": google_interval,
+        "flow_type": "authorization_code",
+        "state_param": state_param,
+        "redirect_uri": AUTH_CODE_REDIRECT_URI,
     }
     _write_state(state)
 
     flow_state = {
         "flow_id": flow_id,
         "nonce": nonce,
-        "device_code": device_code,
     }
     return {
-        "auth_url": verification_url,
+        "auth_url": auth_url,
         "expires_at": _iso8601_utc(expires_epoch),
         "flow_state": flow_state,
-        "flow_type": "device_code",
-        "user_code": user_code,
-        "poll_interval_seconds": google_interval,
+        "flow_type": "authorization_code",
     }
 
 
@@ -739,13 +811,57 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
             "flow_state nonce mismatch",
         )
 
+    stored_flow_type = _optional_text(stored_flow.get("flow_type"))
+    if stored_flow_type == "device_code":
+        raise BridgeError(
+            "capability_invalid_input",
+            "device_code flows must use auth_poll, not auth_complete",
+        )
+
     account_ref = (
         _optional_text(stored_flow.get("account_hint"))
         or _optional_text(params.get("account_hint"))
         or "default"
     )
-    callback_url = _optional_text(params.get("callback_url"))
-    code = _optional_text(params.get("code"))
+    code = _required_text(
+        params.get("code"),
+        code="capability_invalid_input",
+        message="code is required for auth_complete",
+    )
+    redirect_uri = (
+        _optional_text(stored_flow.get("redirect_uri")) or AUTH_CODE_REDIRECT_URI
+    )
+
+    # Exchange authorization code for tokens
+    client_id = _google_client_id()
+    client_secret = _google_client_secret()
+    token_resp = _http_post_form(
+        _google_token_url(),
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+        },
+    )
+
+    error_code = _optional_text(token_resp.get("error"))
+    if error_code:
+        error_desc = _optional_text(token_resp.get("error_description")) or error_code
+        raise BridgeError(
+            "capability_backend_unavailable",
+            f"Google token exchange failed: {error_desc}",
+        )
+
+    access_token = _optional_text(token_resp.get("access_token"))
+    refresh_token = _optional_text(token_resp.get("refresh_token"))
+    if not access_token:
+        raise BridgeError(
+            "capability_backend_unavailable",
+            "Google token response missing access_token",
+        )
+
     account_key = _account_key(claims.user_id, capability_id, account_ref)
     existing = state["accounts"].get(account_key)
     existing_created_at = (
@@ -758,11 +874,6 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
     )
     if credential_key is None:
         credential_key = f"cred_{secrets.token_hex(8)}"
-    vault_ref = (
-        _optional_text(existing.get("vault_ref"))
-        if isinstance(existing, dict)
-        else None
-    )
     try:
         vault = _vault()
         vault_ref = vault.put_json(
@@ -775,10 +886,11 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
                 "user_id": claims.user_id,
                 "account_ref": account_ref,
                 "linked_at": now_epoch,
-                "auth_exchange": {
-                    "code": code,
-                    "callback_url": callback_url,
-                },
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "token_type": _optional_text(token_resp.get("token_type")),
+                "expires_in": _int_claim(token_resp, "expires_in"),
+                "obtained_at": now_epoch,
             },
         )
     except VaultError:

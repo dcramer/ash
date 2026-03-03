@@ -123,6 +123,20 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
                         "expires_in": 3600,
                     },
                 )
+        elif grant_type == "authorization_code":
+            code = (params.get("code") or [""])[0]
+            if code:
+                self._json_response(
+                    200,
+                    {
+                        "access_token": _FAKE_ACCESS_TOKEN,
+                        "refresh_token": _FAKE_REFRESH_TOKEN,
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                    },
+                )
+            else:
+                self._json_response(400, {"error": "invalid_grant"})
         elif grant_type == "refresh_token":
             self._json_response(
                 200,
@@ -184,6 +198,7 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
             "GOOGLE_CLIENT_ID": "fake-client-id",
             "GOOGLE_CLIENT_SECRET": "fake-client-secret",
             "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+            "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
         },
     )
     await manager.register_provider(provider)
@@ -238,7 +253,7 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert group_caps["gog.email"]["available"] is False
     assert group_caps["gog.calendar"]["available"] is False
 
-    # ---- Auth begin (device code flow) for email ----
+    # ---- Auth begin (authorization code flow) for email ----
     begin_email = await _rpc(
         server,
         request_id=3,
@@ -251,38 +266,25 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     )
     assert begin_email.error is None
     assert isinstance(begin_email.result, dict)
-    assert begin_email.result["flow_type"] == "device_code"
-    assert begin_email.result["user_code"] == _FAKE_USER_CODE
-    assert begin_email.result["auth_url"] == _FAKE_VERIFICATION_URL
+    assert begin_email.result["flow_type"] == "authorization_code"
+    assert begin_email.result.get("user_code") is None
+    assert "response_type=code" in begin_email.result["auth_url"]
     email_flow_id = str(begin_email.result["flow_id"])
 
-    # ---- Auth poll (first poll = pending) ----
-    poll_pending = await _rpc(
+    # ---- Auth complete (exchange code for tokens) ----
+    complete_email = await _rpc(
         server,
         request_id=4,
-        method="capability.auth.poll",
+        method="capability.auth.complete",
         params={
             "context_token": user1_private,
             "flow_id": email_flow_id,
+            "code": "fake-auth-code-email",
         },
     )
-    assert poll_pending.error is None
-    assert isinstance(poll_pending.result, dict)
-    assert poll_pending.result["status"] == "pending"
-
-    # ---- Auth poll (second poll = complete) ----
-    poll_complete = await _rpc(
-        server,
-        request_id=5,
-        method="capability.auth.poll",
-        params={
-            "context_token": user1_private,
-            "flow_id": email_flow_id,
-        },
-    )
-    assert poll_complete.error is None
-    assert isinstance(poll_complete.result, dict)
-    assert poll_complete.result["ok"] is True
+    assert complete_email.error is None
+    assert isinstance(complete_email.result, dict)
+    assert complete_email.result["ok"] is True
 
     # ---- Invoke email list_messages ----
     invoke_email = await _rpc(
@@ -305,7 +307,7 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert "refresh_token" not in serialized_email_output
     assert "client_secret" not in serialized_email_output
 
-    # ---- Auth begin + poll for calendar ----
+    # ---- Auth begin + complete for calendar ----
     begin_calendar = await _rpc(
         server,
         request_id=7,
@@ -318,33 +320,23 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     )
     assert begin_calendar.error is None
     assert isinstance(begin_calendar.result, dict)
-    assert begin_calendar.result["flow_type"] == "device_code"
+    assert begin_calendar.result["flow_type"] == "authorization_code"
     calendar_flow_id = str(begin_calendar.result["flow_id"])
 
-    # First poll = pending
-    await _rpc(
+    # Complete calendar auth code flow
+    complete_calendar = await _rpc(
         server,
         request_id=8,
-        method="capability.auth.poll",
+        method="capability.auth.complete",
         params={
             "context_token": user1_private,
             "flow_id": calendar_flow_id,
+            "code": "fake-auth-code-calendar",
         },
     )
-
-    # Second poll = complete
-    poll_calendar_complete = await _rpc(
-        server,
-        request_id=9,
-        method="capability.auth.poll",
-        params={
-            "context_token": user1_private,
-            "flow_id": calendar_flow_id,
-        },
-    )
-    assert poll_calendar_complete.error is None
-    assert isinstance(poll_calendar_complete.result, dict)
-    assert poll_calendar_complete.result["ok"] is True
+    assert complete_calendar.error is None
+    assert isinstance(complete_calendar.result, dict)
+    assert complete_calendar.result["ok"] is True
 
     # ---- Invoke calendar list_events ----
     invoke_calendar = await _rpc(

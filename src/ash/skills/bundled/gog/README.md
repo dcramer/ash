@@ -16,6 +16,8 @@ gogcli bridge
 
 ## Getting Started
 
+**Prerequisite**: Your Google Cloud OAuth client must be "Desktop" type (not "TVs and Limited Input devices"). Desktop clients support authorization code flow with loopback redirects, which is required for Calendar and Gmail scopes.
+
 Add this to `config.toml`:
 
 ```toml

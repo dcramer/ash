@@ -84,6 +84,20 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
                         "expires_in": 3600,
                     },
                 )
+        elif grant_type == "authorization_code":
+            code = (params.get("code") or [""])[0]
+            if code:
+                self._json_response(
+                    200,
+                    {
+                        "access_token": _FAKE_ACCESS_TOKEN,
+                        "refresh_token": _FAKE_REFRESH_TOKEN,
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                    },
+                )
+            else:
+                self._json_response(400, {"error": "invalid_grant"})
         elif grant_type == "refresh_token":
             self._json_response(
                 200,
@@ -181,10 +195,11 @@ def test_bridge_definitions() -> None:
     assert ids == {"gog.email", "gog.calendar"}
 
 
-def test_bridge_auth_flow_and_user_scoped_invoke(
+def test_bridge_auth_code_flow_and_user_scoped_invoke(
     tmp_path: Path,
     fake_google_oauth: str,
 ) -> None:
+    """gog.email uses authorization code flow (gmail scopes not device-code-compatible)."""
     service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
     state_path = tmp_path / "gogcli-state.json"
     vault_path = tmp_path / "vault"
@@ -195,6 +210,7 @@ def test_bridge_auth_flow_and_user_scoped_invoke(
         "GOOGLE_CLIENT_ID": "fake-client-id",
         "GOOGLE_CLIENT_SECRET": "fake-client-secret",
         "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
     }
     user1_token = service.issue(
         effective_user_id="user-1",
@@ -203,7 +219,7 @@ def test_bridge_auth_flow_and_user_scoped_invoke(
         provider="telegram",
     )
 
-    # auth_begin returns device code flow
+    # auth_begin returns authorization code flow (gmail scopes not device-code-compatible)
     begin = _run_bridge(
         {
             "version": 1,
@@ -220,63 +236,53 @@ def test_bridge_auth_flow_and_user_scoped_invoke(
     )
     assert "error" not in begin
     result = begin["result"]
-    assert result["flow_type"] == "device_code"
-    assert result["user_code"] == _FAKE_USER_CODE
+    assert result["flow_type"] == "authorization_code"
+    assert "user_code" not in result
+    assert "poll_interval_seconds" not in result
+    auth_url = result["auth_url"]
+    assert "response_type=code" in auth_url
+    assert "redirect_uri=http" in auth_url
+    assert "access_type=offline" in auth_url
     flow_state = result["flow_state"]
     assert flow_state["flow_id"]
     assert flow_state["nonce"]
-    assert flow_state["device_code"]
 
     state_after_begin = _load_state(state_path)
     assert flow_state["flow_id"] in state_after_begin["auth_flows"]
+    stored_flow = state_after_begin["auth_flows"][flow_state["flow_id"]]
+    assert stored_flow["flow_type"] == "authorization_code"
+    assert stored_flow["state_param"]
 
-    # First poll: pending
-    poll1 = _run_bridge(
+    # auth_complete exchanges code for tokens
+    complete = _run_bridge(
         {
             "version": 1,
-            "id": "req_auth_poll_1",
+            "id": "req_auth_complete",
             "namespace": "gog",
-            "method": "auth_poll",
+            "method": "auth_complete",
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
+                "code": "fake-auth-code-from-redirect",
                 "context_token": user1_token,
             },
         },
         env=env,
     )
-    assert "error" not in poll1
-    assert poll1["result"]["status"] == "pending"
-
-    # Second poll: complete with tokens
-    poll2 = _run_bridge(
-        {
-            "version": 1,
-            "id": "req_auth_poll_2",
-            "namespace": "gog",
-            "method": "auth_poll",
-            "params": {
-                "capability_id": "gog.email",
-                "flow_state": flow_state,
-                "context_token": user1_token,
-            },
-        },
-        env=env,
-    )
-    assert "error" not in poll2
-    assert poll2["result"]["status"] == "complete"
-    account_ref = poll2["result"]["account_ref"]
+    assert "error" not in complete
+    account_ref = complete["result"]["account_ref"]
     assert account_ref == "work"
 
-    state_after_poll = _load_state(state_path)
-    assert flow_state["flow_id"] not in state_after_poll["auth_flows"]
+    state_after_complete = _load_state(state_path)
+    assert flow_state["flow_id"] not in state_after_complete["auth_flows"]
     account_key = "user-1:gog.email:work"
-    vault_ref = state_after_poll["accounts"][account_key]["vault_ref"]
+    vault_ref = state_after_complete["accounts"][account_key]["vault_ref"]
     vault_payload = FileVault(vault_path).get_json(vault_ref)
     assert isinstance(vault_payload, dict)
     credential_key = str(vault_payload["credential_key"])
     assert credential_key.startswith("cred_")
     assert vault_payload["access_token"] == _FAKE_ACCESS_TOKEN
+    assert vault_payload["refresh_token"] == _FAKE_REFRESH_TOKEN
 
     # Invoke with authed account
     invoke_user1 = _run_bridge(
@@ -363,11 +369,11 @@ def test_bridge_auth_begin_fails_without_credentials(tmp_path: Path) -> None:
     assert "GOOGLE_CLIENT_ID" in response["error"]["message"]
 
 
-def test_bridge_auth_poll_rejects_reused_flow(
+def test_bridge_auth_complete_rejects_reused_flow(
     tmp_path: Path,
     fake_google_oauth: str,
 ) -> None:
-    """After a flow completes via auth_poll, re-polling returns an error."""
+    """After a flow completes via auth_complete, re-completing returns an error."""
     service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
     env = {
         "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
@@ -376,6 +382,7 @@ def test_bridge_auth_poll_rejects_reused_flow(
         "GOOGLE_CLIENT_ID": "fake-client-id",
         "GOOGLE_CLIENT_SECRET": "fake-client-secret",
         "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
     }
     user_token = service.issue(
         effective_user_id="user-1",
@@ -399,61 +406,47 @@ def test_bridge_auth_poll_rejects_reused_flow(
         env=env,
     )
     assert "error" not in begin
+    assert begin["result"]["flow_type"] == "authorization_code"
     flow_state = begin["result"]["flow_state"]
 
-    # First poll: pending
-    _run_bridge(
+    # First auth_complete: succeeds
+    first = _run_bridge(
         {
             "version": 1,
-            "id": "req_reuse_poll_1",
+            "id": "req_reuse_complete_1",
             "namespace": "gog",
-            "method": "auth_poll",
+            "method": "auth_complete",
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
+                "code": "fake-auth-code",
                 "context_token": user_token,
             },
         },
         env=env,
     )
+    assert "error" not in first
 
-    # Second poll: completes and consumes the flow
+    # Second auth_complete: flow is consumed — should fail
     second = _run_bridge(
         {
             "version": 1,
-            "id": "req_reuse_poll_2",
+            "id": "req_reuse_complete_2",
             "namespace": "gog",
-            "method": "auth_poll",
+            "method": "auth_complete",
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
+                "code": "fake-auth-code",
                 "context_token": user_token,
             },
         },
         env=env,
     )
-    assert "error" not in second
-    assert second["result"]["status"] == "complete"
-
-    # Third poll: flow is consumed — should fail
-    third = _run_bridge(
-        {
-            "version": 1,
-            "id": "req_reuse_poll_3",
-            "namespace": "gog",
-            "method": "auth_poll",
-            "params": {
-                "capability_id": "gog.email",
-                "flow_state": flow_state,
-                "context_token": user_token,
-            },
-        },
-        env=env,
-    )
-    assert third["error"]["code"] == "capability_auth_flow_invalid"
+    assert second["error"]["code"] == "capability_auth_flow_invalid"
 
 
-def test_bridge_auth_poll_rejects_expired_flow(
+def test_bridge_auth_complete_rejects_expired_flow(
     tmp_path: Path,
     fake_google_oauth: str,
 ) -> None:
@@ -466,6 +459,7 @@ def test_bridge_auth_poll_rejects_expired_flow(
         "GOOGLE_CLIENT_ID": "fake-client-id",
         "GOOGLE_CLIENT_SECRET": "fake-client-secret",
         "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
     }
     user_token = service.issue(
         effective_user_id="user-1",
@@ -497,21 +491,22 @@ def test_bridge_auth_poll_rejects_expired_flow(
     state["auth_flows"][flow_id]["expires_at"] = 1
     state_path.write_text(json.dumps(state, ensure_ascii=True), encoding="utf-8")
 
-    poll = _run_bridge(
+    complete = _run_bridge(
         {
             "version": 1,
-            "id": "req_expired_poll",
+            "id": "req_expired_complete",
             "namespace": "gog",
-            "method": "auth_poll",
+            "method": "auth_complete",
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
+                "code": "fake-auth-code",
                 "context_token": user_token,
             },
         },
         env=env,
     )
-    assert poll["error"]["code"] == "capability_auth_flow_invalid"
+    assert complete["error"]["code"] == "capability_auth_flow_invalid"
 
 
 def test_bridge_invoke_requires_vault_record(
@@ -528,6 +523,7 @@ def test_bridge_invoke_requires_vault_record(
         "GOOGLE_CLIENT_ID": "fake-client-id",
         "GOOGLE_CLIENT_SECRET": "fake-client-secret",
         "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
     }
     user_token = service.issue(
         effective_user_id="user-1",
@@ -553,37 +549,24 @@ def test_bridge_invoke_requires_vault_record(
     assert "error" not in begin
     flow_state = begin["result"]["flow_state"]
 
-    # Pending then complete
-    _run_bridge(
+    # Complete auth code flow
+    complete = _run_bridge(
         {
             "version": 1,
-            "id": "req_vault_poll_1",
+            "id": "req_vault_complete",
             "namespace": "gog",
-            "method": "auth_poll",
+            "method": "auth_complete",
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
+                "code": "fake-auth-code",
                 "context_token": user_token,
             },
         },
         env=env,
     )
-    poll2 = _run_bridge(
-        {
-            "version": 1,
-            "id": "req_vault_poll_2",
-            "namespace": "gog",
-            "method": "auth_poll",
-            "params": {
-                "capability_id": "gog.email",
-                "flow_state": flow_state,
-                "context_token": user_token,
-            },
-        },
-        env=env,
-    )
-    assert "error" not in poll2
-    account_ref = poll2["result"]["account_ref"]
+    assert "error" not in complete
+    account_ref = complete["result"]["account_ref"]
 
     # Delete the vault entry
     state = _load_state(state_path)
@@ -642,11 +625,148 @@ def test_bridge_rejects_invalid_context_signature(tmp_path: Path) -> None:
     assert response["error"]["code"] == "capability_invalid_input"
 
 
-@pytest.mark.asyncio
-async def test_subprocess_provider_round_trip_with_bridge(
+def test_bridge_auth_code_flow_for_calendar(
     tmp_path: Path,
     fake_google_oauth: str,
 ) -> None:
+    """auth_begin for gog.calendar returns authorization_code flow with auth URL."""
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    state_path = tmp_path / "gogcli-state.json"
+    vault_path = tmp_path / "vault"
+    env = {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(state_path),
+        "GOGCLI_VAULT_PATH": str(vault_path),
+        "GOOGLE_CLIENT_ID": "fake-client-id",
+        "GOOGLE_CLIENT_SECRET": "fake-client-secret",
+        "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+    }
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+
+    begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_cal_begin",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.calendar",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin
+    result = begin["result"]
+    assert result["flow_type"] == "authorization_code"
+    assert "user_code" not in result
+    assert "poll_interval_seconds" not in result
+    auth_url = result["auth_url"]
+    assert "response_type=code" in auth_url
+    assert "scope=" in auth_url
+    assert "calendar" in auth_url
+
+    # Complete with code — tokens stored in vault
+    flow_state = result["flow_state"]
+    complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_cal_complete",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.calendar",
+                "flow_state": flow_state,
+                "code": "fake-cal-auth-code",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in complete
+    account_ref = complete["result"]["account_ref"]
+    assert account_ref == "default"
+
+    # Verify vault contains tokens (not raw auth_exchange)
+    state = _load_state(state_path)
+    account_key = "user-1:gog.calendar:default"
+    vault_ref = state["accounts"][account_key]["vault_ref"]
+    vault_payload = FileVault(vault_path).get_json(vault_ref)
+    assert isinstance(vault_payload, dict)
+    assert vault_payload["access_token"] == _FAKE_ACCESS_TOKEN
+    assert vault_payload["refresh_token"] == _FAKE_REFRESH_TOKEN
+    assert "auth_exchange" not in vault_payload
+
+
+def test_bridge_auth_code_complete_invalid_code(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    """auth_complete with missing/empty code returns error."""
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(tmp_path / "gogcli-state.json"),
+        "GOGCLI_VAULT_PATH": str(tmp_path / "vault"),
+        "GOOGLE_CLIENT_ID": "fake-client-id",
+        "GOOGLE_CLIENT_SECRET": "fake-client-secret",
+        "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+    }
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+
+    begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_invalid_code_begin",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.email",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin
+    flow_state = begin["result"]["flow_state"]
+
+    # auth_complete without code
+    response = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_invalid_code_complete",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.email",
+                "flow_state": flow_state,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert response["error"]["code"] == "capability_invalid_input"
+    assert "code is required" in response["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_subprocess_provider_auth_code_round_trip(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    """End-to-end through SubprocessCapabilityProvider for auth code flow."""
     service = ContextTokenService(secret=b"provider-roundtrip-secret-32-bytes")
     provider = SubprocessCapabilityProvider(
         namespace="gog",
@@ -658,6 +778,7 @@ async def test_subprocess_provider_round_trip_with_bridge(
             "GOOGLE_CLIENT_ID": "fake-client-id",
             "GOOGLE_CLIENT_SECRET": "fake-client-secret",
             "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+            "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
         },
     )
     definitions = await provider.definitions()
@@ -666,35 +787,29 @@ async def test_subprocess_provider_round_trip_with_bridge(
 
     user1 = _context("user-1")
     begin = await provider.auth_begin(
-        capability_id="gog.email",
+        capability_id="gog.calendar",
         account_hint="work",
         context=user1,
     )
-    assert begin.flow_type == "device_code"
-    assert begin.user_code == _FAKE_USER_CODE
+    assert begin.flow_type == "authorization_code"
+    assert begin.user_code is None
+    assert "response_type=code" in begin.auth_url
 
-    # First poll: pending
-    poll1 = await provider.auth_poll(
-        capability_id="gog.email",
+    # Complete with auth code
+    complete = await provider.auth_complete(
+        capability_id="gog.calendar",
         flow_state=begin.flow_state,
+        callback_url=None,
+        code="fake-auth-code-from-redirect",
         context=user1,
     )
-    assert poll1.status == "pending"
-
-    # Second poll: complete
-    poll2 = await provider.auth_poll(
-        capability_id="gog.email",
-        flow_state=begin.flow_state,
-        context=user1,
-    )
-    assert poll2.status == "complete"
-    assert poll2.account_ref == "work"
+    assert complete.account_ref == "work"
 
     output = await provider.invoke(
-        capability_id="gog.email",
-        operation="list_messages",
-        input_data={"limit": 1},
-        account_ref=poll2.account_ref,
+        capability_id="gog.calendar",
+        operation="list_events",
+        input_data={},
+        account_ref=complete.account_ref,
         idempotency_key=None,
         context=user1,
     )
@@ -703,10 +818,10 @@ async def test_subprocess_provider_round_trip_with_bridge(
     user2 = _context("user-2")
     with pytest.raises(CapabilityError) as exc_info:
         await provider.invoke(
-            capability_id="gog.email",
-            operation="list_messages",
-            input_data={"limit": 1},
-            account_ref=poll2.account_ref,
+            capability_id="gog.calendar",
+            operation="list_events",
+            input_data={},
+            account_ref=complete.account_ref,
             idempotency_key=None,
             context=user2,
         )
