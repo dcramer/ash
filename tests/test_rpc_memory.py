@@ -1745,3 +1745,277 @@ class TestRPCThisChatFiltering:
             }
         )
         assert results == []
+
+
+class TestRPCExtractionDebounce:
+    """Tests for RPC extraction touching postprocess debounce."""
+
+    async def test_rpc_extraction_touches_postprocess_debounce(
+        self, memory_manager, mock_extractor, tmp_path
+    ):
+        """RPC extraction should call touch_debounce on postprocess service."""
+        from ash.memory.postprocess import MemoryPostprocessService
+        from ash.store.types import ExtractedFact, MemoryType
+
+        postprocess = MemoryPostprocessService(
+            store=memory_manager,
+            extractor=mock_extractor,
+            extraction_enabled=True,
+            min_message_length=1,
+            debounce_seconds=60,
+            context_messages=10,
+            confidence_threshold=0.7,
+        )
+
+        mock_extractor.extract_from_conversation = AsyncMock(
+            return_value=[
+                ExtractedFact(
+                    content="User likes pizza",
+                    subjects=[],
+                    shared=False,
+                    confidence=0.9,
+                    memory_type=MemoryType.PREFERENCE,
+                ),
+            ]
+        )
+
+        server = MockRPCServer()
+        sessions_path = tmp_path / "sessions"
+        sessions_path.mkdir()
+        register_memory_methods(
+            server,  # type: ignore[arg-type]
+            memory_manager,
+            memory_extractor=mock_extractor,
+            sessions_path=sessions_path,
+            postprocess_service=postprocess,
+        )
+
+        assert postprocess._last_extraction_time is None
+
+        handler = server.methods["memory.extract_from_messages"]
+        await handler(
+            {
+                "provider": "telegram",
+                "messages": [
+                    {"role": "user", "content": "I love pizza"},
+                    {"role": "assistant", "content": "Got it!"},
+                ],
+                "user_id": "user-1",
+            }
+        )
+
+        assert postprocess._last_extraction_time is not None
+
+    async def test_postprocess_debounce_suppresses_after_rpc_extraction(
+        self, memory_manager, mock_extractor, tmp_path
+    ):
+        """Postprocess should not schedule extraction when debounce was recently touched."""
+
+        from ash.memory.postprocess import MemoryPostprocessService
+
+        postprocess = MemoryPostprocessService(
+            store=memory_manager,
+            extractor=mock_extractor,
+            extraction_enabled=True,
+            min_message_length=1,
+            debounce_seconds=60,
+            context_messages=10,
+            confidence_threshold=0.7,
+        )
+
+        # Simulate RPC extraction having just occurred
+        postprocess.touch_debounce()
+
+        # _should_extract should now return False (within debounce window)
+        assert not postprocess._should_extract(
+            "Some long enough message for extraction"
+        )
+
+
+class TestSelfFactConflictGuard:
+    """Tests for the guard that drops person_facts conflicting with self-facts."""
+
+    async def test_person_fact_dropped_when_conflicting_self_fact_exists(
+        self, memory_manager, mock_embedding_generator
+    ):
+        """A third-party claim should be dropped when the subject has a conflicting self-fact."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import (
+            AssertionEnvelope,
+            AssertionKind,
+            ExtractedFact,
+            MemoryType,
+        )
+
+        # Create Evan's person record
+        evan = await memory_manager.create_person(
+            created_by="evan-user-id",
+            name="Evan",
+            relationship="self",
+            aliases=["evanpurkhiser"],
+        )
+
+        # Store Evan's self-fact: "User is 6'2\" tall"
+        evan_self_fact = await memory_manager.add_memory(
+            content="User is 6'2\" tall",
+            source="background_extraction",
+            memory_type=MemoryType.IDENTITY,
+            owner_user_id="evan-user-id",
+            subject_person_ids=[evan.id],
+            source_username="evanpurkhiser",
+            stated_by_person_id=evan.id,
+            assertion=AssertionEnvelope(
+                assertion_kind=AssertionKind.SELF_FACT,
+                subjects=[evan.id],
+                speaker_person_id=evan.id,
+                predicates=[],
+                confidence=1.0,
+            ),
+        )
+        # Verify edges exist for trust classification
+        assert memory_manager._graph.memories.get(evan_self_fact.id) is not None
+
+        # Now SK claims "Evan's height is 5'2\"" -- should be dropped
+        sk = await memory_manager.create_person(
+            created_by="sk-user-id",
+            name="SK",
+            relationship="self",
+            aliases=["sksembhi"],
+        )
+
+        # Make the embedding search return the conflicting self-fact with high similarity
+        mock_embedding_generator.embed = AsyncMock(return_value=[0.1] * 1536)
+        memory_manager._index.search = MagicMock(
+            return_value=[(evan_self_fact.id, 0.90)]
+        )
+
+        fact = ExtractedFact(
+            content="Evan's height is 5'2\"",
+            subjects=["Evan"],
+            shared=False,
+            confidence=0.9,
+            memory_type=MemoryType.IDENTITY,
+            speaker="sksembhi",
+        )
+
+        stored_ids = await process_extracted_facts(
+            facts=[fact],
+            store=memory_manager,
+            user_id="sk-user-id",
+            speaker_username="sksembhi",
+            speaker_display_name="SK",
+            speaker_person_id=sk.id,
+            owner_names=["sksembhi", "SK"],
+            source="background_extraction",
+            confidence_threshold=0.7,
+        )
+
+        # The contradictory person_fact should have been dropped
+        assert len(stored_ids) == 0
+
+    async def test_person_fact_stored_when_no_conflicting_self_fact(
+        self, memory_manager, mock_embedding_generator
+    ):
+        """A person_fact should be stored when no conflicting self-fact exists."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import ExtractedFact, MemoryType
+
+        # Create a person record for the subject (no self-facts exist)
+        await memory_manager.create_person(
+            created_by="other-user",
+            name="Bob",
+            aliases=["bob123"],
+        )
+
+        # No conflicting memories found
+        mock_embedding_generator.embed = AsyncMock(return_value=[0.1] * 1536)
+        memory_manager._index.search = MagicMock(return_value=[])
+
+        fact = ExtractedFact(
+            content="Bob is a software engineer",
+            subjects=["Bob"],
+            shared=False,
+            confidence=0.9,
+            memory_type=MemoryType.IDENTITY,
+            speaker="alice",
+        )
+
+        stored_ids = await process_extracted_facts(
+            facts=[fact],
+            store=memory_manager,
+            user_id="alice-user-id",
+            speaker_username="alice",
+            speaker_display_name="Alice",
+            owner_names=["alice", "Alice"],
+            source="background_extraction",
+            confidence_threshold=0.7,
+        )
+
+        assert len(stored_ids) == 1
+
+    async def test_self_fact_not_blocked_by_guard(
+        self, memory_manager, mock_embedding_generator
+    ):
+        """A self-fact (speaker is subject) should not be blocked by the guard."""
+        from ash.memory.processing import process_extracted_facts
+        from ash.store.types import (
+            AssertionEnvelope,
+            AssertionKind,
+            ExtractedFact,
+            MemoryType,
+        )
+
+        # Create Evan's person record
+        evan = await memory_manager.create_person(
+            created_by="evan-user-id",
+            name="Evan",
+            relationship="self",
+            aliases=["evanpurkhiser"],
+        )
+
+        # Store Evan's old self-fact
+        old_fact = await memory_manager.add_memory(
+            content="User is 6'2\" tall",
+            source="background_extraction",
+            memory_type=MemoryType.IDENTITY,
+            owner_user_id="evan-user-id",
+            subject_person_ids=[evan.id],
+            source_username="evanpurkhiser",
+            stated_by_person_id=evan.id,
+            assertion=AssertionEnvelope(
+                assertion_kind=AssertionKind.SELF_FACT,
+                subjects=[evan.id],
+                speaker_person_id=evan.id,
+                predicates=[],
+                confidence=1.0,
+            ),
+        )
+
+        # Evan updates their own height -- should NOT be blocked
+        mock_embedding_generator.embed = AsyncMock(return_value=[0.1] * 1536)
+        memory_manager._index.search = MagicMock(return_value=[(old_fact.id, 0.90)])
+
+        # This is a self-fact (no subjects = about the speaker)
+        fact = ExtractedFact(
+            content="User is 6'3\" tall",
+            subjects=[],
+            shared=False,
+            confidence=0.9,
+            memory_type=MemoryType.IDENTITY,
+            speaker="evanpurkhiser",
+        )
+
+        stored_ids = await process_extracted_facts(
+            facts=[fact],
+            store=memory_manager,
+            user_id="evan-user-id",
+            speaker_username="evanpurkhiser",
+            speaker_display_name="Evan",
+            speaker_person_id=evan.id,
+            owner_names=["evanpurkhiser", "Evan"],
+            source="background_extraction",
+            confidence_threshold=0.7,
+        )
+
+        # Self-fact should be stored (not blocked by the guard)
+        assert len(stored_ids) == 1

@@ -756,7 +756,9 @@ This ensures memories remain meaningful when recalled later.
                 text = text[:2000] + "..."
 
             if msg.role == Role.USER:
-                if speaker_info:
+                # Skip speaker_info for pre-labeled history messages (already
+                # contain @username: prefix from chat history loading).
+                if speaker_info and not text.lstrip().startswith("@"):
                     label = speaker_info.format_label()
                     lines.append(f"<user>\n{label}: {text}\n</user>")
                 else:

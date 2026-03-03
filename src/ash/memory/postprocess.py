@@ -48,6 +48,14 @@ class MemoryPostprocessService:
         self._confidence_threshold = confidence_threshold
         self._last_extraction_time: float | None = None
 
+    def touch_debounce(self) -> None:
+        """Mark an extraction as having just occurred.
+
+        Called by RPC extraction handlers so the postprocess debounce timer
+        is aware that extraction already happened, preventing double-extraction.
+        """
+        self._last_extraction_time = time.time()
+
     def maybe_schedule(
         self,
         *,

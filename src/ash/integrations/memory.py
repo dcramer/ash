@@ -52,6 +52,7 @@ class MemoryIntegration(IntegrationContributor):
             components.memory_manager,
             memory_extractor=components.memory_extractor,
             sessions_path=context.sessions_path,
+            postprocess_service=self._postprocess,
         )
 
     async def on_message_postprocess(

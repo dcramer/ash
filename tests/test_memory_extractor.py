@@ -961,3 +961,51 @@ class TestAliasParsing:
 
         assert len(facts) == 1
         assert facts[0].aliases == {}
+
+
+class TestFormatConversation:
+    """Tests for _format_conversation speaker labeling behavior."""
+
+    @pytest.fixture
+    def extractor(self):
+        return MemoryExtractor(
+            llm=MagicMock(),
+            model="test-model",
+            confidence_threshold=0.7,
+        )
+
+    def test_skips_speaker_info_for_at_prefixed_messages(self, extractor):
+        """Pre-labeled history messages (starting with @) should not get speaker_info prepended."""
+        speaker = SpeakerInfo(username="sksembhi", display_name="SK")
+        messages = [
+            Message(role=Role.USER, content="@evanpurkhiser (Evan): I'm 6'2\""),
+        ]
+        result = extractor._format_conversation(messages, speaker_info=speaker)
+        # Should NOT prepend @sksembhi label — message is already labeled
+        assert "@sksembhi" not in result
+        assert "@evanpurkhiser (Evan): I'm 6'2\"" in result
+
+    def test_adds_speaker_info_for_unprefixed_messages(self, extractor):
+        """Unprefixed user messages should get speaker_info label prepended."""
+        speaker = SpeakerInfo(username="sksembhi", display_name="SK")
+        messages = [
+            Message(role=Role.USER, content="Hello world"),
+        ]
+        result = extractor._format_conversation(messages, speaker_info=speaker)
+        assert "@sksembhi (SK): Hello world" in result
+
+    def test_mixed_history_and_current_messages(self, extractor):
+        """History (pre-labeled) and current (unlabeled) messages should be handled correctly."""
+        speaker = SpeakerInfo(username="sksembhi", display_name="SK")
+        messages = [
+            Message(role=Role.USER, content="@evanpurkhiser (Evan): I'm 6'2\""),
+            Message(role=Role.ASSISTANT, content="Got it!"),
+            Message(role=Role.USER, content="Evan's height is 5'2\""),
+        ]
+        result = extractor._format_conversation(messages, speaker_info=speaker)
+        # History message: no speaker_info prepended
+        assert "@sksembhi" not in result.split("</user>")[0]
+        # Current message: speaker_info prepended
+        assert "@sksembhi (SK): Evan's height is 5'2\"" in result
+        # History message preserved
+        assert "@evanpurkhiser (Evan): I'm 6'2\"" in result

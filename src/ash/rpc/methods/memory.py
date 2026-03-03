@@ -18,6 +18,7 @@ from ash.store.visibility import (
 
 if TYPE_CHECKING:
     from ash.memory.extractor import MemoryExtractor
+    from ash.memory.postprocess import MemoryPostprocessService
     from ash.rpc.server import RPCServer
     from ash.store.store import Store
 
@@ -31,6 +32,7 @@ def register_memory_methods(
     memory_manager: "Store",
     memory_extractor: "MemoryExtractor | None" = None,
     sessions_path: Path | None = None,
+    postprocess_service: "MemoryPostprocessService | None" = None,
 ) -> None:
     """Register memory-related RPC methods.
 
@@ -39,6 +41,7 @@ def register_memory_methods(
         memory_manager: Store instance.
         memory_extractor: Optional extractor for fact classification/extraction.
         sessions_path: Path to sessions directory (for memory.extract).
+        postprocess_service: Optional postprocess service for debounce coordination.
     """
 
     async def _build_username_lookup() -> dict[str, str]:
@@ -495,6 +498,11 @@ def register_memory_methods(
             graph_chat_id=graph_chat_id,
             chat_type=chat_type,
         )
+
+        # Touch postprocess debounce so the background extraction timer
+        # knows an RPC extraction just occurred, preventing double-extraction.
+        if postprocess_service and stored_ids:
+            postprocess_service.touch_debounce()
 
         return {"stored": len(stored_ids)}
 

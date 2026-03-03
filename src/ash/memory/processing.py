@@ -351,6 +351,75 @@ async def build_owner_names_for_speaker(
     return owner_names
 
 
+async def _conflicts_with_self_fact(
+    store: Store,
+    content: str,
+    subject_person_ids: list[str],
+    speaker_person_id: str | None,
+) -> bool:
+    """Check if a person_fact conflicts with an existing authoritative self-fact.
+
+    When a third party claims something about a subject (person_fact), and the
+    subject already has a self-fact (stated by themselves) on the same topic,
+    the third-party claim should be dropped to preserve subject authority.
+
+    Only applies when the speaker is NOT the subject (i.e. third-party claims).
+    """
+    from ash.graph.edges import get_memories_about_person
+    from ash.store.trust import classify_trust
+    from ash.store.types import get_assertion
+
+    if not subject_person_ids:
+        return False
+
+    # If the speaker is the subject, this is a self-fact update, not a conflict
+    if speaker_person_id and speaker_person_id in subject_person_ids:
+        return False
+
+    # Find existing self-facts about each subject
+    for pid in subject_person_ids:
+        memory_ids = get_memories_about_person(store._graph, pid)
+        for mid in memory_ids:
+            memory = store._graph.memories.get(mid)
+            if not memory or memory.superseded_at or memory.archived_at:
+                continue
+
+            # Must be a self-fact (speaker is the subject)
+            trust = classify_trust(store._graph, mid)
+            if trust != "fact":
+                continue
+
+            # Also verify assertion kind is SELF_FACT if assertion exists
+            assertion = get_assertion(memory)
+            if assertion and assertion.assertion_kind != AssertionKind.SELF_FACT:
+                continue
+
+            # Check semantic similarity — is the new claim about the same topic?
+            try:
+                query_embedding = await store._embeddings.embed(content)
+                similar = store._index.search(query_embedding, limit=5)
+                for found_id, similarity in similar:
+                    if found_id == mid and similarity >= 0.75:
+                        logger.info(
+                            "person_fact_blocked_by_self_fact",
+                            extra={
+                                "fact.content": content[:80],
+                                "self_fact.id": mid,
+                                "self_fact.content": memory.content[:80],
+                                "similarity": similarity,
+                            },
+                        )
+                        return True
+            except Exception:
+                logger.debug(
+                    "self_fact_conflict_check_failed",
+                    extra={"person_id": pid},
+                    exc_info=True,
+                )
+
+    return False
+
+
 async def process_extracted_facts(
     facts: list[ExtractedFact],
     store: Store,
@@ -535,6 +604,17 @@ async def process_extracted_facts(
                     },
                 )
                 assertion = downgrade_assertion_to_context(assertion)
+
+            # Guard: drop third-party person_facts that contradict authoritative
+            # self-facts from the subject. See specs/memory/index.md.
+            if (
+                assertion.assertion_kind == AssertionKind.PERSON_FACT
+                and subject_person_ids
+                and await _conflicts_with_self_fact(
+                    store, fact.content, subject_person_ids, stated_by_pid
+                )
+            ):
+                continue
 
             # DM sensitivity floor: ephemeral types get minimum PERSONAL
             # in private chats as defense-in-depth against cross-context leakage
