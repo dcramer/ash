@@ -13,6 +13,7 @@ import pytest
 
 from ash.capabilities import CapabilityError
 from ash.capabilities.providers import (
+    CapabilityAuthCompleteInput,
     CapabilityCallContext,
     SubprocessCapabilityProvider,
 )
@@ -384,7 +385,7 @@ def test_bridge_auth_code_flow_and_user_scoped_invoke(
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
-                "code": "fake-auth-code-from-redirect",
+                "authorization_code": "fake-auth-code-from-redirect",
                 "context_token": user1_token,
             },
         },
@@ -546,7 +547,7 @@ def test_bridge_auth_complete_rejects_reused_flow(
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
-                "code": "fake-auth-code",
+                "authorization_code": "fake-auth-code",
                 "context_token": user_token,
             },
         },
@@ -564,7 +565,7 @@ def test_bridge_auth_complete_rejects_reused_flow(
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
-                "code": "fake-auth-code",
+                "authorization_code": "fake-auth-code",
                 "context_token": user_token,
             },
         },
@@ -627,7 +628,7 @@ def test_bridge_auth_complete_rejects_expired_flow(
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
-                "code": "fake-auth-code",
+                "authorization_code": "fake-auth-code",
                 "context_token": user_token,
             },
         },
@@ -686,7 +687,7 @@ def test_bridge_invoke_requires_vault_record(
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
-                "code": "fake-auth-code",
+                "authorization_code": "fake-auth-code",
                 "context_token": user_token,
             },
         },
@@ -810,7 +811,7 @@ def test_bridge_auth_code_flow_for_calendar(
             "params": {
                 "capability_id": "gog.calendar",
                 "flow_state": flow_state,
-                "code": "fake-cal-auth-code",
+                "authorization_code": "fake-cal-auth-code",
                 "context_token": user_token,
             },
         },
@@ -835,7 +836,7 @@ def test_bridge_auth_code_complete_invalid_code(
     tmp_path: Path,
     fake_google_oauth: str,
 ) -> None:
-    """auth_complete with missing/empty code returns error."""
+    """auth_complete requires normalized authorization_code input."""
     service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
     env = {
         "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
@@ -869,7 +870,7 @@ def test_bridge_auth_code_complete_invalid_code(
     assert "error" not in begin
     flow_state = begin["result"]["flow_state"]
 
-    # auth_complete without code
+    # auth_complete without authorization_code
     response = _run_bridge(
         {
             "version": 1,
@@ -885,7 +886,65 @@ def test_bridge_auth_code_complete_invalid_code(
         env=env,
     )
     assert response["error"]["code"] == "capability_invalid_input"
-    assert "code is required" in response["error"]["message"]
+    assert "authorization_code is required" in response["error"]["message"]
+
+
+def test_bridge_auth_complete_rejects_callback_url_without_normalized_code(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    """auth_complete does not parse callback_url in bridge layer."""
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    state_path = tmp_path / "gogcli-state.json"
+    vault_path = tmp_path / "vault"
+    env = {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(state_path),
+        "GOGCLI_VAULT_PATH": str(vault_path),
+        "GOOGLE_CLIENT_ID": "fake-client-id",
+        "GOOGLE_CLIENT_SECRET": "fake-client-secret",
+        "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+    }
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+
+    begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_callback_begin",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.calendar",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin
+    flow_state = begin["result"]["flow_state"]
+    complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_callback_complete",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.calendar",
+                "flow_state": flow_state,
+                "callback_url": "http://localhost/?code=fake-cal-auth-code",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert complete["error"]["code"] == "capability_invalid_input"
+    assert "authorization_code is required" in complete["error"]["message"]
 
 
 def test_bridge_auth_complete_preserves_existing_refresh_token_when_omitted(
@@ -935,7 +994,7 @@ def test_bridge_auth_complete_preserves_existing_refresh_token_when_omitted(
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state_1,
-                "code": "fake-auth-code-initial",
+                "authorization_code": "fake-auth-code-initial",
                 "context_token": user_token,
             },
         },
@@ -968,7 +1027,7 @@ def test_bridge_auth_complete_preserves_existing_refresh_token_when_omitted(
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state_2,
-                "code": "fake-auth-code-no-refresh",
+                "authorization_code": "fake-auth-code-no-refresh",
                 "context_token": user_token,
             },
         },
@@ -1024,8 +1083,9 @@ async def test_subprocess_provider_auth_code_round_trip(
     complete = await provider.auth_complete(
         capability_id="gog.calendar",
         flow_state=begin.flow_state,
-        callback_url=None,
-        code="fake-auth-code-from-redirect",
+        completion=CapabilityAuthCompleteInput(
+            authorization_code="fake-auth-code-from-redirect",
+        ),
         context=user1,
     )
     assert complete.account_ref == "work"
@@ -1087,7 +1147,7 @@ def _auth_email_account(
             "params": {
                 "capability_id": "gog.email",
                 "flow_state": flow_state,
-                "code": "fake-auth-code",
+                "authorization_code": "fake-auth-code",
                 "context_token": user_token,
             },
         },
@@ -1127,7 +1187,7 @@ def _auth_calendar_account(
             "params": {
                 "capability_id": "gog.calendar",
                 "flow_state": flow_state,
-                "code": "fake-auth-code",
+                "authorization_code": "fake-auth-code",
                 "context_token": user_token,
             },
         },

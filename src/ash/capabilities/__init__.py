@@ -21,6 +21,7 @@ from ash.capabilities.manager import (
 )
 from ash.capabilities.providers import (
     CapabilityAuthBeginResult,
+    CapabilityAuthCompleteInput,
     CapabilityAuthCompleteResult,
     CapabilityAuthPollResult,
     CapabilityCallContext,
@@ -41,6 +42,7 @@ __all__ = [
     "CapabilityProvider",
     "CapabilityCallContext",
     "CapabilityAuthBeginResult",
+    "CapabilityAuthCompleteInput",
     "CapabilityAuthCompleteResult",
     "CapabilityAuthPollResult",
     "CapabilityAccount",

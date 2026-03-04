@@ -44,6 +44,7 @@ class CapabilityAuthFlow:
     expires_at: datetime
     flow_state: dict[str, Any] = field(default_factory=dict)
     flow_type: str = "authorization_code"
+    expected_callback_state: str | None = None
 
 
 @dataclass(slots=True)

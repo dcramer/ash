@@ -11,8 +11,13 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from ash.capabilities.auth_normalization import (
+    AuthNormalizationError,
+    normalize_auth_completion,
+)
 from ash.capabilities.providers import (
     CapabilityAuthBeginResult,
+    CapabilityAuthCompleteInput,
     CapabilityAuthCompleteResult,
     CapabilityAuthPollResult,
     CapabilityCallContext,
@@ -282,6 +287,7 @@ class CapabilityManager:
                 expires_at=expires_at,
                 flow_state=dict(begin_result.flow_state),
                 flow_type=flow_type,
+                expected_callback_state=begin_result.expected_callback_state,
             )
 
         result: dict[str, Any] = {
@@ -331,11 +337,6 @@ class CapabilityManager:
         normalized_source_display_name = _optional_text(source_display_name)
         normalized_callback_url = _optional_text(callback_url)
         normalized_code = _optional_text(code)
-        if not normalized_callback_url and not normalized_code:
-            raise CapabilityError(
-                "capability_invalid_input",
-                "either callback_url or code is required",
-            )
 
         async with self._lock:
             self._prune_expired_flows_locked()
@@ -353,6 +354,14 @@ class CapabilityManager:
             _, provider_impl = self._get_definition_and_provider_locked(
                 flow.capability_id
             )
+        try:
+            normalized_completion = normalize_auth_completion(
+                callback_url=normalized_callback_url,
+                code=normalized_code,
+                expected_state=flow.expected_callback_state,
+            )
+        except AuthNormalizationError as e:
+            raise CapabilityError(e.code, str(e)) from e
 
         call_context = CapabilityCallContext(
             user_id=normalized_user_id,
@@ -368,8 +377,11 @@ class CapabilityManager:
             provider_impl,
             capability_id=flow.capability_id,
             flow_state=dict(flow.flow_state),
-            callback_url=normalized_callback_url,
-            code=normalized_code,
+            completion=CapabilityAuthCompleteInput(
+                authorization_code=normalized_completion.authorization_code,
+                raw_callback_url=normalized_completion.raw_callback_url,
+                state=normalized_completion.state,
+            ),
             account_hint=flow.account_hint,
             context=call_context,
         )
@@ -659,6 +671,7 @@ class CapabilityManager:
             flow_type=result.flow_type or "authorization_code",
             user_code=result.user_code,
             poll_interval_seconds=result.poll_interval_seconds,
+            expected_callback_state=result.expected_callback_state,
         )
 
     async def _provider_auth_poll(
@@ -686,8 +699,7 @@ class CapabilityManager:
         *,
         capability_id: str,
         flow_state: dict[str, Any],
-        callback_url: str | None,
-        code: str | None,
+        completion: CapabilityAuthCompleteInput,
         account_hint: str | None,
         context: CapabilityCallContext,
     ) -> CapabilityAuthCompleteResult:
@@ -698,8 +710,7 @@ class CapabilityManager:
         return await provider_impl.auth_complete(
             capability_id=capability_id,
             flow_state=flow_state,
-            callback_url=callback_url,
-            code=code,
+            completion=completion,
             context=context,
         )
 

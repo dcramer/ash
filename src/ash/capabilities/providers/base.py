@@ -36,6 +36,7 @@ class CapabilityAuthBeginResult:
     flow_type: str = "authorization_code"  # or "device_code"
     user_code: str | None = None
     poll_interval_seconds: int | None = None
+    expected_callback_state: str | None = None
 
 
 @dataclass(slots=True)
@@ -45,6 +46,15 @@ class CapabilityAuthCompleteResult:
     account_ref: str
     credential_material: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class CapabilityAuthCompleteInput:
+    """Normalized auth completion input for providers."""
+
+    authorization_code: str
+    raw_callback_url: str | None = None
+    state: str | None = None
 
 
 @dataclass(slots=True)
@@ -94,8 +104,7 @@ class CapabilityProvider(Protocol):
         *,
         capability_id: str,
         flow_state: dict[str, Any],
-        callback_url: str | None,
-        code: str | None,
+        completion: CapabilityAuthCompleteInput,
         context: CapabilityCallContext,
     ) -> CapabilityAuthCompleteResult:
         """Complete auth flow and return linked account result."""

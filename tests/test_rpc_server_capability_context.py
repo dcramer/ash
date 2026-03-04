@@ -8,6 +8,7 @@ import pytest
 
 from ash.capabilities import (
     CapabilityAuthBeginResult,
+    CapabilityAuthCompleteInput,
     CapabilityAuthCompleteResult,
     CapabilityAuthPollResult,
     CapabilityCallContext,
@@ -63,14 +64,12 @@ class _ContextCaptureProvider:
         *,
         capability_id: str,
         flow_state: dict[str, Any],
-        callback_url: str | None,
-        code: str | None,
+        completion: CapabilityAuthCompleteInput,
         context: CapabilityCallContext,
     ) -> CapabilityAuthCompleteResult:
         _ = capability_id
         _ = flow_state
-        _ = callback_url
-        _ = code
+        _ = completion
         _ = context
         return CapabilityAuthCompleteResult(account_ref="work")
 

@@ -7,6 +7,7 @@ import pytest
 
 from ash.capabilities import CapabilityError
 from ash.capabilities.providers import (
+    CapabilityAuthCompleteInput,
     CapabilityCallContext,
     SubprocessCapabilityProvider,
 )
@@ -128,8 +129,11 @@ async def test_subprocess_provider_auth_and_invoke(monkeypatch) -> None:
     complete = await provider.auth_complete(
         capability_id="gog.email",
         flow_state=begin.flow_state,
-        callback_url="https://localhost/callback?code=abc",
-        code=None,
+        completion=CapabilityAuthCompleteInput(
+            authorization_code="abc",
+            raw_callback_url="https://localhost/callback?code=abc",
+            state=None,
+        ),
         context=_context(),
     )
     assert complete.account_ref == "work"

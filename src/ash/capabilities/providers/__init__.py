@@ -2,6 +2,7 @@
 
 from ash.capabilities.providers.base import (
     CapabilityAuthBeginResult,
+    CapabilityAuthCompleteInput,
     CapabilityAuthCompleteResult,
     CapabilityAuthPollResult,
     CapabilityCallContext,
@@ -11,6 +12,7 @@ from ash.capabilities.providers.subprocess import SubprocessCapabilityProvider
 
 __all__ = [
     "CapabilityAuthBeginResult",
+    "CapabilityAuthCompleteInput",
     "CapabilityAuthCompleteResult",
     "CapabilityAuthPollResult",
     "CapabilityCallContext",

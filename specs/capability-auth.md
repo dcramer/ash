@@ -31,7 +31,7 @@ The device code flow works identically across all providers.
 1. Auth flows work on any deployment: headless server, SSH session, Telegram bot.
 2. No browser or public URL is required on the machine running Ash.
 3. Users complete consent on their own device — phone, laptop, or any browser.
-4. Existing `auth_begin`/`auth_complete` (authorization code) flows continue to work unchanged.
+4. Existing caller-facing `auth_begin`/`auth_complete` flows continue to work; auth completion normalization is centralized in host capability manager.
 5. Skills detect flow type from `auth_begin` response and adapt UX accordingly.
 
 ## Device Code Flow
@@ -325,7 +325,8 @@ Update `src/ash/integrations/skills/capabilities/google/SKILL.md` auth section t
 
 - `flow_type` defaults to `"authorization_code"` — existing bridges and skill flows keep working.
 - `auth_poll` is handled by the manager delegation wrapper: when the provider is missing or doesn't implement it, raises `CapabilityError("capability_invalid_input", "auth polling not supported by this provider")`.
-- Existing `auth_complete` with `code`/`callback_url` continues to work for redirect-based flows.
+- Existing caller-side `auth_complete` with `code`/`callback_url` continues to work for redirect-based flows.
+- Provider/bridge `auth_complete` consumes normalized `authorization_code` input; callback URL parsing is host-owned.
 - `SubprocessCapabilityProvider` handles missing `auth_poll` from bridges gracefully (bridge returns error, provider surfaces it).
 - New fields in `auth_begin` return dict (`flow_type`, `user_code`, `poll_interval_seconds`) are nullable/defaulted — callers that don't check them are unaffected.
 

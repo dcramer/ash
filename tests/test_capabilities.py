@@ -8,6 +8,7 @@ import pytest
 
 from ash.capabilities import (
     CapabilityAuthBeginResult,
+    CapabilityAuthCompleteInput,
     CapabilityAuthCompleteResult,
     CapabilityAuthPollResult,
     CapabilityCallContext,
@@ -69,16 +70,14 @@ class _RecordingProvider:
         *,
         capability_id: str,
         flow_state: dict[str, Any],
-        callback_url: str | None,
-        code: str | None,
+        completion: CapabilityAuthCompleteInput,
         context: CapabilityCallContext,
     ) -> CapabilityAuthCompleteResult:
         self.complete_calls.append(
             {
                 "capability_id": capability_id,
                 "flow_state": flow_state,
-                "callback_url": callback_url,
-                "code": code,
+                "completion": completion,
                 "context": context,
             }
         )
@@ -336,6 +335,72 @@ async def test_invoke_requires_auth_and_enforces_user_isolation(
 
 
 @pytest.mark.asyncio
+async def test_auth_complete_requires_code_or_callback_code() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    await manager.register_provider(_RecordingProvider(namespace="gog"))
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await manager.auth_complete(
+            flow_id=begin["flow_id"],
+            user_id="user-1",
+            callback_url=None,
+            code=None,
+        )
+    assert exc_info.value.code == "capability_auth_code_missing"
+
+
+@pytest.mark.asyncio
+async def test_auth_complete_rejects_conflicting_code_sources() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    await manager.register_provider(_RecordingProvider(namespace="gog"))
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await manager.auth_complete(
+            flow_id=begin["flow_id"],
+            user_id="user-1",
+            callback_url="https://localhost/callback?code=abc",
+            code="def",
+        )
+    assert exc_info.value.code == "capability_auth_code_conflict"
+
+
+@pytest.mark.asyncio
+async def test_auth_complete_rejects_callback_state_mismatch() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    await manager.register_provider(_RecordingProvider(namespace="gog"))
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+
+    flow_id = str(begin["flow_id"])
+    manager._auth_flows[flow_id].expected_callback_state = "expected-state"
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await manager.auth_complete(
+            flow_id=flow_id,
+            user_id="user-1",
+            callback_url="https://localhost/callback?state=other&code=abc",
+            code=None,
+        )
+    assert exc_info.value.code == "capability_auth_state_mismatch"
+
+
+@pytest.mark.asyncio
 async def test_provider_registration_enforces_namespace_prefix() -> None:
     manager = CapabilityManager()
     provider = _RecordingProvider(namespace="gog", capability_id="other.email")
@@ -414,6 +479,10 @@ async def test_provider_delegation_uses_trusted_context_and_stores_account_mater
     assert complete["account_ref"] == "acct_work"
     complete_call = provider.complete_calls[0]
     assert complete_call["flow_state"] == {"flow_nonce": "nonce-1"}
+    completion = complete_call["completion"]
+    assert isinstance(completion, CapabilityAuthCompleteInput)
+    assert completion.authorization_code == "abc"
+    assert completion.raw_callback_url == "https://localhost/callback?code=abc"
 
     result = await manager.invoke(
         capability_id="gog.email",
@@ -491,11 +560,10 @@ async def test_provider_auth_completion_rejects_sensitive_credential_material() 
         *,
         capability_id: str,
         flow_state: dict[str, Any],
-        callback_url: str | None,
-        code: str | None,
+        completion: CapabilityAuthCompleteInput,
         context: CapabilityCallContext,
     ) -> CapabilityAuthCompleteResult:
-        _ = (capability_id, flow_state, callback_url, code, context)
+        _ = (capability_id, flow_state, completion, context)
         return CapabilityAuthCompleteResult(
             account_ref="acct_work",
             credential_material={"refresh_token": "leak"},

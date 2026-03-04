@@ -354,9 +354,17 @@ Request params:
 {
   "flow_id": "caf_01...",
   "callback_url": "https://localhost/callback?code=...",
+  "code": "optional-direct-auth-code",
   "context_token": "<signed-token>"
 }
 ```
+
+Normalization rules (host-owned, provider-independent):
+
+- Accept `code`, `callback_url`, or both.
+- If both are provided and disagree, fail with `capability_auth_code_conflict`.
+- If callback `state` is present and mismatches stored flow state, fail with `capability_auth_state_mismatch`.
+- If no usable code can be resolved, fail with `capability_auth_code_missing`.
 
 Response:
 
@@ -426,6 +434,10 @@ See `specs/browser.md` for runtime bridge invariants.
 | Auth flow expired/invalid | `capability_auth_flow_invalid` |
 | Device auth flow expired | `capability_auth_flow_expired` |
 | Device auth flow denied by user | `capability_auth_flow_denied` |
+| Callback URL malformed | `capability_auth_callback_invalid` |
+| Callback/code mismatch | `capability_auth_code_conflict` |
+| Callback state mismatch | `capability_auth_state_mismatch` |
+| Missing authorization code | `capability_auth_code_missing` |
 | Invalid input schema | `capability_invalid_input` |
 | Upstream/provider unavailable | `capability_backend_unavailable` |
 

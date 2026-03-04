@@ -19,6 +19,7 @@ from typing import Any
 
 from ash.capabilities.providers.base import (
     CapabilityAuthBeginResult,
+    CapabilityAuthCompleteInput,
     CapabilityAuthCompleteResult,
     CapabilityAuthPollResult,
     CapabilityCallContext,
@@ -121,6 +122,9 @@ class SubprocessCapabilityProvider(CapabilityProvider):
             flow_type=flow_type,
             user_code=user_code,
             poll_interval_seconds=poll_interval,
+            expected_callback_state=_optional_text(
+                result.get("expected_callback_state")
+            ),
         )
 
     async def auth_poll(
@@ -168,8 +172,7 @@ class SubprocessCapabilityProvider(CapabilityProvider):
         *,
         capability_id: str,
         flow_state: dict[str, Any],
-        callback_url: str | None,
-        code: str | None,
+        completion: CapabilityAuthCompleteInput,
         context: CapabilityCallContext,
     ) -> CapabilityAuthCompleteResult:
         result = await self._call_bridge(
@@ -177,8 +180,9 @@ class SubprocessCapabilityProvider(CapabilityProvider):
             {
                 "capability_id": capability_id,
                 "flow_state": dict(flow_state),
-                "callback_url": callback_url,
-                "code": code,
+                "authorization_code": completion.authorization_code,
+                "raw_callback_url": completion.raw_callback_url,
+                "state": completion.state,
                 "context_token": self._issue_context_token(context),
             },
         )
@@ -524,6 +528,13 @@ def _required_text(*, value: Any, code: str, message: str) -> str:
     if not text:
         raise _capability_error(code, message)
     return text
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _capability_error(code: str, message: str) -> Exception:

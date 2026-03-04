@@ -739,6 +739,7 @@ def _handle_auth_begin(params: dict[str, Any]) -> dict[str, Any]:
         "expires_at": _iso8601_utc(expires_epoch),
         "flow_state": flow_state,
         "flow_type": "authorization_code",
+        "expected_callback_state": state_param,
     }
 
 
@@ -986,9 +987,9 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
         or "default"
     )
     code = _required_text(
-        params.get("code"),
+        params.get("authorization_code"),
         code="capability_invalid_input",
-        message="code is required for auth_complete",
+        message="authorization_code is required for auth_complete",
     )
     redirect_uri = (
         _optional_text(stored_flow.get("redirect_uri")) or AUTH_CODE_REDIRECT_URI
