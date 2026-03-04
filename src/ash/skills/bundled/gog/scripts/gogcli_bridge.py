@@ -11,8 +11,10 @@ import base64
 import binascii
 import hashlib
 import hmac
+import html
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -577,6 +579,24 @@ def _handle_definitions() -> dict[str, Any]:
                     {
                         "name": "list_messages",
                         "description": "List recent inbox messages",
+                        "requires_auth": True,
+                        "mutating": False,
+                    },
+                    {
+                        "name": "search_messages",
+                        "description": "Search messages with Gmail query syntax",
+                        "requires_auth": True,
+                        "mutating": False,
+                    },
+                    {
+                        "name": "get_message",
+                        "description": "Read a message body and headers",
+                        "requires_auth": True,
+                        "mutating": False,
+                    },
+                    {
+                        "name": "get_thread",
+                        "description": "Read messages in an email thread",
                         "requires_auth": True,
                         "mutating": False,
                     },
@@ -1207,6 +1227,27 @@ def _invoke_operation(
             account_ref=account_ref,
         )
 
+    if capability_id == "gog.email" and operation == "search_messages":
+        return _invoke_search_messages(
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+
+    if capability_id == "gog.email" and operation == "get_message":
+        return _invoke_get_message(
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+
+    if capability_id == "gog.email" and operation == "get_thread":
+        return _invoke_get_thread(
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+
     if capability_id == "gog.email" and operation == "send_message":
         return _invoke_send_message(
             input_data=input_data,
@@ -1320,38 +1361,144 @@ def _handle_invoke(params: dict[str, Any]) -> dict[str, Any]:
         )
 
 
-def _invoke_list_messages(
-    *,
-    input_data: dict[str, Any],
-    access_token: str,
-    account_ref: str,
-) -> dict[str, Any]:
-    folder = _optional_text(input_data.get("folder")) or "inbox"
-    limit_value = input_data.get("limit", 10)
+def _decode_gmail_data(value: Any) -> str:
+    encoded = _optional_text(value)
+    if not encoded:
+        return ""
     try:
-        limit = int(limit_value)
-    except (TypeError, ValueError):
-        raise BridgeError(
-            "capability_invalid_input", "limit must be an integer"
-        ) from None
-    limit = max(1, min(limit, 50))
+        decoded = _b64url_decode(encoded)
+    except (ValueError, binascii.Error):
+        return ""
+    return decoded.decode("utf-8", errors="replace")
 
-    label_id = GMAIL_FOLDER_LABELS.get(folder.lower(), folder.upper())
+
+def _html_to_text(value: str) -> str:
+    no_tags = re.sub(r"<[^>]+>", " ", value)
+    unescaped = html.unescape(no_tags)
+    return " ".join(unescaped.split())
+
+
+def _gmail_header_map(detail: dict[str, Any]) -> dict[str, str]:
+    headers_list = (
+        detail.get("payload", {}).get("headers", [])
+        if isinstance(detail.get("payload"), dict)
+        else []
+    )
+    header_map: dict[str, str] = {}
+    for hdr in headers_list:
+        if isinstance(hdr, dict):
+            name = _optional_text(hdr.get("name"))
+            value = _optional_text(hdr.get("value"))
+            if name and value:
+                header_map[name.lower()] = value
+    return header_map
+
+
+def _received_at(detail: dict[str, Any], header_map: dict[str, str]) -> str:
+    internal_date = _optional_text(detail.get("internalDate"))
+    if not internal_date:
+        return header_map.get("date", "")
+    try:
+        return _iso8601_utc(int(internal_date) // 1000)
+    except (ValueError, OSError):
+        return header_map.get("date", "")
+
+
+def _extract_gmail_bodies(payload: Any) -> tuple[str, str]:
+    text_parts: list[str] = []
+    html_parts: list[str] = []
+
+    def _walk(part: Any) -> None:
+        if not isinstance(part, dict):
+            return
+        mime_type = (_optional_text(part.get("mimeType")) or "").lower()
+        body = part.get("body")
+        data = None
+        if isinstance(body, dict):
+            data = body.get("data")
+        decoded = _decode_gmail_data(data)
+        if decoded:
+            if mime_type.startswith("text/plain"):
+                text_parts.append(decoded)
+            elif mime_type.startswith("text/html"):
+                html_parts.append(decoded)
+
+        raw_parts = part.get("parts")
+        if isinstance(raw_parts, list):
+            for child in raw_parts:
+                _walk(child)
+
+    _walk(payload)
+    text_body = "\n\n".join(item for item in text_parts if item).strip()
+    html_body = "\n\n".join(item for item in html_parts if item).strip()
+    if not text_body and html_body:
+        text_body = _html_to_text(html_body)
+    return text_body, html_body
+
+
+def _message_summary(detail: dict[str, Any]) -> dict[str, Any]:
+    header_map = _gmail_header_map(detail)
+    msg_id = _optional_text(detail.get("id")) or ""
+    return {
+        "id": msg_id,
+        "thread_id": _optional_text(detail.get("threadId")) or "",
+        "from": header_map.get("from", ""),
+        "subject": header_map.get("subject", ""),
+        "received_at": _received_at(detail, header_map),
+        "snippet": _optional_text(detail.get("snippet")) or "",
+    }
+
+
+def _message_detail(
+    detail: dict[str, Any],
+    *,
+    include_html: bool,
+) -> dict[str, Any]:
+    header_map = _gmail_header_map(detail)
+    text_body, html_body = _extract_gmail_bodies(detail.get("payload"))
+    output = {
+        "id": _optional_text(detail.get("id")) or "",
+        "thread_id": _optional_text(detail.get("threadId")) or "",
+        "subject": header_map.get("subject", ""),
+        "from": header_map.get("from", ""),
+        "to": header_map.get("to", ""),
+        "cc": header_map.get("cc", ""),
+        "received_at": _received_at(detail, header_map),
+        "snippet": _optional_text(detail.get("snippet")) or "",
+        "body_text": text_body,
+        "labels": detail.get("labelIds")
+        if isinstance(detail.get("labelIds"), list)
+        else [],
+    }
+    if include_html:
+        output["body_html"] = html_body
+    return output
+
+
+def _list_message_summaries(
+    *,
+    access_token: str,
+    limit: int,
+    folder: str | None = None,
+    query: str | None = None,
+) -> list[dict[str, Any]]:
+    params: list[tuple[str, str]] = [("maxResults", str(limit))]
+    if folder:
+        label_id = GMAIL_FOLDER_LABELS.get(folder.lower(), folder.upper())
+        params.append(("labelIds", label_id))
+    if query:
+        params.append(("q", query))
     gmail_base = _google_gmail_api_base_url()
-
-    # Fetch message ID list
     list_resp = _google_api_request(
         "GET",
         f"{gmail_base}/gmail/v1/users/me/messages",
         access_token=access_token,
-        params=[("labelIds", label_id), ("maxResults", str(limit))],
+        params=params,
     )
-
     raw_messages = list_resp.get("messages")
     if not isinstance(raw_messages, list):
         raw_messages = []
 
-    # Fetch metadata for each message
     messages: list[dict[str, Any]] = []
     for raw_msg in raw_messages[:limit]:
         msg_id = raw_msg.get("id") if isinstance(raw_msg, dict) else None
@@ -1364,46 +1511,155 @@ def _invoke_list_messages(
             params=[
                 ("format", "metadata"),
                 ("metadataHeaders", "From"),
+                ("metadataHeaders", "To"),
+                ("metadataHeaders", "Cc"),
                 ("metadataHeaders", "Subject"),
                 ("metadataHeaders", "Date"),
             ],
         )
-        headers_list = (
-            detail.get("payload", {}).get("headers", [])
-            if isinstance(detail.get("payload"), dict)
-            else []
-        )
-        header_map: dict[str, str] = {}
-        for hdr in headers_list:
-            if isinstance(hdr, dict):
-                name = _optional_text(hdr.get("name"))
-                value = _optional_text(hdr.get("value"))
-                if name and value:
-                    header_map[name.lower()] = value
+        messages.append(_message_summary(detail))
+    return messages
 
-        internal_date = _optional_text(detail.get("internalDate"))
-        received_at = None
-        if internal_date:
-            try:
-                received_at = _iso8601_utc(int(internal_date) // 1000)
-            except (ValueError, OSError):
-                received_at = header_map.get("date")
-        else:
-            received_at = header_map.get("date")
 
-        messages.append(
-            {
-                "id": msg_id,
-                "from": header_map.get("from", ""),
-                "subject": header_map.get("subject", ""),
-                "received_at": received_at or "",
-                "snippet": _optional_text(detail.get("snippet")) or "",
-            }
-        )
+def _invoke_list_messages(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    folder = _optional_text(input_data.get("folder")) or "inbox"
+    query = _optional_text(input_data.get("query"))
+    limit_value = input_data.get("limit", 10)
+    try:
+        limit = int(limit_value)
+    except (TypeError, ValueError):
+        raise BridgeError(
+            "capability_invalid_input", "limit must be an integer"
+        ) from None
+    limit = max(1, min(limit, 50))
+
+    messages = _list_message_summaries(
+        access_token=access_token,
+        limit=limit,
+        folder=folder,
+        query=query,
+    )
 
     return {
         "output": {
             "folder": folder,
+            "query": query or "",
+            "messages": messages,
+            "count": len(messages),
+            "account_ref": account_ref,
+        }
+    }
+
+
+def _invoke_search_messages(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    query = _required_text(
+        input_data.get("query"),
+        code="capability_invalid_input",
+        message="query is required",
+    )
+    limit_value = input_data.get("limit", 20)
+    try:
+        limit = int(limit_value)
+    except (TypeError, ValueError):
+        raise BridgeError(
+            "capability_invalid_input", "limit must be an integer"
+        ) from None
+    limit = max(1, min(limit, 50))
+    messages = _list_message_summaries(
+        access_token=access_token,
+        limit=limit,
+        query=query,
+    )
+    return {
+        "output": {
+            "query": query,
+            "messages": messages,
+            "count": len(messages),
+            "account_ref": account_ref,
+        }
+    }
+
+
+def _invoke_get_message(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    message_id = _required_text(
+        input_data.get("id"),
+        code="capability_invalid_input",
+        message="id is required",
+    )
+    body_format = (_optional_text(input_data.get("format")) or "text").lower()
+    if body_format not in {"text", "html", "both"}:
+        raise BridgeError(
+            "capability_invalid_input",
+            "format must be one of: text, html, both",
+        )
+    include_html = body_format in {"html", "both"}
+    gmail_base = _google_gmail_api_base_url()
+    detail = _google_api_request(
+        "GET",
+        f"{gmail_base}/gmail/v1/users/me/messages/{message_id}",
+        access_token=access_token,
+        params=[("format", "full")],
+    )
+    output = _message_detail(detail, include_html=include_html)
+    if body_format == "html":
+        output["body_text"] = ""
+    return {"output": {**output, "account_ref": account_ref}}
+
+
+def _invoke_get_thread(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    thread_id = _required_text(
+        input_data.get("thread_id"),
+        code="capability_invalid_input",
+        message="thread_id is required",
+    )
+    limit_value = input_data.get("limit", 20)
+    try:
+        limit = int(limit_value)
+    except (TypeError, ValueError):
+        raise BridgeError(
+            "capability_invalid_input",
+            "limit must be an integer",
+        ) from None
+    limit = max(1, min(limit, 100))
+
+    gmail_base = _google_gmail_api_base_url()
+    thread = _google_api_request(
+        "GET",
+        f"{gmail_base}/gmail/v1/users/me/threads/{thread_id}",
+        access_token=access_token,
+        params=[("format", "full")],
+    )
+    raw_messages = thread.get("messages")
+    if not isinstance(raw_messages, list):
+        raw_messages = []
+    messages: list[dict[str, Any]] = []
+    for detail in raw_messages[:limit]:
+        if not isinstance(detail, dict):
+            continue
+        messages.append(_message_detail(detail, include_html=False))
+    return {
+        "output": {
+            "thread_id": thread_id,
             "messages": messages,
             "count": len(messages),
             "account_ref": account_ref,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 import sys
@@ -36,6 +37,39 @@ _device_code_counter = 0
 _poll_counts: dict[str, int] = {}
 
 
+def _b64url_text(value: str) -> str:
+    return base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _fake_message_detail(msg_id: str, thread_id: str) -> dict[str, Any]:
+    return {
+        "id": msg_id,
+        "threadId": thread_id,
+        "snippet": f"Preview of {msg_id}",
+        "internalDate": "1709337600000",
+        "labelIds": ["INBOX"],
+        "payload": {
+            "mimeType": "multipart/alternative",
+            "headers": [
+                {"name": "From", "value": "sender@example.com"},
+                {"name": "To", "value": "me@example.com"},
+                {"name": "Subject", "value": f"Subject for {msg_id}"},
+                {"name": "Date", "value": "Sat, 02 Mar 2024 00:00:00 +0000"},
+            ],
+            "parts": [
+                {
+                    "mimeType": "text/plain",
+                    "body": {"data": _b64url_text(f"Plain body for {msg_id}")},
+                },
+                {
+                    "mimeType": "text/html",
+                    "body": {"data": _b64url_text(f"<p>HTML body for {msg_id}</p>")},
+                },
+            ],
+        },
+    }
+
+
 class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         pass
@@ -55,28 +89,24 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return
 
-        # /gmail/v1/users/me/messages/{id} (must check before list endpoint)
-        if path.startswith("/gmail/v1/users/me/messages/"):
-            msg_id = path.split("/")[-1]
+        if path.startswith("/gmail/v1/users/me/threads/"):
+            thread_id = path.split("/")[-1]
             self._json_response(
                 200,
                 {
-                    "id": msg_id,
-                    "threadId": f"thread_{msg_id}",
-                    "snippet": f"Preview of {msg_id}",
-                    "internalDate": "1709337600000",
-                    "payload": {
-                        "headers": [
-                            {"name": "From", "value": "sender@example.com"},
-                            {"name": "Subject", "value": f"Subject for {msg_id}"},
-                            {
-                                "name": "Date",
-                                "value": "Sat, 02 Mar 2024 00:00:00 +0000",
-                            },
-                        ]
-                    },
+                    "id": thread_id,
+                    "messages": [
+                        _fake_message_detail("msg_1", thread_id),
+                        _fake_message_detail("msg_2", thread_id),
+                    ],
                 },
             )
+            return
+
+        # /gmail/v1/users/me/messages/{id} (must check before list endpoint)
+        if path.startswith("/gmail/v1/users/me/messages/"):
+            msg_id = path.split("/")[-1]
+            self._json_response(200, _fake_message_detail(msg_id, f"thread_{msg_id}"))
             return
 
         # /gmail/v1/users/me/messages (list)
@@ -314,6 +344,23 @@ def test_bridge_definitions() -> None:
         item["id"] for item in definitions if isinstance(item, dict) and "id" in item
     }
     assert ids == {"gog.email", "gog.calendar"}
+    email_def = next(
+        item
+        for item in definitions
+        if isinstance(item, dict) and item.get("id") == "gog.email"
+    )
+    operations = {
+        operation.get("name")
+        for operation in email_def.get("operations", [])
+        if isinstance(operation, dict)
+    }
+    assert {
+        "list_messages",
+        "search_messages",
+        "get_message",
+        "get_thread",
+        "send_message",
+    }.issubset(operations)
 
 
 def test_bridge_auth_code_flow_and_user_scoped_invoke(
@@ -1267,6 +1314,136 @@ def test_bridge_invoke_send_message(
     assert output["message_id"] == "sent_msg_001"
     assert output["to"] == "recipient@example.com"
     assert output["subject"] == "Test email"
+
+
+def test_bridge_invoke_get_message(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_email_account(
+        tmp_path=tmp_path,
+        fake_google_oauth=fake_google_oauth,
+        env=env,
+        user_token=user_token,
+    )
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_get_message",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.email",
+                "operation": "get_message",
+                "input_data": {"id": "msg_1"},
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in invoke
+    output = invoke["result"]["output"]
+    assert output["id"] == "msg_1"
+    assert output["thread_id"] == "thread_msg_1"
+    assert output["body_text"] == "Plain body for msg_1"
+    assert "body_html" not in output
+
+
+def test_bridge_invoke_get_thread(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_email_account(
+        tmp_path=tmp_path,
+        fake_google_oauth=fake_google_oauth,
+        env=env,
+        user_token=user_token,
+    )
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_get_thread",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.email",
+                "operation": "get_thread",
+                "input_data": {"thread_id": "thread_1"},
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in invoke
+    output = invoke["result"]["output"]
+    assert output["thread_id"] == "thread_1"
+    assert output["count"] == 2
+    assert output["messages"][0]["body_text"] == "Plain body for msg_1"
+
+
+def test_bridge_invoke_search_messages(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_email_account(
+        tmp_path=tmp_path,
+        fake_google_oauth=fake_google_oauth,
+        env=env,
+        user_token=user_token,
+    )
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_search_messages",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.email",
+                "operation": "search_messages",
+                "input_data": {"query": "from:sender@example.com", "limit": 2},
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in invoke
+    output = invoke["result"]["output"]
+    assert output["query"] == "from:sender@example.com"
+    assert output["count"] == 2
 
 
 def test_bridge_invoke_calendar_create_event(

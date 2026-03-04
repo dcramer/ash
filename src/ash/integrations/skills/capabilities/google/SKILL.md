@@ -1,5 +1,6 @@
 ---
-description: "Set up, configure, or use Gmail and Google Calendar. Handles initial setup, authentication, sending/reading/searching emails, and managing calendar events. Use whenever the user mentions setting up Google, email, inbox, sending a message, checking their calendar, scheduling a meeting, or managing events."
+name: google
+description: "Manage Gmail and Google Calendar with capability-backed auth and operations. Use when asked to check inbox, summarize emails, give a day at a glance, send an email, review calendar events, or schedule meetings."
 opt_in: true
 sensitive: true
 access:
@@ -16,7 +17,7 @@ input_schema:
   properties:
     task:
       type: string
-      description: The email/calendar task to perform
+      description: The Google email/calendar task to perform
   required:
     - task
 ---
@@ -27,6 +28,7 @@ Manage Gmail and Google Calendar through host-managed capabilities.
 
 - Use `ash-sb capability` for every Gmail/Calendar operation.
 - Never read or request raw OAuth access tokens, refresh tokens, or client secrets.
+- Do not fabricate capability results. Only report data returned by commands.
 
 ## Workflow
 
@@ -38,142 +40,104 @@ On every invocation, follow these steps in order:
 ash-sb capability list
 ```
 
-Expected output:
+- If a needed capability is missing, tell the user to enable `[skills.google]` and stop.
+- If a needed capability is not authenticated, run auth (step 2).
+- If already authenticated, continue to operations (step 3).
 
-```
-Capabilities:
-- gog.email: Gmail integration
-  Available: yes
-  Authenticated: no
-  Operations: list_messages, get_message, send_message, ...
-- gog.calendar: Google Calendar integration
-  Available: yes
-  Authenticated: yes
-  Operations: list_events, create_event, ...
-Total: 2 capability(ies)
-```
+### 2. Authenticate (when needed)
 
-- If a needed capability is missing entirely, tell the user the google skill needs to be enabled in their Ash config (`[skills.google] enabled = true`) and stop.
-- If `Authenticated: no` for any needed capability, go to step 2.
-- If `Authenticated: yes` for all needed capabilities, skip to step 3.
-
-### 2. Authenticate
-
-Run this step for each capability where `Authenticated: no`. If the user's request is setup-only (e.g. "set up my email"), stop after authentication is complete — do not invoke any operations.
-
-Before prompting the user again, check whether the current task already contains a pasted Google callback URL (`http://localhost/?...code=...`) or a raw auth code. If yes:
-
-1. Run `ash-sb capability auth begin -c <capability>` first.
-2. Immediately run `ash-sb capability auth complete --flow-id <id> --callback-url '<URL>'` (or `--code '<CODE>'`).
-3. Re-run `ash-sb capability list` and continue to operations if authenticated.
-
-Do not ask the user for another URL/code when one is already present in the task.
-
-If `auth complete` fails with an invalid/expired flow error, explicitly tell the user
-their previous auth link/code expired (or no longer matches the active flow), then
-start a fresh auth flow and ask them to paste the new callback URL promptly.
-
-**2a. Begin auth flow**
-
-Use `--account work` or `--account personal` if the user specifies an account preference:
+For each unauthenticated capability (`gog.email`, `gog.calendar`):
 
 ```bash
 ash-sb capability auth begin -c gog.email
 ```
 
-Expected output:
+Then:
 
-```
-Started capability auth flow (flow_id=abc123)
-  Capability: gog.email
-  Auth URL: https://www.google.com/device
-  Flow type: device_code
-  User code: ABCD-EFGH
-  Poll interval: 5s
-  Expires: 2026-03-01T12:30:00Z
-```
+- If flow type is `device_code`: show URL + user code, then poll.
+- If flow type is `authorization_code`: show URL and ask user for callback URL or code, then complete.
 
-**2b. Present URL and code to user**
-
-Check the `Flow type` in the output:
-
-- If `device_code`: show the `Auth URL` and `User code` from the output. Tell the user to open the URL and enter the code. Then proceed to step 2c to poll for completion.
-- If `authorization_code`: show the `Auth URL` from the output and ask the user to complete the Google consent screen and provide either the authorization code or the callback URL. Then use `ash-sb capability auth complete --flow-id <id> --code '<CODE>'` (or `--callback-url '<URL>'` when the user pastes the full callback URL). Do **not** pass `-c/--capability` to `auth complete`; that option is only valid for `auth begin`.
-
-**2c. Poll for completion (device code flow)**
-
-After showing the user the URL and code, poll for completion:
+Use these commands:
 
 ```bash
-ash-sb capability auth poll --flow-id abc123 --timeout 300
+ash-sb capability auth poll --flow-id <id> --timeout 300
+ash-sb capability auth complete --flow-id <id> --callback-url '<URL>'
+ash-sb capability auth complete --flow-id <id> --code '<CODE>'
 ```
 
-This blocks until the user completes authorization or the timeout expires. Expected output on success:
+If user intent is setup-only, stop after successful auth confirmation.
 
-```
-Capability auth completed (flow_id=abc123, account_ref=default)
-```
+### 3. Perform operations
 
-**2d. Repeat for additional capabilities**
+Use only capability operations and explicit JSON input.
 
-If multiple capabilities need auth (e.g. both `gog.email` and `gog.calendar`), repeat steps 2a–2c for each one. Each capability requires its own auth flow.
-
-### 3. Perform operation
-
-Run capability operations with explicit capability IDs and JSON input:
+Common email/calendar commands:
 
 ```bash
 ash-sb capability invoke -c gog.email -o list_messages --input-json '{"folder":"inbox","limit":20}'
-ash-sb capability invoke -c gog.calendar -o list_events --input-json '{"calendar":"primary","window":"7d"}'
+ash-sb capability invoke -c gog.email -o search_messages --input-json '{"query":"is:unread newer_than:1d","limit":20}'
+ash-sb capability invoke -c gog.email -o get_message --input-json '{"id":"<message_id>"}'
+ash-sb capability invoke -c gog.email -o get_thread --input-json '{"thread_id":"<thread_id>","limit":20}'
+ash-sb capability invoke -c gog.calendar -o list_events --input-json '{"calendar":"primary","window":"1d"}'
+ash-sb capability invoke -c gog.calendar -o create_event --input-json '{"title":"Team sync","start":"2026-03-04T18:00:00Z"}'
 ```
 
-Confirm key details before mutating operations (sending emails, creating/updating events).
+If the user asks a broad question and does not provide scope, use these defaults:
 
-## Output Format
+- Email summaries: `search_messages` with `{"query":"is:unread newer_than:1d","limit":20}`
+- Day-at-a-glance: `list_events` with `{"calendar":"primary","window":"1d"}` plus unread/recent email query
+- Message deep read: run `get_message` for each item you summarize
 
-Format your `complete()` output exactly as shown below. This is critical — the parent agent relays your output directly.
+## Behavior Playbooks
 
-**Listing emails:**
+### Summarize Emails
 
-```
-- From: Alice <alice@example.com> — "Quarterly review" (2 hours ago)
-- From: Bob <bob@example.com> — "Lunch tomorrow?" (yesterday)
-```
+When user asks for summaries (for example "summarize my emails", "what did I miss"):
 
-**Listing events:**
+1. Gather candidate messages with `search_messages` (preferred) or `list_messages`.
+2. Fetch full message content with `get_message` for messages you summarize.
+3. Summarize using this structure:
+   - `Top priorities`
+   - `Needs reply`
+   - `FYI`
+   - `Suggested next actions`
+4. Keep each bullet tied to a concrete message subject/sender so the user can act on it.
 
-```
-- Tomorrow 10am–11am: Team standup (Google Meet)
-- Friday 2pm–3pm: 1:1 with Alice (Room 3B)
-```
+Do not summarize from snippets alone when full content can be fetched.
 
-**After mutations (send, create, update, delete):**
+### Day At A Glance
 
-```
-Sent: "Re: Quarterly review" to alice@example.com
-```
+When user asks for a day overview:
 
-```
-Created: Team lunch — Friday 12pm–1pm
-```
+1. Pull today/near-term calendar with `list_events`.
+2. Pull high-signal recent email using `search_messages` (for example unread/new/important) and fetch full content for top items.
+3. Return this structure:
+   - `Today's schedule`
+   - `Email priorities`
+   - `Conflicts / follow-ups`
+   - `Recommended next steps`
+4. If there are no events or no high-signal email, say that explicitly instead of leaving sections blank.
 
-**Setup/auth completion:**
+Use Google calendar + Google email only for this view.
 
-```
-Google email is now connected (user@gmail.com). You're all set — let me know when you want to check your inbox or send a message.
-```
+### Standard mutations
 
-```
-Google email and calendar are now connected. You're all set to use both.
-```
+Before `send_message` or `create_event`, confirm key details if user intent is ambiguous.
+Required confirmation fields:
 
-**Formatting rules:**
+- Email send: recipient, subject, body intent
+- Event create: title, start time/date, end time or duration, timezone context if unclear
 
-- Show dates conversationally ("2 hours ago", "tomorrow at 3pm") — never raw ISO timestamps
-- After mutations, do NOT re-list all items unless the user asks
-- Only claim success after the command produces success output
+## Output Rules
+
+- Keep timestamps conversational (for example "2 hours ago", "tomorrow at 3pm").
+- For summary workflows, prefer grouped bullets over raw dumps.
+- After mutation success, confirm the action and stop unless user asked for more.
+- Only claim success after command output confirms it.
+- For auth/setup completion, explicitly state which capability is now connected.
 
 ## Error Handling
 
-- If a command fails, report the error message and stop
-- Do not attempt to fix or debug failed commands unless the user asks
+- If a command fails, report the error message and stop.
+- Do not request raw credentials or attempt unsupported workarounds.
+- If capability is unavailable or disabled, instruct the user to enable `[skills.google]`.

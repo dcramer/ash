@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import threading
@@ -67,6 +68,39 @@ _device_code_counter = 0
 _poll_counts: dict[str, int] = {}
 
 
+def _b64url_text(value: str) -> str:
+    return base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _fake_message_detail(msg_id: str, thread_id: str) -> dict[str, Any]:
+    return {
+        "id": msg_id,
+        "threadId": thread_id,
+        "snippet": f"Preview of {msg_id}",
+        "internalDate": "1709337600000",
+        "labelIds": ["INBOX"],
+        "payload": {
+            "mimeType": "multipart/alternative",
+            "headers": [
+                {"name": "From", "value": "sender@example.com"},
+                {"name": "To", "value": "me@example.com"},
+                {"name": "Subject", "value": f"Subject for {msg_id}"},
+                {"name": "Date", "value": "Sat, 02 Mar 2024 00:00:00 +0000"},
+            ],
+            "parts": [
+                {
+                    "mimeType": "text/plain",
+                    "body": {"data": _b64url_text(f"Plain body for {msg_id}")},
+                },
+                {
+                    "mimeType": "text/html",
+                    "body": {"data": _b64url_text(f"<p>HTML body for {msg_id}</p>")},
+                },
+            ],
+        },
+    }
+
+
 class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
     """Handles OAuth, Gmail API, and Calendar API endpoints with canned responses."""
 
@@ -88,31 +122,24 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return
 
-        # /gmail/v1/users/me/messages/{id} (must check before list endpoint)
-        if path.startswith("/gmail/v1/users/me/messages/"):
-            msg_id = path.split("/")[-1]
+        if path.startswith("/gmail/v1/users/me/threads/"):
+            thread_id = path.split("/")[-1]
             self._json_response(
                 200,
                 {
-                    "id": msg_id,
-                    "threadId": f"thread_{msg_id}",
-                    "snippet": f"Preview of {msg_id}",
-                    "internalDate": "1709337600000",
-                    "payload": {
-                        "headers": [
-                            {"name": "From", "value": "sender@example.com"},
-                            {
-                                "name": "Subject",
-                                "value": f"Subject for {msg_id}",
-                            },
-                            {
-                                "name": "Date",
-                                "value": "Sat, 02 Mar 2024 00:00:00 +0000",
-                            },
-                        ]
-                    },
+                    "id": thread_id,
+                    "messages": [
+                        _fake_message_detail("msg_1", thread_id),
+                        _fake_message_detail("msg_2", thread_id),
+                    ],
                 },
             )
+            return
+
+        # /gmail/v1/users/me/messages/{id} (must check before list endpoint)
+        if path.startswith("/gmail/v1/users/me/messages/"):
+            msg_id = path.split("/")[-1]
+            self._json_response(200, _fake_message_detail(msg_id, f"thread_{msg_id}"))
             return
 
         # /gmail/v1/users/me/messages (list)
@@ -423,6 +450,25 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert "access_token" not in serialized_email_output
     assert "refresh_token" not in serialized_email_output
     assert "client_secret" not in serialized_email_output
+
+    # ---- Invoke email get_message ----
+    invoke_email_message = await _rpc(
+        server,
+        request_id=61,
+        method="capability.invoke",
+        params={
+            "context_token": user1_private,
+            "capability": "gog.email",
+            "operation": "get_message",
+            "input": {"id": "msg_1"},
+        },
+    )
+    assert invoke_email_message.error is None
+    assert isinstance(invoke_email_message.result, dict)
+    message_output = invoke_email_message.result["output"]
+    assert message_output["id"] == "msg_1"
+    assert message_output["thread_id"] == "thread_msg_1"
+    assert message_output["body_text"] == "Plain body for msg_1"
 
     # ---- Auth begin + complete for calendar ----
     begin_calendar = await _rpc(

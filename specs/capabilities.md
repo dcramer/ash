@@ -121,18 +121,18 @@ Capability providers are configured as bridge commands.
 For bundled `gog` dogfood, configure from the skill section:
 
 ```toml
-[skills.gog]
+[skills.google]
 enabled = true
 
-[skills.gog.capability_provider]
+[skills.google.capability_provider]
 enabled = true
 namespace = "gog"
 command = ["gogcli", "bridge"]
 timeout_seconds = 30
 ```
 
-`skills.gog.enabled = true` applies default `capabilities.providers.gog` wiring.
-Optional `skills.gog.capability_provider` values override command/namespace/timeout.
+`skills.google.enabled = true` applies default `capabilities.providers.gog` wiring.
+Optional `skills.google.capability_provider` values override command/namespace/timeout.
 Explicit `[capabilities.providers.gog]` remains available for host-level overrides.
 
 The host invokes the bridge with JSON over stdin/stdout for `definitions`,

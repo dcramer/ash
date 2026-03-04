@@ -43,3 +43,10 @@ def test_google_skill_uses_capability_contract_text() -> None:
     assert "ash-sb capability" in text
     assert "[skills.google]" in text
     assert "Never read or request raw OAuth access tokens" in text
+
+
+def test_google_skill_includes_summary_and_day_at_a_glance_playbooks() -> None:
+    text = _load_google_skill_text().lower()
+    assert "summarize emails" in text
+    assert "day at a glance" in text
+    assert "get_message" in text

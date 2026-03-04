@@ -139,10 +139,10 @@ Capability IDs must be namespaced (for example `gog.email`, not `email`).
 Provider execution details are host-owned config, not skill metadata:
 
 ```toml
-[skills.gog]
+[skills.google]
 enabled = true
 
-[skills.gog.capability_provider]
+[skills.google.capability_provider]
 enabled = true
 namespace = "gog"
 command = ["gogcli", "bridge"]
@@ -167,10 +167,10 @@ allow_chat_ids = ["12345"]        # Optional per-skill chat allowlist override
 [skills.defaults]
 allow_chat_ids = ["12345"]        # Optional global default allowlist for all skills
 
-[skills.gog]
-enabled = true                    # Enables bundled gog skill and provider auto-wiring
+[skills.google]
+enabled = true                    # Enables bundled google skill and provider auto-wiring
 
-[skills.gog.capability_provider]
+[skills.google.capability_provider]
 enabled = true
 namespace = "gog"
 command = ["gogcli", "bridge"]
@@ -184,11 +184,11 @@ Config keys match env var names exactly (UPPER_CASE). No case conversion.
 `allow_chat_ids` can be set globally in `[skills.defaults]` and overridden per skill.
 Secret-like env var names are blocked by policy and must use host-managed capability/proxy auth.
 
-`[skills.gog].enabled = true` applies default `gog` provider wiring.
-`[skills.gog.capability_provider]` can override provider command/namespace/timeout
+`[skills.google].enabled = true` applies default `gog` provider wiring.
+`[skills.google.capability_provider]` can override provider command/namespace/timeout
 from the same skill section.
 
-Explicit `[skills.gog]` / `[capabilities.providers.gog]` values override preset defaults.
+Explicit `[skills.google]` / `[capabilities.providers.gog]` values override preset defaults.
 
 ### System Prompt Listing
 
