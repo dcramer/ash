@@ -401,6 +401,63 @@ async def test_auth_complete_rejects_callback_state_mismatch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auth_complete_accepts_callback_url_in_code_field() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _RecordingProvider(namespace="gog")
+    await manager.register_provider(provider)
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+
+    flow_id = str(begin["flow_id"])
+    manager._auth_flows[flow_id].expected_callback_state = "expected-state"
+    callback = "http://localhost/?state=expected-state&code=abc123&scope=mail"
+
+    result = await manager.auth_complete(
+        flow_id=flow_id,
+        user_id="user-1",
+        callback_url=None,
+        code=callback,
+    )
+
+    assert result["ok"] is True
+    completion = provider.complete_calls[0]["completion"]
+    assert completion.authorization_code == "abc123"
+    assert completion.raw_callback_url == callback
+
+
+@pytest.mark.asyncio
+async def test_auth_complete_accepts_code_query_fragment_in_code_field() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _RecordingProvider(namespace="gog")
+    await manager.register_provider(provider)
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+
+    flow_id = str(begin["flow_id"])
+    manager._auth_flows[flow_id].expected_callback_state = "expected-state"
+
+    result = await manager.auth_complete(
+        flow_id=flow_id,
+        user_id="user-1",
+        callback_url=None,
+        code="?state=expected-state&code=abc123",
+    )
+
+    assert result["ok"] is True
+    completion = provider.complete_calls[0]["completion"]
+    assert completion.authorization_code == "abc123"
+    assert completion.state == "expected-state"
+
+
+@pytest.mark.asyncio
 async def test_auth_begin_reuses_pending_flow_for_same_scope() -> None:
     manager = CapabilityManager(auth_flow_ttl_seconds=300)
     provider = _RecordingProvider(namespace="gog")

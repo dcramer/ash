@@ -64,7 +64,7 @@ Run this step for each capability where `Authenticated: no`. If the user's reque
 Before prompting the user again, check whether the current task already contains a pasted Google callback URL (`http://localhost/?...code=...`) or a raw auth code. If yes:
 
 1. Run `ash-sb capability auth begin -c <capability>` first.
-2. Immediately run `ash-sb capability auth complete --flow-id <id> --callback-url <URL>` (or `--code <CODE>`).
+2. Immediately run `ash-sb capability auth complete --flow-id <id> --callback-url '<URL>'` (or `--code '<CODE>'`).
 3. Re-run `ash-sb capability list` and continue to operations if authenticated.
 
 Do not ask the user for another URL/code when one is already present in the task.
@@ -98,7 +98,7 @@ Started capability auth flow (flow_id=abc123)
 Check the `Flow type` in the output:
 
 - If `device_code`: show the `Auth URL` and `User code` from the output. Tell the user to open the URL and enter the code. Then proceed to step 2c to poll for completion.
-- If `authorization_code`: show the `Auth URL` from the output and ask the user to complete the Google consent screen and provide either the authorization code or the callback URL. Then use `ash-sb capability auth complete --flow-id <id> --code <CODE>` (or `--callback-url <URL>` when the user pastes the full callback URL). Do **not** pass `-c/--capability` to `auth complete`; that option is only valid for `auth begin`.
+- If `authorization_code`: show the `Auth URL` from the output and ask the user to complete the Google consent screen and provide either the authorization code or the callback URL. Then use `ash-sb capability auth complete --flow-id <id> --code '<CODE>'` (or `--callback-url '<URL>'` when the user pastes the full callback URL). Do **not** pass `-c/--capability` to `auth complete`; that option is only valid for `auth begin`.
 
 **2c. Poll for completion (device code flow)**
 
