@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -374,6 +375,8 @@ def test_bridge_auth_code_flow_and_user_scoped_invoke(
     stored_flow = state_after_begin["auth_flows"][flow_state["flow_id"]]
     assert stored_flow["flow_type"] == "authorization_code"
     assert stored_flow["state_param"]
+    # Flows should remain valid long enough for real-world consent latency.
+    assert int(stored_flow["expires_at"]) - int(time.time()) >= 25 * 60
 
     # auth_complete exchanges code for tokens
     complete = _run_bridge(

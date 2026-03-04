@@ -65,7 +65,7 @@ class CapabilityManager:
     def __init__(
         self,
         *,
-        auth_flow_ttl_seconds: int = 600,
+        auth_flow_ttl_seconds: int = 1800,
     ) -> None:
         self._lock = asyncio.Lock()
         self._definitions: dict[str, CapabilityDefinition] = {}

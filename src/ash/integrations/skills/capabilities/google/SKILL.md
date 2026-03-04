@@ -69,6 +69,10 @@ Before prompting the user again, check whether the current task already contains
 
 Do not ask the user for another URL/code when one is already present in the task.
 
+If `auth complete` fails with an invalid/expired flow error, explicitly tell the user
+their previous auth link/code expired (or no longer matches the active flow), then
+start a fresh auth flow and ask them to paste the new callback URL promptly.
+
 **2a. Begin auth flow**
 
 Use `--account work` or `--account personal` if the user specifies an account preference:
