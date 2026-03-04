@@ -61,6 +61,14 @@ Total: 2 capability(ies)
 
 Run this step for each capability where `Authenticated: no`. If the user's request is setup-only (e.g. "set up my email"), stop after authentication is complete — do not invoke any operations.
 
+Before prompting the user again, check whether the current task already contains a pasted Google callback URL (`http://localhost/?...code=...`) or a raw auth code. If yes:
+
+1. Run `ash-sb capability auth begin -c <capability>` first.
+2. Immediately run `ash-sb capability auth complete --flow-id <id> --callback-url <URL>` (or `--code <CODE>`).
+3. Re-run `ash-sb capability list` and continue to operations if authenticated.
+
+Do not ask the user for another URL/code when one is already present in the task.
+
 **2a. Begin auth flow**
 
 Use `--account work` or `--account personal` if the user specifies an account preference:

@@ -324,6 +324,10 @@ Response:
 Starts auth for a capability/account and returns an auth flow handle.
 For device code flow extensions (`flow_type`, `user_code`, `auth_poll`), see `specs/capability-auth.md`.
 
+If an unexpired pending auth flow already exists for the same caller scope
+(`effective_user_id`, `capability`, `account_hint`), the host returns that
+existing flow instead of creating a new one.
+
 Request params:
 
 ```json

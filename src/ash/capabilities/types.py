@@ -42,8 +42,11 @@ class CapabilityAuthFlow:
     user_id: str
     account_hint: str | None
     expires_at: datetime
+    auth_url: str
     flow_state: dict[str, Any] = field(default_factory=dict)
     flow_type: str = "authorization_code"
+    user_code: str | None = None
+    poll_interval_seconds: int | None = None
     expected_callback_state: str | None = None
 
 

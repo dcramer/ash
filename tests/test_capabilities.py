@@ -401,6 +401,29 @@ async def test_auth_complete_rejects_callback_state_mismatch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auth_begin_reuses_pending_flow_for_same_scope() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _RecordingProvider(namespace="gog")
+    await manager.register_provider(provider)
+
+    first = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+    second = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+
+    assert first["flow_id"] == second["flow_id"]
+    assert len(provider.begin_calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_provider_registration_enforces_namespace_prefix() -> None:
     manager = CapabilityManager()
     provider = _RecordingProvider(namespace="gog", capability_id="other.email")

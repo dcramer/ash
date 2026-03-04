@@ -255,6 +255,13 @@ class CapabilityManager:
                 normalized_capability_id
             )
             _assert_chat_type_allowed(definition, normalized_chat_type)
+            existing_flow = self._find_pending_auth_flow_locked(
+                user_id=normalized_user_id,
+                capability_id=normalized_capability_id,
+                account_hint=normalized_account_hint,
+            )
+            if existing_flow is not None:
+                return _auth_begin_response(existing_flow)
 
         call_context = CapabilityCallContext(
             user_id=normalized_user_id,
@@ -278,29 +285,23 @@ class CapabilityManager:
             datetime.now(UTC) + timedelta(seconds=self._auth_flow_ttl_seconds)
         )
         flow_type = begin_result.flow_type or "authorization_code"
+        flow = CapabilityAuthFlow(
+            flow_id=flow_id,
+            capability_id=normalized_capability_id,
+            user_id=normalized_user_id,
+            account_hint=normalized_account_hint,
+            expires_at=expires_at,
+            auth_url=begin_result.auth_url,
+            flow_state=dict(begin_result.flow_state),
+            flow_type=flow_type,
+            user_code=begin_result.user_code,
+            poll_interval_seconds=begin_result.poll_interval_seconds,
+            expected_callback_state=begin_result.expected_callback_state,
+        )
         async with self._lock:
-            self._auth_flows[flow_id] = CapabilityAuthFlow(
-                flow_id=flow_id,
-                capability_id=normalized_capability_id,
-                user_id=normalized_user_id,
-                account_hint=normalized_account_hint,
-                expires_at=expires_at,
-                flow_state=dict(begin_result.flow_state),
-                flow_type=flow_type,
-                expected_callback_state=begin_result.expected_callback_state,
-            )
+            self._auth_flows[flow_id] = flow
 
-        result: dict[str, Any] = {
-            "flow_id": flow_id,
-            "auth_url": begin_result.auth_url,
-            "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
-            "flow_type": flow_type,
-        }
-        if begin_result.user_code is not None:
-            result["user_code"] = begin_result.user_code
-        if begin_result.poll_interval_seconds is not None:
-            result["poll_interval_seconds"] = begin_result.poll_interval_seconds
-        return result
+        return _auth_begin_response(flow)
 
     async def auth_complete(
         self,
@@ -639,6 +640,24 @@ class CapabilityManager:
         provider_impl = self._providers.get(provider_name) if provider_name else None
         return definition, provider_impl
 
+    def _find_pending_auth_flow_locked(
+        self,
+        *,
+        user_id: str,
+        capability_id: str,
+        account_hint: str | None,
+    ) -> CapabilityAuthFlow | None:
+        matches = [
+            flow
+            for flow in self._auth_flows.values()
+            if flow.user_id == user_id
+            and flow.capability_id == capability_id
+            and flow.account_hint == account_hint
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda flow: flow.expires_at)
+
     async def _provider_auth_begin(
         self,
         provider_impl: CapabilityProvider | None,
@@ -862,6 +881,20 @@ def _first_account_ref_locked(
     if not refs:
         return None
     return sorted(refs)[0]
+
+
+def _auth_begin_response(flow: CapabilityAuthFlow) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "flow_id": flow.flow_id,
+        "auth_url": flow.auth_url,
+        "expires_at": flow.expires_at.isoformat().replace("+00:00", "Z"),
+        "flow_type": flow.flow_type,
+    }
+    if flow.user_code is not None:
+        result["user_code"] = flow.user_code
+    if flow.poll_interval_seconds is not None:
+        result["poll_interval_seconds"] = flow.poll_interval_seconds
+    return result
 
 
 def _find_sensitive_key_path(value: Any, path: str = "output") -> str | None:
