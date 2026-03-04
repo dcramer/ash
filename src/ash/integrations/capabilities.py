@@ -81,7 +81,8 @@ class CapabilitiesIntegration(IntegrationContributor):
             line = (
                 "- For sensitive external integrations (email/calendar), use "
                 "`ash-sb capability` so identity scope is enforced by "
-                "`ASH_CONTEXT_TOKEN`; do not request raw credential env vars."
+                "`ASH_CONTEXT_TOKEN`; do not request raw credential env vars. "
+                "Secret-like env vars are blocked by security policy."
             )
             if line not in lines:
                 lines.append(line)

@@ -484,6 +484,25 @@ def _get_access_token(vault_ref: str) -> str:
     return token
 
 
+def _resolve_refresh_token(
+    *,
+    new_refresh_token: str | None,
+    existing_vault_ref: str | None,
+) -> str | None:
+    """Prefer new refresh token, otherwise preserve existing stored token."""
+    if new_refresh_token:
+        return new_refresh_token
+    if not existing_vault_ref:
+        return None
+    try:
+        creds = _vault().get_json(existing_vault_ref)
+    except VaultError:
+        return None
+    if not isinstance(creds, dict):
+        return None
+    return _optional_text(creds.get("refresh_token"))
+
+
 def _parse_window(window: str) -> int:
     """Parse a window string like '7d', '3h', '2w' into seconds."""
     if not window:
@@ -822,15 +841,6 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
             f"Google token endpoint returned error: {error_code}",
         )
 
-    # Success — we got tokens
-    access_token = _optional_text(token_resp.get("access_token"))
-    refresh_token = _optional_text(token_resp.get("refresh_token"))
-    if not access_token:
-        raise BridgeError(
-            "capability_backend_unavailable",
-            "Google token response missing access_token",
-        )
-
     account_hint = _optional_text(stored_flow.get("account_hint")) or "default"
     account_ref = account_hint
     account_key = _account_key(claims.user_id, capability_id, account_ref)
@@ -839,6 +849,11 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
     existing_created_at = (
         _int_claim(existing, "created_at") if isinstance(existing, dict) else None
     )
+    existing_vault_ref = (
+        _optional_text(existing.get("vault_ref"))
+        if isinstance(existing, dict)
+        else None
+    )
     credential_key = (
         _optional_text(existing.get("credential_key"))
         if isinstance(existing, dict)
@@ -846,6 +861,18 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
     )
     if credential_key is None:
         credential_key = f"cred_{secrets.token_hex(8)}"
+
+    # Success — we got tokens
+    access_token = _optional_text(token_resp.get("access_token"))
+    refresh_token = _resolve_refresh_token(
+        new_refresh_token=_optional_text(token_resp.get("refresh_token")),
+        existing_vault_ref=existing_vault_ref,
+    )
+    if not access_token:
+        raise BridgeError(
+            "capability_backend_unavailable",
+            "Google token response missing access_token",
+        )
 
     try:
         vault = _vault()
@@ -989,18 +1016,15 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
             f"Google token exchange failed: {error_desc}",
         )
 
-    access_token = _optional_text(token_resp.get("access_token"))
-    refresh_token = _optional_text(token_resp.get("refresh_token"))
-    if not access_token:
-        raise BridgeError(
-            "capability_backend_unavailable",
-            "Google token response missing access_token",
-        )
-
     account_key = _account_key(claims.user_id, capability_id, account_ref)
     existing = state["accounts"].get(account_key)
     existing_created_at = (
         _int_claim(existing, "created_at") if isinstance(existing, dict) else None
+    )
+    existing_vault_ref = (
+        _optional_text(existing.get("vault_ref"))
+        if isinstance(existing, dict)
+        else None
     )
     credential_key = (
         _optional_text(existing.get("credential_key"))
@@ -1009,6 +1033,16 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
     )
     if credential_key is None:
         credential_key = f"cred_{secrets.token_hex(8)}"
+    access_token = _optional_text(token_resp.get("access_token"))
+    refresh_token = _resolve_refresh_token(
+        new_refresh_token=_optional_text(token_resp.get("refresh_token")),
+        existing_vault_ref=existing_vault_ref,
+    )
+    if not access_token:
+        raise BridgeError(
+            "capability_backend_unavailable",
+            "Google token response missing access_token",
+        )
     try:
         vault = _vault()
         vault_ref = vault.put_json(

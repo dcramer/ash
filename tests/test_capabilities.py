@@ -84,7 +84,7 @@ class _RecordingProvider:
         )
         return CapabilityAuthCompleteResult(
             account_ref="acct_work",
-            credential_material={"refresh_token": "rt-provider-only"},
+            credential_material={"credential_key": "cred-provider-only"},
             metadata={"account_name": "Work"},
         )
 
@@ -155,6 +155,37 @@ class _PartiallyInvalidProvider(_RecordingProvider):
                 },
             ),
         ]
+
+
+@dataclass
+class _SensitivePollProvider(_RecordingProvider):
+    async def auth_begin(
+        self,
+        *,
+        capability_id: str,
+        account_hint: str | None,
+        context: CapabilityCallContext,
+    ) -> CapabilityAuthBeginResult:
+        _ = (capability_id, account_hint, context)
+        return CapabilityAuthBeginResult(
+            auth_url="https://auth.example/device",
+            flow_type="device_code",
+            flow_state={"flow_nonce": "nonce-2"},
+        )
+
+    async def auth_poll(
+        self,
+        *,
+        capability_id: str,
+        flow_state: dict[str, Any],
+        context: CapabilityCallContext,
+    ) -> CapabilityAuthPollResult:
+        _ = (capability_id, flow_state, context)
+        return CapabilityAuthPollResult(
+            status="complete",
+            account_ref="acct_work",
+            credential_material={"refresh_token": "leak"},
+        )
 
 
 @pytest.fixture
@@ -408,7 +439,7 @@ async def test_provider_delegation_uses_trusted_context_and_stores_account_mater
     assert invoke_context.session_key == "session-xyz"
 
     account = manager._accounts[("user-1", "gog.email", "acct_work")]
-    assert account.credential_material == {"refresh_token": "rt-provider-only"}
+    assert account.credential_material == {"credential_key": "cred-provider-only"}
     assert account.metadata == {"account_name": "Work"}
 
 
@@ -436,6 +467,68 @@ async def test_provider_output_rejects_sensitive_material() -> None:
             capability_id="gog.email",
             operation="list_messages",
             input_data={"folder": "inbox"},
+            user_id="user-1",
+            chat_type="private",
+        )
+    assert exc_info.value.code == "capability_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_provider_auth_completion_rejects_sensitive_credential_material() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _RecordingProvider(namespace="gog")
+    await manager.register_provider(provider)
+
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+    provider.complete_calls.clear()
+
+    async def _bad_auth_complete(
+        *,
+        capability_id: str,
+        flow_state: dict[str, Any],
+        callback_url: str | None,
+        code: str | None,
+        context: CapabilityCallContext,
+    ) -> CapabilityAuthCompleteResult:
+        _ = (capability_id, flow_state, callback_url, code, context)
+        return CapabilityAuthCompleteResult(
+            account_ref="acct_work",
+            credential_material={"refresh_token": "leak"},
+        )
+
+    provider.auth_complete = _bad_auth_complete  # type: ignore[assignment]
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await manager.auth_complete(
+            flow_id=begin["flow_id"],
+            user_id="user-1",
+            callback_url="https://localhost/callback?code=abc",
+            code=None,
+        )
+    assert exc_info.value.code == "capability_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_provider_auth_poll_rejects_sensitive_credential_material() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _SensitivePollProvider(namespace="gog")
+    await manager.register_provider(provider)
+
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await manager.auth_poll(
+            flow_id=begin["flow_id"],
             user_id="user-1",
             chat_type="private",
         )

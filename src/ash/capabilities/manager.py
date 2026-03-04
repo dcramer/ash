@@ -379,6 +379,12 @@ class CapabilityManager:
             code="capability_invalid_output",
             message="auth completion must return account_ref",
         )
+        credential_material = dict(complete_result.credential_material)
+        if _find_sensitive_key_path(credential_material, path="credential_material"):
+            raise CapabilityError(
+                "capability_invalid_output",
+                "provider auth completion returned credential material",
+            )
         now = datetime.now(UTC)
         async with self._lock:
             self._accounts[(flow.user_id, flow.capability_id, account_ref)] = (
@@ -387,7 +393,7 @@ class CapabilityManager:
                     user_id=flow.user_id,
                     account_ref=account_ref,
                     created_at=now,
-                    credential_material=dict(complete_result.credential_material),
+                    credential_material=credential_material,
                     metadata=dict(complete_result.metadata),
                 )
             )
@@ -465,6 +471,14 @@ class CapabilityManager:
                 code="capability_invalid_output",
                 message="auth poll completion must return account_ref",
             )
+            credential_material = dict(poll_result.credential_material)
+            if _find_sensitive_key_path(
+                credential_material, path="credential_material"
+            ):
+                raise CapabilityError(
+                    "capability_invalid_output",
+                    "provider auth poll returned credential material",
+                )
             now = datetime.now(UTC)
             async with self._lock:
                 self._accounts[(flow.user_id, flow.capability_id, account_ref)] = (
@@ -473,7 +487,7 @@ class CapabilityManager:
                         user_id=flow.user_id,
                         account_ref=account_ref,
                         created_at=now,
-                        credential_material=dict(poll_result.credential_material),
+                        credential_material=credential_material,
                         metadata=dict(poll_result.metadata),
                     )
                 )

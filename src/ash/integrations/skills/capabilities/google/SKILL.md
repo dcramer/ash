@@ -86,7 +86,7 @@ Started capability auth flow (flow_id=abc123)
 Check the `Flow type` in the output:
 
 - If `device_code`: show the `Auth URL` and `User code` from the output. Tell the user to open the URL and enter the code. Then proceed to step 2c to poll for completion.
-- If `authorization_code`: show the `Auth URL` from the output and ask the user to complete the Google consent screen and provide either the authorization code or the callback URL. Then use `ash-sb capability auth complete --flow-id <id> --code <CODE>`.
+- If `authorization_code`: show the `Auth URL` from the output and ask the user to complete the Google consent screen and provide either the authorization code or the callback URL. Then use `ash-sb capability auth complete --flow-id <id> --code <CODE>` (or `--callback-url <URL>` when the user pastes the full callback URL). Do **not** pass `-c/--capability` to `auth complete`; that option is only valid for `auth begin`.
 
 **2c. Poll for completion (device code flow)**
 

@@ -186,7 +186,12 @@ The provider runs a while loop that processes TurnResults until it needs user in
 
 ```python
 while True:
-    result = execute_turn(stack.top, user_message=..., tool_result=...)
+    result = execute_turn(
+        stack.top,
+        user_message=...,
+        tool_result=...,
+        tool_overrides={"send_message": progress_tool},
+    )
 
     match result.action:
         case SEND_TEXT:
@@ -217,6 +222,10 @@ while True:
             # Same as MAX_ITERATIONS but with error text
 ```
 
+Provider orchestration SHOULD pass a per-request `send_message` override that
+funnels subagent progress into the current response thread (thinking/progress
+buffer) rather than emitting separate direct messages.
+
 Every iteration either `return`s (waiting for user input) or `continue`s (cascading). No recursion.
 
 ### execute_turn (AgentExecutor)
@@ -224,7 +233,12 @@ Every iteration either `return`s (waiting for user input) or `continue`s (cascad
 Runs one logical turn for a stack frame:
 
 ```python
-async def execute_turn(frame, user_message=None, tool_result=None) -> TurnResult:
+async def execute_turn(
+    frame,
+    user_message=None,
+    tool_result=None,
+    tool_overrides=None,
+) -> TurnResult:
     session = frame.session
 
     if user_message: session.add_user_message(user_message)
@@ -245,7 +259,11 @@ async def execute_turn(frame, user_message=None, tool_result=None) -> TurnResult
             if tool_use.name == "complete":
                 return TurnResult(COMPLETE, text=tool_use.input["result"])
             try:
-                result = await tools.execute(tool_use.name, tool_use.input, ctx)
+                tool_impl = tool_overrides.get(tool_use.name) if tool_overrides else None
+                if tool_impl:
+                    result = await tool_impl.execute(tool_use.input, ctx)
+                else:
+                    result = await tools.execute(tool_use.name, tool_use.input, ctx)
                 session.add_tool_result(tool_use.id, result.content, result.is_error)
             except ChildActivated as ca:
                 return TurnResult(CHILD_ACTIVATED, child_frame=ca.child_frame)

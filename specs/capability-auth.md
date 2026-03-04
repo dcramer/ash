@@ -8,7 +8,7 @@ Parent spec: `specs/capabilities.md`
 
 ## Status
 
-Spec only — not yet implemented.
+Implemented.
 
 ## Intent
 

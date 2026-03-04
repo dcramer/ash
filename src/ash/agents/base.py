@@ -11,6 +11,8 @@ PROGRESS_UPDATES_STEERING = """## Progress Updates
 Use `send_message` to keep the user informed during long-running tasks:
 - Share what you're working on at each major step
 - Keep updates brief (one line)
+- Use it for progress only, not final instructions or final results
+- If user action is needed (auth codes, confirmations), provide that once in the final response path
 
 Example: "Searching documentation...", "Found 3 results, analyzing..."""
 

@@ -196,7 +196,16 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
                 )
         elif grant_type == "authorization_code":
             code = (params.get("code") or [""])[0]
-            if code:
+            if code == "fake-auth-code-no-refresh":
+                self._json_response(
+                    200,
+                    {
+                        "access_token": _FAKE_ACCESS_TOKEN,
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                    },
+                )
+            elif code:
                 self._json_response(
                     200,
                     {
@@ -877,6 +886,102 @@ def test_bridge_auth_code_complete_invalid_code(
     )
     assert response["error"]["code"] == "capability_invalid_input"
     assert "code is required" in response["error"]["message"]
+
+
+def test_bridge_auth_complete_preserves_existing_refresh_token_when_omitted(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    """Re-auth keeps prior refresh token when token response omits refresh_token."""
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(tmp_path / "gogcli-state.json"),
+        "GOGCLI_VAULT_PATH": str(tmp_path / "vault"),
+        "GOOGLE_CLIENT_ID": "fake-client-id",
+        "GOOGLE_CLIENT_SECRET": "fake-client-secret",
+        "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+    }
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+
+    # Initial link stores refresh token.
+    begin_1 = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_preserve_refresh_begin_1",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.email",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin_1
+    flow_state_1 = begin_1["result"]["flow_state"]
+    complete_1 = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_preserve_refresh_complete_1",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.email",
+                "flow_state": flow_state_1,
+                "code": "fake-auth-code-initial",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in complete_1
+
+    # Re-auth with auth code that yields no refresh_token in fake OAuth server.
+    begin_2 = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_preserve_refresh_begin_2",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.email",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin_2
+    flow_state_2 = begin_2["result"]["flow_state"]
+    complete_2 = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_preserve_refresh_complete_2",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.email",
+                "flow_state": flow_state_2,
+                "code": "fake-auth-code-no-refresh",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in complete_2
+
+    state = _load_state(Path(env["GOGCLI_STATE_PATH"]))
+    account_key = "user-1:gog.email:default"
+    vault_ref = str(state["accounts"][account_key]["vault_ref"])
+    vault_payload = FileVault(Path(env["GOGCLI_VAULT_PATH"])).get_json(vault_ref)
+    assert isinstance(vault_payload, dict)
+    assert vault_payload["refresh_token"] == _FAKE_REFRESH_TOKEN
 
 
 @pytest.mark.asyncio

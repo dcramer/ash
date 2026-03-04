@@ -34,6 +34,17 @@ from ash.context_token import (
 
 _BRIDGE_PROTOCOL_VERSION = 1
 _BRIDGE_CONTEXT_TOKEN_TTL_SECONDS = 900
+_BRIDGE_BASE_ENV_KEYS = (
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "PYTHONPATH",
+    "TMP",
+    "TEMP",
+    "TMPDIR",
+    "USER",
+)
 
 
 class SubprocessCapabilityProvider(CapabilityProvider):
@@ -301,7 +312,14 @@ class SubprocessCapabilityProvider(CapabilityProvider):
         return parsed
 
     def _bridge_environment(self) -> dict[str, str]:
-        env = dict(os.environ)
+        env: dict[str, str] = {}
+        for key in _BRIDGE_BASE_ENV_KEYS:
+            value = os.environ.get(key)
+            if value is not None:
+                env[key] = value
+        for key, value in os.environ.items():
+            if key.startswith("GOGCLI_"):
+                env[key] = value
         if self._extra_env:
             env.update(self._extra_env)
         env[ENV_SECRET] = self._context_token_service.export_verifier_secret()

@@ -537,7 +537,7 @@ class AshConfig(BaseModel):
     # Allows overriding model, max_iterations per agent
     agents: dict[str, AgentOverrideConfig] = Field(default_factory=dict)
     # Skill-specific configuration: [skills.<name>] sections
-    # Allows setting API keys, model override, and enabled flag per skill
+    # Allows setting env/config values, model override, and enabled flag per skill
     skills: dict[str, SkillConfig] = Field(default_factory=dict)
     # Skill defaults from [skills.defaults]
     skill_defaults: SkillDefaultsConfig = Field(default_factory=SkillDefaultsConfig)

@@ -904,6 +904,7 @@ class AgentExecutor:
         user_message: str | None = None,
         tool_result: tuple[str, str, bool] | None = None,
         session_manager: "SessionManager | None" = None,
+        tool_overrides: dict[str, Any] | None = None,
     ) -> TurnResult:
         """Run one logical turn for a stack frame.
 
@@ -917,6 +918,8 @@ class AgentExecutor:
             user_message: Optional user message to inject.
             tool_result: Optional (tool_use_id, content, is_error) from completed child.
             session_manager: Optional session manager for logging to context.jsonl.
+            tool_overrides: Optional map of tool name -> tool implementation to use
+                for this turn instead of the shared executor registry.
 
         Returns:
             TurnResult indicating what happened.
@@ -1082,9 +1085,16 @@ class AgentExecutor:
                             session_manager=session_manager,
                             tool_use_id=tool_use.id,
                         )
-                        result = await self._tools.execute(
-                            tool_use.name, tool_use.input, per_tool_context
-                        )
+                        override_tool = (tool_overrides or {}).get(tool_use.name)
+                        if override_tool is not None:
+                            result = await override_tool.execute(
+                                tool_use.input,
+                                per_tool_context,
+                            )
+                        else:
+                            result = await self._tools.execute(
+                                tool_use.name, tool_use.input, per_tool_context
+                            )
                         sanitized = self._sanitize_tool_result(
                             tool_name=tool_use.name,
                             tool_use_id=tool_use.id,

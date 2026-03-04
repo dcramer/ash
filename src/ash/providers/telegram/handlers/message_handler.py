@@ -22,6 +22,7 @@ from ash.providers.telegram.handlers.session_handler import (
     SessionLock,
 )
 from ash.providers.telegram.handlers.tool_tracker import (
+    ProgressMessageTool,
     ToolTracker,
 )
 from ash.providers.telegram.handlers.utils import append_inline_attribution
@@ -444,6 +445,7 @@ class TelegramMessageHandler:
                     session_key,
                     entry_user_message=None,
                     thinking_msg_id=tracker.thinking_msg_id,
+                    tracker=tracker,
                 )
                 # Persist messages so thread_index registers the bot response
                 # (user message already early-persisted by sync/streaming handler)
@@ -669,8 +671,12 @@ class TelegramMessageHandler:
                 "input.preview": _truncate(message.text),
             },
         )
+        tracker = self._create_tool_tracker(message)
         response_external_id = await self._run_orchestration_loop(
-            message, session_key, entry_user_message=message.text
+            message,
+            session_key,
+            entry_user_message=message.text,
+            tracker=tracker,
         )
         # Register bot response in thread_index so follow-up replies get routed
         if response_external_id:
@@ -685,6 +691,7 @@ class TelegramMessageHandler:
         session_key: str,
         entry_user_message: str | None = None,
         thinking_msg_id: str | None = None,
+        tracker: ToolTracker | None = None,
     ) -> str | None:
         """Run the interactive subagent orchestration loop.
 
@@ -706,6 +713,12 @@ class TelegramMessageHandler:
 
         entry_tool_result: tuple[str, str, bool] | None = None
         response_external_id: str | None = None
+        orchestration_tracker = tracker
+        if orchestration_tracker is None:
+            orchestration_tracker = self._create_tool_tracker(message)
+        if thinking_msg_id:
+            orchestration_tracker.thinking_msg_id = thinking_msg_id
+        progress_tool = ProgressMessageTool(orchestration_tracker)
 
         while True:
             top = stack.top
@@ -719,6 +732,7 @@ class TelegramMessageHandler:
                 user_message=entry_user_message,
                 tool_result=entry_tool_result,
                 session_manager=sm,
+                tool_overrides={progress_tool.name: progress_tool},
             )
             entry_user_message = None
             entry_tool_result = None
@@ -735,10 +749,10 @@ class TelegramMessageHandler:
                     response_external_id = await self._send_stack_response(
                         message,
                         result.text,
-                        thinking_msg_id=thinking_msg_id,
+                        thinking_msg_id=orchestration_tracker.thinking_msg_id,
                         provenance_clause=provenance_clause,
                     )
-                    thinking_msg_id = None  # Consume after first use
+                    orchestration_tracker.thinking_msg_id = None
                     # If top is the main agent, pop it (main agent done)
                     if top.agent_type == "main":
                         main_frame = stack.pop()
@@ -768,9 +782,9 @@ class TelegramMessageHandler:
                             response_external_id = await self._send_stack_response(
                                 message,
                                 result.text,
-                                thinking_msg_id=thinking_msg_id,
+                                thinking_msg_id=orchestration_tracker.thinking_msg_id,
                             )
-                            thinking_msg_id = None
+                            orchestration_tracker.thinking_msg_id = None
                         self._stack_manager.clear(session_key)
                         self._persist_stack(session_key, sm)
                         return response_external_id
@@ -800,9 +814,11 @@ class TelegramMessageHandler:
                 case TurnAction.INTERRUPT:
                     # For now, treat interrupts in stack mode as text to user
                     response_external_id = await self._send_stack_response(
-                        message, result.text, thinking_msg_id=thinking_msg_id
+                        message,
+                        result.text,
+                        thinking_msg_id=orchestration_tracker.thinking_msg_id,
                     )
-                    thinking_msg_id = None
+                    orchestration_tracker.thinking_msg_id = None
                     return response_external_id
 
                 case TurnAction.MAX_ITERATIONS:
@@ -815,9 +831,9 @@ class TelegramMessageHandler:
                         response_external_id = await self._send_stack_response(
                             message,
                             "Agent reached maximum steps.",
-                            thinking_msg_id=thinking_msg_id,
+                            thinking_msg_id=orchestration_tracker.thinking_msg_id,
                         )
-                        thinking_msg_id = None
+                        orchestration_tracker.thinking_msg_id = None
                         self._stack_manager.clear(session_key)
                         self._persist_stack(session_key, sm)
                         return response_external_id
@@ -843,9 +859,9 @@ class TelegramMessageHandler:
                         response_external_id = await self._send_stack_response(
                             message,
                             result.text or "An error occurred.",
-                            thinking_msg_id=thinking_msg_id,
+                            thinking_msg_id=orchestration_tracker.thinking_msg_id,
                         )
-                        thinking_msg_id = None
+                        orchestration_tracker.thinking_msg_id = None
                         self._stack_manager.clear(session_key)
                         self._persist_stack(session_key, sm)
                         return response_external_id

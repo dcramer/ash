@@ -10,7 +10,8 @@ from ash.agents.types import StackFrame, TurnAction
 from ash.config.models import AshConfig, ModelConfig
 from ash.context_token import get_default_context_token_service
 from ash.core.session import SessionState
-from ash.llm.types import CompletionResponse, Message, Role, TextContent
+from ash.llm.types import CompletionResponse, Message, Role, TextContent, ToolUse
+from ash.tools.base import ToolResult
 
 
 class MockAgent(Agent):
@@ -207,3 +208,80 @@ async def test_execute_turn_refreshes_context_token_for_stacked_frames() -> None
     assert refreshed_token != stale_token
     verified = token_service.verify(refreshed_token)
     assert verified.effective_user_id == "user-1"
+
+
+@pytest.mark.asyncio
+async def test_execute_turn_uses_tool_overrides() -> None:
+    llm = MagicMock()
+    llm.complete = AsyncMock(
+        side_effect=[
+            CompletionResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content=[
+                        ToolUse(
+                            id="tool-1",
+                            name="send_message",
+                            input={"message": "progress"},
+                        )
+                    ],
+                ),
+                model="gpt-5.2",
+                usage=MagicMock(input_tokens=10, output_tokens=5),
+            ),
+            CompletionResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content=[TextContent(text="done")],
+                ),
+                model="gpt-5.2",
+                usage=MagicMock(input_tokens=10, output_tokens=5),
+            ),
+        ]
+    )
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock()
+    config = MagicMock(spec=AshConfig)
+    config.tool_output_trust = None
+
+    class _OverrideTool:
+        async def execute(
+            self, input_data: dict[str, object], context: object
+        ) -> ToolResult:
+            _ = input_data
+            _ = context
+            return ToolResult.success("ok")
+
+    executor = AgentExecutor(llm, tools, config)
+    session = SessionState(
+        session_id="sess-1",
+        provider="telegram",
+        chat_id="chat-1",
+        user_id="user-1",
+    )
+    frame = StackFrame(
+        frame_id="frame-1",
+        agent_name="skill:test",
+        agent_type="skill",
+        session=session,
+        system_prompt="system",
+        context=AgentContext(
+            session_id="sess-1",
+            user_id="user-1",
+            chat_id="chat-1",
+            provider="telegram",
+        ),
+        effective_tools=["send_message"],
+        max_iterations=3,
+    )
+
+    result = await executor.execute_turn(
+        frame,
+        user_message="start",
+        tool_overrides={"send_message": _OverrideTool()},
+    )
+
+    assert result.action == TurnAction.SEND_TEXT
+    assert result.text == "done"
+    tools.execute.assert_not_called()

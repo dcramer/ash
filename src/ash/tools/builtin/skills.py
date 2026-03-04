@@ -1,6 +1,7 @@
 """Skill invocation tool."""
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 from ash.agents.base import Agent
@@ -15,6 +16,9 @@ if TYPE_CHECKING:
     from ash.skills import SkillRegistry
 
 logger = logging.getLogger(__name__)
+_SECRET_ENV_NAME_PATTERNS = (
+    r"(?i)(?:^|_)(?:api[_-]?key|token|secret|password|passwd|auth)(?:$|_)",
+)
 
 # Built-in skills that are handled specially (not loaded from SKILL.md files)
 BUILTIN_SKILLS: dict[str, str] = {}
@@ -57,6 +61,8 @@ This is required so control returns to the parent agent.
 
 For long-running tasks, use `send_message` for progress updates only (e.g., "Processing file 3 of 10...").
 Never use `send_message` for the final result - the final result must go through `complete`.
+Never duplicate user-action prompts (for example auth URLs/codes) in both `send_message` and `complete`.
+Put user-action instructions in `complete` exactly once.
 
 ---
 
@@ -277,6 +283,31 @@ class UseSkillTool(Tool):
                 )
         return env
 
+    def _is_secret_like_env_var(self, var_name: str) -> bool:
+        """Return True when an env var name matches blocked secret patterns."""
+        normalized = var_name.strip()
+        if not normalized:
+            return False
+
+        for pattern in _SECRET_ENV_NAME_PATTERNS:
+            if re.search(pattern, normalized):
+                return True
+        return False
+
+    def _validate_secret_delivery_policy(self, skill: SkillDefinition) -> str | None:
+        """Return an error if skill declares blocked secret-like env names."""
+        secret_names = sorted(
+            {name for name in skill.env if self._is_secret_like_env_var(name)}
+        )
+        if not secret_names:
+            return None
+
+        return (
+            f"Skill '{skill.name}' declares secret-like env vars that are blocked by "
+            f"security policy: {', '.join(secret_names)}. "
+            "Use host-managed capability/proxy auth instead."
+        )
+
     def _resolve_allowed_chat_ids(self, skill_config: Any) -> set[str]:
         """Resolve effective allowed chat IDs (per-skill override -> defaults)."""
         allowlist_value: Any = None
@@ -450,6 +481,10 @@ class UseSkillTool(Tool):
         )
         if capability_hard_error:
             return ToolResult.error(capability_hard_error)
+
+        secret_policy_error = self._validate_secret_delivery_policy(skill)
+        if secret_policy_error:
+            return ToolResult.error(secret_policy_error)
 
         # Advisory check — don't block; skills handle their own capability
         # verification and can guide the user through setup/auth flows.

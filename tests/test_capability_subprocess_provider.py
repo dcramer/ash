@@ -353,6 +353,19 @@ def test_subprocess_provider_bridge_env_exports_context_token_secret() -> None:
     assert len(decoded) >= 16
 
 
+def test_subprocess_provider_bridge_env_does_not_inherit_unrelated_secrets(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "should-not-pass-through")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    provider = SubprocessCapabilityProvider(namespace="gog", command=["gogcli", "rpc"])
+    env = provider._bridge_environment()
+
+    assert env.get("PATH") == "/usr/bin"
+    assert "OPENAI_API_KEY" not in env
+
+
 def test_subprocess_provider_resolves_command_from_python_bin(
     monkeypatch, tmp_path
 ) -> None:

@@ -16,6 +16,10 @@ def _mock_config(**overrides) -> MagicMock:
     """Create a MagicMock config with sandbox.mount_prefix accessible."""
     config = MagicMock(spec=AshConfig)
     config.sandbox = SimpleNamespace(mount_prefix="/ash")
+    config.skills = {}
+    config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
+    config.agents = {}
+    config.workspace = None
     for k, v in overrides.items():
         setattr(config, k, v)
     return config
@@ -179,9 +183,9 @@ class TestUseSkillToolValidation:
         registry.list_available.return_value = []
         registry.has.return_value = False
         executor = MagicMock()
-        config = MagicMock(spec=AshConfig)
-        config.skills = {}
-        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
+        config = _mock_config(
+            skills={}, skill_defaults=SimpleNamespace(allow_chat_ids=[]), workspace=None
+        )
         return UseSkillTool(registry, executor, config)
 
     @pytest.mark.asyncio
@@ -213,10 +217,11 @@ class TestUseSkillToolErrorHandling:
     @pytest.fixture
     def tool(self, registry, tmp_path):
         executor = MagicMock()
-        config = MagicMock(spec=AshConfig)
-        config.skills = {}
-        config.skill_defaults = SimpleNamespace(allow_chat_ids=[])
-        config.workspace = tmp_path
+        config = _mock_config(
+            skills={},
+            skill_defaults=SimpleNamespace(allow_chat_ids=[]),
+            workspace=tmp_path,
+        )
         return UseSkillTool(registry, executor, config)
 
     @pytest.mark.asyncio
@@ -250,7 +255,7 @@ class TestUseSkillToolErrorHandling:
             name="test",
             description="Test",
             instructions="x",
-            env=["API_KEY", "SECRET"],
+            env=["SERVICE_URL", "ACCOUNT_NAME"],
         )
         registry.has.return_value = True
         registry.get.return_value = skill
@@ -261,8 +266,25 @@ class TestUseSkillToolErrorHandling:
         assert result.is_error
         assert "requires configuration" in result.content
         assert "[skills.test]" in result.content
-        assert "API_KEY" in result.content
-        assert "SECRET" in result.content
+        assert "SERVICE_URL" in result.content
+        assert "ACCOUNT_NAME" in result.content
+
+    @pytest.mark.asyncio
+    async def test_secret_env_vars_blocked_by_default(self, tool, registry):
+        skill = SkillDefinition(
+            name="test",
+            description="Test",
+            instructions="x",
+            env=["API_KEY", "SERVICE_URL"],
+        )
+        registry.has.return_value = True
+        registry.get.return_value = skill
+        tool._config.skills = {"test": SkillConfig(**{"API_KEY": "secret"})}  # type: ignore[arg-type]
+
+        result = await tool.execute({"skill": "test", "message": "do"})
+
+        assert result.is_error
+        assert "blocked by security policy" in result.content
 
 
 class TestUseSkillToolExecution:

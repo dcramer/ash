@@ -56,6 +56,7 @@ per-user credential isolation rules.
 - Capability auth flow handles are short-lived, unguessable, and bound to the requesting user scope.
 - Capability execution emits structured audit events without logging raw bearer tokens.
 - Capability responses must never include raw credential artifacts (access tokens, refresh tokens, cookie jars, client secrets).
+- Provider auth `credential_material` must contain only opaque references/metadata (no raw tokens/secrets).
 - Provider-side credential artifacts must be persisted via a dedicated vault abstraction (not graph collections or sandbox-readable mounts).
 
 ### SHOULD
@@ -257,6 +258,7 @@ Rules:
 - Provider responses are user-facing payloads and must be credential-safe.
 - Host rejects provider outputs containing credential-like keys (`access_token`,
   `refresh_token`, `id_token`, `client_secret`, cookie/auth headers).
+- Host rejects provider auth `credential_material` containing credential-like keys.
 
 ### RPC Methods
 
