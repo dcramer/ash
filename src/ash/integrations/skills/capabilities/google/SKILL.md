@@ -24,6 +24,12 @@ input_schema:
 
 Manage Gmail and Google Calendar through host-managed capabilities.
 
+Use progressive disclosure:
+
+- Read `references/gmail-workflows.md` when handling summaries, inbox triage, day-at-a-glance planning, or Gmail query choices.
+- Read `references/auth-and-failures.md` when auth is incomplete/expired or capability commands fail.
+- Read `references/output-templates.md` when producing summary/day-plan output sections.
+
 ## Security Contract
 
 - Use `ash-sb capability` for every Gmail/Calendar operation.
@@ -71,7 +77,7 @@ If user intent is setup-only, stop after successful auth confirmation.
 
 Use only capability operations and explicit JSON input.
 
-Common email/calendar commands:
+Core commands:
 
 ```bash
 ash-sb capability invoke -c gog.email -o list_messages --input-json '{"folder":"inbox","limit":20}'
@@ -96,11 +102,7 @@ When user asks for summaries (for example "summarize my emails", "what did I mis
 
 1. Gather candidate messages with `search_messages` (preferred) or `list_messages`.
 2. Fetch full message content with `get_message` for messages you summarize.
-3. Summarize using this structure:
-   - `Top priorities`
-   - `Needs reply`
-   - `FYI`
-   - `Suggested next actions`
+3. Summarize using the section template in `references/output-templates.md`.
 4. Keep each bullet tied to a concrete message subject/sender so the user can act on it.
 
 Do not summarize from snippets alone when full content can be fetched.
@@ -111,11 +113,7 @@ When user asks for a day overview:
 
 1. Pull today/near-term calendar with `list_events`.
 2. Pull high-signal recent email using `search_messages` (for example unread/new/important) and fetch full content for top items.
-3. Return this structure:
-   - `Today's schedule`
-   - `Email priorities`
-   - `Conflicts / follow-ups`
-   - `Recommended next steps`
+3. Render the response with the day-at-a-glance template in `references/output-templates.md`.
 4. If there are no events or no high-signal email, say that explicitly instead of leaving sections blank.
 
 Use Google calendar + Google email only for this view.
