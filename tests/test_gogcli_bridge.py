@@ -7,7 +7,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -22,7 +22,7 @@ from ash.security.vault import FileVault
 _BRIDGE_MODULE = "ash.skills.bundled.gog.scripts.gogcli_bridge"
 
 # ---------------------------------------------------------------------------
-# Fake Google OAuth server (shared with e2e test)
+# Fake Google OAuth + API server
 # ---------------------------------------------------------------------------
 
 _FAKE_USER_CODE = "ABCD-EFGH"
@@ -38,9 +38,119 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         pass
 
+    def _check_auth(self) -> bool:
+        auth = self.headers.get("Authorization", "")
+        if auth != f"Bearer {_FAKE_ACCESS_TOKEN}":
+            self._json_response(401, {"error": {"message": "Invalid credentials"}})
+            return False
+        return True
+
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
+
+        if not self._check_auth():
+            return
+
+        # /gmail/v1/users/me/messages/{id} (must check before list endpoint)
+        if path.startswith("/gmail/v1/users/me/messages/"):
+            msg_id = path.split("/")[-1]
+            self._json_response(
+                200,
+                {
+                    "id": msg_id,
+                    "threadId": f"thread_{msg_id}",
+                    "snippet": f"Preview of {msg_id}",
+                    "internalDate": "1709337600000",
+                    "payload": {
+                        "headers": [
+                            {"name": "From", "value": "sender@example.com"},
+                            {"name": "Subject", "value": f"Subject for {msg_id}"},
+                            {
+                                "name": "Date",
+                                "value": "Sat, 02 Mar 2024 00:00:00 +0000",
+                            },
+                        ]
+                    },
+                },
+            )
+            return
+
+        # /gmail/v1/users/me/messages (list)
+        if path == "/gmail/v1/users/me/messages":
+            max_results = int((qs.get("maxResults") or ["10"])[0])
+            msg_ids = [
+                {"id": f"msg_{i + 1}", "threadId": f"thread_{i + 1}"}
+                for i in range(max_results)
+            ]
+            self._json_response(
+                200, {"messages": msg_ids, "resultSizeEstimate": len(msg_ids)}
+            )
+            return
+
+        # /calendar/v3/calendars/{calendarId}/events
+        if "/calendar/v3/calendars/" in path and path.endswith("/events"):
+            self._json_response(
+                200,
+                {
+                    "items": [
+                        {
+                            "id": "evt_1",
+                            "summary": "Fake calendar event",
+                            "start": {"dateTime": "2026-03-02T10:00:00Z"},
+                            "end": {"dateTime": "2026-03-02T11:00:00Z"},
+                            "location": "Conference Room",
+                            "description": "A test event",
+                        }
+                    ]
+                },
+            )
+            return
+
+        self._json_response(404, {"error": {"message": "not found"}})
+
     def do_POST(self) -> None:  # noqa: N802
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length).decode("utf-8")
+
+        # Gmail send and Calendar create require Bearer auth
+        if self.path.startswith("/gmail/") or self.path.startswith("/calendar/"):
+            if not self._check_auth():
+                return
+
+            if self.path == "/gmail/v1/users/me/messages/send":
+                request_body = json.loads(body)
+                self._json_response(
+                    200,
+                    {
+                        "id": "sent_msg_001",
+                        "threadId": "thread_sent_001",
+                        "labelIds": ["SENT"],
+                    },
+                )
+                return
+
+            # /calendar/v3/calendars/{calendarId}/events
+            if "/calendar/v3/calendars/" in self.path and self.path.endswith("/events"):
+                request_body = json.loads(body)
+                self._json_response(
+                    200,
+                    {
+                        "id": "created_evt_001",
+                        "summary": request_body.get("summary", ""),
+                        "start": request_body.get("start", {}),
+                        "end": request_body.get("end", {}),
+                        "location": request_body.get("location", ""),
+                        "description": request_body.get("description", ""),
+                    },
+                )
+                return
+
+            self._json_response(404, {"error": {"message": "not found"}})
+            return
+
+        # OAuth form-encoded endpoints
         params = parse_qs(body)
 
         if self.path == "/device/code":
@@ -211,6 +321,8 @@ def test_bridge_auth_code_flow_and_user_scoped_invoke(
         "GOOGLE_CLIENT_SECRET": "fake-client-secret",
         "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
         "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_GMAIL_API_BASE_URL": fake_google_oauth,
+        "GOOGLE_CALENDAR_API_BASE_URL": fake_google_oauth,
     }
     user1_token = service.issue(
         effective_user_id="user-1",
@@ -305,6 +417,12 @@ def test_bridge_auth_code_flow_and_user_scoped_invoke(
     messages = invoke_user1["result"]["output"]["messages"]
     assert isinstance(messages, list)
     assert len(messages) == 2
+    # Verify real API response fields
+    msg = messages[0]
+    assert msg["id"] == "msg_1"
+    assert msg["from"] == "sender@example.com"
+    assert "Subject for msg_1" in msg["subject"]
+    assert msg["snippet"]  # non-empty
     state_after_invoke = _load_state(state_path)
     assert account_key in state_after_invoke["accounts"]
     scope_key = "user-1:gog.email"
@@ -779,6 +897,8 @@ async def test_subprocess_provider_auth_code_round_trip(
             "GOOGLE_CLIENT_SECRET": "fake-client-secret",
             "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
             "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+            "GOOGLE_GMAIL_API_BASE_URL": fake_google_oauth,
+            "GOOGLE_CALENDAR_API_BASE_URL": fake_google_oauth,
         },
     )
     definitions = await provider.definitions()
@@ -814,6 +934,7 @@ async def test_subprocess_provider_auth_code_round_trip(
         context=user1,
     )
     assert output["count"] == 1
+    assert output["events"][0]["title"] == "Fake calendar event"
 
     user2 = _context("user-2")
     with pytest.raises(CapabilityError) as exc_info:
@@ -826,3 +947,336 @@ async def test_subprocess_provider_auth_code_round_trip(
             context=user2,
         )
     assert exc_info.value.code == "capability_auth_required"
+
+
+def _auth_email_account(
+    *,
+    tmp_path: Path,
+    fake_google_oauth: str,
+    env: dict[str, str],
+    user_token: str,
+) -> str:
+    """Helper: run auth_begin + auth_complete for gog.email, return account_ref."""
+    begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_helper_begin",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.email",
+                "account_hint": "work",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin
+    flow_state = begin["result"]["flow_state"]
+    complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_helper_complete",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.email",
+                "flow_state": flow_state,
+                "code": "fake-auth-code",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in complete
+    return complete["result"]["account_ref"]
+
+
+def _auth_calendar_account(
+    *,
+    env: dict[str, str],
+    user_token: str,
+) -> str:
+    """Helper: run auth_begin + auth_complete for gog.calendar, return account_ref."""
+    begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_cal_helper_begin",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.calendar",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in begin
+    flow_state = begin["result"]["flow_state"]
+    complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_cal_helper_complete",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.calendar",
+                "flow_state": flow_state,
+                "code": "fake-auth-code",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in complete
+    return complete["result"]["account_ref"]
+
+
+def _make_env(
+    *,
+    service: ContextTokenService,
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> dict[str, str]:
+    return {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(tmp_path / "gogcli-state.json"),
+        "GOGCLI_VAULT_PATH": str(tmp_path / "vault"),
+        "GOOGLE_CLIENT_ID": "fake-client-id",
+        "GOOGLE_CLIENT_SECRET": "fake-client-secret",
+        "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_GMAIL_API_BASE_URL": fake_google_oauth,
+        "GOOGLE_CALENDAR_API_BASE_URL": fake_google_oauth,
+    }
+
+
+def test_bridge_invoke_send_message(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    """send_message builds MIME, base64-encodes, and POSTs to Gmail API."""
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_email_account(
+        tmp_path=tmp_path,
+        fake_google_oauth=fake_google_oauth,
+        env=env,
+        user_token=user_token,
+    )
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_send",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.email",
+                "operation": "send_message",
+                "input_data": {
+                    "to": "recipient@example.com",
+                    "subject": "Test email",
+                    "body": "Hello from the bridge test!",
+                },
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in invoke
+    output = invoke["result"]["output"]
+    assert output["status"] == "sent"
+    assert output["message_id"] == "sent_msg_001"
+    assert output["to"] == "recipient@example.com"
+    assert output["subject"] == "Test email"
+
+
+def test_bridge_invoke_calendar_create_event(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    """create_event POSTs to Calendar API and returns created event."""
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_calendar_account(env=env, user_token=user_token)
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_create_event",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.calendar",
+                "operation": "create_event",
+                "input_data": {
+                    "title": "Team standup",
+                    "start": "2026-03-02T10:00:00Z",
+                    "end": "2026-03-02T10:30:00Z",
+                    "description": "Daily sync",
+                    "location": "Zoom",
+                },
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in invoke
+    output = invoke["result"]["output"]
+    assert output["status"] == "created"
+    assert output["event_id"] == "created_evt_001"
+    assert output["title"] == "Team standup"
+    assert output["location"] == "Zoom"
+    assert output["description"] == "Daily sync"
+
+
+def test_bridge_invoke_refreshes_access_token_after_401(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_email_account(
+        tmp_path=tmp_path,
+        fake_google_oauth=fake_google_oauth,
+        env=env,
+        user_token=user_token,
+    )
+
+    state = _load_state(Path(env["GOGCLI_STATE_PATH"]))
+    account_key = f"user-1:gog.email:{account_ref}"
+    vault_ref = str(state["accounts"][account_key]["vault_ref"])
+    vault = FileVault(Path(env["GOGCLI_VAULT_PATH"]))
+    creds = vault.get_json(vault_ref)
+    assert isinstance(creds, dict)
+    creds["access_token"] = "expired-token"
+    creds["obtained_at"] = 9_999_999_999
+    creds["expires_in"] = 3600
+    vault.put_json(namespace="gog.credentials", key=account_key, payload=creds)
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_retry_after_401",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.email",
+                "operation": "list_messages",
+                "input_data": {"limit": 1},
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in invoke
+    assert invoke["result"]["output"]["count"] == 1
+
+    refreshed_creds = vault.get_json(vault_ref)
+    assert isinstance(refreshed_creds, dict)
+    assert refreshed_creds["access_token"] == _FAKE_ACCESS_TOKEN
+
+
+def test_bridge_invoke_list_events_rejects_invalid_window(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_calendar_account(env=env, user_token=user_token)
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_bad_window",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.calendar",
+                "operation": "list_events",
+                "input_data": {"window": "-1d"},
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert invoke["error"]["code"] == "capability_invalid_input"
+    assert "window" in invoke["error"]["message"]
+
+
+def test_bridge_invoke_calendar_create_event_defaults_all_day_end_to_next_day(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_calendar_account(env=env, user_token=user_token)
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_create_all_day_event",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.calendar",
+                "operation": "create_event",
+                "input_data": {
+                    "title": "All day event",
+                    "start": "2026-03-02",
+                },
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in invoke
+    output = invoke["result"]["output"]
+    assert output["start"] == "2026-03-02"
+    assert output["end"] == "2026-03-03"

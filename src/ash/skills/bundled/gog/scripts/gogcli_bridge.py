@@ -65,6 +65,22 @@ DEVICE_CODE_ALLOWED_SCOPES: frozenset[str] = frozenset(
 
 AUTH_CODE_REDIRECT_URI = "http://localhost"
 
+ENV_GOOGLE_GMAIL_API_BASE_URL = "GOOGLE_GMAIL_API_BASE_URL"
+DEFAULT_GOOGLE_GMAIL_API_BASE_URL = "https://gmail.googleapis.com"
+ENV_GOOGLE_CALENDAR_API_BASE_URL = "GOOGLE_CALENDAR_API_BASE_URL"
+DEFAULT_GOOGLE_CALENDAR_API_BASE_URL = "https://www.googleapis.com"
+
+GMAIL_FOLDER_LABELS: dict[str, str] = {
+    "inbox": "INBOX",
+    "sent": "SENT",
+    "drafts": "DRAFT",
+    "spam": "SPAM",
+    "trash": "TRASH",
+    "starred": "STARRED",
+    "important": "IMPORTANT",
+    "unread": "UNREAD",
+}
+
 CAPABILITY_SCOPES: dict[str, str] = {
     "gog.email": (
         "https://www.googleapis.com/auth/gmail.readonly"
@@ -381,6 +397,125 @@ def _google_client_secret() -> str:
             "GOOGLE_CLIENT_SECRET is not configured",
         )
     return value
+
+
+def _google_gmail_api_base_url() -> str:
+    value = _optional_text(os.environ.get(ENV_GOOGLE_GMAIL_API_BASE_URL))
+    return value or DEFAULT_GOOGLE_GMAIL_API_BASE_URL
+
+
+def _google_calendar_api_base_url() -> str:
+    value = _optional_text(os.environ.get(ENV_GOOGLE_CALENDAR_API_BASE_URL))
+    return value or DEFAULT_GOOGLE_CALENDAR_API_BASE_URL
+
+
+def _google_api_request(
+    method: str,
+    url: str,
+    *,
+    access_token: str,
+    params: list[tuple[str, str]] | None = None,
+    json_body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Authenticated HTTP request to a Google API endpoint."""
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import urlencode
+    from urllib.request import Request, urlopen
+
+    if params:
+        url = f"{url}?{urlencode(params, doseq=True)}"
+
+    data = None
+    if json_body is not None:
+        data = json.dumps(json_body).encode("utf-8")
+
+    request = Request(url, data=data, method=method)  # noqa: S310
+    request.add_header("Authorization", f"Bearer {access_token}")
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    try:
+        with urlopen(request, timeout=30) as resp:  # noqa: S310
+            return json.loads(resp.read().decode("utf-8"))
+    except HTTPError as e:
+        if e.code == 401:
+            raise BridgeError(
+                "capability_auth_required",
+                "Google API returned 401 — re-authentication required",
+            ) from None
+        try:
+            error_body = json.loads(e.read().decode("utf-8"))
+        except (json.JSONDecodeError, OSError):
+            error_body = {}
+        error_msg = ""
+        if isinstance(error_body.get("error"), dict):
+            error_msg = _optional_text(error_body["error"].get("message")) or ""
+        raise BridgeError(
+            "capability_backend_unavailable",
+            f"Google API returned HTTP {e.code}{': ' + error_msg if error_msg else ''}",
+        ) from None
+    except URLError as e:
+        raise BridgeError(
+            "capability_backend_unavailable",
+            f"Google API request failed: {e.reason}",
+        ) from None
+
+
+def _get_access_token(vault_ref: str) -> str:
+    """Read the current access_token from the vault."""
+    try:
+        vault = _vault()
+        creds = vault.get_json(vault_ref)
+    except VaultError:
+        raise BridgeError(
+            "capability_auth_required",
+            "failed to read credentials from vault",
+        ) from None
+    if not isinstance(creds, dict):
+        raise BridgeError(
+            "capability_auth_required",
+            "credentials not found in vault",
+        )
+    token = _optional_text(creds.get("access_token"))
+    if not token:
+        raise BridgeError(
+            "capability_auth_required",
+            "access_token not found in stored credentials",
+        )
+    return token
+
+
+def _parse_window(window: str) -> int:
+    """Parse a window string like '7d', '3h', '2w' into seconds."""
+    if not window:
+        return 7 * 86400  # default 7 days
+
+    normalized = window.strip().lower()
+    if len(normalized) < 2:
+        raise BridgeError(
+            "capability_invalid_input",
+            "window must be a positive duration like '7d', '3h', or '2w'",
+        )
+    unit = normalized[-1]
+    value_text = normalized[:-1]
+    if not value_text.isdigit():
+        raise BridgeError(
+            "capability_invalid_input",
+            "window must be a positive duration like '7d', '3h', or '2w'",
+        )
+    value = int(value_text)
+    if value <= 0:
+        raise BridgeError(
+            "capability_invalid_input",
+            "window must be greater than zero",
+        )
+    multipliers = {"h": 3600, "d": 86400, "w": 604800}
+    multiplier = multipliers.get(unit)
+    if multiplier is None:
+        raise BridgeError(
+            "capability_invalid_input",
+            "window unit must be one of: h, d, w",
+        )
+    return value * multiplier
 
 
 def _http_post_form(url: str, params: dict[str, str]) -> dict[str, Any]:
@@ -968,31 +1103,36 @@ def _as_object(value: Any, *, field_name: str) -> dict[str, Any]:
     raise BridgeError("capability_invalid_input", f"{field_name} must be an object")
 
 
-def _refresh_token_if_needed(*, account_key: str, vault_ref: str | None) -> None:
-    """Attempt to refresh Google access token if expired."""
+def _refresh_token_if_needed(
+    *,
+    account_key: str,
+    vault_ref: str | None,
+    force: bool = False,
+) -> bool:
+    """Attempt to refresh Google access token if expired or explicitly forced."""
     if not vault_ref:
-        return
+        return False
     try:
         vault = _vault()
         creds = vault.get_json(vault_ref)
     except VaultError:
-        return
+        return False
     if not isinstance(creds, dict):
-        return
+        return False
     refresh_token = _optional_text(creds.get("refresh_token"))
     if not refresh_token:
-        return
+        return False
     obtained_at = _int_claim(creds, "obtained_at") or 0
     expires_in = _int_claim(creds, "expires_in") or 3600
     now_epoch = int(time.time())
     # Refresh 60 seconds before actual expiry
-    if now_epoch < obtained_at + expires_in - 60:
-        return
+    if not force and now_epoch < obtained_at + expires_in - 60:
+        return False
     try:
         client_id = _google_client_id()
         client_secret = _google_client_secret()
     except BridgeError:
-        return
+        return False
     token_resp = _http_post_form(
         _google_token_url(),
         {
@@ -1004,7 +1144,7 @@ def _refresh_token_if_needed(*, account_key: str, vault_ref: str | None) -> None
     )
     new_access_token = _optional_text(token_resp.get("access_token"))
     if not new_access_token:
-        return
+        return False
     creds["access_token"] = new_access_token
     new_expires_in = _int_claim(token_resp, "expires_in")
     if new_expires_in:
@@ -1013,7 +1153,50 @@ def _refresh_token_if_needed(*, account_key: str, vault_ref: str | None) -> None
     try:
         vault.put_json(namespace=VAULT_NAMESPACE, key=account_key, payload=creds)
     except VaultError:
-        pass
+        return False
+    return True
+
+
+def _invoke_operation(
+    *,
+    capability_id: str,
+    operation: str,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    if capability_id == "gog.email" and operation == "list_messages":
+        return _invoke_list_messages(
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+
+    if capability_id == "gog.email" and operation == "send_message":
+        return _invoke_send_message(
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+
+    if capability_id == "gog.calendar" and operation == "list_events":
+        return _invoke_list_events(
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+
+    if capability_id == "gog.calendar" and operation == "create_event":
+        return _invoke_create_event(
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+
+    raise BridgeError(
+        "capability_invalid_input",
+        f"unsupported operation for {capability_id}: {operation}",
+    )
 
 
 def _handle_invoke(params: dict[str, Any]) -> dict[str, Any]:
@@ -1051,6 +1234,7 @@ def _handle_invoke(params: dict[str, Any]) -> dict[str, Any]:
     _refresh_token_if_needed(
         account_key=linked_account_key,
         vault_ref=_optional_text(linked_account.get("vault_ref")),
+        force=False,
     )
     scope_key = _operation_scope_key(claims.user_id, capability_id)
     existing_scope = state["operation_state"].get(scope_key)
@@ -1064,106 +1248,355 @@ def _handle_invoke(params: dict[str, Any]) -> dict[str, Any]:
         "last_invoked_at": now_epoch,
     }
     _write_state(state)
-    now_iso = _iso8601_utc(now_epoch)
 
-    if capability_id == "gog.email" and operation == "list_messages":
-        folder = _optional_text(input_data.get("folder")) or "inbox"
-        limit_value = input_data.get("limit", 10)
-        try:
-            limit = int(limit_value)
-        except (TypeError, ValueError):
-            raise BridgeError(
-                "capability_invalid_input", "limit must be an integer"
-            ) from None
-        limit = max(1, min(limit, 50))
-        messages = [
-            {
-                "id": f"msg_{index + 1}",
-                "from": "updates@example.com",
-                "subject": f"Sample message {index + 1}",
-                "received_at": now_iso,
-            }
-            for index in range(limit)
-        ]
-        return {
-            "output": {
-                "folder": folder,
-                "messages": messages,
-                "count": len(messages),
-                "account_ref": account_ref,
-            }
-        }
+    vault_ref = _optional_text(linked_account.get("vault_ref"))
+    if not vault_ref:
+        raise BridgeError(
+            "capability_auth_required",
+            "account has no vault reference",
+        )
+    access_token = _get_access_token(vault_ref)
+    try:
+        return _invoke_operation(
+            capability_id=capability_id,
+            operation=operation,
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+    except BridgeError as e:
+        # Access token can be stale due to clock drift/revocation despite local expiry checks.
+        if e.code != "capability_auth_required":
+            raise
+        refreshed = _refresh_token_if_needed(
+            account_key=linked_account_key,
+            vault_ref=vault_ref,
+            force=True,
+        )
+        if not refreshed:
+            raise
+        access_token = _get_access_token(vault_ref)
+        return _invoke_operation(
+            capability_id=capability_id,
+            operation=operation,
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
 
-    if capability_id == "gog.email" and operation == "send_message":
-        recipient = _required_text(
-            input_data.get("to"),
-            code="capability_invalid_input",
-            message="to is required",
-        )
-        subject = _required_text(
-            input_data.get("subject"),
-            code="capability_invalid_input",
-            message="subject is required",
-        )
-        _required_text(
-            input_data.get("body"),
-            code="capability_invalid_input",
-            message="body is required",
-        )
-        return {
-            "output": {
-                "status": "queued",
-                "message_id": f"queued_{secrets.token_hex(6)}",
-                "to": recipient,
-                "subject": subject,
-                "account_ref": account_ref,
-            }
-        }
 
-    if capability_id == "gog.calendar" and operation == "list_events":
-        window = _optional_text(input_data.get("window")) or "7d"
-        events = [
-            {
-                "id": "evt_1",
-                "title": "Example event",
-                "start": now_iso,
-                "calendar": _optional_text(input_data.get("calendar")) or "primary",
-            }
-        ]
-        return {
-            "output": {
-                "window": window,
-                "events": events,
-                "count": len(events),
-                "account_ref": account_ref,
-            }
-        }
+def _invoke_list_messages(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    folder = _optional_text(input_data.get("folder")) or "inbox"
+    limit_value = input_data.get("limit", 10)
+    try:
+        limit = int(limit_value)
+    except (TypeError, ValueError):
+        raise BridgeError(
+            "capability_invalid_input", "limit must be an integer"
+        ) from None
+    limit = max(1, min(limit, 50))
 
-    if capability_id == "gog.calendar" and operation == "create_event":
-        title = _required_text(
-            input_data.get("title"),
-            code="capability_invalid_input",
-            message="title is required",
-        )
-        start = _required_text(
-            input_data.get("start"),
-            code="capability_invalid_input",
-            message="start is required",
-        )
-        return {
-            "output": {
-                "status": "created",
-                "event_id": f"evt_{secrets.token_hex(6)}",
-                "title": title,
-                "start": start,
-                "account_ref": account_ref,
-            }
-        }
+    label_id = GMAIL_FOLDER_LABELS.get(folder.lower(), folder.upper())
+    gmail_base = _google_gmail_api_base_url()
 
-    raise BridgeError(
-        "capability_invalid_input",
-        f"unsupported operation for {capability_id}: {operation}",
+    # Fetch message ID list
+    list_resp = _google_api_request(
+        "GET",
+        f"{gmail_base}/gmail/v1/users/me/messages",
+        access_token=access_token,
+        params=[("labelIds", label_id), ("maxResults", str(limit))],
     )
+
+    raw_messages = list_resp.get("messages")
+    if not isinstance(raw_messages, list):
+        raw_messages = []
+
+    # Fetch metadata for each message
+    messages: list[dict[str, Any]] = []
+    for raw_msg in raw_messages[:limit]:
+        msg_id = raw_msg.get("id") if isinstance(raw_msg, dict) else None
+        if not msg_id:
+            continue
+        detail = _google_api_request(
+            "GET",
+            f"{gmail_base}/gmail/v1/users/me/messages/{msg_id}",
+            access_token=access_token,
+            params=[
+                ("format", "metadata"),
+                ("metadataHeaders", "From"),
+                ("metadataHeaders", "Subject"),
+                ("metadataHeaders", "Date"),
+            ],
+        )
+        headers_list = (
+            detail.get("payload", {}).get("headers", [])
+            if isinstance(detail.get("payload"), dict)
+            else []
+        )
+        header_map: dict[str, str] = {}
+        for hdr in headers_list:
+            if isinstance(hdr, dict):
+                name = _optional_text(hdr.get("name"))
+                value = _optional_text(hdr.get("value"))
+                if name and value:
+                    header_map[name.lower()] = value
+
+        internal_date = _optional_text(detail.get("internalDate"))
+        received_at = None
+        if internal_date:
+            try:
+                received_at = _iso8601_utc(int(internal_date) // 1000)
+            except (ValueError, OSError):
+                received_at = header_map.get("date")
+        else:
+            received_at = header_map.get("date")
+
+        messages.append(
+            {
+                "id": msg_id,
+                "from": header_map.get("from", ""),
+                "subject": header_map.get("subject", ""),
+                "received_at": received_at or "",
+                "snippet": _optional_text(detail.get("snippet")) or "",
+            }
+        )
+
+    return {
+        "output": {
+            "folder": folder,
+            "messages": messages,
+            "count": len(messages),
+            "account_ref": account_ref,
+        }
+    }
+
+
+def _invoke_send_message(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    from email.mime.text import MIMEText
+
+    recipient = _required_text(
+        input_data.get("to"),
+        code="capability_invalid_input",
+        message="to is required",
+    )
+    subject = _required_text(
+        input_data.get("subject"),
+        code="capability_invalid_input",
+        message="subject is required",
+    )
+    body = _required_text(
+        input_data.get("body"),
+        code="capability_invalid_input",
+        message="body is required",
+    )
+
+    mime_msg = MIMEText(body)
+    mime_msg["To"] = recipient
+    mime_msg["Subject"] = subject
+    raw_bytes = mime_msg.as_bytes()
+    raw_b64 = base64.urlsafe_b64encode(raw_bytes).decode("ascii")
+
+    gmail_base = _google_gmail_api_base_url()
+    send_resp = _google_api_request(
+        "POST",
+        f"{gmail_base}/gmail/v1/users/me/messages/send",
+        access_token=access_token,
+        json_body={"raw": raw_b64},
+    )
+
+    return {
+        "output": {
+            "status": "sent",
+            "message_id": _optional_text(send_resp.get("id")) or "",
+            "to": recipient,
+            "subject": subject,
+            "account_ref": account_ref,
+        }
+    }
+
+
+def _invoke_list_events(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    window = _optional_text(input_data.get("window")) or "7d"
+    calendar_id = _optional_text(input_data.get("calendar")) or "primary"
+    limit_value = input_data.get("limit", 25)
+    try:
+        limit = int(limit_value)
+    except (TypeError, ValueError):
+        limit = 25
+    limit = max(1, min(limit, 250))
+
+    now_epoch = int(time.time())
+    window_seconds = _parse_window(window)
+    time_min = _iso8601_utc(now_epoch)
+    time_max = _iso8601_utc(now_epoch + window_seconds)
+
+    cal_base = _google_calendar_api_base_url()
+    from urllib.parse import quote
+
+    list_resp = _google_api_request(
+        "GET",
+        f"{cal_base}/calendar/v3/calendars/{quote(calendar_id, safe='')}/events",
+        access_token=access_token,
+        params=[
+            ("timeMin", time_min),
+            ("timeMax", time_max),
+            ("singleEvents", "true"),
+            ("orderBy", "startTime"),
+            ("maxResults", str(limit)),
+        ],
+    )
+
+    raw_items = list_resp.get("items")
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    events: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        start_obj = item.get("start", {})
+        end_obj = item.get("end", {})
+        if isinstance(start_obj, dict):
+            start_val = start_obj.get("dateTime") or start_obj.get("date") or ""
+        else:
+            start_val = ""
+        if isinstance(end_obj, dict):
+            end_val = end_obj.get("dateTime") or end_obj.get("date") or ""
+        else:
+            end_val = ""
+        events.append(
+            {
+                "id": _optional_text(item.get("id")) or "",
+                "title": _optional_text(item.get("summary")) or "",
+                "start": start_val,
+                "end": end_val,
+                "calendar": calendar_id,
+                "location": _optional_text(item.get("location")) or "",
+                "description": _optional_text(item.get("description")) or "",
+            }
+        )
+
+    return {
+        "output": {
+            "window": window,
+            "events": events,
+            "count": len(events),
+            "account_ref": account_ref,
+        }
+    }
+
+
+def _invoke_create_event(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    title = _required_text(
+        input_data.get("title"),
+        code="capability_invalid_input",
+        message="title is required",
+    )
+    start = _required_text(
+        input_data.get("start"),
+        code="capability_invalid_input",
+        message="start is required",
+    )
+    end = _optional_text(input_data.get("end"))
+    description = _optional_text(input_data.get("description"))
+    location = _optional_text(input_data.get("location"))
+    calendar_id = _optional_text(input_data.get("calendar")) or "primary"
+
+    is_all_day = len(start) == 10  # "2026-03-02" format
+
+    if is_all_day:
+        from datetime import date, timedelta
+
+        start_body: dict[str, str] = {"date": start}
+        if end:
+            end_body: dict[str, str] = {"date": end}
+        else:
+            try:
+                end_body = {
+                    "date": (date.fromisoformat(start) + timedelta(days=1)).isoformat()
+                }
+            except ValueError:
+                end_body = {"date": start}
+    else:
+        start_body = {"dateTime": start}
+        if end:
+            end_body = {"dateTime": end}
+        else:
+            # Default: start + 1 hour
+            try:
+                # Parse ISO datetime and add 1 hour
+                from datetime import datetime, timedelta
+
+                dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                end_dt = dt + timedelta(hours=1)
+                end_body = {"dateTime": end_dt.isoformat()}
+            except (ValueError, OSError):
+                end_body = {"dateTime": start}
+
+    event_body: dict[str, Any] = {
+        "summary": title,
+        "start": start_body,
+        "end": end_body,
+    }
+    if description:
+        event_body["description"] = description
+    if location:
+        event_body["location"] = location
+
+    cal_base = _google_calendar_api_base_url()
+    from urllib.parse import quote
+
+    created = _google_api_request(
+        "POST",
+        f"{cal_base}/calendar/v3/calendars/{quote(calendar_id, safe='')}/events",
+        access_token=access_token,
+        json_body=event_body,
+    )
+
+    created_start = created.get("start", {})
+    created_end = created.get("end", {})
+    if isinstance(created_start, dict):
+        start_val = created_start.get("dateTime") or created_start.get("date") or start
+    else:
+        start_val = start
+    if isinstance(created_end, dict):
+        end_val = created_end.get("dateTime") or created_end.get("date") or ""
+    else:
+        end_val = ""
+
+    return {
+        "output": {
+            "status": "created",
+            "event_id": _optional_text(created.get("id")) or "",
+            "title": _optional_text(created.get("summary")) or title,
+            "start": start_val,
+            "end": end_val,
+            "calendar": calendar_id,
+            "location": _optional_text(created.get("location")) or "",
+            "description": _optional_text(created.get("description")) or "",
+            "account_ref": account_ref,
+        }
+    }
 
 
 def _dispatch(method: str, params: dict[str, Any]) -> dict[str, Any]:

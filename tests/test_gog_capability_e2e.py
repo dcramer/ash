@@ -6,7 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -54,7 +54,7 @@ async def _rpc(
 
 
 # ---------------------------------------------------------------------------
-# Fake Google OAuth server for device code flow
+# Fake Google OAuth + API server
 # ---------------------------------------------------------------------------
 
 _FAKE_USER_CODE = "ABCD-EFGH"
@@ -68,14 +68,126 @@ _poll_counts: dict[str, int] = {}
 
 
 class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
-    """Handles device code and token endpoints with canned responses."""
+    """Handles OAuth, Gmail API, and Calendar API endpoints with canned responses."""
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         pass  # suppress noisy request logging
 
+    def _check_auth(self) -> bool:
+        auth = self.headers.get("Authorization", "")
+        if auth != f"Bearer {_FAKE_ACCESS_TOKEN}":
+            self._json_response(401, {"error": {"message": "Invalid credentials"}})
+            return False
+        return True
+
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
+
+        if not self._check_auth():
+            return
+
+        # /gmail/v1/users/me/messages/{id} (must check before list endpoint)
+        if path.startswith("/gmail/v1/users/me/messages/"):
+            msg_id = path.split("/")[-1]
+            self._json_response(
+                200,
+                {
+                    "id": msg_id,
+                    "threadId": f"thread_{msg_id}",
+                    "snippet": f"Preview of {msg_id}",
+                    "internalDate": "1709337600000",
+                    "payload": {
+                        "headers": [
+                            {"name": "From", "value": "sender@example.com"},
+                            {
+                                "name": "Subject",
+                                "value": f"Subject for {msg_id}",
+                            },
+                            {
+                                "name": "Date",
+                                "value": "Sat, 02 Mar 2024 00:00:00 +0000",
+                            },
+                        ]
+                    },
+                },
+            )
+            return
+
+        # /gmail/v1/users/me/messages (list)
+        if path == "/gmail/v1/users/me/messages":
+            max_results = int((qs.get("maxResults") or ["10"])[0])
+            msg_ids = [
+                {"id": f"msg_{i + 1}", "threadId": f"thread_{i + 1}"}
+                for i in range(max_results)
+            ]
+            self._json_response(
+                200, {"messages": msg_ids, "resultSizeEstimate": len(msg_ids)}
+            )
+            return
+
+        # /calendar/v3/calendars/{calendarId}/events
+        if "/calendar/v3/calendars/" in path and path.endswith("/events"):
+            self._json_response(
+                200,
+                {
+                    "items": [
+                        {
+                            "id": "evt_1",
+                            "summary": "Fake calendar event",
+                            "start": {"dateTime": "2026-03-02T10:00:00Z"},
+                            "end": {"dateTime": "2026-03-02T11:00:00Z"},
+                            "location": "Conference Room",
+                            "description": "A test event",
+                        }
+                    ]
+                },
+            )
+            return
+
+        self._json_response(404, {"error": {"message": "not found"}})
+
     def do_POST(self) -> None:  # noqa: N802
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length).decode("utf-8")
+
+        # Gmail send and Calendar create require Bearer auth
+        if self.path.startswith("/gmail/") or self.path.startswith("/calendar/"):
+            if not self._check_auth():
+                return
+
+            if self.path == "/gmail/v1/users/me/messages/send":
+                self._json_response(
+                    200,
+                    {
+                        "id": "sent_msg_001",
+                        "threadId": "thread_sent_001",
+                        "labelIds": ["SENT"],
+                    },
+                )
+                return
+
+            # /calendar/v3/calendars/{calendarId}/events
+            if "/calendar/v3/calendars/" in self.path and self.path.endswith("/events"):
+                request_body = json.loads(body)
+                self._json_response(
+                    200,
+                    {
+                        "id": "created_evt_001",
+                        "summary": request_body.get("summary", ""),
+                        "start": request_body.get("start", {}),
+                        "end": request_body.get("end", {}),
+                        "location": request_body.get("location", ""),
+                        "description": request_body.get("description", ""),
+                    },
+                )
+                return
+
+            self._json_response(404, {"error": {"message": "not found"}})
+            return
+
+        # OAuth form-encoded endpoints
         params = parse_qs(body)
 
         if self.path == "/device/code":
@@ -160,7 +272,7 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
 
 @pytest.fixture()
 def fake_google_oauth():
-    """Start a local HTTP server mimicking Google OAuth endpoints."""
+    """Start a local HTTP server mimicking Google OAuth + API endpoints."""
     global _device_code_counter  # noqa: PLW0603
     _device_code_counter = 0
     _poll_counts.clear()
@@ -199,6 +311,8 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
             "GOOGLE_CLIENT_SECRET": "fake-client-secret",
             "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
             "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+            "GOOGLE_GMAIL_API_BASE_URL": fake_google_oauth,
+            "GOOGLE_CALENDAR_API_BASE_URL": fake_google_oauth,
         },
     )
     await manager.register_provider(provider)
@@ -302,6 +416,9 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert isinstance(invoke_email.result, dict)
     email_output = invoke_email.result["output"]
     assert email_output["count"] == 2
+    assert email_output["messages"][0]["from"] == "sender@example.com"
+    assert "Subject for msg_1" in email_output["messages"][0]["subject"]
+    assert email_output["messages"][0]["snippet"]  # non-empty
     serialized_email_output = json.dumps(email_output, ensure_ascii=True).lower()
     assert "access_token" not in serialized_email_output
     assert "refresh_token" not in serialized_email_output
@@ -354,6 +471,8 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert isinstance(invoke_calendar.result, dict)
     calendar_output = invoke_calendar.result["output"]
     assert calendar_output["count"] == 1
+    assert calendar_output["events"][0]["title"] == "Fake calendar event"
+    assert calendar_output["events"][0]["location"] == "Conference Room"
 
     # ---- Policy: group chat blocked ----
     group_blocked = await _rpc(
