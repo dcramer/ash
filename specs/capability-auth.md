@@ -33,6 +33,7 @@ The device code flow works identically across all providers.
 3. Users complete consent on their own device — phone, laptop, or any browser.
 4. Existing caller-facing `auth_begin`/`auth_complete` flows continue to work; auth completion normalization is centralized in host capability manager.
 5. Skills detect flow type from `auth_begin` response and adapt UX accordingly.
+6. Capability-backed skill execution uses a shared host-owned auth UX contract so user-facing auth prompts consistently include actionable URL/code details.
 
 ## Device Code Flow
 
@@ -64,6 +65,19 @@ flow_type == "device_code":
 flow_type == "authorization_code":
   → Show auth URL, ask user to paste callback/code (current behavior)
 ```
+
+### Skill UX contract (host-owned)
+
+Capability-backed skills must follow a shared auth UX contract provided by the
+`use_skill` runtime wrapper:
+
+1. If auth is required, initiate `auth begin` immediately (do not only say auth is needed).
+2. Include the exact `auth_url` from command output in user-facing instructions.
+3. Include exact `user_code` for device code flows.
+4. Request one clear next action (paste callback/code or confirm device completion).
+
+This contract is centralized so behavior is not duplicated across individual
+skill prompt files.
 
 ## Contract Changes
 

@@ -172,6 +172,37 @@ class TestSkillAgent:
 
         assert "## Skill Directory" not in prompt
 
+    def test_capability_auth_contract_added_for_capability_skills(self):
+        """Capability-backed skills should include shared auth UX contract."""
+        skill = SkillDefinition(
+            name="google",
+            description="Google skill",
+            instructions="Use capability commands.",
+            capabilities=["gog.email"],
+        )
+        agent = SkillAgent(skill)
+        context = AgentContext(input_data={"context": ""})
+
+        prompt = agent.build_system_prompt(context)
+
+        assert "## Capability Auth UX Contract" in prompt
+        assert "ash-sb capability auth begin" in prompt
+        assert "exact `auth_url`" in prompt
+
+    def test_capability_auth_contract_not_added_for_non_capability_skills(self):
+        """Non-capability skills should not get auth UX contract noise."""
+        skill = SkillDefinition(
+            name="research",
+            description="Research",
+            instructions="Use web search.",
+        )
+        agent = SkillAgent(skill)
+        context = AgentContext(input_data={"context": ""})
+
+        prompt = agent.build_system_prompt(context)
+
+        assert "## Capability Auth UX Contract" not in prompt
+
 
 class TestUseSkillToolValidation:
     """Tests for UseSkillTool input validation."""

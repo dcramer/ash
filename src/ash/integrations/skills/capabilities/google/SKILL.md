@@ -58,10 +58,27 @@ For each unauthenticated capability (`gog.email`, `gog.calendar`):
 ash-sb capability auth begin -c gog.email
 ```
 
+Parse the command output and extract auth fields before responding.
+If `auth_url` is missing from output, report the command failure and stop.
+
 Then:
 
 - If flow type is `device_code`: show URL + user code, then poll.
 - If flow type is `authorization_code`: show URL and ask user for callback URL or code, then complete.
+
+When presenting auth instructions, always include:
+
+- The exact `auth_url` returned by `auth begin` (never paraphrase or omit it).
+- The exact `user_code` when flow type is `device_code`.
+- A single clear instruction: complete consent, then paste callback URL or code.
+
+Use one of these response templates exactly:
+
+Authorization code flow:
+`To continue, open this Google auth URL: <auth_url>\nAfter approval, paste the full callback URL (or just the code) here.`
+
+Device code flow:
+`To continue, open: <auth_url>\nEnter this code: <user_code>\nAfter approval, tell me when done and I will continue.`
 
 Use these commands:
 
@@ -72,6 +89,17 @@ ash-sb capability auth complete --flow-id <id> --code '<CODE>'
 ```
 
 If user intent is setup-only, stop after successful auth confirmation.
+
+### 2b. Proactive re-auth when scopes change or auth expires
+
+If a user asks for an operation and capability invoke/list returns auth-required or similar auth errors:
+
+1. Tell the user this action requires Google re-authorization (for example new Gmail/Calendar scopes or expired authorization).
+2. Immediately start auth with `ash-sb capability auth begin -c <capability>` instead of waiting.
+3. Present the returned auth URL and clear next step instructions.
+4. Continue completion via `auth poll` or `auth complete` based on flow type.
+
+Do not stop at "you need auth" when you can initiate the flow directly.
 
 ### 3. Perform operations
 
@@ -133,6 +161,13 @@ Required confirmation fields:
 - After mutation success, confirm the action and stop unless user asked for more.
 - Only claim success after command output confirms it.
 - For auth/setup completion, explicitly state which capability is now connected.
+- For auth-required errors, use proactive language:
+  - Say what requires re-auth (for example "inbox summary needs Gmail scope re-authorization").
+  - Provide the exact auth URL/code immediately after initiating `auth begin`.
+  - Ask for callback URL/code in one concise step.
+
+Never reply with only "need auth" or "use /google". Always include the runnable next step with the actual auth URL.
+Do not mention slash commands (for example `/google`) as a substitute for auth instructions.
 
 ## Error Handling
 

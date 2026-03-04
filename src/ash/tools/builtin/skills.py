@@ -58,6 +58,8 @@ This is required so control returns to the parent agent.
 - Include actual command output, not just summaries
 - If something failed, include the error message
 - Be concise - the user wants results, not a narrative
+- Preserve user-action artifacts exactly (auth URLs, user codes, callback tokens,
+  IDs, one-time codes). Do not paraphrase or omit them.
 
 For long-running tasks, use `send_message` for progress updates only (e.g., "Processing file 3 of 10...").
 Never use `send_message` for the final result - the final result must go through `complete`.
@@ -66,6 +68,19 @@ Put user-action instructions in `complete` exactly once.
 
 ---
 
+"""
+
+CAPABILITY_AUTH_UX_CONTRACT = """## Capability Auth UX Contract
+
+This skill declares host capabilities. When capability auth is required or re-authorization is needed:
+
+1. Start auth immediately with `ash-sb capability auth begin -c <capability>` (do not only say "need auth").
+2. Include the exact `auth_url` returned by the command.
+3. Include the exact `user_code` for device-code flows.
+4. Ask for one clear next step: paste callback URL or code (or confirm completion for device flow polling).
+
+Never replace auth instructions with generic hints or slash-command suggestions.
+Preserve auth URLs/codes verbatim in your `complete` output.
 """
 
 
@@ -138,6 +153,10 @@ class SkillAgent(Agent):
 
         # Add skill instructions
         prompt += self._skill.instructions
+
+        # Add shared capability-auth UX rules for capability-backed skills.
+        if self._skill.capabilities:
+            prompt += f"\n\n{CAPABILITY_AUTH_UX_CONTRACT}"
 
         # Tell the skill agent where its co-located files live in the sandbox
         if self._sandbox_skill_dir:

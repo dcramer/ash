@@ -116,6 +116,8 @@ CRITICAL: You MUST include this {source_type} output in your response to the use
 Preserve the formatting structure exactly — do NOT flatten lists into prose,
 remove line breaks, or convert structured output into a run-on sentence.
 Relay it in your voice but keep the same format (checklists, bullets, etc.).
+If the output includes user-action artifacts (URLs, auth codes, callback tokens,
+commands, IDs), preserve them verbatim. Do not omit, paraphrase, or replace them.
 </instruction>
 <output>
 {content}
