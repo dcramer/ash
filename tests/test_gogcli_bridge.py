@@ -1093,6 +1093,104 @@ def test_bridge_auth_complete_preserves_existing_refresh_token_when_omitted(
     assert vault_payload["refresh_token"] == _FAKE_REFRESH_TOKEN
 
 
+def test_bridge_auth_complete_reuses_refresh_token_from_related_capability(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    """Calendar auth can inherit refresh token from prior Gmail link for same account."""
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(tmp_path / "gogcli-state.json"),
+        "GOGCLI_VAULT_PATH": str(tmp_path / "vault"),
+        "GOOGLE_CLIENT_ID": "fake-client-id",
+        "GOOGLE_CLIENT_SECRET": "fake-client-secret",
+        "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+    }
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+
+    email_begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_reuse_related_begin_email",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.email",
+                "account_hint": "work",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in email_begin
+    email_flow_state = email_begin["result"]["flow_state"]
+    email_complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_reuse_related_complete_email",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.email",
+                "flow_state": email_flow_state,
+                "authorization_code": "fake-auth-code-initial",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in email_complete
+
+    calendar_begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_reuse_related_begin_calendar",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.calendar",
+                "account_hint": "work",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in calendar_begin
+    calendar_flow_state = calendar_begin["result"]["flow_state"]
+    calendar_complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_reuse_related_complete_calendar",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.calendar",
+                "flow_state": calendar_flow_state,
+                "authorization_code": "fake-auth-code-no-refresh",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in calendar_complete
+
+    state = _load_state(Path(env["GOGCLI_STATE_PATH"]))
+    calendar_key = "user-1:gog.calendar:work"
+    calendar_vault_ref = str(state["accounts"][calendar_key]["vault_ref"])
+    calendar_vault_payload = FileVault(Path(env["GOGCLI_VAULT_PATH"])).get_json(
+        calendar_vault_ref
+    )
+    assert isinstance(calendar_vault_payload, dict)
+    assert calendar_vault_payload["refresh_token"] == _FAKE_REFRESH_TOKEN
+
+
 @pytest.mark.asyncio
 async def test_subprocess_provider_auth_code_round_trip(
     tmp_path: Path,

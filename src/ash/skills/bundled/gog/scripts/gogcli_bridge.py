@@ -490,19 +490,88 @@ def _resolve_refresh_token(
     *,
     new_refresh_token: str | None,
     existing_vault_ref: str | None,
+    additional_vault_refs: list[str] | None = None,
 ) -> str | None:
-    """Prefer new refresh token, otherwise preserve existing stored token."""
+    """Prefer new refresh token, then preserve a stored token from any related account."""
     if new_refresh_token:
         return new_refresh_token
-    if not existing_vault_ref:
-        return None
-    try:
-        creds = _vault().get_json(existing_vault_ref)
-    except VaultError:
-        return None
-    if not isinstance(creds, dict):
-        return None
-    return _optional_text(creds.get("refresh_token"))
+
+    candidate_refs: list[str] = []
+    if existing_vault_ref:
+        candidate_refs.append(existing_vault_ref)
+    if additional_vault_refs:
+        candidate_refs.extend(additional_vault_refs)
+
+    seen: set[str] = set()
+    for vault_ref in candidate_refs:
+        if vault_ref in seen:
+            continue
+        seen.add(vault_ref)
+        try:
+            creds = _vault().get_json(vault_ref)
+        except VaultError:
+            continue
+        if not isinstance(creds, dict):
+            continue
+        refresh_token = _optional_text(creds.get("refresh_token"))
+        if refresh_token:
+            return refresh_token
+    return None
+
+
+def _related_vault_refs(
+    *,
+    state: dict[str, Any],
+    user_id: str,
+    account_ref: str,
+    exclude_account_key: str | None = None,
+) -> list[tuple[str, str]]:
+    """Collect vault refs for the same Google account across capabilities."""
+    accounts = _dict_values(state.get("accounts"))
+    prefix = f"{user_id}:"
+    suffix = f":{account_ref}"
+    refs: list[tuple[str, str]] = []
+    for account_key, account in accounts.items():
+        if account_key == exclude_account_key:
+            continue
+        if not account_key.startswith(prefix) or not account_key.endswith(suffix):
+            continue
+        vault_ref = _optional_text(account.get("vault_ref"))
+        if vault_ref:
+            refs.append((account_key, vault_ref))
+    return refs
+
+
+def _propagate_refresh_token(
+    *,
+    state: dict[str, Any],
+    user_id: str,
+    account_ref: str,
+    refresh_token: str,
+    exclude_account_key: str,
+) -> None:
+    """Keep refresh tokens in sync across Gmail/Calendar entries for one account."""
+    for related_account_key, related_vault_ref in _related_vault_refs(
+        state=state,
+        user_id=user_id,
+        account_ref=account_ref,
+        exclude_account_key=exclude_account_key,
+    ):
+        try:
+            creds = _vault().get_json(related_vault_ref)
+        except VaultError:
+            continue
+        if not isinstance(creds, dict):
+            continue
+        creds["refresh_token"] = refresh_token
+        try:
+            _vault().put_json(
+                namespace=VAULT_NAMESPACE,
+                key=related_account_key,
+                payload=creds,
+            )
+        except VaultError:
+            continue
 
 
 def _parse_window(window: str) -> int:
@@ -730,6 +799,7 @@ def _handle_auth_begin(params: dict[str, Any]) -> dict[str, Any]:
         "response_type": "code",
         "scope": scope,
         "access_type": "offline",
+        "include_granted_scopes": "true",
         "prompt": "consent",
         "state": state_param,
     }
@@ -882,12 +952,19 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
     )
     if credential_key is None:
         credential_key = f"cred_{secrets.token_hex(8)}"
+    related_accounts = _related_vault_refs(
+        state=state,
+        user_id=claims.user_id,
+        account_ref=account_ref,
+        exclude_account_key=account_key,
+    )
 
     # Success — we got tokens
     access_token = _optional_text(token_resp.get("access_token"))
     refresh_token = _resolve_refresh_token(
         new_refresh_token=_optional_text(token_resp.get("refresh_token")),
         existing_vault_ref=existing_vault_ref,
+        additional_vault_refs=[vault_ref for _, vault_ref in related_accounts],
     )
     if not access_token:
         raise BridgeError(
@@ -928,6 +1005,14 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
         "credential_key": credential_key,
         "vault_ref": vault_ref,
     }
+    if refresh_token:
+        _propagate_refresh_token(
+            state=state,
+            user_id=claims.user_id,
+            account_ref=account_ref,
+            refresh_token=refresh_token,
+            exclude_account_key=account_key,
+        )
     state["auth_flows"].pop(flow_id, None)
     _write_state(state)
 
@@ -1054,10 +1139,17 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
     )
     if credential_key is None:
         credential_key = f"cred_{secrets.token_hex(8)}"
+    related_accounts = _related_vault_refs(
+        state=state,
+        user_id=claims.user_id,
+        account_ref=account_ref,
+        exclude_account_key=account_key,
+    )
     access_token = _optional_text(token_resp.get("access_token"))
     refresh_token = _resolve_refresh_token(
         new_refresh_token=_optional_text(token_resp.get("refresh_token")),
         existing_vault_ref=existing_vault_ref,
+        additional_vault_refs=[vault_ref for _, vault_ref in related_accounts],
     )
     if not access_token:
         raise BridgeError(
@@ -1096,6 +1188,14 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
         "credential_key": credential_key,
         "vault_ref": vault_ref,
     }
+    if refresh_token:
+        _propagate_refresh_token(
+            state=state,
+            user_id=claims.user_id,
+            account_ref=account_ref,
+            refresh_token=refresh_token,
+            exclude_account_key=account_key,
+        )
     state["auth_flows"].pop(flow_id, None)
     _write_state(state)
     return {
