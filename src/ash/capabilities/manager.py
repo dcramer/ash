@@ -305,6 +305,44 @@ class CapabilityManager:
 
         return _auth_begin_response(flow)
 
+    async def list_auth_flows(
+        self,
+        *,
+        user_id: str,
+        capability_id: str | None = None,
+        account_hint: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List pending auth flows for the caller."""
+        normalized_user_id = _required_text(
+            value=user_id,
+            code="capability_invalid_input",
+            message="user_id is required",
+        )
+        normalized_capability_id = (
+            _required_capability_id(capability_id)
+            if capability_id is not None
+            else None
+        )
+        normalized_account_hint = _optional_text(account_hint)
+
+        async with self._lock:
+            self._prune_expired_flows_locked()
+            matches = [
+                flow
+                for flow in self._auth_flows.values()
+                if flow.user_id == normalized_user_id
+                and (
+                    normalized_capability_id is None
+                    or flow.capability_id == normalized_capability_id
+                )
+                and (
+                    normalized_account_hint is None
+                    or flow.account_hint == normalized_account_hint
+                )
+            ]
+            matches.sort(key=lambda flow: flow.expires_at, reverse=True)
+            return [_auth_begin_response(flow) for flow in matches]
+
     async def auth_complete(
         self,
         *,
@@ -940,6 +978,8 @@ def _linked_accounts_locked(
 def _auth_begin_response(flow: CapabilityAuthFlow) -> dict[str, Any]:
     result: dict[str, Any] = {
         "flow_id": flow.flow_id,
+        "capability": flow.capability_id,
+        "account_hint": flow.account_hint,
         "auth_url": flow.auth_url,
         "expires_at": flow.expires_at.isoformat().replace("+00:00", "Z"),
         "flow_type": flow.flow_type,

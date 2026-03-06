@@ -177,6 +177,51 @@ def auth_begin(
     typer.echo(f"  Expires: {result.get('expires_at', '')}")
 
 
+@auth_app.command("list")
+def auth_list(
+    capability: Annotated[
+        str | None,
+        typer.Option("--capability", "-c", help="Optional namespaced capability id"),
+    ] = None,
+    account_hint: Annotated[
+        str | None,
+        typer.Option("--account", help="Optional account reference hint"),
+    ] = None,
+) -> None:
+    """List pending capability auth flows for the current caller."""
+    params: dict[str, Any] = {}
+    if capability:
+        params["capability"] = capability
+    if account_hint:
+        params["account_hint"] = account_hint
+    result = _call("capability.auth.list", params)
+    flows = result.get("flows") or []
+    if not isinstance(flows, list) or not flows:
+        typer.echo("No pending capability auth flows.")
+        return
+
+    typer.echo("Pending capability auth flows:")
+    for flow in flows:
+        if not isinstance(flow, dict):
+            continue
+        flow_id = str(flow.get("flow_id", "")).strip() or "?"
+        capability_id = str(flow.get("capability", "")).strip()
+        account = str(flow.get("account_hint", "")).strip()
+        if capability_id and account:
+            typer.echo(f"- {flow_id} ({capability_id}, account={account})")
+        elif capability_id:
+            typer.echo(f"- {flow_id} ({capability_id})")
+        else:
+            typer.echo(f"- {flow_id}")
+        typer.echo(f"  Auth URL: {flow.get('auth_url', '')}")
+        typer.echo(f"  Flow type: {flow.get('flow_type', 'authorization_code')}")
+        if flow.get("user_code"):
+            typer.echo(f"  User code: {flow['user_code']}")
+        if flow.get("poll_interval_seconds") is not None:
+            typer.echo(f"  Poll interval: {flow['poll_interval_seconds']}s")
+        typer.echo(f"  Expires: {flow.get('expires_at', '')}")
+
+
 @auth_app.command("complete")
 def auth_complete(
     flow_id: Annotated[

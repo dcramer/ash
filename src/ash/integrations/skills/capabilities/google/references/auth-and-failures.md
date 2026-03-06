@@ -16,6 +16,8 @@ If user intent is setup-only, stop after auth succeeds.
 
 If user provides a callback URL (`http://localhost/?code=...`), pass it with `--callback-url`.
 If user provides only a code value, pass it with `--code`.
+If `flow_id` is missing, use `ash-sb capability auth list` (filtered by capability/account when possible) and complete the most recent pending flow.
+Do not start a new auth flow while a valid callback URL/code is already provided.
 
 Never ask for OAuth secrets.
 

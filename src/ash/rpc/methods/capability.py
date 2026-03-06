@@ -90,6 +90,20 @@ def register_capability_methods(
         except CapabilityError as e:
             raise ValueError(f"{e.code}: {e}") from e
 
+    async def capability_auth_list(params: dict[str, Any]) -> dict[str, Any]:
+        user_id = _required_text(params, "user_id")
+        capability_id = _optional_text(params, "capability")
+        account_hint = _optional_text(params, "account_hint")
+        try:
+            flows = await manager.list_auth_flows(
+                user_id=user_id,
+                capability_id=capability_id,
+                account_hint=account_hint,
+            )
+        except CapabilityError as e:
+            raise ValueError(f"{e.code}: {e}") from e
+        return {"flows": flows}
+
     async def capability_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
         flow_id = _required_text(params, "flow_id")
         user_id = _required_text(params, "user_id")
@@ -134,6 +148,7 @@ def register_capability_methods(
     server.register("capability.list", capability_list)
     server.register("capability.invoke", capability_invoke)
     server.register("capability.auth.begin", capability_auth_begin)
+    server.register("capability.auth.list", capability_auth_list)
     server.register("capability.auth.complete", capability_auth_complete)
     server.register("capability.auth.poll", capability_auth_poll)
 

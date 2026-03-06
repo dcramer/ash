@@ -379,6 +379,40 @@ Response:
 }
 ```
 
+#### `capability.auth.list`
+
+Lists pending auth flows for the verified caller so follow-up callback/code messages can
+complete an existing flow without restarting auth.
+
+Request params:
+
+```json
+{
+  "capability": "gog.calendar",
+  "account_hint": "work",
+  "context_token": "<signed-token>"
+}
+```
+
+`capability` and `account_hint` are optional filters.
+
+Response:
+
+```json
+{
+  "flows": [
+    {
+      "flow_id": "caf_01...",
+      "capability": "gog.calendar",
+      "account_hint": "work",
+      "auth_url": "https://...",
+      "expires_at": "2026-02-24T20:10:00Z",
+      "flow_type": "authorization_code"
+    }
+  ]
+}
+```
+
 #### `capability.auth.poll`
 
 Polls a pending device code auth flow. See `specs/capability-auth.md` for full contract.
@@ -388,6 +422,7 @@ Polls a pending device code auth flow. See `specs/capability-auth.md` for full c
 - `ash-sb capability list`
 - `ash-sb capability invoke --capability <id> --operation <name> --input-json <json>`
 - `ash-sb capability auth begin --capability <id> [--account <hint>]`
+- `ash-sb capability auth list [--capability <id>] [--account <hint>]`
 - `ash-sb capability auth complete --flow-id <id> (--callback-url <url> | --code <code>)`
 - `ash-sb capability auth poll --flow-id <id> [--timeout <secs>] [--interval <secs>]`
   (See `specs/capability-auth.md`.)

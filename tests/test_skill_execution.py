@@ -371,6 +371,60 @@ class TestUseSkillToolExecution:
         frame = exc_info.value.child_frame
         assert "Do the thing" in frame.system_prompt
 
+    @pytest.mark.asyncio
+    async def test_callback_message_injects_auth_recovery_context(self):
+        from ash.agents.types import ChildActivated
+
+        skill = SkillDefinition(
+            name="google",
+            description="Google skill",
+            instructions="Use capabilities.",
+            capabilities=["gog.calendar"],
+        )
+        registry = MagicMock()
+        registry.has.return_value = True
+        registry.get.return_value = skill
+        executor = MagicMock()
+        config = _mock_config(
+            skills={},
+            agents={},
+            skill_defaults=SimpleNamespace(allow_chat_ids=[]),
+        )
+        tool = UseSkillTool(registry, executor, config)
+
+        class _Manager:
+            async def list_capabilities(
+                self,
+                *,
+                user_id: str,
+                chat_type: str | None,
+                include_unavailable: bool = False,
+            ):
+                _ = (user_id, chat_type, include_unavailable)
+                return [{"id": "gog.calendar"}]
+
+        tool.set_capability_manager(_Manager())
+
+        callback_url = (
+            "http://localhost/?state=abc&code=4/0AFakeCode&"
+            "scope=https://www.googleapis.com/auth/calendar"
+        )
+        with pytest.raises(ChildActivated) as exc_info:
+            await tool.execute(
+                {"skill": "google", "message": callback_url, "context": "base context"},
+                context=ToolContext(
+                    user_id="u-1",
+                    chat_id="dm-1",
+                    metadata={"chat_type": "private"},
+                ),
+            )
+
+        injected = str(exc_info.value.child_frame.context.input_data.get("context", ""))
+        assert "OAuth callback/code detected in the latest user message." in injected
+        assert "ash-sb capability auth list" in injected
+        assert "ash-sb capability auth complete --flow-id <flow_id>" in injected
+        assert "base context" in injected
+
 
 class TestSkillEnvironmentBuilding:
     """Tests for skill environment variable injection."""

@@ -57,3 +57,12 @@ def test_google_skill_includes_archive_and_label_mutation_guidance() -> None:
     assert "archive_messages" in text
     assert "update_labels" in text
     assert "always confirm key details" in text
+
+
+def test_google_skill_avoids_auth_loop_and_includes_flow_recovery_guidance() -> None:
+    text = _load_google_skill_text().lower()
+    assert "flow id: <flow_id>" in text
+    assert (
+        "do not start a new `auth begin` while a valid callback/code is present" in text
+    )
+    assert "ash-sb capability auth list" in text

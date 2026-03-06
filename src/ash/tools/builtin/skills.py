@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 _SECRET_ENV_NAME_PATTERNS = (
     r"(?i)(?:^|_)(?:api[_-]?key|token|secret|password|passwd|auth)(?:$|_)",
 )
+_OAUTH_CALLBACK_URL_PATTERN = re.compile(r"https?://localhost[^\s]*[?&]code=")
+_OAUTH_CODE_ONLY_PATTERN = re.compile(r"^\s*4/[^\s]+\s*$")
 
 # Built-in skills that are handled specially (not loaded from SKILL.md files)
 BUILTIN_SKILLS: dict[str, str] = {}
@@ -75,9 +77,13 @@ CAPABILITY_AUTH_UX_CONTRACT = """## Capability Auth UX Contract
 This skill declares host capabilities. When capability auth is required or re-authorization is needed:
 
 1. Start auth immediately with `ash-sb capability auth begin -c <capability>` (do not only say "need auth").
-2. Include the exact `auth_url` returned by the command.
-3. Include the exact `user_code` for device-code flows.
-4. Ask for one clear next step: paste callback URL or code (or confirm completion for device flow polling).
+2. Include the exact `flow_id` returned by the command.
+3. Include the exact `auth_url` returned by the command.
+4. Include the exact `user_code` for device-code flows.
+5. Ask for one clear next step: paste callback URL or code (or confirm completion for device flow polling).
+
+If the user already pasted a callback URL or auth code, complete the existing flow first.
+Do not run another `auth begin` until completion fails as invalid/expired.
 
 Never replace auth instructions with generic hints or slash-command suggestions.
 Preserve auth URLs/codes verbatim in your `complete` output.
@@ -460,6 +466,37 @@ class UseSkillTool(Tool):
             f"Skill '{skill.name}' has unavailable capabilities: {', '.join(missing)}"
         )
 
+    def _looks_like_oauth_callback_or_code(self, message: str) -> bool:
+        """Detect user-provided OAuth callback URLs or code-only replies."""
+        return bool(
+            _OAUTH_CALLBACK_URL_PATTERN.search(message)
+            or _OAUTH_CODE_ONLY_PATTERN.match(message)
+        )
+
+    def _build_capability_auth_recovery_context(
+        self,
+        *,
+        skill: SkillDefinition,
+        message: str,
+        user_context: str,
+    ) -> str:
+        """Inject deterministic auth-completion guidance for callback follow-ups."""
+        if not skill.capabilities:
+            return user_context
+        if not self._looks_like_oauth_callback_or_code(message):
+            return user_context
+
+        hint = (
+            "OAuth callback/code detected in the latest user message.\n"
+            "Do this before any new auth begin:\n"
+            "1. Run `ash-sb capability auth list` (add `-c <capability>` / `--account <alias>` if known).\n"
+            "2. Complete the newest matching pending flow with `ash-sb capability auth complete --flow-id <flow_id> --callback-url '<user_callback_url>'` or `--code '<user_code>'`.\n"
+            "3. Only run `auth begin` if completion fails with invalid/expired flow."
+        )
+        if not user_context:
+            return hint
+        return f"{user_context}\n\n{hint}"
+
     async def execute(
         self,
         input_data: dict[str, Any],
@@ -475,6 +512,9 @@ class UseSkillTool(Tool):
         if not message:
             return ToolResult.error("Missing required field: message")
 
+        message = str(message)
+        user_context = str(user_context)
+
         if not self._registry.has(skill_name):
             self._registry.reload_all(self._config.workspace)
             if not self._registry.has(skill_name):
@@ -486,6 +526,11 @@ class UseSkillTool(Tool):
                 )
 
         skill = self._registry.get(skill_name)
+        user_context = self._build_capability_auth_recovery_context(
+            skill=skill,
+            message=message,
+            user_context=user_context,
+        )
         skill_config = self._config.skills.get(skill_name)
 
         if skill_config and not skill_config.enabled:

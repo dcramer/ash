@@ -563,6 +563,44 @@ async def test_auth_begin_reuses_pending_flow_for_same_scope() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_auth_flows_filters_and_scopes_by_user() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _RecordingProvider(namespace="gog")
+    await manager.register_provider(provider)
+
+    user_one_work = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+    await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="personal",
+    )
+    await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-2",
+        chat_type="private",
+        account_hint="work",
+    )
+
+    user_one_flows = await manager.list_auth_flows(user_id="user-1")
+    assert len(user_one_flows) == 2
+    assert {flow["account_hint"] for flow in user_one_flows} == {"work", "personal"}
+    assert all(flow["capability"] == "gog.email" for flow in user_one_flows)
+
+    filtered = await manager.list_auth_flows(
+        user_id="user-1",
+        capability_id="gog.email",
+        account_hint="work",
+    )
+    assert [flow["flow_id"] for flow in filtered] == [user_one_work["flow_id"]]
+
+
+@pytest.mark.asyncio
 async def test_provider_registration_enforces_namespace_prefix() -> None:
     manager = CapabilityManager()
     provider = _RecordingProvider(namespace="gog", capability_id="other.email")

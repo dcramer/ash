@@ -68,6 +68,7 @@ Then:
 
 When presenting auth instructions, always include:
 
+- The exact `flow_id` returned by `auth begin`.
 - The exact `auth_url` returned by `auth begin` (never paraphrase or omit it).
 - The exact `user_code` when flow type is `device_code`.
 - A single clear instruction: complete consent, then paste callback URL or code.
@@ -75,10 +76,10 @@ When presenting auth instructions, always include:
 Use one of these response templates exactly:
 
 Authorization code flow:
-`To continue, open this Google auth URL: <auth_url>\nAfter approval, paste the full callback URL (or just the code) here.`
+`To continue, open this Google auth URL: <auth_url>\nFlow ID: <flow_id>\nAfter approval, paste the full callback URL (or just the code) here.`
 
 Device code flow:
-`To continue, open: <auth_url>\nEnter this code: <user_code>\nAfter approval, tell me when done and I will continue.`
+`To continue, open: <auth_url>\nFlow ID: <flow_id>\nEnter this code: <user_code>\nAfter approval, tell me when done and I will continue.`
 
 Use these commands:
 
@@ -89,6 +90,10 @@ ash-sb capability auth complete --flow-id <id> --code '<CODE>'
 ```
 
 If user intent is setup-only, stop after successful auth confirmation.
+
+If the user provides a callback URL or auth code in a follow-up message, complete that existing flow immediately with `auth complete`.
+Do not start a new `auth begin` while a valid callback/code is present unless completion fails with invalid/expired flow.
+If `flow_id` is not already known, run `ash-sb capability auth list -c <capability> --account <alias>` and use the most recent pending flow.
 
 ### 2b. Proactive re-auth when scopes change or auth expires
 
@@ -123,6 +128,17 @@ If the user asks a broad question and does not provide scope, use these defaults
 - Email summaries: `search_messages` with `{"query":"is:unread newer_than:1d","limit":20}`
 - Day-at-a-glance: `list_events` with `{"calendar":"primary","window":"1d"}` plus unread/recent email query
 - Message deep read: run `get_message` for each item you summarize
+
+### Account and calendar defaults
+
+Interpret account/calendar phrasing with these defaults unless user explicitly says otherwise:
+
+- "work calendar", "my work calendar", or "calendar at work" means account alias `work` and calendar `primary`.
+- "personal calendar", "my calendar", or unspecified calendar means account alias `default` and calendar `primary`.
+- "add/connect/link my <alias> calendar" means start auth for `gog.calendar` using that alias.
+
+Do not ask taxonomy prompts like "do you mean second account vs shared calendar vs subscribed calendar" before starting auth.
+If account alias is implied, proceed with that alias and only ask a single follow-up if a concrete operation later needs a non-primary calendar id.
 
 ## Behavior Playbooks
 
