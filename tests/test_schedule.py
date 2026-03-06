@@ -1627,6 +1627,41 @@ class TestScheduledTaskWrapper:
         # The previous 8 AM LA should show as 08:00, not UTC equivalent
         assert "08:00" in wrapped_message
 
+    @pytest.mark.asyncio
+    async def test_handler_sets_session_chat_type_for_dm_policy(self):
+        """Scheduled tasks in DMs preserve private chat_type for skill policy checks."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ash.scheduling import ScheduledTaskHandler
+
+        mock_agent = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "ok"
+        mock_agent.process_message = AsyncMock(return_value=mock_response)
+
+        mock_sender = AsyncMock(return_value="msg_123")
+        handler = ScheduledTaskHandler(
+            agent=mock_agent,
+            senders={"telegram": mock_sender},
+            timezone="UTC",
+        )
+
+        entry = ScheduleEntry(
+            id="dm_ctx_1",
+            message="Check my calendar",
+            trigger_at=datetime.now(UTC) - timedelta(minutes=1),
+            provider="telegram",
+            chat_id="123456789",
+            chat_type="private",
+            user_id="42",
+        )
+
+        await handler.handle(entry)
+
+        call_args = mock_agent.process_message.call_args
+        session = call_args.args[1]
+        assert session.context.chat_type == "private"
+
 
 class TestStalenessGuard:
     """Tests for the staleness guard in ScheduleWatcher."""

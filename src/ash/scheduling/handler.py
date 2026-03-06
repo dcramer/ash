@@ -90,6 +90,21 @@ def format_delay(seconds: float) -> str:
     return f"~{days:.1f} days"
 
 
+def _resolve_chat_type(entry: ScheduleEntry) -> str | None:
+    """Resolve effective chat_type for scheduled executions.
+
+    New entries should carry chat_type directly. For older Telegram entries
+    without this field, infer private vs group from Telegram chat ID shape.
+    """
+    if entry.chat_type:
+        return entry.chat_type
+
+    if entry.provider == "telegram" and entry.chat_id:
+        return "group" if entry.chat_id.startswith("-") else "private"
+
+    return None
+
+
 class MessageSender(Protocol):
     """Protocol for sending messages to a chat. Returns the sent message ID."""
 
@@ -217,6 +232,7 @@ class ScheduledTaskHandler:
         # Populate context so system prompt builder includes full context
         session.context.username = entry.username or ""
         session.context.is_scheduled_task = True
+        session.context.chat_type = _resolve_chat_type(entry)
         if entry.chat_title:
             session.context.chat_title = entry.chat_title
 

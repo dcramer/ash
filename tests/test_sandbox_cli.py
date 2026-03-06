@@ -15,6 +15,7 @@ def _context_token(
     *,
     effective_user_id: str = "user123",
     chat_id: str | None = "chat456",
+    chat_type: str | None = "private",
     provider: str | None = "telegram",
     source_username: str | None = "testuser",
     timezone: str | None = "UTC",
@@ -22,6 +23,7 @@ def _context_token(
     return get_default_context_token_service().issue(
         effective_user_id=effective_user_id,
         chat_id=chat_id,
+        chat_type=chat_type,
         provider=provider,
         source_username=source_username,
         timezone=timezone,
@@ -82,6 +84,7 @@ class TestScheduleCreate:
         params = call_args[1]
         assert params["message"] == "Test reminder"
         assert params["chat_id"] == "chat456"
+        assert params["chat_type"] == "private"
         assert params["provider"] == "telegram"
 
     def test_create_periodic(self, cli_runner, mock_rpc):

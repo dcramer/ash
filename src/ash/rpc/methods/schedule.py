@@ -35,6 +35,7 @@ def register_schedule_methods(
             trigger_at: ISO datetime for one-shot (mutually exclusive with cron)
             cron: Cron expression for periodic (mutually exclusive with trigger_at)
             chat_id: Target chat ID (required)
+            chat_type: Chat type for policy checks at execution time (optional)
             provider: Provider name (required)
             user_id: User ID
             username: Username
@@ -67,6 +68,7 @@ def register_schedule_methods(
             trigger_at=trigger_at,
             cron=cron,
             chat_id=chat_id,
+            chat_type=params.get("chat_type"),
             chat_title=params.get("chat_title"),
             provider=provider,
             user_id=params.get("user_id"),

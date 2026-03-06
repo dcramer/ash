@@ -51,26 +51,28 @@ class ThreadIndex:
             returns the same thread_id. Otherwise returns external_id as a new thread.
         """
         index = self._ensure_loaded()
+        external_key = str(external_id)
+        reply_key = str(reply_to_external_id) if reply_to_external_id else None
 
-        if reply_to_external_id:
-            parent_thread = index.get(reply_to_external_id)
+        if reply_key:
+            parent_thread = index.get(reply_key)
             if parent_thread:
                 logger.debug(
                     "Message %s joins thread %s (via reply to %s)",
-                    external_id,
+                    external_key,
                     parent_thread,
-                    reply_to_external_id,
+                    reply_key,
                 )
                 return parent_thread
             logger.debug(
                 "Message %s replied to unknown message %s, starting new thread",
-                external_id,
-                reply_to_external_id,
+                external_key,
+                reply_key,
             )
 
         # Start new thread using this message's ID as the thread_id
-        logger.debug("Message %s starts new thread", external_id)
-        return external_id
+        logger.debug("Message %s starts new thread", external_key)
+        return external_key
 
     def register_message(self, external_id: str, thread_id: str) -> None:
         """Register a message in a thread.
@@ -81,11 +83,13 @@ class ThreadIndex:
         """
         with self._lock:
             index = self._ensure_loaded()
-            if external_id not in index:
-                index[external_id] = thread_id
+            external_key = str(external_id)
+            thread_key = str(thread_id)
+            if external_key not in index:
+                index[external_key] = thread_key
                 self._manager.save()
                 logger.debug(
-                    "Registered message %s in thread %s", external_id, thread_id
+                    "Registered message %s in thread %s", external_key, thread_key
                 )
 
     def get_thread_id(self, external_id: str) -> str | None:
@@ -98,4 +102,4 @@ class ThreadIndex:
             The thread_id if the message is registered, None otherwise.
         """
         index = self._ensure_loaded()
-        return index.get(external_id)
+        return index.get(str(external_id))

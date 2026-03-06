@@ -471,12 +471,14 @@ class TelegramProvider(Provider):
         images: list[ImageAttachment] | None = None,
         *,
         was_mentioned: bool = False,
+        is_reply_to_bot: bool = False,
     ) -> IncomingMessage:
         """Convert a Telegram message to an IncomingMessage."""
         metadata = {
             "chat_type": message.chat.type,
             "chat_title": message.chat.title,
             "was_mentioned": was_mentioned,
+            "is_reply_to_bot": is_reply_to_bot,
         }
         # Include thread_id for forum topics (supergroups with topics enabled)
         if message.message_thread_id is not None:
@@ -621,6 +623,7 @@ class TelegramProvider(Provider):
             # Strip bot mention from caption if in group
             is_group = message.chat.type in ("group", "supergroup")
             was_mentioned = is_group and self._is_mentioned(message)
+            is_reply_to_bot = is_group and self._is_reply(message)
             caption = message.caption or ""
             if is_group and caption:
                 caption = self._strip_mention(caption)
@@ -632,6 +635,7 @@ class TelegramProvider(Provider):
                 caption,
                 images=[image],
                 was_mentioned=was_mentioned,
+                is_reply_to_bot=is_reply_to_bot,
             )
 
             if self._handler:
@@ -655,10 +659,16 @@ class TelegramProvider(Provider):
             # Strip bot mention from text if in group
             is_group = message.chat.type in ("group", "supergroup")
             was_mentioned = is_group and self._is_mentioned(message)
+            is_reply_to_bot = is_group and self._is_reply(message)
             text = self._strip_mention(message.text) if is_group else message.text
 
             incoming = self._to_incoming_message(
-                message, user_id, username, text, was_mentioned=was_mentioned
+                message,
+                user_id,
+                username,
+                text,
+                was_mentioned=was_mentioned,
+                is_reply_to_bot=is_reply_to_bot,
             )
             # Add processing mode to metadata
             incoming.metadata["processing_mode"] = processing_mode

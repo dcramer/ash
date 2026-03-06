@@ -68,6 +68,7 @@ class TestMessageConversion:
         assert incoming.username == "testuser"
         assert incoming.display_name == "Test User"
         assert incoming.metadata["chat_type"] == "private"
+        assert incoming.metadata["is_reply_to_bot"] is False
         assert incoming.images == []
 
     def test_to_incoming_message_with_reply(self, provider):
@@ -87,9 +88,11 @@ class TestMessageConversion:
             user_id=789,
             username="testuser",
             text="Replying to you",
+            is_reply_to_bot=True,
         )
 
         assert incoming.reply_to_message_id == "100"
+        assert incoming.metadata["is_reply_to_bot"] is True
 
     def test_to_incoming_message_group_with_thread(self, provider):
         """Test group message conversion includes thread_id for forum topics."""

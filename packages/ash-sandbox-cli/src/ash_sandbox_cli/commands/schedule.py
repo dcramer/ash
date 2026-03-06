@@ -22,6 +22,7 @@ def _get_context() -> dict[str, str]:
     return {
         "user_id": context.get("user_id") or "",
         "chat_id": context.get("chat_id") or "",
+        "chat_type": context.get("chat_type") or "",
         "chat_title": context.get("chat_title") or "",
         "provider": context.get("provider") or "",
         "username": context.get("username") or "",
@@ -257,6 +258,8 @@ def create(
         params["cron"] = cron
     if ctx["chat_title"]:
         params["chat_title"] = ctx["chat_title"]
+    if ctx["chat_type"]:
+        params["chat_type"] = ctx["chat_type"]
     if ctx["user_id"]:
         params["user_id"] = ctx["user_id"]
     if ctx["username"]:

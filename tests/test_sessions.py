@@ -1096,3 +1096,32 @@ class TestChatHistoryInjection:
 
         ctx = SessionContext()
         assert not hasattr(ctx, "chat_history")
+
+
+class TestGroupReplySkipPolicy:
+    @pytest.mark.asyncio
+    async def test_reply_to_bot_is_not_skipped_when_thread_unknown(self):
+        from ash.config.models import ConversationConfig
+        from ash.providers.base import IncomingMessage
+        from ash.providers.telegram.handlers.session_handler import SessionHandler
+
+        handler = SessionHandler(
+            provider_name="telegram",
+            config=None,
+            conversation_config=ConversationConfig(),
+        )
+
+        message = IncomingMessage(
+            id="201",
+            chat_id="-1001",
+            user_id="u1",
+            text="follow up",
+            reply_to_message_id="200",
+            metadata={
+                "chat_type": "group",
+                "was_mentioned": False,
+                "is_reply_to_bot": True,
+            },
+        )
+
+        assert await handler.should_skip_reply(message) is False

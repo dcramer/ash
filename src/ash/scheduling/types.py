@@ -31,6 +31,7 @@ class ScheduleEntry:
     timezone: str | None = None
     # Context for routing response back
     chat_id: str | None = None
+    chat_type: str | None = None  # "private", "group", "supergroup", ...
     chat_title: str | None = None  # Friendly name for the chat
     user_id: str | None = None
     username: str | None = None  # For @mentions in response
@@ -234,6 +235,8 @@ class ScheduleEntry:
         # Context fields
         if self.chat_id:
             data["chat_id"] = self.chat_id
+        if self.chat_type:
+            data["chat_type"] = self.chat_type
         if self.chat_title:
             data["chat_title"] = self.chat_title
         if self.user_id:
@@ -290,6 +293,7 @@ class ScheduleEntry:
             "last_run",
             "timezone",
             "chat_id",
+            "chat_type",
             "chat_title",
             "user_id",
             "username",
@@ -306,6 +310,7 @@ class ScheduleEntry:
             last_run=last_run,
             timezone=data.get("timezone"),
             chat_id=data.get("chat_id"),
+            chat_type=data.get("chat_type"),
             chat_title=data.get("chat_title"),
             user_id=data.get("user_id"),
             username=data.get("username"),

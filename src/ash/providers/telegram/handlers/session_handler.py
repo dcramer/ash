@@ -372,6 +372,8 @@ class SessionHandler:
             return False
         if message.metadata.get("was_mentioned", False):
             return False
+        if message.metadata.get("is_reply_to_bot", False):
+            return False
 
         # Check thread index first
         thread_index = self.get_thread_index(message.chat_id)
