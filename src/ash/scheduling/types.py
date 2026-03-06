@@ -111,8 +111,12 @@ class ScheduleEntry:
                 )
                 tz = ZoneInfo("UTC")
 
-            now = datetime.now(tz)
-            prev_local = croniter(self.cron, now).get_prev(datetime)
+            now_local = datetime.now(tz)
+            # croniter can drift by an hour across DST transitions when given
+            # timezone-aware datetimes; evaluate in naive local wall-clock time.
+            now_naive = now_local.replace(tzinfo=None)
+            prev_naive = croniter(self.cron, now_naive).get_prev(datetime)
+            prev_local = prev_naive.replace(tzinfo=tz)
             return prev_local.astimezone(UTC)
         except Exception as e:
             logger.warning(
@@ -191,8 +195,11 @@ class ScheduleEntry:
             else:
                 base_time = self.created_at.astimezone(tz)
 
-            # Evaluate cron in local timezone, result is timezone-aware
-            next_local = croniter(self.cron, base_time).get_next(datetime)
+            # croniter can drift by an hour across DST transitions when given
+            # timezone-aware datetimes; evaluate in naive local wall-clock time.
+            base_naive = base_time.replace(tzinfo=None)
+            next_naive = croniter(self.cron, base_naive).get_next(datetime)
+            next_local = next_naive.replace(tzinfo=tz)
 
             # Convert to UTC for consistent storage/comparison
             next_utc = next_local.astimezone(UTC)
