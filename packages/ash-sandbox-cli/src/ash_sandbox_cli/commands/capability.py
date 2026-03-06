@@ -258,6 +258,52 @@ def auth_complete(
     )
 
 
+@auth_app.command("complete-callback")
+def auth_complete_callback(
+    callback_url: Annotated[
+        str | None,
+        typer.Option("--callback-url", help="OAuth callback URL"),
+    ] = None,
+    code: Annotated[
+        str | None,
+        typer.Option("--code", help="Authorization code"),
+    ] = None,
+    capability: Annotated[
+        str | None,
+        typer.Option("--capability", "-c", help="Optional namespaced capability id"),
+    ] = None,
+    account_hint: Annotated[
+        str | None,
+        typer.Option("--account", help="Optional account reference hint"),
+    ] = None,
+) -> None:
+    """Complete capability auth by callback/code with host-side flow resolution."""
+    if not callback_url and not code:
+        typer.echo("Error: Must specify either --callback-url or --code", err=True)
+        raise typer.Exit(1)
+
+    params: dict[str, Any] = {}
+    if callback_url:
+        params["callback_url"] = callback_url
+    if code:
+        params["code"] = code
+    if capability:
+        params["capability"] = capability
+    if account_hint:
+        params["account_hint"] = account_hint
+
+    result = _call("capability.auth.complete_callback", params)
+    if not result.get("ok"):
+        typer.echo("Error: capability auth completion failed", err=True)
+        raise typer.Exit(1)
+    typer.echo(
+        "Capability auth completed "
+        f"(flow_id={result.get('flow_id', '')}, "
+        f"capability={result.get('capability', '')}, "
+        f"account_ref={result.get('account_ref', '')})"
+    )
+
+
 @auth_app.command("poll")
 def auth_poll(
     flow_id: Annotated[

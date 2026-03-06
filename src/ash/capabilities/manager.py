@@ -454,6 +454,125 @@ class CapabilityManager:
 
         return {"ok": True, "account_ref": account_ref}
 
+    async def auth_complete_callback(
+        self,
+        *,
+        user_id: str,
+        callback_url: str | None = None,
+        code: str | None = None,
+        capability_id: str | None = None,
+        account_hint: str | None = None,
+        chat_id: str | None = None,
+        chat_type: str | None = None,
+        provider: str | None = None,
+        thread_id: str | None = None,
+        session_key: str | None = None,
+        source_username: str | None = None,
+        source_display_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Complete pending auth by callback URL/code with host-side flow resolution.
+
+        Prefers deterministic state matching when callback state is present.
+        """
+        normalized_user_id = _required_text(
+            value=user_id,
+            code="capability_invalid_input",
+            message="user_id is required",
+        )
+        normalized_capability_id = (
+            _required_capability_id(capability_id)
+            if capability_id is not None
+            else None
+        )
+        normalized_account_hint = _optional_text(account_hint)
+        normalized_chat_id = _optional_text(chat_id)
+        normalized_chat_type = _optional_text(chat_type)
+        normalized_provider = _optional_text(provider)
+        normalized_thread_id = _optional_text(thread_id)
+        normalized_session_key = _optional_text(session_key)
+        normalized_source_username = _optional_text(source_username)
+        normalized_source_display_name = _optional_text(source_display_name)
+
+        try:
+            normalized_completion = normalize_auth_completion(
+                callback_url=_optional_text(callback_url),
+                code=_optional_text(code),
+                expected_state=None,
+            )
+        except AuthNormalizationError as e:
+            raise CapabilityError(e.code, str(e)) from e
+
+        callback_state = _optional_text(normalized_completion.state)
+
+        async with self._lock:
+            self._prune_expired_flows_locked()
+            eligible = [
+                flow
+                for flow in self._auth_flows.values()
+                if flow.user_id == normalized_user_id
+                and (
+                    normalized_capability_id is None
+                    or flow.capability_id == normalized_capability_id
+                )
+                and (
+                    normalized_account_hint is None
+                    or flow.account_hint == normalized_account_hint
+                )
+            ]
+
+            if not eligible:
+                raise CapabilityError(
+                    "capability_auth_flow_invalid",
+                    "no pending auth flows match caller scope",
+                )
+
+            selected: CapabilityAuthFlow | None = None
+            if callback_state is not None:
+                state_matches = [
+                    flow
+                    for flow in eligible
+                    if _optional_text(flow.expected_callback_state) == callback_state
+                ]
+                if not state_matches:
+                    raise CapabilityError(
+                        "capability_auth_state_mismatch",
+                        "callback_url state does not match auth flow",
+                    )
+                if len(state_matches) > 1:
+                    raise CapabilityError(
+                        "capability_auth_flow_ambiguous",
+                        "multiple pending auth flows matched callback state",
+                    )
+                selected = state_matches[0]
+            elif len(eligible) == 1:
+                selected = eligible[0]
+            else:
+                raise CapabilityError(
+                    "capability_auth_flow_ambiguous",
+                    "multiple pending auth flows; callback state is required",
+                )
+
+        result = await self.auth_complete(
+            flow_id=selected.flow_id,
+            user_id=normalized_user_id,
+            chat_id=normalized_chat_id,
+            chat_type=normalized_chat_type,
+            provider=normalized_provider,
+            thread_id=normalized_thread_id,
+            session_key=normalized_session_key,
+            source_username=normalized_source_username,
+            source_display_name=normalized_source_display_name,
+            callback_url=normalized_completion.raw_callback_url,
+            code=normalized_completion.authorization_code,
+        )
+        return {
+            "ok": bool(result.get("ok")),
+            "account_ref": result.get("account_ref"),
+            "flow_id": selected.flow_id,
+            "capability": selected.capability_id,
+            "account_hint": selected.account_hint,
+        }
+
     async def auth_poll(
         self,
         *,

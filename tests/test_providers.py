@@ -558,6 +558,107 @@ class TestTelegramMessageHandler:
         # No response should have been sent (silent drop)
         mock_provider.send.assert_not_called()
 
+    async def test_handle_message_completes_capability_callback_without_agent(
+        self, mock_provider, mock_agent, tmp_path
+    ) -> None:
+        """Localhost OAuth callbacks should be completed host-side."""
+        from ash.providers.base import IncomingMessage
+
+        capability_manager = MagicMock()
+        capability_manager.auth_complete_callback = AsyncMock(
+            return_value={
+                "ok": True,
+                "capability": "gog.calendar",
+                "account_hint": "default",
+            }
+        )
+        capability_manager.list_auth_flows = AsyncMock(return_value=[])
+
+        use_skill_tool = MagicMock()
+        use_skill_tool._capability_manager = capability_manager
+        tool_registry = MagicMock()
+        tool_registry.has.side_effect = lambda name: name == "use_skill"
+        tool_registry.get.return_value = use_skill_tool
+
+        handler = TelegramMessageHandler(
+            provider=mock_provider,
+            agent=mock_agent,
+            streaming=True,
+            tool_registry=tool_registry,
+        )
+        cast(Any, handler._session_handler).persist_messages = AsyncMock()
+
+        callback_message = IncomingMessage(
+            id="oauth-1",
+            chat_id="456",
+            user_id="789",
+            text=(
+                "http://localhost/?state=abc&iss=https://accounts.google.com"
+                "&code=4/abc123&scope=https://www.googleapis.com/auth/calendar"
+            ),
+            username="testuser",
+            display_name="Test User",
+        )
+
+        await handler.handle_message(callback_message)
+
+        capability_manager.auth_complete_callback.assert_awaited_once()
+        capability_manager.list_auth_flows.assert_awaited_once_with(user_id="789")
+        mock_agent.process_message.assert_not_called()
+        mock_agent.process_message_streaming.assert_not_called()
+        mock_provider.send.assert_awaited()
+        sent_text = mock_provider.send.call_args.args[0].text
+        assert "Google Calendar connected" in sent_text
+        assert "setup is complete" in sent_text
+
+    async def test_handle_message_reports_capability_auth_error_without_agent(
+        self, mock_provider, mock_agent
+    ) -> None:
+        """Capability auth errors should return deterministic retry text."""
+        from ash.providers.base import IncomingMessage
+
+        class CapabilityAuthError(Exception):
+            def __init__(self, code: str) -> None:
+                super().__init__(code)
+                self.code = code
+
+        capability_manager = MagicMock()
+        capability_manager.auth_complete_callback = AsyncMock(
+            side_effect=CapabilityAuthError("capability_auth_state_mismatch")
+        )
+
+        use_skill_tool = MagicMock()
+        use_skill_tool._capability_manager = capability_manager
+        tool_registry = MagicMock()
+        tool_registry.has.side_effect = lambda name: name == "use_skill"
+        tool_registry.get.return_value = use_skill_tool
+
+        handler = TelegramMessageHandler(
+            provider=mock_provider,
+            agent=mock_agent,
+            streaming=True,
+            tool_registry=tool_registry,
+        )
+
+        callback_message = IncomingMessage(
+            id="oauth-2",
+            chat_id="456",
+            user_id="789",
+            text="http://localhost/?state=bad&code=4/def456",
+            username="testuser",
+            display_name="Test User",
+        )
+
+        await handler.handle_message(callback_message)
+
+        capability_manager.auth_complete_callback.assert_awaited_once()
+        mock_agent.process_message.assert_not_called()
+        mock_agent.process_message_streaming.assert_not_called()
+        mock_provider.send.assert_awaited()
+        sent_text = mock_provider.send.call_args.args[0].text
+        assert "capability_auth_state_mismatch" in sent_text
+        assert "latest auth URL" in sent_text
+
     async def test_handle_callback_query_resumes_checkpoint(
         self, mock_provider, mock_agent, tmp_path
     ):

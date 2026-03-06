@@ -540,6 +540,67 @@ async def test_auth_complete_accepts_code_query_fragment_in_code_field() -> None
 
 
 @pytest.mark.asyncio
+async def test_auth_complete_callback_resolves_flow_by_state() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _RecordingProvider(namespace="gog")
+    await manager.register_provider(provider)
+
+    begin_work = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+    begin_default = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="default",
+    )
+    manager._auth_flows[
+        str(begin_work["flow_id"])
+    ].expected_callback_state = "state-work"
+    manager._auth_flows[
+        str(begin_default["flow_id"])
+    ].expected_callback_state = "state-default"
+
+    result = await manager.auth_complete_callback(
+        user_id="user-1",
+        callback_url="http://localhost/?state=state-default&code=abc",
+    )
+
+    assert result["ok"] is True
+    assert result["flow_id"] == begin_default["flow_id"]
+    assert result["capability"] == "gog.email"
+    completion = provider.complete_calls[0]["completion"]
+    assert completion.state == "state-default"
+
+
+@pytest.mark.asyncio
+async def test_auth_complete_callback_rejects_ambiguous_flows_without_state() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _RecordingProvider(namespace="gog")
+    await manager.register_provider(provider)
+
+    await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+    await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="default",
+    )
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await manager.auth_complete_callback(user_id="user-1", code="abc-only")
+    assert exc_info.value.code == "capability_auth_flow_ambiguous"
+
+
+@pytest.mark.asyncio
 async def test_auth_begin_reuses_pending_flow_for_same_scope() -> None:
     manager = CapabilityManager(auth_flow_ttl_seconds=300)
     provider = _RecordingProvider(namespace="gog")

@@ -127,6 +127,39 @@ def register_capability_methods(
             raise ValueError(f"{e.code}: {e}") from e
         return {"ok": bool(result.get("ok")), "account_ref": result["account_ref"]}
 
+    async def capability_auth_complete_callback(
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        user_id = _required_text(params, "user_id")
+        callback_url = _optional_text(params, "callback_url")
+        code = _optional_text(params, "code")
+        capability_id = _optional_text(params, "capability")
+        account_hint = _optional_text(params, "account_hint")
+        try:
+            result = await manager.auth_complete_callback(
+                user_id=user_id,
+                callback_url=callback_url,
+                code=code,
+                capability_id=capability_id,
+                account_hint=account_hint,
+                chat_id=_optional_text(params, "chat_id"),
+                chat_type=_optional_text(params, "chat_type"),
+                provider=_optional_text(params, "provider"),
+                thread_id=_optional_text(params, "thread_id"),
+                session_key=_optional_text(params, "session_key"),
+                source_username=_optional_text(params, "source_username"),
+                source_display_name=_optional_text(params, "source_display_name"),
+            )
+        except CapabilityError as e:
+            raise ValueError(f"{e.code}: {e}") from e
+        return {
+            "ok": bool(result.get("ok")),
+            "account_ref": result["account_ref"],
+            "flow_id": result["flow_id"],
+            "capability": result["capability"],
+            "account_hint": result.get("account_hint"),
+        }
+
     async def capability_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
         flow_id = _required_text(params, "flow_id")
         user_id = _required_text(params, "user_id")
@@ -150,6 +183,9 @@ def register_capability_methods(
     server.register("capability.auth.begin", capability_auth_begin)
     server.register("capability.auth.list", capability_auth_list)
     server.register("capability.auth.complete", capability_auth_complete)
+    server.register(
+        "capability.auth.complete_callback", capability_auth_complete_callback
+    )
     server.register("capability.auth.poll", capability_auth_poll)
 
     logger.debug("Registered capability RPC methods")

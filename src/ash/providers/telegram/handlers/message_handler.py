@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
     from ash.tools.registry import ToolRegistry
 
 logger = logging.getLogger("telegram")
+_LOCALHOST_CALLBACK_URL_PATTERN = re.compile(r"https?://localhost[^\s]*[?&]code=[^\s]*")
 
 
 def _extract_tool_calls_from_session(session: SessionState) -> list[dict[str, Any]]:
@@ -216,6 +218,126 @@ class TelegramMessageHandler:
             skill_registry=self._skill_registry,
         )
 
+    def _get_capability_manager(self) -> Any | None:
+        """Best-effort lookup of the capability manager via use_skill tool wiring."""
+        if self._tool_registry is None:
+            return None
+        if not hasattr(self._tool_registry, "has") or not self._tool_registry.has(
+            "use_skill"
+        ):
+            return None
+        try:
+            skill_tool = self._tool_registry.get("use_skill")
+        except Exception:
+            return None
+        return getattr(skill_tool, "_capability_manager", None)
+
+    @staticmethod
+    def _extract_localhost_callback_url(message_text: str) -> str | None:
+        """Extract a localhost OAuth callback URL from message text."""
+        match = _LOCALHOST_CALLBACK_URL_PATTERN.search(message_text)
+        if not match:
+            return None
+        callback_url = match.group(0).strip().rstrip(".,;")
+        return callback_url or None
+
+    async def _try_handle_capability_oauth_callback(
+        self, message: IncomingMessage
+    ) -> bool:
+        """Complete capability auth from pasted callback URL without LLM orchestration."""
+        callback_url = self._extract_localhost_callback_url(message.text or "")
+        if not callback_url:
+            return False
+
+        manager = self._get_capability_manager()
+        if manager is None:
+            return False
+
+        try:
+            completion = await manager.auth_complete_callback(
+                user_id=message.user_id,
+                callback_url=callback_url,
+                chat_id=message.chat_id,
+                chat_type=message.metadata.get("chat_type"),
+                provider=self._provider.name,
+                thread_id=message.metadata.get("thread_id"),
+                source_username=message.username,
+                source_display_name=message.display_name,
+            )
+            pending_flows = await manager.list_auth_flows(user_id=message.user_id)
+        except Exception as e:
+            code = getattr(e, "code", "")
+            if isinstance(code, str) and code.startswith("capability_auth_"):
+                reply = (
+                    "I could not apply that OAuth callback yet "
+                    f"({code}). Please continue with the latest auth URL."
+                )
+                await self._provider.send(
+                    OutgoingMessage(
+                        chat_id=message.chat_id,
+                        text=reply,
+                        reply_to_message_id=message.id,
+                    )
+                )
+                return True
+            return False
+
+        capability = str(completion.get("capability", "")).strip()
+        account_hint = str(completion.get("account_hint", "")).strip() or "default"
+        capability_label = {
+            "gog.email": "Gmail",
+            "gog.calendar": "Google Calendar",
+        }.get(capability, capability or "Google capability")
+
+        pending_caps = sorted(
+            {
+                str(flow.get("capability", "")).strip()
+                for flow in pending_flows
+                if isinstance(flow, dict) and flow.get("capability")
+            }
+        )
+        if pending_caps:
+            pending_names = ", ".join(
+                sorted(
+                    {
+                        {
+                            "gog.email": "Gmail",
+                            "gog.calendar": "Google Calendar",
+                        }.get(cap, cap)
+                        for cap in pending_caps
+                    }
+                )
+            )
+            reply = (
+                f"{capability_label} connected for account '{account_hint}'. "
+                f"Still pending: {pending_names}. Paste the next callback URL when ready."
+            )
+        else:
+            reply = (
+                f"{capability_label} connected for account '{account_hint}'. "
+                "Google setup is complete."
+            )
+
+        response_external_id = await self._provider.send(
+            OutgoingMessage(
+                chat_id=message.chat_id,
+                text=reply,
+                reply_to_message_id=message.id,
+            )
+        )
+        await self._session_handler.persist_messages(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            user_message=message.text,
+            assistant_message=reply,
+            external_id=message.id,
+            response_external_id=response_external_id,
+            thread_id=message.metadata.get("thread_id"),
+            username=message.username,
+            display_name=message.display_name,
+        )
+        return True
+
     def _log_response(self, text: str | None) -> None:
         bot_name = self._provider.bot_username or "bot"
         logger.info(
@@ -369,6 +491,9 @@ class TelegramMessageHandler:
             )
             if isinstance(candidate, IncomingMessage):
                 message = candidate
+
+        if await self._try_handle_capability_oauth_callback(message):
+            return
 
         # Check if there's an active interactive subagent stack for this session
         thread_id = message.metadata.get("thread_id")

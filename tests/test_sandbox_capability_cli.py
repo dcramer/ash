@@ -255,3 +255,37 @@ def test_auth_complete(cli_runner: CliRunner, mock_rpc) -> None:
     assert result.exit_code == 0
     assert "Capability auth completed" in result.stdout
     assert "account_ref=work" in result.stdout
+
+
+def test_auth_complete_callback(cli_runner: CliRunner, mock_rpc) -> None:
+    mock_rpc.return_value = {
+        "ok": True,
+        "flow_id": "caf_1",
+        "capability": "gog.email",
+        "account_ref": "work",
+    }
+    result = cli_runner.invoke(
+        app,
+        [
+            "auth",
+            "complete-callback",
+            "--callback-url",
+            "http://localhost/?state=s1&code=abc",
+            "--capability",
+            "gog.email",
+            "--account",
+            "work",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Capability auth completed" in result.stdout
+    assert "capability.auth.complete_callback" == mock_rpc.call_args[0][0]
+
+
+def test_auth_complete_callback_requires_code_or_callback(
+    cli_runner: CliRunner, mock_rpc
+) -> None:
+    result = cli_runner.invoke(app, ["auth", "complete-callback"])
+    assert result.exit_code == 1
+    assert "Must specify either --callback-url or --code" in result.output
+    mock_rpc.assert_not_called()
