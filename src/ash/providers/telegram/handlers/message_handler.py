@@ -280,7 +280,25 @@ class TelegramMessageHandler:
                     )
                 )
                 return True
-            return False
+            logger.exception(
+                "capability_oauth_callback_failed",
+                extra={
+                    "chat_id": message.chat_id,
+                    "user_id": message.user_id,
+                },
+            )
+            reply = (
+                "I hit an internal error while processing that OAuth callback. "
+                "Please resend the callback URL."
+            )
+            await self._provider.send(
+                OutgoingMessage(
+                    chat_id=message.chat_id,
+                    text=reply,
+                    reply_to_message_id=message.id,
+                )
+            )
+            return True
 
         capability = str(completion.get("capability", "")).strip()
         account_hint = str(completion.get("account_hint", "")).strip() or "default"
@@ -325,6 +343,7 @@ class TelegramMessageHandler:
                 reply_to_message_id=message.id,
             )
         )
+        self._log_response(reply)
         await self._session_handler.persist_messages(
             chat_id=message.chat_id,
             user_id=message.user_id,

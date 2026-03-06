@@ -659,6 +659,49 @@ class TestTelegramMessageHandler:
         assert "capability_auth_state_mismatch" in sent_text
         assert "latest auth URL" in sent_text
 
+    async def test_handle_message_reports_callback_internal_error_without_agent(
+        self, mock_provider, mock_agent
+    ) -> None:
+        """Unexpected callback failures should still produce deterministic feedback."""
+        from ash.providers.base import IncomingMessage
+
+        capability_manager = MagicMock()
+        capability_manager.auth_complete_callback = AsyncMock(
+            side_effect=RuntimeError("boom")
+        )
+
+        use_skill_tool = MagicMock()
+        use_skill_tool._capability_manager = capability_manager
+        tool_registry = MagicMock()
+        tool_registry.has.side_effect = lambda name: name == "use_skill"
+        tool_registry.get.return_value = use_skill_tool
+
+        handler = TelegramMessageHandler(
+            provider=mock_provider,
+            agent=mock_agent,
+            streaming=True,
+            tool_registry=tool_registry,
+        )
+
+        callback_message = IncomingMessage(
+            id="oauth-3",
+            chat_id="456",
+            user_id="789",
+            text="http://localhost/?state=bad&code=4/ghi789",
+            username="testuser",
+            display_name="Test User",
+        )
+
+        await handler.handle_message(callback_message)
+
+        capability_manager.auth_complete_callback.assert_awaited_once()
+        mock_agent.process_message.assert_not_called()
+        mock_agent.process_message_streaming.assert_not_called()
+        mock_provider.send.assert_awaited()
+        sent_text = mock_provider.send.call_args.args[0].text
+        assert "internal error" in sent_text
+        assert "resend the callback URL" in sent_text
+
     async def test_handle_callback_query_resumes_checkpoint(
         self, mock_provider, mock_agent, tmp_path
     ):
