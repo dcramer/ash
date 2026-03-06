@@ -112,6 +112,8 @@ ash-sb capability invoke -c gog.email -o list_messages --account work --input-js
 ash-sb capability invoke -c gog.email -o search_messages --account work --input-json '{"query":"is:unread newer_than:1d","limit":20}'
 ash-sb capability invoke -c gog.email -o get_message --account work --input-json '{"id":"<message_id>"}'
 ash-sb capability invoke -c gog.email -o get_thread --account work --input-json '{"thread_id":"<thread_id>","limit":20}'
+ash-sb capability invoke -c gog.email -o archive_messages --account work --input-json '{"ids":["<message_id>"],"archive":true}'
+ash-sb capability invoke -c gog.email -o update_labels --account work --input-json '{"ids":["<message_id>"],"add_label_ids":["IMPORTANT"],"remove_label_ids":[]}'
 ash-sb capability invoke -c gog.calendar -o list_events --account work --input-json '{"calendar":"primary","window":"1d"}'
 ash-sb capability invoke -c gog.calendar -o create_event --account work --input-json '{"title":"Team sync","start":"2026-03-04T18:00:00Z"}'
 ```
@@ -148,11 +150,12 @@ Use Google calendar + Google email only for this view.
 
 ### Standard mutations
 
-Before `send_message` or `create_event`, confirm key details if user intent is ambiguous.
+Before `send_message`, `create_event`, `archive_messages`, or `update_labels`, always confirm key details.
 Required confirmation fields:
 
 - Email send: recipient, subject, body intent
 - Event create: title, start time/date, end time or duration, timezone context if unclear
+- Archive/update labels: target account alias, message IDs (or clearly identified messages), and the exact label/archive action
 
 ## Output Rules
 

@@ -174,6 +174,23 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if self.path.startswith(
+                "/gmail/v1/users/me/messages/"
+            ) and self.path.endswith("/modify"):
+                request_body = json.loads(body)
+                self._json_response(
+                    200,
+                    {
+                        "id": self.path.split("/")[-2],
+                        "labelIds": request_body.get("addLabelIds", []),
+                    },
+                )
+                return
+
+            if self.path == "/gmail/v1/users/me/messages/batchModify":
+                self._json_response(204, {})
+                return
+
             # /calendar/v3/calendars/{calendarId}/events
             if "/calendar/v3/calendars/" in self.path and self.path.endswith("/events"):
                 request_body = json.loads(body)
@@ -371,6 +388,8 @@ def test_bridge_definitions() -> None:
         "get_message",
         "get_thread",
         "send_message",
+        "archive_messages",
+        "update_labels",
     }.issubset(operations)
 
 
@@ -1534,6 +1553,141 @@ def test_bridge_invoke_send_message(
     assert output["message_id"] == "sent_msg_001"
     assert output["to"] == "recipient@example.com"
     assert output["subject"] == "Test email"
+
+
+def test_bridge_invoke_archive_messages_bulk(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_email_account(
+        tmp_path=tmp_path,
+        fake_google_oauth=fake_google_oauth,
+        env=env,
+        user_token=user_token,
+    )
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_archive_bulk",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.email",
+                "operation": "archive_messages",
+                "input_data": {"ids": ["msg_1", "msg_2"], "archive": True},
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in invoke
+    output = invoke["result"]["output"]
+    assert output["status"] == "updated"
+    assert output["archive"] is True
+    assert output["updated_count"] == 2
+    assert output["ids"] == ["msg_1", "msg_2"]
+
+
+def test_bridge_invoke_update_labels_single(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_email_account(
+        tmp_path=tmp_path,
+        fake_google_oauth=fake_google_oauth,
+        env=env,
+        user_token=user_token,
+    )
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_update_labels_single",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.email",
+                "operation": "update_labels",
+                "input_data": {
+                    "ids": ["msg_1"],
+                    "add_label_ids": ["IMPORTANT"],
+                    "remove_label_ids": ["INBOX"],
+                },
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in invoke
+    output = invoke["result"]["output"]
+    assert output["status"] == "updated"
+    assert output["updated_count"] == 1
+    assert output["add_label_ids"] == ["IMPORTANT"]
+    assert output["remove_label_ids"] == ["INBOX"]
+
+
+def test_bridge_invoke_update_labels_rejects_noop(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    env = _make_env(
+        service=service, tmp_path=tmp_path, fake_google_oauth=fake_google_oauth
+    )
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+    account_ref = _auth_email_account(
+        tmp_path=tmp_path,
+        fake_google_oauth=fake_google_oauth,
+        env=env,
+        user_token=user_token,
+    )
+
+    invoke = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_update_labels_noop",
+            "namespace": "gog",
+            "method": "invoke",
+            "params": {
+                "capability_id": "gog.email",
+                "operation": "update_labels",
+                "input_data": {"ids": ["msg_1"], "add_label_ids": []},
+                "account_ref": account_ref,
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert invoke["error"]["code"] == "capability_invalid_input"
+    assert "add_label_ids or remove_label_ids" in invoke["error"]["message"]
 
 
 def test_bridge_invoke_get_message(

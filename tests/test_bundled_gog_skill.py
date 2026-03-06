@@ -50,3 +50,10 @@ def test_google_skill_includes_summary_and_day_at_a_glance_playbooks() -> None:
     assert "summarize emails" in text
     assert "day at a glance" in text
     assert "get_message" in text
+
+
+def test_google_skill_includes_archive_and_label_mutation_guidance() -> None:
+    text = _load_google_skill_text().lower()
+    assert "archive_messages" in text
+    assert "update_labels" in text
+    assert "always confirm key details" in text

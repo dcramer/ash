@@ -89,6 +89,7 @@ CAPABILITY_SCOPES: dict[str, str] = {
     "gog.email": (
         "https://www.googleapis.com/auth/gmail.readonly"
         " https://www.googleapis.com/auth/gmail.send"
+        " https://www.googleapis.com/auth/gmail.modify"
     ),
     "gog.calendar": "https://www.googleapis.com/auth/calendar",
 }
@@ -449,7 +450,10 @@ def _google_api_request(
         request.add_header("Content-Type", "application/json")
     try:
         with urlopen(request, timeout=30) as resp:  # noqa: S310
-            return json.loads(resp.read().decode("utf-8"))
+            raw_body = resp.read().decode("utf-8").strip()
+            if not raw_body:
+                return {}
+            return json.loads(raw_body)
     except HTTPError as e:
         if e.code == 401:
             raise BridgeError(
@@ -725,6 +729,18 @@ def _handle_definitions() -> dict[str, Any]:
                     {
                         "name": "send_message",
                         "description": "Send an email message",
+                        "requires_auth": True,
+                        "mutating": True,
+                    },
+                    {
+                        "name": "archive_messages",
+                        "description": "Archive or unarchive one or more messages",
+                        "requires_auth": True,
+                        "mutating": True,
+                    },
+                    {
+                        "name": "update_labels",
+                        "description": "Add/remove labels on one or more messages",
                         "requires_auth": True,
                         "mutating": True,
                     },
@@ -1427,6 +1443,20 @@ def _invoke_operation(
             account_ref=account_ref,
         )
 
+    if capability_id == "gog.email" and operation == "archive_messages":
+        return _invoke_archive_messages(
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+
+    if capability_id == "gog.email" and operation == "update_labels":
+        return _invoke_update_labels(
+            input_data=input_data,
+            access_token=access_token,
+            account_ref=account_ref,
+        )
+
     if capability_id == "gog.calendar" and operation == "list_events":
         return _invoke_list_events(
             input_data=input_data,
@@ -1883,6 +1913,157 @@ def _invoke_send_message(
             "message_id": _optional_text(send_resp.get("id")) or "",
             "to": recipient,
             "subject": subject,
+            "account_ref": account_ref,
+        }
+    }
+
+
+def _required_string_list(
+    value: Any,
+    *,
+    field_name: str,
+    max_items: int,
+    allow_empty: bool = False,
+) -> list[str]:
+    if value is None:
+        values: list[Any] = []
+    elif isinstance(value, list):
+        values = value
+    else:
+        raise BridgeError("capability_invalid_input", f"{field_name} must be a list")
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        text = _optional_text(item)
+        if not text:
+            raise BridgeError(
+                "capability_invalid_input",
+                f"{field_name} entries must be non-empty strings",
+            )
+        if text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+
+    if not allow_empty and not result:
+        raise BridgeError("capability_invalid_input", f"{field_name} is required")
+    if len(result) > max_items:
+        raise BridgeError(
+            "capability_invalid_input",
+            f"{field_name} must contain at most {max_items} items",
+        )
+    return result
+
+
+def _gmail_modify_messages(
+    *,
+    access_token: str,
+    ids: list[str],
+    add_label_ids: list[str],
+    remove_label_ids: list[str],
+) -> None:
+    gmail_base = _google_gmail_api_base_url()
+    payload: dict[str, Any] = {}
+    if add_label_ids:
+        payload["addLabelIds"] = add_label_ids
+    if remove_label_ids:
+        payload["removeLabelIds"] = remove_label_ids
+
+    if len(ids) == 1:
+        _google_api_request(
+            "POST",
+            f"{gmail_base}/gmail/v1/users/me/messages/{ids[0]}/modify",
+            access_token=access_token,
+            json_body=payload,
+        )
+        return
+
+    _google_api_request(
+        "POST",
+        f"{gmail_base}/gmail/v1/users/me/messages/batchModify",
+        access_token=access_token,
+        json_body={**payload, "ids": ids},
+    )
+
+
+def _invoke_archive_messages(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    ids = _required_string_list(
+        input_data.get("ids"),
+        field_name="ids",
+        max_items=100,
+    )
+    raw_archive = input_data.get("archive", True)
+    if not isinstance(raw_archive, bool):
+        raise BridgeError("capability_invalid_input", "archive must be a boolean")
+    archive = raw_archive
+
+    add_label_ids = [] if archive else ["INBOX"]
+    remove_label_ids = ["INBOX"] if archive else []
+    _gmail_modify_messages(
+        access_token=access_token,
+        ids=ids,
+        add_label_ids=add_label_ids,
+        remove_label_ids=remove_label_ids,
+    )
+    return {
+        "output": {
+            "status": "updated",
+            "archive": archive,
+            "updated_count": len(ids),
+            "ids": ids,
+            "account_ref": account_ref,
+        }
+    }
+
+
+def _invoke_update_labels(
+    *,
+    input_data: dict[str, Any],
+    access_token: str,
+    account_ref: str,
+) -> dict[str, Any]:
+    ids = _required_string_list(
+        input_data.get("ids"),
+        field_name="ids",
+        max_items=100,
+    )
+    add_label_ids = _required_string_list(
+        input_data.get("add_label_ids"),
+        field_name="add_label_ids",
+        max_items=100,
+        allow_empty=True,
+    )
+    remove_label_ids = _required_string_list(
+        input_data.get("remove_label_ids"),
+        field_name="remove_label_ids",
+        max_items=100,
+        allow_empty=True,
+    )
+    if not add_label_ids and not remove_label_ids:
+        raise BridgeError(
+            "capability_invalid_input",
+            "at least one of add_label_ids or remove_label_ids is required",
+        )
+
+    _gmail_modify_messages(
+        access_token=access_token,
+        ids=ids,
+        add_label_ids=add_label_ids,
+        remove_label_ids=remove_label_ids,
+    )
+    return {
+        "output": {
+            "status": "updated",
+            "updated_count": len(ids),
+            "ids": ids,
+            "add_label_ids": add_label_ids,
+            "remove_label_ids": remove_label_ids,
             "account_ref": account_ref,
         }
     }

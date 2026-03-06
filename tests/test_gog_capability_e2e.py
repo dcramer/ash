@@ -206,6 +206,23 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if self.path.startswith(
+                "/gmail/v1/users/me/messages/"
+            ) and self.path.endswith("/modify"):
+                request_body = json.loads(body)
+                self._json_response(
+                    200,
+                    {
+                        "id": self.path.split("/")[-2],
+                        "labelIds": request_body.get("addLabelIds", []),
+                    },
+                )
+                return
+
+            if self.path == "/gmail/v1/users/me/messages/batchModify":
+                self._json_response(204, {})
+                return
+
             # /calendar/v3/calendars/{calendarId}/events
             if "/calendar/v3/calendars/" in self.path and self.path.endswith("/events"):
                 request_body = json.loads(body)
@@ -480,6 +497,47 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert message_output["id"] == "msg_1"
     assert message_output["thread_id"] == "thread_msg_1"
     assert message_output["body_text"] == "Plain body for msg_1"
+
+    # ---- Invoke email archive_messages ----
+    archive_email = await _rpc(
+        server,
+        request_id=62,
+        method="capability.invoke",
+        params={
+            "context_token": user1_private,
+            "capability": "gog.email",
+            "operation": "archive_messages",
+            "input": {"ids": ["msg_1"], "archive": True},
+        },
+    )
+    assert archive_email.error is None
+    assert isinstance(archive_email.result, dict)
+    archive_output = archive_email.result["output"]
+    assert archive_output["status"] == "updated"
+    assert archive_output["archive"] is True
+    assert archive_output["updated_count"] == 1
+
+    # ---- Invoke email update_labels ----
+    update_labels = await _rpc(
+        server,
+        request_id=63,
+        method="capability.invoke",
+        params={
+            "context_token": user1_private,
+            "capability": "gog.email",
+            "operation": "update_labels",
+            "input": {
+                "ids": ["msg_1"],
+                "add_label_ids": ["IMPORTANT"],
+                "remove_label_ids": ["INBOX"],
+            },
+        },
+    )
+    assert update_labels.error is None
+    assert isinstance(update_labels.result, dict)
+    labels_output = update_labels.result["output"]
+    assert labels_output["status"] == "updated"
+    assert labels_output["updated_count"] == 1
 
     # ---- Auth begin + complete for calendar ----
     begin_calendar = await _rpc(
