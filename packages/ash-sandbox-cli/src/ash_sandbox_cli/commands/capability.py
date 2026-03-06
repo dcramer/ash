@@ -74,6 +74,23 @@ def list_capabilities(
         typer.echo(f"- {capability_id}: {description}")
         typer.echo(f"  Available: {available}")
         typer.echo(f"  Authenticated: {authenticated}")
+        linked_accounts = capability.get("linked_accounts") or []
+        if isinstance(linked_accounts, list) and linked_accounts:
+            labels: list[str] = []
+            for item in linked_accounts:
+                if not isinstance(item, dict):
+                    continue
+                account_ref = str(item.get("account_ref", "")).strip()
+                raw_email = item.get("account_email")
+                account_email = str(raw_email).strip() if raw_email is not None else ""
+                if not account_ref:
+                    continue
+                if account_email:
+                    labels.append(f"{account_ref} ({account_email})")
+                else:
+                    labels.append(account_ref)
+            if labels:
+                typer.echo(f"  Accounts: {', '.join(labels)}")
         operations = capability.get("operations") or []
         if isinstance(operations, list) and operations:
             typer.echo(f"  Operations: {', '.join(str(item) for item in operations)}")
@@ -101,6 +118,10 @@ def invoke_capability(
         str | None,
         typer.Option("--idempotency-key", help="Optional idempotency key"),
     ] = None,
+    account: Annotated[
+        str | None,
+        typer.Option("--account", help="Optional linked account alias"),
+    ] = None,
 ) -> None:
     """Invoke one capability operation."""
     try:
@@ -116,6 +137,8 @@ def invoke_capability(
     }
     if idempotency_key:
         params["idempotency_key"] = idempotency_key
+    if account:
+        params["account_ref"] = account
 
     result = _call("capability.invoke", params)
     request_id = result.get("request_id", "?")

@@ -59,6 +59,7 @@ def register_capability_methods(
                 source_username=_optional_text(params, "source_username"),
                 source_display_name=_optional_text(params, "source_display_name"),
                 idempotency_key=_optional_text(params, "idempotency_key"),
+                account_ref=_optional_text(params, "account_ref"),
             )
         except CapabilityError as e:
             raise ValueError(f"{e.code}: {e}") from e

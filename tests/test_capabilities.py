@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from ash.capabilities import (
+    CapabilityAccount,
     CapabilityAuthBeginResult,
     CapabilityAuthCompleteInput,
     CapabilityAuthCompleteResult,
@@ -332,6 +333,87 @@ async def test_invoke_requires_auth_and_enforces_user_isolation(
             chat_type="private",
         )
     assert isolated.value.code == "capability_auth_required"
+
+
+@pytest.mark.asyncio
+async def test_invoke_requires_explicit_account_when_multiple_are_linked() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    await manager.register_provider(_RecordingProvider(namespace="gog"))
+
+    begin_work = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+    await manager.auth_complete(
+        flow_id=begin_work["flow_id"],
+        user_id="user-1",
+        callback_url="https://localhost/callback?code=abc",
+        code=None,
+    )
+
+    manager._accounts[("user-1", "gog.email", "acct_personal")] = CapabilityAccount(
+        capability_id="gog.email",
+        user_id="user-1",
+        account_ref="acct_personal",
+        created_at=datetime.now(UTC),
+        metadata={"account_name": "Personal"},
+    )
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await manager.invoke(
+            capability_id="gog.email",
+            operation="list_messages",
+            input_data={"folder": "inbox"},
+            user_id="user-1",
+            chat_type="private",
+        )
+    assert exc_info.value.code == "capability_account_ambiguous"
+
+    result = await manager.invoke(
+        capability_id="gog.email",
+        operation="list_messages",
+        input_data={"folder": "inbox"},
+        user_id="user-1",
+        chat_type="private",
+        account_ref="acct_work",
+    )
+    assert result.output["account_ref"] == "acct_work"
+
+
+@pytest.mark.asyncio
+async def test_list_capabilities_includes_linked_account_metadata() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    await manager.register_provider(_RecordingProvider(namespace="gog"))
+
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_type="private",
+        account_hint="work",
+    )
+    await manager.auth_complete(
+        flow_id=begin["flow_id"],
+        user_id="user-1",
+        callback_url="https://localhost/callback?code=abc",
+        code=None,
+    )
+
+    capabilities = await manager.list_capabilities(
+        user_id="user-1",
+        chat_type="private",
+    )
+    email = next(row for row in capabilities if row["id"] == "gog.email")
+    assert email["authenticated"] is True
+    assert email["linked_accounts"] == [
+        {
+            "account_ref": "acct_work",
+            "account_name": "Work",
+            "account_email": None,
+            "created_at": email["linked_accounts"][0]["created_at"],
+        }
+    ]
 
 
 @pytest.mark.asyncio

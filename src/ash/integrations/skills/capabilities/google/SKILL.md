@@ -55,7 +55,7 @@ ash-sb capability list
 For each unauthenticated capability (`gog.email`, `gog.calendar`):
 
 ```bash
-ash-sb capability auth begin -c gog.email
+ash-sb capability auth begin -c gog.email --account work
 ```
 
 Parse the command output and extract auth fields before responding.
@@ -108,12 +108,12 @@ Use only capability operations and explicit JSON input.
 Core commands:
 
 ```bash
-ash-sb capability invoke -c gog.email -o list_messages --input-json '{"folder":"inbox","limit":20}'
-ash-sb capability invoke -c gog.email -o search_messages --input-json '{"query":"is:unread newer_than:1d","limit":20}'
-ash-sb capability invoke -c gog.email -o get_message --input-json '{"id":"<message_id>"}'
-ash-sb capability invoke -c gog.email -o get_thread --input-json '{"thread_id":"<thread_id>","limit":20}'
-ash-sb capability invoke -c gog.calendar -o list_events --input-json '{"calendar":"primary","window":"1d"}'
-ash-sb capability invoke -c gog.calendar -o create_event --input-json '{"title":"Team sync","start":"2026-03-04T18:00:00Z"}'
+ash-sb capability invoke -c gog.email -o list_messages --account work --input-json '{"folder":"inbox","limit":20}'
+ash-sb capability invoke -c gog.email -o search_messages --account work --input-json '{"query":"is:unread newer_than:1d","limit":20}'
+ash-sb capability invoke -c gog.email -o get_message --account work --input-json '{"id":"<message_id>"}'
+ash-sb capability invoke -c gog.email -o get_thread --account work --input-json '{"thread_id":"<thread_id>","limit":20}'
+ash-sb capability invoke -c gog.calendar -o list_events --account work --input-json '{"calendar":"primary","window":"1d"}'
+ash-sb capability invoke -c gog.calendar -o create_event --account work --input-json '{"title":"Team sync","start":"2026-03-04T18:00:00Z"}'
 ```
 
 If the user asks a broad question and does not provide scope, use these defaults:

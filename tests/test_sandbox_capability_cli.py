@@ -43,6 +43,7 @@ def test_list_capabilities(cli_runner: CliRunner, mock_rpc) -> None:
                 "description": "Email operations",
                 "available": True,
                 "authenticated": False,
+                "linked_accounts": [],
                 "operations": ["list_messages"],
             }
         ]
@@ -82,6 +83,83 @@ def test_invoke_capability(cli_runner: CliRunner, mock_rpc) -> None:
     assert params["capability"] == "gog.email"
     assert params["operation"] == "list_messages"
     assert params["input"] == {"folder": "inbox"}
+
+
+def test_invoke_capability_with_account(cli_runner: CliRunner, mock_rpc) -> None:
+    mock_rpc.return_value = {
+        "ok": True,
+        "request_id": "cap_123",
+        "output": {"status": "ok"},
+    }
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "invoke",
+            "--capability",
+            "gog.email",
+            "--operation",
+            "list_messages",
+            "--account",
+            "work",
+        ],
+    )
+    assert result.exit_code == 0
+    params = mock_rpc.call_args[0][1]
+    assert params["account_ref"] == "work"
+
+
+def test_list_capabilities_shows_linked_accounts(
+    cli_runner: CliRunner, mock_rpc
+) -> None:
+    mock_rpc.return_value = {
+        "capabilities": [
+            {
+                "id": "gog.email",
+                "description": "Email operations",
+                "available": True,
+                "authenticated": True,
+                "linked_accounts": [
+                    {
+                        "account_ref": "work",
+                        "account_email": "me@company.com",
+                    }
+                ],
+                "operations": ["list_messages"],
+            }
+        ]
+    }
+
+    result = cli_runner.invoke(app, ["list"])
+    assert result.exit_code == 0
+    assert "Accounts: work (me@company.com)" in result.stdout
+
+
+def test_list_capabilities_hides_none_account_email(
+    cli_runner: CliRunner, mock_rpc
+) -> None:
+    mock_rpc.return_value = {
+        "capabilities": [
+            {
+                "id": "gog.email",
+                "description": "Email operations",
+                "available": True,
+                "authenticated": True,
+                "linked_accounts": [
+                    {
+                        "account_ref": "work",
+                        "account_email": None,
+                    }
+                ],
+                "operations": ["list_messages"],
+            }
+        ]
+    }
+
+    result = cli_runner.invoke(app, ["list"])
+    assert result.exit_code == 0
+    assert "Accounts: work" in result.stdout
+    assert "(None)" not in result.stdout
 
 
 def test_invoke_rejects_non_object_json(cli_runner: CliRunner, mock_rpc) -> None:

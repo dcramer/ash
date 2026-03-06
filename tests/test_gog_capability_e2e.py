@@ -136,6 +136,17 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/oauth2/v3/userinfo":
+            self._json_response(
+                200,
+                {
+                    "sub": "google-user-1",
+                    "email": "worker@example.com",
+                    "name": "Work Account",
+                },
+            )
+            return
+
         # /gmail/v1/users/me/messages/{id} (must check before list endpoint)
         if path.startswith("/gmail/v1/users/me/messages/"):
             msg_id = path.split("/")[-1]
@@ -559,6 +570,10 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     state_payload = json.loads(state_text)
     email_account = state_payload["accounts"]["user-1:gog.email:work"]
     calendar_account = state_payload["accounts"]["user-1:gog.calendar:work"]
+    assert email_account["account_email"] == "worker@example.com"
+    assert email_account["account_name"] == "Work Account"
+    assert email_account["google_sub"] == "google-user-1"
+    assert calendar_account["google_sub"] == "google-user-1"
     vault = FileVault(vault_path)
 
     email_vault_payload = vault.get_json(email_account["vault_ref"])

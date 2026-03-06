@@ -51,6 +51,8 @@ DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 # Google authorization endpoint (different host from token endpoint)
 DEFAULT_GOOGLE_AUTH_BASE_URL = "https://accounts.google.com"
 ENV_GOOGLE_AUTH_BASE_URL = "GOOGLE_AUTH_BASE_URL"
+ENV_GOOGLE_USERINFO_BASE_URL = "GOOGLE_USERINFO_BASE_URL"
+DEFAULT_GOOGLE_USERINFO_PATH = "/oauth2/v3/userinfo"
 
 # Scopes supported by device code flow (from Google docs)
 DEVICE_CODE_ALLOWED_SCOPES: frozenset[str] = frozenset(
@@ -381,6 +383,16 @@ def _google_authorization_url() -> str:
     return f"{base}/o/oauth2/v2/auth"
 
 
+def _google_userinfo_url() -> str:
+    base = _optional_text(os.environ.get(ENV_GOOGLE_USERINFO_BASE_URL))
+    if not base:
+        base = _optional_text(os.environ.get(ENV_GOOGLE_OAUTH_BASE_URL))
+    if not base:
+        base = _optional_text(os.environ.get(ENV_GOOGLE_AUTH_BASE_URL))
+    host = (base or DEFAULT_GOOGLE_OAUTH_BASE_URL).rstrip("/")
+    return f"{host}{DEFAULT_GOOGLE_USERINFO_PATH}"
+
+
 def _google_client_id() -> str:
     value = _optional_text(os.environ.get(ENV_GOOGLE_CLIENT_ID))
     if not value:
@@ -519,27 +531,66 @@ def _resolve_refresh_token(
     return None
 
 
+def _google_identity_metadata(*, access_token: str) -> dict[str, str]:
+    """Best-effort profile lookup for metadata (non-fatal on failure)."""
+    try:
+        profile = _google_api_request(
+            "GET",
+            _google_userinfo_url(),
+            access_token=access_token,
+        )
+    except BridgeError:
+        return {}
+    if not isinstance(profile, dict):
+        return {}
+
+    account_email = _optional_text(profile.get("email")) or ""
+    account_name = _optional_text(profile.get("name")) or ""
+    google_sub = _optional_text(profile.get("sub")) or ""
+    metadata: dict[str, str] = {}
+    if account_name:
+        metadata["account_name"] = account_name
+    if account_email:
+        metadata["account_email"] = account_email
+    if google_sub:
+        metadata["google_sub"] = google_sub
+    return metadata
+
+
 def _related_vault_refs(
     *,
     state: dict[str, Any],
     user_id: str,
     account_ref: str,
+    google_sub: str | None = None,
     exclude_account_key: str | None = None,
 ) -> list[tuple[str, str]]:
     """Collect vault refs for the same Google account across capabilities."""
     accounts = _dict_values(state.get("accounts"))
     prefix = f"{user_id}:"
     suffix = f":{account_ref}"
-    refs: list[tuple[str, str]] = []
+    matched_by_identity: list[tuple[str, str]] = []
+    matched_by_alias: list[tuple[str, str]] = []
     for account_key, account in accounts.items():
         if account_key == exclude_account_key:
             continue
-        if not account_key.startswith(prefix) or not account_key.endswith(suffix):
+        if not account_key.startswith(prefix):
             continue
         vault_ref = _optional_text(account.get("vault_ref"))
-        if vault_ref:
-            refs.append((account_key, vault_ref))
-    return refs
+        if not vault_ref:
+            continue
+        related_sub = _optional_text(account.get("google_sub"))
+        if google_sub:
+            if related_sub:
+                if related_sub == google_sub:
+                    matched_by_identity.append((account_key, vault_ref))
+                # Do not alias-match entries that assert a different identity.
+                continue
+        if account_key.endswith(suffix):
+            matched_by_alias.append((account_key, vault_ref))
+    if matched_by_identity:
+        return matched_by_identity
+    return matched_by_alias
 
 
 def _propagate_refresh_token(
@@ -549,12 +600,14 @@ def _propagate_refresh_token(
     account_ref: str,
     refresh_token: str,
     exclude_account_key: str,
+    google_sub: str | None = None,
 ) -> None:
     """Keep refresh tokens in sync across Gmail/Calendar entries for one account."""
     for related_account_key, related_vault_ref in _related_vault_refs(
         state=state,
         user_id=user_id,
         account_ref=account_ref,
+        google_sub=google_sub,
         exclude_account_key=exclude_account_key,
     ):
         try:
@@ -952,25 +1005,27 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
     )
     if credential_key is None:
         credential_key = f"cred_{secrets.token_hex(8)}"
-    related_accounts = _related_vault_refs(
-        state=state,
-        user_id=claims.user_id,
-        account_ref=account_ref,
-        exclude_account_key=account_key,
-    )
-
     # Success — we got tokens
     access_token = _optional_text(token_resp.get("access_token"))
-    refresh_token = _resolve_refresh_token(
-        new_refresh_token=_optional_text(token_resp.get("refresh_token")),
-        existing_vault_ref=existing_vault_ref,
-        additional_vault_refs=[vault_ref for _, vault_ref in related_accounts],
-    )
     if not access_token:
         raise BridgeError(
             "capability_backend_unavailable",
             "Google token response missing access_token",
         )
+    identity_metadata = _google_identity_metadata(access_token=access_token)
+    google_sub = _optional_text(identity_metadata.get("google_sub"))
+    related_accounts = _related_vault_refs(
+        state=state,
+        user_id=claims.user_id,
+        account_ref=account_ref,
+        google_sub=google_sub,
+        exclude_account_key=account_key,
+    )
+    refresh_token = _resolve_refresh_token(
+        new_refresh_token=_optional_text(token_resp.get("refresh_token")),
+        existing_vault_ref=existing_vault_ref,
+        additional_vault_refs=[vault_ref for _, vault_ref in related_accounts],
+    )
 
     try:
         vault = _vault()
@@ -1004,6 +1059,9 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
         "chat_type": claims.chat_type,
         "credential_key": credential_key,
         "vault_ref": vault_ref,
+        "account_name": identity_metadata.get("account_name"),
+        "account_email": identity_metadata.get("account_email"),
+        "google_sub": identity_metadata.get("google_sub"),
     }
     if refresh_token:
         _propagate_refresh_token(
@@ -1012,6 +1070,7 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
             account_ref=account_ref,
             refresh_token=refresh_token,
             exclude_account_key=account_key,
+            google_sub=google_sub,
         )
     state["auth_flows"].pop(flow_id, None)
     _write_state(state)
@@ -1026,6 +1085,9 @@ def _handle_auth_poll(params: dict[str, Any]) -> dict[str, Any]:
             "provider": "google",
             "capability_id": capability_id,
             "linked_at": _iso8601_utc(now_epoch),
+            "account_name": identity_metadata.get("account_name"),
+            "account_email": identity_metadata.get("account_email"),
+            "google_sub": identity_metadata.get("google_sub"),
         },
     }
 
@@ -1139,23 +1201,26 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
     )
     if credential_key is None:
         credential_key = f"cred_{secrets.token_hex(8)}"
-    related_accounts = _related_vault_refs(
-        state=state,
-        user_id=claims.user_id,
-        account_ref=account_ref,
-        exclude_account_key=account_key,
-    )
     access_token = _optional_text(token_resp.get("access_token"))
-    refresh_token = _resolve_refresh_token(
-        new_refresh_token=_optional_text(token_resp.get("refresh_token")),
-        existing_vault_ref=existing_vault_ref,
-        additional_vault_refs=[vault_ref for _, vault_ref in related_accounts],
-    )
     if not access_token:
         raise BridgeError(
             "capability_backend_unavailable",
             "Google token response missing access_token",
         )
+    identity_metadata = _google_identity_metadata(access_token=access_token)
+    google_sub = _optional_text(identity_metadata.get("google_sub"))
+    related_accounts = _related_vault_refs(
+        state=state,
+        user_id=claims.user_id,
+        account_ref=account_ref,
+        google_sub=google_sub,
+        exclude_account_key=account_key,
+    )
+    refresh_token = _resolve_refresh_token(
+        new_refresh_token=_optional_text(token_resp.get("refresh_token")),
+        existing_vault_ref=existing_vault_ref,
+        additional_vault_refs=[vault_ref for _, vault_ref in related_accounts],
+    )
     try:
         vault = _vault()
         vault_ref = vault.put_json(
@@ -1187,6 +1252,9 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
         "chat_type": claims.chat_type,
         "credential_key": credential_key,
         "vault_ref": vault_ref,
+        "account_name": identity_metadata.get("account_name"),
+        "account_email": identity_metadata.get("account_email"),
+        "google_sub": identity_metadata.get("google_sub"),
     }
     if refresh_token:
         _propagate_refresh_token(
@@ -1195,6 +1263,7 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
             account_ref=account_ref,
             refresh_token=refresh_token,
             exclude_account_key=account_key,
+            google_sub=google_sub,
         )
     state["auth_flows"].pop(flow_id, None)
     _write_state(state)
@@ -1207,6 +1276,9 @@ def _handle_auth_complete(params: dict[str, Any]) -> dict[str, Any]:
             "provider": "google",
             "capability_id": capability_id,
             "linked_at": _iso8601_utc(now_epoch),
+            "account_name": identity_metadata.get("account_name"),
+            "account_email": identity_metadata.get("account_email"),
+            "google_sub": identity_metadata.get("google_sub"),
         },
     }
 

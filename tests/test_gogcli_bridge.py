@@ -103,6 +103,17 @@ class _FakeGoogleOAuthHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/oauth2/v3/userinfo":
+            self._json_response(
+                200,
+                {
+                    "sub": "google-user-1",
+                    "email": "worker@example.com",
+                    "name": "Work Account",
+                },
+            )
+            return
+
         # /gmail/v1/users/me/messages/{id} (must check before list endpoint)
         if path.startswith("/gmail/v1/users/me/messages/"):
             msg_id = path.split("/")[-1]
@@ -449,6 +460,12 @@ def test_bridge_auth_code_flow_and_user_scoped_invoke(
     assert flow_state["flow_id"] not in state_after_complete["auth_flows"]
     account_key = "user-1:gog.email:work"
     vault_ref = state_after_complete["accounts"][account_key]["vault_ref"]
+    assert state_after_complete["accounts"][account_key]["account_email"] == (
+        "worker@example.com"
+    )
+    assert state_after_complete["accounts"][account_key]["google_sub"] == (
+        "google-user-1"
+    )
     vault_payload = FileVault(vault_path).get_json(vault_ref)
     assert isinstance(vault_payload, dict)
     credential_key = str(vault_payload["credential_key"])
@@ -1189,6 +1206,111 @@ def test_bridge_auth_complete_reuses_refresh_token_from_related_capability(
     )
     assert isinstance(calendar_vault_payload, dict)
     assert calendar_vault_payload["refresh_token"] == _FAKE_REFRESH_TOKEN
+
+
+def test_bridge_auth_complete_does_not_reuse_refresh_token_across_google_sub(
+    tmp_path: Path,
+    fake_google_oauth: str,
+) -> None:
+    """Different google_sub identities must not share refresh tokens."""
+    service = ContextTokenService(secret=b"bridge-test-secret-32-bytes....")
+    state_path = tmp_path / "gogcli-state.json"
+    vault_path = tmp_path / "vault"
+    env = {
+        "ASH_CONTEXT_TOKEN_SECRET": service.export_verifier_secret(),
+        "GOGCLI_STATE_PATH": str(state_path),
+        "GOGCLI_VAULT_PATH": str(vault_path),
+        "GOOGLE_CLIENT_ID": "fake-client-id",
+        "GOOGLE_CLIENT_SECRET": "fake-client-secret",
+        "GOOGLE_OAUTH_BASE_URL": fake_google_oauth,
+        "GOOGLE_AUTH_BASE_URL": fake_google_oauth,
+    }
+    user_token = service.issue(
+        effective_user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+    )
+
+    # Seed a related alias entry with a different identity and a refresh token.
+    seeded_vault = FileVault(vault_path)
+    seeded_vault_ref = seeded_vault.put_json(
+        namespace="gog.credentials",
+        key="user-1:gog.email:work",
+        payload={
+            "credential_key": "cred_seeded",
+            "provider": "google",
+            "capability_id": "gog.email",
+            "user_id": "user-1",
+            "account_ref": "work",
+            "linked_at": 0,
+            "access_token": _FAKE_ACCESS_TOKEN,
+            "refresh_token": "seeded-refresh-token",
+            "obtained_at": 0,
+        },
+    )
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "accounts": {
+                    "user-1:gog.email:work": {
+                        "created_at": 0,
+                        "updated_at": 0,
+                        "provider": "telegram",
+                        "chat_type": "private",
+                        "credential_key": "cred_seeded",
+                        "vault_ref": seeded_vault_ref,
+                        "google_sub": "different-google-sub",
+                    }
+                },
+                "auth_flows": {},
+                "operation_state": {},
+            },
+            ensure_ascii=True,
+        ),
+        encoding="utf-8",
+    )
+
+    calendar_begin = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_reuse_sub_mismatch_begin_calendar",
+            "namespace": "gog",
+            "method": "auth_begin",
+            "params": {
+                "capability_id": "gog.calendar",
+                "account_hint": "work",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in calendar_begin
+    calendar_flow_state = calendar_begin["result"]["flow_state"]
+    calendar_complete = _run_bridge(
+        {
+            "version": 1,
+            "id": "req_reuse_sub_mismatch_complete_calendar",
+            "namespace": "gog",
+            "method": "auth_complete",
+            "params": {
+                "capability_id": "gog.calendar",
+                "flow_state": calendar_flow_state,
+                "authorization_code": "fake-auth-code-no-refresh",
+                "context_token": user_token,
+            },
+        },
+        env=env,
+    )
+    assert "error" not in calendar_complete
+
+    state = _load_state(state_path)
+    calendar_key = "user-1:gog.calendar:work"
+    calendar_vault_ref = str(state["accounts"][calendar_key]["vault_ref"])
+    calendar_vault_payload = FileVault(vault_path).get_json(calendar_vault_ref)
+    assert isinstance(calendar_vault_payload, dict)
+    assert calendar_vault_payload.get("refresh_token") is None
 
 
 @pytest.mark.asyncio

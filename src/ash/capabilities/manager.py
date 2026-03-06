@@ -197,6 +197,11 @@ class CapabilityManager:
                 allowed = _is_chat_type_allowed(definition, normalized_chat_type)
                 if not include_unavailable and not allowed:
                     continue
+                linked_accounts = _linked_accounts_locked(
+                    self._accounts,
+                    user_id=normalized_user_id,
+                    capability_id=definition.id,
+                )
                 requires_auth = any(
                     operation.requires_auth
                     for operation in definition.operations.values()
@@ -209,11 +214,8 @@ class CapabilityManager:
                         "allowed_chat_types": _effective_allowed_chat_types(definition),
                         "available": allowed,
                         "requires_auth": requires_auth,
-                        "authenticated": _has_account_locked(
-                            self._accounts,
-                            user_id=normalized_user_id,
-                            capability_id=definition.id,
-                        ),
+                        "authenticated": bool(linked_accounts),
+                        "linked_accounts": linked_accounts,
                         "operations": sorted(definition.operations),
                     }
                 )
@@ -527,6 +529,7 @@ class CapabilityManager:
         source_username: str | None = None,
         source_display_name: str | None = None,
         idempotency_key: str | None = None,
+        account_ref: str | None = None,
     ) -> CapabilityInvokeResult:
         """Invoke one capability operation under caller scope."""
         normalized_user_id = _required_text(
@@ -548,6 +551,7 @@ class CapabilityManager:
         normalized_source_username = _optional_text(source_username)
         normalized_source_display_name = _optional_text(source_display_name)
         normalized_idempotency_key = _optional_text(idempotency_key)
+        normalized_account_ref = _optional_text(account_ref)
 
         account_ref: str | None = None
         provider_impl: CapabilityProvider | None = None
@@ -569,17 +573,37 @@ class CapabilityManager:
                 )
 
             if op.requires_auth:
-                account_ref = _first_account_ref_locked(
+                account_refs = _account_refs_locked(
                     self._accounts,
                     user_id=normalized_user_id,
                     capability_id=normalized_capability_id,
                 )
-                if account_ref is None:
+                if not account_refs:
                     raise CapabilityError(
                         "capability_auth_required",
                         (
                             "capability requires auth for caller scope; run "
                             "capability.auth.begin and capability.auth.complete first"
+                        ),
+                    )
+                if normalized_account_ref is not None:
+                    if normalized_account_ref not in account_refs:
+                        raise CapabilityError(
+                            "capability_auth_required",
+                            (
+                                "capability account is not linked for caller scope: "
+                                f"{normalized_account_ref}"
+                            ),
+                        )
+                    account_ref = normalized_account_ref
+                elif len(account_refs) == 1:
+                    account_ref = account_refs[0]
+                else:
+                    raise CapabilityError(
+                        "capability_account_ambiguous",
+                        (
+                            "multiple linked accounts for caller scope; "
+                            f"specify account_ref from: {', '.join(account_refs)}"
                         ),
                     )
 
@@ -784,6 +808,12 @@ def _optional_text(value: str | None) -> str | None:
     return text or None
 
 
+def _stringish(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
 def _required_text(*, value: str | None, code: str, message: str) -> str:
     text = _optional_text(value)
     if text is None:
@@ -867,20 +897,44 @@ def _has_account_locked(
     return False
 
 
-def _first_account_ref_locked(
+def _account_refs_locked(
     accounts: dict[tuple[str, str, str], CapabilityAccount],
     *,
     user_id: str,
     capability_id: str,
-) -> str | None:
+) -> list[str]:
     refs = [
         account_ref
         for account_user, account_capability, account_ref in accounts
         if account_user == user_id and account_capability == capability_id
     ]
-    if not refs:
-        return None
-    return sorted(refs)[0]
+    return sorted(refs)
+
+
+def _linked_accounts_locked(
+    accounts: dict[tuple[str, str, str], CapabilityAccount],
+    *,
+    user_id: str,
+    capability_id: str,
+) -> list[dict[str, Any]]:
+    linked: list[dict[str, Any]] = []
+    for (account_user, account_capability, account_ref), account in sorted(
+        accounts.items(), key=lambda item: item[0][2]
+    ):
+        if account_user != user_id or account_capability != capability_id:
+            continue
+        metadata = account.metadata
+        account_name = _optional_text(_stringish(metadata.get("account_name")))
+        account_email = _optional_text(_stringish(metadata.get("account_email")))
+        linked.append(
+            {
+                "account_ref": account_ref,
+                "account_name": account_name,
+                "account_email": account_email,
+                "created_at": account.created_at.isoformat().replace("+00:00", "Z"),
+            }
+        )
+    return linked
 
 
 def _auth_begin_response(flow: CapabilityAuthFlow) -> dict[str, Any]:
