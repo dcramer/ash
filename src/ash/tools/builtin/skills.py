@@ -478,12 +478,14 @@ class UseSkillTool(Tool):
         *,
         skill: SkillDefinition,
         message: str,
+        raw_user_message: str | None,
         user_context: str,
     ) -> str:
         """Inject deterministic auth-completion guidance for callback follow-ups."""
         if not skill.capabilities:
             return user_context
-        if not self._looks_like_oauth_callback_or_code(message):
+        callback_source = raw_user_message or message
+        if not self._looks_like_oauth_callback_or_code(callback_source):
             return user_context
 
         hint = (
@@ -526,9 +528,15 @@ class UseSkillTool(Tool):
                 )
 
         skill = self._registry.get(skill_name)
+        raw_user_message = None
+        if context is not None:
+            raw = context.metadata.get("current_user_message")
+            if isinstance(raw, str) and raw.strip():
+                raw_user_message = raw
         user_context = self._build_capability_auth_recovery_context(
             skill=skill,
             message=message,
+            raw_user_message=raw_user_message,
             user_context=user_context,
         )
         skill_config = self._config.skills.get(skill_name)

@@ -567,6 +567,7 @@ class Agent:
         setup: _MessageSetup,
         session_manager: Any = None,
         tool_overrides: dict[str, Any] | None = None,
+        current_user_message: str | None = None,
     ) -> ToolContext:
         """Build a ToolContext for tool execution, with reply anchor initialized.
 
@@ -587,13 +588,17 @@ class Agent:
         )
         env = self._apply_sandbox_env_hooks(env, session, setup.effective_user_id)
 
+        metadata = session.context.to_dict()
+        if current_user_message is not None:
+            metadata["current_user_message"] = current_user_message
+
         tool_context = ToolContext(
             session_id=session.session_id,
             user_id=setup.effective_user_id,
             chat_id=session.chat_id,
             thread_id=session.context.thread_id,
             provider=session.provider,
-            metadata=session.context.to_dict(),
+            metadata=metadata,
             env=env,
             session_manager=session_manager,
             tool_overrides=tool_overrides or {},
@@ -980,7 +985,11 @@ class Agent:
                     )
 
                 tool_context = self._build_tool_context(
-                    session, setup, session_manager, tool_overrides
+                    session,
+                    setup,
+                    session_manager,
+                    tool_overrides,
+                    current_user_message=user_message,
                 )
 
                 try:
@@ -1129,7 +1138,11 @@ class Agent:
                     return
 
                 tool_context = self._build_tool_context(
-                    session, setup, session_manager, tool_overrides
+                    session,
+                    setup,
+                    session_manager,
+                    tool_overrides,
+                    current_user_message=user_message,
                 )
 
                 try:
