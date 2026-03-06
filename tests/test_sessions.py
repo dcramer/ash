@@ -1054,10 +1054,21 @@ class TestDMThreading:
 
     @pytest.mark.asyncio
     async def test_standalone_dm_creates_new_thread(self, handler):
-        """A standalone DM (no reply) gets a new thread_id."""
+        """First standalone DM creates a thread."""
         msg = self._make_message("100", chat_type="private")
         thread_id = await handler.resolve_reply_chain_thread(msg)
         assert thread_id is not None
+
+    @pytest.mark.asyncio
+    async def test_followup_dm_reuses_active_thread(self, handler):
+        """Non-reply DM follow-up reuses the active thread."""
+        msg1 = self._make_message("100", chat_type="private")
+        thread1 = await handler.resolve_reply_chain_thread(msg1)
+
+        msg2 = self._make_message("101", chat_type="private")
+        thread2 = await handler.resolve_reply_chain_thread(msg2)
+
+        assert thread2 == thread1
 
     @pytest.mark.asyncio
     async def test_dm_reply_joins_parent_thread(self, handler):
@@ -1071,6 +1082,18 @@ class TestDMThreading:
         thread2 = await handler.resolve_reply_chain_thread(msg2)
 
         assert thread2 == thread1
+
+    @pytest.mark.asyncio
+    async def test_new_topic_phrase_forces_new_dm_thread(self, handler):
+        """DM can intentionally branch using a new topic phrase."""
+        msg1 = self._make_message("100", chat_type="private")
+        thread1 = await handler.resolve_reply_chain_thread(msg1)
+
+        msg2 = self._make_message("101", chat_type="private")
+        msg2.text = "new topic: can we switch gears"
+        thread2 = await handler.resolve_reply_chain_thread(msg2)
+
+        assert thread2 != thread1
 
     @pytest.mark.asyncio
     async def test_group_message_still_gets_thread(self, handler):

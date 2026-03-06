@@ -60,6 +60,8 @@ def register_capability_methods(
                 source_display_name=_optional_text(params, "source_display_name"),
                 idempotency_key=_optional_text(params, "idempotency_key"),
                 account_ref=_optional_text(params, "account_ref"),
+                mutation_plan_id=_optional_text(params, "mutation_plan_id"),
+                target_fingerprint=_optional_text(params, "target_fingerprint"),
             )
         except CapabilityError as e:
             raise ValueError(f"{e.code}: {e}") from e

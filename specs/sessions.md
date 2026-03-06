@@ -11,7 +11,13 @@ Ash uses **per-user sessions scoped to thread** for group chats:
 - Standalone `@mention` messages create a new thread (thread_id = message external_id)
 - Replies follow the parent thread via `ThreadIndex`
 - Session key for groups: `telegram_{chat_id}_{user_id}_{thread_id}` (users in the same thread do not share session state)
-- DMs use a single session: `telegram_{chat_id}_{user_id}` (no thread_id)
+
+For DMs, Ash uses **hybrid active-thread routing**:
+
+- Replies follow parent thread via `ThreadIndex`.
+- Non-reply messages continue on the active DM thread when it is fresh.
+- A new thread is created when no active thread is available (or after explicit new-topic intent/timeout rollover).
+- Session key for DM turns remains thread-scoped when a thread_id exists: `telegram_{chat_id}_{user_id}_{thread_id}`.
 
 ## File Structure
 

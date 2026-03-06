@@ -29,6 +29,7 @@ from ash.capabilities.types import (
     CapabilityDefinition,
     CapabilityInvokeResult,
 )
+from ash.chats import ChatStateManager
 
 _NAMESPACED_CAPABILITY_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$")
 _NAMESPACE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -687,6 +688,8 @@ class CapabilityManager:
         source_display_name: str | None = None,
         idempotency_key: str | None = None,
         account_ref: str | None = None,
+        mutation_plan_id: str | None = None,
+        target_fingerprint: str | None = None,
     ) -> CapabilityInvokeResult:
         """Invoke one capability operation under caller scope."""
         normalized_user_id = _required_text(
@@ -709,6 +712,8 @@ class CapabilityManager:
         normalized_source_display_name = _optional_text(source_display_name)
         normalized_idempotency_key = _optional_text(idempotency_key)
         normalized_account_ref = _optional_text(account_ref)
+        normalized_mutation_plan_id = _optional_text(mutation_plan_id)
+        normalized_target_fingerprint = _optional_text(target_fingerprint)
 
         account_ref: str | None = None
         provider_impl: CapabilityProvider | None = None
@@ -774,6 +779,22 @@ class CapabilityManager:
             source_username=normalized_source_username,
             source_display_name=normalized_source_display_name,
         )
+        confirmed_plan_id: str | None = None
+        if _requires_mutation_confirmation(
+            capability_id=normalized_capability_id,
+            operation=normalized_operation,
+            provider=normalized_provider,
+            mutating=bool(op.mutating),
+        ):
+            confirmed_plan_id = _assert_mutation_confirmation_proof(
+                chat_id=normalized_chat_id,
+                thread_id=normalized_thread_id,
+                capability_id=normalized_capability_id,
+                operation=normalized_operation,
+                mutation_plan_id=normalized_mutation_plan_id,
+                target_fingerprint=normalized_target_fingerprint,
+            )
+
         raw_output = await self._provider_invoke(
             provider_impl,
             capability_id=normalized_capability_id,
@@ -791,6 +812,11 @@ class CapabilityManager:
             )
 
         request_id = f"cap_{secrets.token_hex(8)}"
+        if confirmed_plan_id and normalized_chat_id:
+            _mark_mutation_plan_executed(
+                chat_id=normalized_chat_id,
+                plan_id=confirmed_plan_id,
+            )
 
         return CapabilityInvokeResult(
             request_id=request_id,
@@ -1133,6 +1159,72 @@ def _find_sensitive_key_path(value: Any, path: str = "output") -> str | None:
                 return found
         return None
     return None
+
+
+def _requires_mutation_confirmation(
+    *,
+    capability_id: str,
+    operation: str,
+    provider: str | None,
+    mutating: bool,
+) -> bool:
+    if not mutating:
+        return False
+    if provider != "telegram":
+        return False
+    return capability_id == "gog.email" and operation in {
+        "archive_messages",
+        "update_labels",
+    }
+
+
+def _assert_mutation_confirmation_proof(
+    *,
+    chat_id: str | None,
+    thread_id: str | None,
+    capability_id: str,
+    operation: str,
+    mutation_plan_id: str | None,
+    target_fingerprint: str | None,
+) -> str:
+    normalized_chat_id = _optional_text(chat_id)
+    if normalized_chat_id is None:
+        raise CapabilityError(
+            "capability_mutation_not_confirmed",
+            "mutating operation requires chat-scoped confirmation proof",
+        )
+
+    manager = ChatStateManager(provider="telegram", chat_id=normalized_chat_id)
+    state = manager.load()
+    state.prune_expired_mutation_confirmations()
+    confirmed = state.find_confirmed_mutation(
+        capability_id=capability_id,
+        operation=operation,
+        target_fingerprint=target_fingerprint,
+        thread_id=thread_id,
+    )
+    if confirmed is None:
+        raise CapabilityError(
+            "capability_mutation_not_confirmed",
+            (
+                "mutation requires prior confirmation in chat history; "
+                "show targets and get explicit user confirm first"
+            ),
+        )
+    if mutation_plan_id and mutation_plan_id != confirmed.plan_id:
+        raise CapabilityError(
+            "capability_mutation_plan_mismatch",
+            "provided mutation_plan_id does not match confirmed chat plan",
+        )
+    manager.save()
+    return confirmed.plan_id
+
+
+def _mark_mutation_plan_executed(*, chat_id: str, plan_id: str) -> None:
+    manager = ChatStateManager(provider="telegram", chat_id=chat_id)
+    state = manager.load()
+    if state.mark_mutation_executed(plan_id=plan_id):
+        manager.save()
 
 
 async def create_capability_manager(

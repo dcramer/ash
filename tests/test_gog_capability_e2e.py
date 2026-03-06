@@ -13,6 +13,7 @@ import pytest
 
 from ash.capabilities import CapabilityManager
 from ash.capabilities.providers import SubprocessCapabilityProvider
+from ash.chats import ChatStateManager
 from ash.context_token import ContextTokenService
 from ash.rpc.methods.capability import register_capability_methods
 from ash.rpc.server import RPCServer
@@ -52,6 +53,24 @@ async def _rpc(
         "params": params,
     }
     return await server._process_request(json.dumps(payload).encode("utf-8"))
+
+
+def _confirm_mutation_plan(
+    *,
+    chat_id: str,
+    thread_id: str,
+    operation: str,
+) -> None:
+    manager = ChatStateManager(provider="telegram", chat_id=chat_id)
+    state = manager.load()
+    state.add_mutation_confirmation(
+        plan_id=f"plan-{operation}",
+        capability_id="gog.email",
+        operation=operation,
+        thread_id=thread_id,
+    )
+    state.confirm_latest_mutation(thread_id=thread_id)
+    manager.save()
 
 
 # ---------------------------------------------------------------------------
@@ -375,11 +394,14 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     server = RPCServer(tmp_path / "rpc.sock", context_token_service=service)
     register_capability_methods(server, manager)
 
+    user1_chat_id = "dm-user-1"
+    user1_thread_id = f"thread-{user1_chat_id}"
+
     user1_private = _token(
         service,
         user_id="user-1",
         chat_type="private",
-        chat_id="dm-user-1",
+        chat_id=user1_chat_id,
     )
     user1_group = _token(
         service,
@@ -499,6 +521,11 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert message_output["body_text"] == "Plain body for msg_1"
 
     # ---- Invoke email archive_messages ----
+    _confirm_mutation_plan(
+        chat_id=user1_chat_id,
+        thread_id=user1_thread_id,
+        operation="archive_messages",
+    )
     archive_email = await _rpc(
         server,
         request_id=62,
@@ -518,6 +545,11 @@ async def test_gog_capability_rpc_stack_round_trip_and_policy_enforcement(
     assert archive_output["updated_count"] == 1
 
     # ---- Invoke email update_labels ----
+    _confirm_mutation_plan(
+        chat_id=user1_chat_id,
+        thread_id=user1_thread_id,
+        operation="update_labels",
+    )
     update_labels = await _rpc(
         server,
         request_id=63,

@@ -122,6 +122,20 @@ def invoke_capability(
         str | None,
         typer.Option("--account", help="Optional linked account alias"),
     ] = None,
+    mutation_plan_id: Annotated[
+        str | None,
+        typer.Option(
+            "--plan-id",
+            help="Optional mutation plan id for host confirmation proof",
+        ),
+    ] = None,
+    target_fingerprint: Annotated[
+        str | None,
+        typer.Option(
+            "--target-fingerprint",
+            help="Optional target fingerprint for host confirmation proof",
+        ),
+    ] = None,
 ) -> None:
     """Invoke one capability operation."""
     try:
@@ -139,6 +153,10 @@ def invoke_capability(
         params["idempotency_key"] = idempotency_key
     if account:
         params["account_ref"] = account
+    if mutation_plan_id:
+        params["mutation_plan_id"] = mutation_plan_id
+    if target_fingerprint:
+        params["target_fingerprint"] = target_fingerprint
 
     result = _call("capability.invoke", params)
     request_id = result.get("request_id", "?")

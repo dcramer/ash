@@ -492,6 +492,8 @@ class TelegramMessageHandler:
             if isinstance(candidate, IncomingMessage):
                 message = candidate
 
+        self._session_handler.maybe_record_mutation_confirmation_from_user(message)
+
         if await self._try_handle_capability_oauth_callback(message):
             return
 

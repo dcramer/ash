@@ -109,6 +109,33 @@ def test_invoke_capability_with_account(cli_runner: CliRunner, mock_rpc) -> None
     assert params["account_ref"] == "work"
 
 
+def test_invoke_capability_with_mutation_proof(cli_runner: CliRunner, mock_rpc) -> None:
+    mock_rpc.return_value = {
+        "ok": True,
+        "request_id": "cap_123",
+        "output": {"status": "ok"},
+    }
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "invoke",
+            "--capability",
+            "gog.email",
+            "--operation",
+            "archive_messages",
+            "--plan-id",
+            "plan-1",
+            "--target-fingerprint",
+            "fp-1",
+        ],
+    )
+    assert result.exit_code == 0
+    params = mock_rpc.call_args[0][1]
+    assert params["mutation_plan_id"] == "plan-1"
+    assert params["target_fingerprint"] == "fp-1"
+
+
 def test_list_capabilities_shows_linked_accounts(
     cli_runner: CliRunner, mock_rpc
 ) -> None:

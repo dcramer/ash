@@ -19,6 +19,7 @@ from ash.capabilities import (
     create_capability_manager,
 )
 from ash.capabilities.types import CapabilityOperation
+from ash.chats import ChatStateManager
 
 
 @dataclass
@@ -154,6 +155,37 @@ class _PartiallyInvalidProvider(_RecordingProvider):
                     ),
                 },
             ),
+        ]
+
+
+@dataclass
+class _MutatingRecordingProvider(_RecordingProvider):
+    async def definitions(self) -> list[CapabilityDefinition]:
+        return [
+            CapabilityDefinition(
+                id=self.capability_id,
+                description="Provider-backed email operations",
+                sensitive=True,
+                operations={
+                    "list_messages": CapabilityOperation(
+                        name="list_messages",
+                        description="List inbox messages",
+                        requires_auth=True,
+                    ),
+                    "archive_messages": CapabilityOperation(
+                        name="archive_messages",
+                        description="Archive inbox messages",
+                        requires_auth=True,
+                        mutating=True,
+                    ),
+                    "update_labels": CapabilityOperation(
+                        name="update_labels",
+                        description="Update message labels",
+                        requires_auth=True,
+                        mutating=True,
+                    ),
+                },
+            )
         ]
 
 
@@ -801,6 +833,132 @@ async def test_provider_output_rejects_sensitive_material() -> None:
             chat_type="private",
         )
     assert exc_info.value.code == "capability_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_mutating_gmail_requires_confirmed_chat_proof() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _MutatingRecordingProvider(namespace="gog")
+    await manager.register_provider(provider)
+
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+        thread_id="thread-1",
+        account_hint="default",
+    )
+    await manager.auth_complete(
+        flow_id=begin["flow_id"],
+        user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+        thread_id="thread-1",
+        callback_url="https://localhost/callback?code=abc",
+        code=None,
+    )
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await manager.invoke(
+            capability_id="gog.email",
+            operation="archive_messages",
+            input_data={"ids": ["m1"], "archive": True},
+            user_id="user-1",
+            chat_id="chat-1",
+            chat_type="private",
+            provider="telegram",
+            thread_id="thread-1",
+            account_ref="acct_work",
+        )
+    assert exc_info.value.code == "capability_mutation_not_confirmed"
+
+    state_manager = ChatStateManager(provider="telegram", chat_id="chat-1")
+    state = state_manager.load()
+    state.add_mutation_confirmation(
+        plan_id="plan-1",
+        capability_id="gog.email",
+        operation="archive_messages",
+        thread_id="thread-1",
+        summary="confirm archive candidates",
+    )
+    state.confirm_latest_mutation(thread_id="thread-1")
+    state_manager.save()
+
+    result = await manager.invoke(
+        capability_id="gog.email",
+        operation="archive_messages",
+        input_data={"ids": ["m1"], "archive": True},
+        user_id="user-1",
+        chat_id="chat-1",
+        chat_type="private",
+        provider="telegram",
+        thread_id="thread-1",
+        account_ref="acct_work",
+    )
+    assert result.output["status"] == "ok"
+
+    saved_state = ChatStateManager(provider="telegram", chat_id="chat-1").load()
+    executed = [
+        item for item in saved_state.mutation_confirmations if item.plan_id == "plan-1"
+    ]
+    assert executed
+    assert executed[0].status == "executed"
+
+
+@pytest.mark.asyncio
+async def test_mutating_gmail_rejects_mismatched_plan_id() -> None:
+    manager = CapabilityManager(auth_flow_ttl_seconds=300)
+    provider = _MutatingRecordingProvider(namespace="gog")
+    await manager.register_provider(provider)
+
+    begin = await manager.auth_begin(
+        capability_id="gog.email",
+        user_id="user-1",
+        chat_id="chat-2",
+        chat_type="private",
+        provider="telegram",
+        thread_id="thread-2",
+        account_hint="default",
+    )
+    await manager.auth_complete(
+        flow_id=begin["flow_id"],
+        user_id="user-1",
+        chat_id="chat-2",
+        chat_type="private",
+        provider="telegram",
+        thread_id="thread-2",
+        callback_url="https://localhost/callback?code=abc",
+        code=None,
+    )
+
+    state_manager = ChatStateManager(provider="telegram", chat_id="chat-2")
+    state = state_manager.load()
+    state.add_mutation_confirmation(
+        plan_id="plan-good",
+        capability_id="gog.email",
+        operation="update_labels",
+        thread_id="thread-2",
+    )
+    state.confirm_latest_mutation(thread_id="thread-2")
+    state_manager.save()
+
+    with pytest.raises(CapabilityError) as exc_info:
+        await manager.invoke(
+            capability_id="gog.email",
+            operation="update_labels",
+            input_data={"ids": ["m1"], "add_label_ids": ["IMPORTANT"]},
+            user_id="user-1",
+            chat_id="chat-2",
+            chat_type="private",
+            provider="telegram",
+            thread_id="thread-2",
+            account_ref="acct_work",
+            mutation_plan_id="plan-bad",
+        )
+    assert exc_info.value.code == "capability_mutation_plan_mismatch"
 
 
 @pytest.mark.asyncio

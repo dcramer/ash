@@ -8,7 +8,10 @@ This module provides:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
+import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -28,6 +31,12 @@ if TYPE_CHECKING:
     from ash.store.store import Store
 
 logger = logging.getLogger("telegram")
+_DM_ACTIVE_THREAD_TIMEOUT_MINUTES = 30
+_MUTATION_CONFIRMATION_TTL_HOURS = 24
+_NEW_TOPIC_PATTERN = re.compile(r"^\s*(new topic|new thread|start over)\b", re.I)
+_CONFIRM_PATTERN = re.compile(
+    r"\b(confirm|do it|go ahead|ship it|archive everything)\b", re.I
+)
 
 
 @dataclass
@@ -114,6 +123,85 @@ class SessionHandler:
         if self._bot_username:
             return self._bot_username.split("_")[0].title()
         return None
+
+    def _get_chat_state_manager(self, chat_id: str) -> ChatStateManager:
+        return ChatStateManager(
+            provider=self._provider_name,
+            chat_id=chat_id,
+            thread_id=None,
+        )
+
+    def maybe_record_mutation_confirmation_from_user(
+        self, message: IncomingMessage
+    ) -> None:
+        """Confirm the latest presented mutation plan on explicit user confirmation."""
+        text = (message.text or "").strip()
+        if not text or not _CONFIRM_PATTERN.search(text):
+            return
+
+        state_manager = self._get_chat_state_manager(message.chat_id)
+        state = state_manager.load()
+        confirmed = state.confirm_latest_mutation(
+            thread_id=message.metadata.get("thread_id"),
+        )
+        if confirmed is None:
+            return
+        state_manager.save()
+        logger.info(
+            "mutation_plan_confirmed",
+            extra={
+                "chat_id": message.chat_id,
+                "plan_id": confirmed.plan_id,
+                "capability": confirmed.capability_id,
+                "operation": confirmed.operation,
+            },
+        )
+
+    def _maybe_track_mutation_plan_from_assistant(
+        self,
+        *,
+        chat_id: str,
+        thread_id: str | None,
+        assistant_message: str,
+    ) -> None:
+        """Best-effort plan tracking for archive/label confirmations in chat history."""
+        text = assistant_message.lower()
+        if "confirm" not in text:
+            return
+
+        operation: str | None = None
+        if "archive" in text:
+            operation = "archive_messages"
+        elif "label" in text:
+            operation = "update_labels"
+        if operation is None:
+            return
+
+        fingerprint = hashlib.sha256(assistant_message.encode("utf-8")).hexdigest()[:20]
+        plan_id = f"mcp_{secrets.token_hex(8)}"
+
+        state_manager = self._get_chat_state_manager(chat_id)
+        state = state_manager.load()
+        state.add_mutation_confirmation(
+            plan_id=plan_id,
+            capability_id="gog.email",
+            operation=operation,
+            target_fingerprint=fingerprint,
+            thread_id=thread_id,
+            summary=assistant_message[:500],
+            ttl_hours=_MUTATION_CONFIRMATION_TTL_HOURS,
+        )
+        state_manager.save()
+        logger.info(
+            "mutation_plan_presented",
+            extra={
+                "chat_id": chat_id,
+                "thread_id": thread_id,
+                "plan_id": plan_id,
+                "capability": "gog.email",
+                "operation": operation,
+            },
+        )
 
     async def get_or_create_session(self, message: IncomingMessage) -> SessionState:
         """Get existing session or create a new one."""
@@ -321,9 +409,9 @@ class SessionHandler:
     async def resolve_reply_chain_thread(self, message: IncomingMessage) -> str | None:
         """Determine thread_id from reply chain for any chat type.
 
-        Works for both DMs and groups. In DMs, standalone messages start new
-        threads while replies join the parent thread — preventing context bleed
-        between unrelated conversations.
+        Works for both DMs and groups. In DMs, reply chains keep explicit
+        threading, but non-reply turns default to the active thread for stable
+        follow-up behavior.
 
         Returns:
             thread_id for session key
@@ -332,16 +420,57 @@ class SessionHandler:
         if thread_id := message.metadata.get("thread_id"):
             return thread_id
 
-        # Resolve thread from reply chain
         thread_index = self.get_thread_index(message.chat_id)
+        chat_type = (message.metadata.get("chat_type") or "").strip().lower()
+        if chat_type == "private":
+            state_manager = self._get_chat_state_manager(message.chat_id)
+            state = state_manager.load()
+
+            forced_new_topic = bool(_NEW_TOPIC_PATTERN.search(message.text or ""))
+            reply_to_external_id = (
+                None if forced_new_topic else message.reply_to_message_id
+            )
+            if reply_to_external_id:
+                thread_id = thread_index.resolve_thread_id(
+                    external_id=message.id,
+                    reply_to_external_id=reply_to_external_id,
+                )
+                thread_index.register_message(message.id, thread_id)
+                state.set_active_thread(thread_id, reason="reply_chain")
+                state_manager.save()
+                return thread_id
+
+            active_thread_id = (
+                None
+                if forced_new_topic
+                else state.get_active_thread(
+                    max_age_minutes=_DM_ACTIVE_THREAD_TIMEOUT_MINUTES
+                )
+            )
+            if active_thread_id:
+                thread_id = str(active_thread_id)
+                thread_index.register_message(message.id, thread_id)
+                state.set_active_thread(thread_id, reason="auto_continue")
+                state_manager.save()
+                return thread_id
+
+            thread_id = thread_index.resolve_thread_id(
+                external_id=message.id,
+                reply_to_external_id=None,
+            )
+            thread_index.register_message(message.id, thread_id)
+            state.set_active_thread(
+                thread_id,
+                reason="new_topic" if forced_new_topic else "timeout_rollover",
+            )
+            state_manager.save()
+            return thread_id
+
         thread_id = thread_index.resolve_thread_id(
             external_id=message.id,
             reply_to_external_id=message.reply_to_message_id,
         )
-
-        # Register this message in the thread
         thread_index.register_message(message.id, thread_id)
-
         return thread_id
 
     async def is_duplicate_message(self, message: IncomingMessage) -> bool:
@@ -442,6 +571,11 @@ class SessionHandler:
                 chat_writer.record_bot_message,
                 content=assistant_message,
                 metadata=bot_metadata or None,
+            )
+            self._maybe_track_mutation_plan_from_assistant(
+                chat_id=chat_id,
+                thread_id=thread_id,
+                assistant_message=assistant_message,
             )
 
         # Update branch head after writing messages
