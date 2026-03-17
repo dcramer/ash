@@ -8,10 +8,13 @@ import pytest
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 
+from ash.agents.types import AgentContext, StackFrame, TurnAction, TurnResult
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.formatting import rendered_text_length
 from ash.providers.telegram.handlers import TelegramMessageHandler
 from ash.providers.telegram.provider import TelegramProvider
+from ash.sessions import SessionManager
+from ash.sessions.types import generate_id
 
 
 class TestTelegramProvider:
@@ -239,6 +242,94 @@ class TestTelegramMessageHandler:
         await handler.handle_message(incoming_message)
 
         mock_provider.send_typing.assert_called_once_with("456")
+
+    async def test_run_orchestration_loop_suppresses_skill_no_reply(
+        self, mock_provider, mock_agent, tmp_path
+    ):
+        from ash.core.session import SessionState
+
+        handler = TelegramMessageHandler(
+            provider=mock_provider,
+            agent=mock_agent,
+            streaming=False,
+            agent_executor=MagicMock(),
+        )
+        mock_agent.run_message_postprocess_hooks = AsyncMock()
+
+        message = IncomingMessage(
+            id="1",
+            chat_id="456",
+            user_id="789",
+            text="run the sfday skill",
+            username="testuser",
+            display_name="Test User",
+        )
+        session_key = "telegram_456_789"
+        session_manager = SessionManager(
+            provider="telegram",
+            chat_id="456",
+            user_id="789",
+            sessions_path=tmp_path,
+        )
+        handler._session_handler._session_managers[session_manager.session_key] = (
+            session_manager
+        )
+
+        main_frame = StackFrame(
+            frame_id=generate_id(),
+            agent_name="main",
+            agent_type="main",
+            session=SessionState(
+                session_id="telegram_456_789_1",
+                provider="telegram",
+                chat_id="456",
+                user_id="789",
+            ),
+            system_prompt="main prompt",
+            context=AgentContext(
+                session_id=session_manager.session_key,
+                user_id="789",
+                chat_id="456",
+                provider="telegram",
+            ),
+        )
+        child_frame = StackFrame(
+            frame_id=generate_id(),
+            agent_name="skill:sfday-telegram-alert",
+            agent_type="skill",
+            session=SessionState(
+                session_id="agent-skill:sfday-telegram-alert-telegram_456_789",
+                provider="telegram",
+                chat_id="456",
+                user_id="789",
+            ),
+            system_prompt="skill prompt",
+            context=AgentContext(
+                session_id=session_manager.session_key,
+                user_id="789",
+                chat_id="456",
+                provider="telegram",
+            ),
+            is_skill_agent=True,
+            parent_tool_use_id="tool-1",
+        )
+        stack = handler._stack_manager.get_or_create(session_key)
+        stack.push(main_frame)
+        stack.push(child_frame)
+
+        handler._agent_executor.execute_turn = AsyncMock(
+            return_value=TurnResult(action=TurnAction.COMPLETE, text="[NO_REPLY]")
+        )
+
+        response_external_id = await handler._run_orchestration_loop(
+            message,
+            session_key,
+        )
+
+        assert response_external_id is None
+        assert handler._stack_manager.has_active(session_key) is False
+        mock_provider.send.assert_not_called()
+        mock_agent.run_message_postprocess_hooks.assert_awaited_once()
 
     async def test_handle_message_streaming(
         self, handler, mock_provider, mock_agent, incoming_message
