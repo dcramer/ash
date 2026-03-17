@@ -255,6 +255,21 @@ def query_logs(
     return newest_first_entries
 
 
+def _entry_matches_search(entry: dict[str, Any], search_pattern: str) -> bool:
+    """Return True when a log entry matches a free-text search."""
+    needle = search_pattern.lower()
+
+    message = str(entry.get("message", ""))
+    if needle in message.lower():
+        return True
+
+    try:
+        structured = json.dumps(entry, sort_keys=True, default=str)
+    except TypeError:
+        structured = str(entry)
+    return needle in structured.lower()
+
+
 def _read_log_file(
     log_file: Path,
     since: datetime | None = None,
@@ -301,10 +316,8 @@ def _read_log_file(
                     continue
 
                 # Filter by search pattern
-                if search_pattern:
-                    message = entry.get("message", "")
-                    if search_pattern.lower() not in message.lower():
-                        continue
+                if search_pattern and not _entry_matches_search(entry, search_pattern):
+                    continue
 
                 entries.append(entry)
     except OSError:
@@ -370,10 +383,10 @@ def _follow_logs(
                     if component and entry.get("component") != component:
                         continue
 
-                    if search_pattern:
-                        message = entry.get("message", "")
-                        if search_pattern.lower() not in message.lower():
-                            continue
+                    if search_pattern and not _entry_matches_search(
+                        entry, search_pattern
+                    ):
+                        continue
 
                     # Display entry
                     last_date = _display_entries(

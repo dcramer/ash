@@ -146,3 +146,34 @@ def test_query_logs_returns_latest_entries_with_newest_last(tmp_path) -> None:
     results = query_logs(logs_dir, limit=2)
 
     assert [entry["message"] for entry in results] == ["second", "third"]
+
+
+def test_query_logs_searches_structured_fields(tmp_path) -> None:
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    log_file = logs_dir / "2026-03-17.jsonl"
+    entries = [
+        {
+            "ts": "2026-03-17T01:00:02Z",
+            "level": "INFO",
+            "component": "scheduling",
+            "message": "scheduled_task_triggered",
+            "schedule.entry_id": "df0f9dfd",
+        },
+        {
+            "ts": "2026-03-17T01:00:09Z",
+            "level": "INFO",
+            "component": "tools",
+            "message": "skill_invoked",
+            "skill": "sfday-telegram-alert",
+        },
+    ]
+    log_file.write_text("".join(json.dumps(entry) + "\n" for entry in entries))
+
+    by_skill = query_logs(logs_dir, search_pattern="sfday-telegram-alert")
+    by_schedule_id = query_logs(logs_dir, search_pattern="df0f9dfd")
+
+    assert len(by_skill) == 1
+    assert by_skill[0]["message"] == "skill_invoked"
+    assert len(by_schedule_id) == 1
+    assert by_schedule_id[0]["message"] == "scheduled_task_triggered"

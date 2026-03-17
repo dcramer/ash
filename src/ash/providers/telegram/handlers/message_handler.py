@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from ash.agents.types import ChildActivated
 from ash.config.models import ConversationConfig
 from ash.core import Agent
+from ash.core.signals import is_no_reply
 from ash.providers.base import IncomingMessage, OutgoingMessage
 from ash.providers.telegram.handlers.checkpoint_handler import CheckpointHandler
 from ash.providers.telegram.handlers.passive_handler import PassiveHandler
@@ -931,6 +932,29 @@ class TelegramMessageHandler:
                                 thinking_msg_id=orchestration_tracker.thinking_msg_id,
                             )
                             orchestration_tracker.thinking_msg_id = None
+                        self._stack_manager.clear(session_key)
+                        self._persist_stack(session_key, sm)
+                        return response_external_id
+                    parent = stack.top
+                    if (
+                        completed.agent_type == "skill"
+                        and parent is not None
+                        and parent.agent_type == "main"
+                        and is_no_reply(result.text)
+                    ):
+                        logger.info(
+                            "child_no_reply_suppressed",
+                            extra={
+                                "child_agent": completed.agent_name,
+                                "remaining_depth": stack.depth,
+                            },
+                        )
+                        main_frame = stack.pop()
+                        await self._agent.run_message_postprocess_hooks(
+                            user_message="",
+                            session=main_frame.session,
+                            effective_user_id=main_frame.context.user_id or "",
+                        )
                         self._stack_manager.clear(session_key)
                         self._persist_stack(session_key, sm)
                         return response_external_id
